@@ -135,29 +135,6 @@ function Detail({ slug }: { slug: string }) {
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="flex min-w-0 flex-col gap-4 lg:order-1">
-          {g.for ? (
-            <Card>
-              <h2 className="text-sm font-semibold text-text-primary">{t("guide.for")}</h2>
-              <p className="mt-1.5 text-sm leading-relaxed text-text-secondary">{g.for}</p>
-            </Card>
-          ) : null}
-
-          {g.how?.length ? (
-            <Card>
-              <h2 className="text-sm font-semibold text-text-primary">{t("guide.how")}</h2>
-              <ol className="mt-2.5 flex flex-col gap-2" data-testid="am-guide-how">
-                {g.how.map((s, i) => (
-                  <li key={`${i}-${s}`} className="flex items-start gap-2.5 text-sm text-text-secondary">
-                    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border text-[11px] tabular-nums text-text-primary">
-                      {i + 1}
-                    </span>
-                    <span className="min-w-0">{s}</span>
-                  </li>
-                ))}
-              </ol>
-            </Card>
-          ) : null}
-
           <Card>
             <h2 className="text-sm font-semibold text-text-primary">{t("guide.needs")}</h2>
             <ul className="mt-2.5 flex flex-col gap-4" data-testid="am-guide-inputs">
@@ -254,62 +231,107 @@ function Detail({ slug }: { slug: string }) {
             )}
           </Card>
 
-          <Card>
-            <div className="flex items-center gap-2">
-              <ShieldCheck width={16} height={16} className="text-status-success" aria-hidden />
-              <h2 className="text-sm font-semibold text-text-primary">{t("guide.never")}</h2>
-            </div>
-            <ul className="mt-2.5 flex flex-col gap-1.5" data-testid="am-guide-never">
-              <CheckLine>{t("detail.readOnly")}</CheckLine>
-              {(g.never ?? []).map((n) => (
-                <CheckLine key={n} ok={false}>
-                  {n}
-                </CheckLine>
-              ))}
-              {(m.permissions?.denied ?? [])
-                .filter((d) => DENY_KEYS.has(d))
-                .map((d) => (
-                  <CheckLine key={d} ok={false}>
-                    {t(`deny.${d}` as AmKey)}
-                  </CheckLine>
-                ))}
-            </ul>
-            {m.cannot ? <p className="mt-3 text-sm text-text-primary">{m.cannot}</p> : null}
-          </Card>
-
-          {g.questions || g.wrong_file ? (
-            <Card>
-              <h2 className="text-sm font-semibold text-text-primary">{t("guide.asks")}</h2>
-              {g.questions ? <p className="mt-1.5 text-sm leading-relaxed text-text-secondary">{g.questions}</p> : null}
-              {g.wrong_file ? (
-                <>
-                  <h3 className="mt-3 text-xs font-medium text-text-primary">{t("guide.wrongFile")}</h3>
-                  <p className="mt-1 text-sm leading-relaxed text-text-secondary">{g.wrong_file}</p>
-                </>
+          {/* AM11b: the page is a workspace, not a brochure. On screen by default: what it does (above), what
+              to give it, what comes back. Everything else — who it is for, how it works, what it never does,
+              what it asks, which model sees what, how long a run takes, the data sheet (retention, isolation,
+              where files are kept) — stays in the product behind this one "รายละเอียด". */}
+          <details className="rounded-xl border border-border bg-bg-surface" data-testid="am-detail-more">
+            <summary className="focus-ring cursor-pointer select-none rounded-xl px-4 py-3 text-sm font-medium text-text-primary" data-testid="am-detail-more-toggle">
+              {t("detail.more")}
+            </summary>
+            <div className="flex flex-col gap-4 px-4 pb-4">
+              {g.for ? (
+                <Card>
+                  <h2 className="text-sm font-semibold text-text-primary">{t("guide.for")}</h2>
+                  <p className="mt-1.5 text-sm leading-relaxed text-text-secondary">{g.for}</p>
+                </Card>
               ) : null}
-            </Card>
-          ) : null}
+
+              {g.how?.length ? (
+                <Card>
+                  <h2 className="text-sm font-semibold text-text-primary">{t("guide.how")}</h2>
+                  <ol className="mt-2.5 flex flex-col gap-2" data-testid="am-guide-how">
+                    {g.how.map((s, i) => (
+                      <li key={`${i}-${s}`} className="flex items-start gap-2.5 text-sm text-text-secondary">
+                        <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border text-[11px] tabular-nums text-text-primary">
+                          {i + 1}
+                        </span>
+                        <span className="min-w-0">{s}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </Card>
+              ) : null}
+
+              <Card>
+                <div className="flex items-center gap-2">
+                  <ShieldCheck width={16} height={16} className="text-status-success" aria-hidden />
+                  <h2 className="text-sm font-semibold text-text-primary">{t("guide.never")}</h2>
+                </div>
+                <ul className="mt-2.5 flex flex-col gap-1.5" data-testid="am-guide-never">
+                  <CheckLine>{t("detail.readOnly")}</CheckLine>
+                  {(g.never ?? []).map((n) => (
+                    <CheckLine key={n} ok={false}>
+                      {n}
+                    </CheckLine>
+                  ))}
+                  {(m.permissions?.denied ?? [])
+                    .filter((d) => DENY_KEYS.has(d))
+                    .map((d) => (
+                      <CheckLine key={d} ok={false}>
+                        {t(`deny.${d}` as AmKey)}
+                      </CheckLine>
+                    ))}
+                </ul>
+                {m.cannot ? <p className="mt-3 text-sm text-text-primary">{m.cannot}</p> : null}
+              </Card>
+
+              {g.questions || g.wrong_file ? (
+                <Card>
+                  <h2 className="text-sm font-semibold text-text-primary">{t("guide.asks")}</h2>
+                  {g.questions ? <p className="mt-1.5 text-sm leading-relaxed text-text-secondary">{g.questions}</p> : null}
+                  {g.wrong_file ? (
+                    <>
+                      <h3 className="mt-3 text-xs font-medium text-text-primary">{t("guide.wrongFile")}</h3>
+                      <p className="mt-1 text-sm leading-relaxed text-text-secondary">{g.wrong_file}</p>
+                    </>
+                  ) : null}
+                </Card>
+              ) : null}
+
+              <Card>
+                <h2 className="text-sm font-semibold text-text-primary">{t("guide.whoSees")}</h2>
+                <p className="mt-0.5 text-xs text-text-muted">{t("guide.whoSeesBody")}</p>
+                <div className="mt-3">
+                  {sheet ? (
+                    <ModelList models={sheet.models ?? []} noModel={sheet.no_model ?? []} compact />
+                  ) : (
+                    <div className="flex items-center gap-2 text-xs text-text-muted">
+                      <Spinner size={12} />
+                      <span>{t("common.loading")}</span>
+                    </div>
+                  )}
+                </div>
+              </Card>
+              <Card>
+                <h2 className="text-sm font-semibold text-text-primary">{t("guide.cost")}</h2>
+                <div className="mt-1.5">
+                  <TimeLines manifest={m} sample={item.sample ?? sample?.sample} stats={item.stats} />
+                </div>
+              </Card>
+              <div className="flex">
+                  <ButtonLink href={`/chat/agents/${encodeURIComponent(item.slug)}/datasheet`} variant="secondary" data-testid="am-datasheet-link">
+                    <FileText width={15} height={15} aria-hidden />
+                    <span>{t("guide.datasheet")}</span>
+                  </ButtonLink>
+              </div>
+            </div>
+          </details>
         </div>
 
         {/* Before you install: who sees your documents, what it costs — next to the button. */}
         <aside className="flex min-w-0 flex-col gap-4 lg:order-2" aria-label={t("guide.beforeInstall")}>
           <div className="rounded-xl border border-border-strong bg-bg-surface px-4 py-4 lg:sticky lg:top-4" data-testid="am-before-install">
-            <h2 className="text-sm font-semibold text-text-primary">{t("guide.whoSees")}</h2>
-            <p className="mt-0.5 text-xs text-text-muted">{t("guide.whoSeesBody")}</p>
-            <div className="mt-3">
-              {sheet ? (
-                <ModelList models={sheet.models ?? []} noModel={sheet.no_model ?? []} compact />
-              ) : (
-                <div className="flex items-center gap-2 text-xs text-text-muted">
-                  <Spinner size={12} />
-                  <span>{t("common.loading")}</span>
-                </div>
-              )}
-            </div>
-            <h2 className="mt-5 text-sm font-semibold text-text-primary">{t("guide.cost")}</h2>
-            <div className="mt-1.5">
-              <TimeLines manifest={m} sample={item.sample ?? sample?.sample} stats={item.stats} />
-            </div>
             <div className="mt-5 flex flex-col gap-2">
               {installed ? (
                 <ButtonLink href={workspaceHref(installed.id)}>
@@ -320,10 +342,6 @@ function Detail({ slug }: { slug: string }) {
               ) : (
                 <QuickInstall slug={item.slug} />
               )}
-              <ButtonLink href={`/chat/agents/${encodeURIComponent(item.slug)}/datasheet`} variant="secondary" data-testid="am-datasheet-link">
-                <FileText width={15} height={15} aria-hidden />
-                <span>{t("guide.datasheet")}</span>
-              </ButtonLink>
               {installed?.self_test_run_id ? (
                 <ButtonLink href={runHref(installed.self_test_run_id)} variant="secondary" size="sm">
                   {t("detail.sampleOpen")}

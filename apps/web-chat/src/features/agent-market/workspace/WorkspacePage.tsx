@@ -399,11 +399,12 @@ function Workspace({ installId, threadId, runId, beside }: { installId: string; 
               // the empty workspace says it itself, once
               estimate={empty ? null : estimate.line}
               tools={<ModelControl installId={installId} models={models} onModels={setModels} />}
+              // AM11b: one short line, not a list. What the agent will not do, how long files are kept and
+              // where — the two paragraphs that stood here — are on the agent's page, under "รายละเอียด".
               footer={
-                <div className="flex flex-col items-center gap-0.5" data-testid="am-ws-footer">
-                  {manifest?.cannot ? <p className="text-center text-[11px] text-text-muted">{manifest.cannot}</p> : null}
-                  {!empty ? <UploadInfo manifest={manifest} center /> : null}
-                </div>
+                <p className="text-center text-[11px] text-text-muted" data-testid="am-ws-footer">
+                  {manifest?.starts_from === "request" ? t("ws.footer.request") : t("ws.footer.files")}
+                </p>
               }
             />
           </AttachmentDropZone>

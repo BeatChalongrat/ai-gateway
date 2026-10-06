@@ -253,10 +253,9 @@ function Greeting({ p }: { p: GreetingPayload }) {
           {needs.map((n, i) => (
             <li key={`${n.label}-${i}`} className="flex items-start gap-2 text-sm">
               <Check width={15} height={15} strokeWidth={2.5} className="mt-0.5 shrink-0 text-status-success" aria-hidden />
-              <span className="min-w-0 text-text-primary">
-                {n.label}
-                {n.note ? <span className="text-text-muted">{` — ${n.note}`}</span> : null}
-              </span>
+              {/* AM11b: the tick is the thing to send, by its name; how to export it and what it must
+                  hold is on the agent's page ("what to give it"), not in the greeting */}
+              <span className="min-w-0 text-text-primary">{n.label}</span>
             </li>
           ))}
         </ul>

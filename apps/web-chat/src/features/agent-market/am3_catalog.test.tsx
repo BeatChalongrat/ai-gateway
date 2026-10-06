@@ -129,7 +129,7 @@ afterEach(() => {
 });
 
 describe("the agent's page, for a stranger", () => {
-  it("says who, how, what files (with real samples), what comes back, cost — and who sees the documents next to install", async () => {
+  it("says what to give it and what comes back; who, how, never, the models and the time are one “รายละเอียด” away", async () => {
     render(<AgentDetailPage slug="sran.invoice-processing" />);
     expect(await screen.findByText("ฝ่ายบัญชีเจ้าหนี้ที่บันทึกใบกำกับภาษีซื้อทุกเดือน")).toBeTruthy();
     expect(within(screen.getByTestId("am-guide-how")).getAllByRole("listitem")).toHaveLength(3);
@@ -144,25 +144,40 @@ describe("the agent's page, for a stranger", () => {
     expect(screen.getByTestId("am-guide-never").textContent).toContain("ไม่ส่งอีเมลแทนคุณ");
     expect(screen.getByText("ถ้าไม่ใช่ใบกำกับภาษี agent จะบอกและไม่บันทึกไฟล์นั้น")).toBeTruthy();
 
-    const before = screen.getByTestId("am-before-install");
-    const models = await within(before).findAllByTestId("am-model");
+    // AM11b D — the page is a workspace, not a brochure. On screen by default: what it does (the summary
+    // under its name), what to give it, what comes back — and the install button. Everything else is in
+    // the product still, behind the one "รายละเอียด", which is closed until a person opens it.
+    const more = screen.getByTestId("am-detail-more") as HTMLDetailsElement;
+    expect(more.open).toBe(false);
+    expect(within(more).getByTestId("am-detail-more-toggle").textContent).toBe("รายละเอียด");
+    for (const outside of ["am-guide-inputs", "am-guide-outputs", "am-sample-inputs", "am-sample-outputs"]) {
+      expect(more.contains(screen.getByTestId(outside))).toBe(false);
+    }
+    for (const inside of ["am-guide-how", "am-guide-never", "am-time", "am-datasheet-link"]) {
+      expect(more.contains(screen.getByTestId(inside))).toBe(true);
+    }
+    expect(more.textContent).toContain("ฝ่ายบัญชีเจ้าหนี้ที่บันทึกใบกำกับภาษีซื้อทุกเดือน");
+    const models = await within(more).findAllByTestId("am-model");
     expect(models).toHaveLength(2);
     expect(models[0]!.textContent).toContain("qwen3.8-27b-fp8");
     expect(within(models[0]!).getByTestId("am-model-where").textContent).toBe("ทำงานในองค์กร");
     expect(within(models[1]!).getByTestId("am-model-where").textContent).toBe("ผู้ให้บริการภายนอก");
-    // AM11b: how long a run takes — the time, and only the time. No credits, no baht.
-    expect(within(before).queryByTestId("am-cost")).toBeNull();
-    const time = within(before).getByTestId("am-time").textContent ?? "";
+    // AM11b A: how long a run takes — the time, and only the time. No credits, no baht.
+    expect(screen.queryByTestId("am-cost")).toBeNull();
+    const time = within(more).getByTestId("am-time").textContent ?? "";
     expect(time).toContain("42 วินาที"); // the real sample run
     expect(time).toContain("5 รอบ"); // the organisation's own median (≥ 3 runs)
     expect(time).toContain("1 นาทีต่อหน้า");
     expect(time).not.toMatch(/เครดิต|บาท|credit|baht|THB|฿/i);
+    // beside the page: the install button and nothing else to read first
+    const before = screen.getByTestId("am-before-install");
     expect(before.textContent).not.toMatch(/เครดิต|credit/i);
-    // the install button is inside the same box, after the models
+    expect(within(before).queryByTestId("am-model")).toBeNull();
+    expect(within(before).queryByTestId("am-time")).toBeNull();
     // AM4: one click with the recommended settings, the step-by-step wizard one link away
     expect(within(before).getByTestId("am-detail-install").textContent).toContain("ใช้ค่าแนะนำทั้งหมด");
     expect(within(before).getByTestId("am-detail-install-custom").getAttribute("href")).toBe("/chat/agents/install/sran.invoice-processing");
-    expect(within(before).getByTestId("am-datasheet-link").getAttribute("href")).toBe("/chat/agents/sran.invoice-processing/datasheet");
+    expect(within(more).getByTestId("am-datasheet-link").getAttribute("href")).toBe("/chat/agents/sran.invoice-processing/datasheet");
   });
 
   it("a paused agent says why and offers no install", async () => {
