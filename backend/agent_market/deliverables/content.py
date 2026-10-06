@@ -23,6 +23,38 @@ DOES_NOT = ("agent นี้อ่านอย่างเดียว ไม่
             "ผู้ใช้ส่งไฟล์ผ่านระบบได้เมื่อผู้ดูแลตั้งค่าเซิร์ฟเวอร์อีเมลไว้ และทุกฉบับต้องมีคนกดอนุมัติ")
 
 
+# AM11b — what a person asked of the documents (agent.json "instructions"; the runner sends the ids a
+# model read out of the person's words as req["instructions"]["apply"]). A directive is applied here, at
+# render time, and nowhere else: it leaves a section out or orders a table's rows. It never touches a
+# figure — the computed table and its citations are the same with or without it — and the sections a
+# report must always have (REQUIRED_SECTIONS: the checks' results, the assumptions, the sources) stay.
+DIRECTIVES = ("no_charts", "brief", "sort_by_variance")
+SECTION_TITLES = {"charts": "แนวโน้มและองค์ประกอบ", "movements": "รายการเคลื่อนไหวสำคัญ", "accounts": "รายละเอียดรายบัญชี"}
+BRIEF_LEAVES_OUT = ("charts", "movements", "accounts")
+CHART_TABLE_HEADS = ("รายการในกราฟ", "เดือนในกราฟ")
+
+
+def asked_of(req: dict) -> list[str]:
+    """The directives asked for, in a fixed order; an id this renderer does not know is not one."""
+    ids = (req.get("instructions") or {}).get("apply") or []
+    return [i for i in DIRECTIVES if i in ids]
+
+
+def variance_order(computed: dict) -> tuple[str | None, list | None]:
+    """The accounts from the largest difference to the smallest — the difference from the budget when
+    the round has one, else from the prior month. (None, None) when the round has neither: there is no
+    difference to order by, and the request cannot be honoured."""
+    key = "var_budget" if computed["has_budget"] else ("var_prior" if computed["has_prior"] else None)
+    if key is None:
+        return None, None
+
+    def size(a):
+        v = _d(a.get(key))
+        return abs(v) if v is not None else Decimal(-1)
+
+    return key, sorted(computed["accounts"], key=lambda a: -size(a))  # stable: equal sizes keep the ledger's order
+
+
 def _d(v) -> Decimal | None:
     return None if v is None else Decimal(str(v))
 
@@ -170,8 +202,14 @@ def pl_table(computed: dict) -> dict:
             "caption": "หน่วย: บาท · ตัวเลขทุกช่องคำนวณด้วย " + computed["script"]}
 
 
-def account_table(computed: dict, limit: int = 40) -> dict:
+def account_table(computed: dict, limit: int = 40, by_variance: bool = False) -> dict:
     has_prior, has_budget = computed["has_prior"], computed["has_budget"]
+    accounts, caption, order = computed["accounts"], "หน่วย: บาท", None
+    if by_variance:
+        key, ordered = variance_order(computed)
+        if ordered is not None:
+            accounts, order = ordered, key
+            caption = "หน่วย: บาท · เรียงจากส่วนต่าง" + ("จากงบประมาณ" if key == "var_budget" else "จากงวดก่อน") + "มากไปน้อย"
     cols = ["รหัส", "ชื่อบัญชี", "งวดนี้"]
     if has_prior:
         cols += ["งวดก่อน", "%"]
@@ -179,7 +217,7 @@ def account_table(computed: dict, limit: int = 40) -> dict:
         cols += ["งบประมาณ", "ต่างจากงบ"]
     cols.append("อ้างอิง")
     rows = []
-    for a in computed["accounts"][:limit]:
+    for a in accounts[:limit]:
         r = [a["code"], a["name"] or "—", money0(a["current"])]
         if has_prior:
             r += [money0(a["prior"]), pct_or_dash(a["var_prior_pct"])]
@@ -188,7 +226,7 @@ def account_table(computed: dict, limit: int = 40) -> dict:
         r.append(a["cite"])
         rows.append(r)
     return {"type": "table", "columns": cols, "rows": rows, "strong_rows": [], "numeric_from": 2,
-            "cite_col": len(cols) - 1, "caption": "หน่วย: บาท", "small": True}
+            "cite_col": len(cols) - 1, "caption": caption, "small": True, "ordered_by": order}
 
 
 def movement_table(computed: dict) -> dict | None:
@@ -427,7 +465,11 @@ def build(computed: dict, req: dict) -> dict:
     if narrative.get("written_by") == "rules":
         about.insert(1, "คำอธิบายในรายงานนี้เขียนจากกฎ เพราะไม่มีโมเดลที่ตอบได้ในรอบนี้")
 
-    chart_specs = charts(computed)
+    # AM11b: what the person asked of the documents (asked_of). Ordering by the difference needs one.
+    ask = asked_of(req)
+    refused = [i for i in ask if i == "sort_by_variance" and variance_order(computed)[0] is None]
+    by_variance = "sort_by_variance" in ask and not refused
+    chart_specs = [] if "no_charts" in ask else charts(computed)
     chart_blocks = []
     for c in chart_specs:
         chart_blocks += [{"type": "chart", "chart": c["id"]}, chart_table(c)]
@@ -437,14 +479,14 @@ def build(computed: dict, req: dict) -> dict:
             {"type": "kpis"},
         ]},
         {"key": "pl", "title": "งบกำไรขาดทุน", "blocks": [pl_table(computed)]},
-        {"key": "charts", "title": "แนวโน้มและองค์ประกอบ", "blocks": chart_blocks},
-        {"key": "movements", "title": "รายการเคลื่อนไหวสำคัญ", "blocks": [b for b in (
+        {"key": "charts", "title": SECTION_TITLES["charts"], "blocks": chart_blocks},
+        {"key": "movements", "title": SECTION_TITLES["movements"], "blocks": [b for b in (
             movement_table(computed),
             {"type": "bullets", "items": [cite_runs(t, computed) for t in sentences(narrative, "movements")],
              "narrative": True}
             if sentences(narrative, "movements") else None,
         ) if b]},
-        {"key": "accounts", "title": "รายละเอียดรายบัญชี", "blocks": [account_table(computed)]},
+        {"key": "accounts", "title": SECTION_TITLES["accounts"], "blocks": [account_table(computed, by_variance=by_variance)]},
         {"key": "exceptions", "title": "รายการที่ต้องตรวจสอบ", "blocks": [
             {"type": "paragraph", "runs": [("รายการที่กฎของระบบตั้งข้อสังเกตไว้ ระบบไม่แก้ตัวเลขเอง รอผู้รับผิดชอบตัดสิน", None)], "muted": True},
             exceptions_table(computed)]},
@@ -471,6 +513,10 @@ def build(computed: dict, req: dict) -> dict:
         ]},
     ]
     sections = [s for s in sections if s["blocks"]]
+    if "brief" in ask:
+        # the short report: the summary, the P&L, what must be checked, the assumptions and where every
+        # figure came from. The charts stay in the deck (model["charts"]), which is already the short form.
+        sections = [s for s in sections if s["key"] not in BRIEF_LEAVES_OUT]
     # What the deck prints: the same sentences with their figures in place, and which figures each cites.
     printed = {"summary": plain_text(narrative["summary"], computed)}
     narrative_cites = {"summary": cites_in(narrative["summary"], computed)}
@@ -493,6 +539,7 @@ def build(computed: dict, req: dict) -> dict:
         "source_note": f"ที่มา: {src['primary']['file']} (sha256 {src['primary']['sha256'][:8]}…) · {computed['script']}",
         "model": model,
         "computed": computed,
+        "asked": {"applied": [i for i in ask if i not in refused], "refused": refused},
     }
 
 

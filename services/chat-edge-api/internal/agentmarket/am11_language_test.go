@@ -247,9 +247,12 @@ var notASentence = map[string]string{
 	"runner/model.go:CompleteWith":          "addressed to a model: what is added to the prompt on its one retry",
 	"runner/model.go:Vision":                "addressed to a vision model: what is added to the prompt on its retry",
 	"runner/clarify.go:classify":            "addressed to a model: the prompt that reads a typed answer as one of a card's options (the language typed in: modellang.go)",
+	// AM11b: what a person asked of an agent's documents
+	"instructions.go:askedSystem": "addressed to a model: the system message of the question that reads a person's words into the directives a package declares",
+	"instructions.go:AskedPrompt": "addressed to a model: the headings of the two lists, of the person's words and of the answer's shape",
 	// AM12: a round on the web. The prompts themselves are the package's files; these are what the runner
 	// puts around what a model is shown, and what an answer that is not the JSON asked for is sent back with
-	"runner/web.go:askJSON":        "addressed to a model: the reason an answer that is not one JSON object is sent back with",
+	"runner/web.go:askJSONWith":    "addressed to a model: the reason an answer that is not one JSON object is sent back with",
 	"runner/web.go:briefHeading":   "addressed to a model: the heading of the person's request",
 	"runner/web.go:needHeading":    "addressed to a model: the heading of what the person needs",
 	"runner/web.go:listHeading":    "addressed to a model: the heading of the organisation's own supplier list",

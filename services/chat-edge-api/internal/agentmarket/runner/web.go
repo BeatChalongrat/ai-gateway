@@ -351,7 +351,15 @@ func splitPrompt(raw []byte) (system, ask string) {
 // refused: no model answered because the gateway's content guardrail refused
 // the question for every model it was put to.
 func (rc *runCtx) askJSON(ctx context.Context, system, user string) (answer json.RawMessage, c Completion, refused bool) {
-	models := rc.writingModels()
+	return rc.askJSONWith(ctx, rc.writingModels(), system, user, true)
+}
+
+// askJSONWith is askJSON put to the models given. With record false the
+// run's "model used" is left as it is: that field names the model that saw
+// the round's data, and a question that shows a model none of it — the words
+// a person typed about the documents (AM11b, asked.go) — must not put a name
+// there: an audit of receipts that no model read still says no model saw them.
+func (rc *runCtx) askJSONWith(ctx context.Context, models []string, system, user string, record bool) (answer json.RawMessage, c Completion, refused bool) {
 	if rc.r.Model == nil || !rc.r.Model.Available() || len(models) == 0 {
 		return nil, Completion{}, false
 	}
@@ -367,7 +375,7 @@ func (rc *runCtx) askJSON(ctx context.Context, system, user string) (answer json
 	if err != nil {
 		return nil, c, refusedByGuardrail(tried)
 	}
-	if self := rc.r.Model.IsSelfHosted(c.Model); c.Model != "" {
+	if self := rc.r.Model.IsSelfHosted(c.Model); c.Model != "" && record {
 		model := c.Model
 		_ = rc.r.Store.SetRunFields(ctx, rc.run.ID, nil, &model, &self)
 	}

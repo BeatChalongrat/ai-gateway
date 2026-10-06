@@ -84,6 +84,48 @@ def summarize(computed: dict) -> dict:
     return _audit.summarize(computed)
 
 
+# AM11b — what a person asked of the workbook (agent.json "instructions"; the runner sends the ids a model
+# read out of the person's words as req["instructions"]["apply"]). Applied here, at render time, and nowhere
+# else: the order of the claims on their sheets. The same claims, the same figures, the same outcomes —
+# every claim is still there, passed or not, and each still names its row in the file it came from.
+DIRECTIVES = ("sort_by_amount",)
+
+
+def _as_asked(computed: dict, req: dict) -> tuple[dict, list[str]]:
+    """The computed table as the workbook is to show it, and the directives applied."""
+    from decimal import Decimal
+
+    ids = (req.get("instructions") or {}).get("apply") or []
+    applied = [i for i in DIRECTIVES if i in ids]
+    if "sort_by_amount" not in applied:
+        return computed, applied
+
+    def size(c):
+        return Decimal(c["amount"]) if c.get("amount") not in (None, "") else Decimal(-1)
+
+    # stable: claims of the same amount keep the file's order
+    return dict(computed, claims=sorted(computed["claims"], key=lambda c: -size(c))), applied
+
+
+def _asked_check(path: str, view: dict, applied: list[str]) -> dict:
+    """What was asked, read back out of the finished workbook: the amounts on the claims sheet, top to
+    bottom, by the numbers in its own cells."""
+    from openpyxl import load_workbook
+
+    from ...deliverables.reread import table
+    from .scripts.workbook import H_CLAIMS, S_CLAIMS, parts
+
+    rows = table(parts(load_workbook(path), S_CLAIMS), H_CLAIMS)
+    amounts = [float(r[9]) if isinstance(r[9], (int, float)) else -1.0 for r in rows]
+    ordered = len(rows) == len(view["claims"]) and all(a >= b for a, b in zip(amounts, amounts[1:]))
+    label = "เอกสารเป็นไปตามที่ขอ (อ่านจากไฟล์)"
+    if not ordered:
+        return {"name": "xlsx.asked", "ok": False, "label": label,
+                "detail": "ขอให้เรียงรายการเบิกจากยอดสูงสุด แต่ชีตรายการเบิกในไฟล์ไม่ได้เรียงตามนั้น"}
+    return {"name": "xlsx.asked", "ok": True, "label": label, "values": len(amounts),
+            "detail": f"รายการเบิก {len(amounts)} แถวเรียงจากยอดสูงสุดลงไป"}
+
+
 def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     import hashlib
 
@@ -91,14 +133,18 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     from ...deliverables.theme import resolve
     from .scripts.workbook import ExpenseWorkbook, check
 
+    view, applied = _as_asked(computed, req)
+
     theme = resolve(req.get("theme"))
     names = req.get("names") or {}
     artifacts, all_ok = [], True
     for fmt in [f for f in wanted_formats(req, ["xlsx"]) if f == "xlsx"]:
         name = os.path.basename(names.get(fmt) or "expense_audit.xlsx")
         path = os.path.join(out_dir, name)
-        meta = ExpenseWorkbook(computed, theme, req.get("run")).write(path)
-        checks = check(path, computed, req.get("run"))
+        meta = ExpenseWorkbook(view, theme, req.get("run")).write(path)
+        checks = check(path, view, req.get("run"))
+        if applied:
+            checks.append(_asked_check(path, view, applied))
         ok = all(c["ok"] for c in checks)
         all_ok &= ok
         with open(path, "rb") as f:
@@ -106,4 +152,5 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
         artifacts.append({"name": name, "format": fmt, "kind": "table", "size": os.path.getsize(path), "sha256": sha,
                           "quality": {"passed": ok, "checks": checks}, "meta": meta, "chart_bindings": [],
                           "citations": len(computed["run_exceptions"])})
-    return {"passed": all_ok, "artifacts": artifacts, "theme": {"id": theme["id"], "version": theme.get("version", 1)}}
+    return {"passed": all_ok, "artifacts": artifacts, "theme": {"id": theme["id"], "version": theme.get("version", 1)},
+            "asked": {"applied": applied, "refused": []}}

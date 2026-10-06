@@ -270,6 +270,12 @@ function Greeting({ p }: { p: GreetingPayload }) {
           {t("greeting.form")}
         </p>
       ) : null}
+      {/* … and one that does what it is asked says what can be asked, in its package's own words */}
+      {ws?.asks?.length ? (
+        <p className="mt-1 text-xs text-text-muted" data-testid="am-greeting-asks">
+          {t("greeting.asks", { examples: ws.asks.join(" · ") })}
+        </p>
+      ) : null}
     </div>
   );
 }

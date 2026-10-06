@@ -175,6 +175,8 @@ function Workspace({ installId, threadId, runId, beside }: { installId: string; 
     () => (takesTemplates(manifest?.templates) ? [...FORM_ACCEPT, ...(manifest?.templates?.reads?.includes("pdf") ? [".pdf"] : [])] : []),
     [manifest],
   );
+  // AM11b: what can be asked of this agent's documents, in its package's words (the greeting names them)
+  const asksKey = JSON.stringify((manifest?.instructions?.can ?? []).map((d) => d.label).filter(Boolean));
   // AM12: an agent that works from what a person types
   const fromRequest = manifest?.starts_from === "request";
   const maxMb = manifest?.limits?.max_file_mb || DEFAULT_MAX_MB;
@@ -216,6 +218,7 @@ function Workspace({ installId, threadId, runId, beside }: { installId: string; 
       maxMb,
       photoNotice,
       fillsForms: formAccept.length > 0,
+      asks: JSON.parse(asksKey) as string[],
       claimDrop: () => {
         claimedAt.current = Date.now();
       },
@@ -225,7 +228,7 @@ function Workspace({ installId, threadId, runId, beside }: { installId: string; 
       admin: snap.admin,
       expectedSeconds: estimate.seconds,
     }),
-    [installId, icon, title, thread.merge, accept, maxMb, photoNotice, formAccept.length, selfTestSig, threadId, snap.admin, estimate.seconds],
+    [installId, icon, title, thread.merge, accept, maxMb, photoNotice, formAccept.length, asksKey, selfTestSig, threadId, snap.admin, estimate.seconds],
   );
 
   // ?run=<id>: once, when the thread has loaded — the thread moving on afterwards does not pull the reader back

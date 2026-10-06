@@ -17,6 +17,10 @@ export const am11bTh = {
 
   // E — nobody can use a feature nothing mentions: an agent that fills a person's own form says so in its greeting
   "greeting.form": "มีแบบฟอร์มของบริษัทที่อยากให้กรอก แนบมาในแชทนี้ได้เลย",
+  // … and neither can they ask for what nothing says can be asked: the package's own list, and that a
+  // request it cannot do is answered with the reason
+  "greeting.asks": "พิมพ์บอกได้ว่าอยากได้เอกสารแบบไหน: {examples} — ข้อไหนทำไม่ได้จะบอกพร้อมเหตุผล",
+  "step.instructions": "อ่านคำขอที่พิมพ์มา",
 } as const;
 
 export const am11bEn = {
@@ -28,4 +32,6 @@ export const am11bEn = {
   "ws.footer.request": "This agent reads only the request and the files you send, and the public web pages it opens itself.",
 
   "greeting.form": "If you have a form of your own you want filled in, attach it in this chat.",
+  "greeting.asks": "Tell it how you want the documents: {examples}. What it cannot do, it says, with the reason.",
+  "step.instructions": "Read what was asked",
 } as const satisfies Record<keyof typeof am11bTh, string>;

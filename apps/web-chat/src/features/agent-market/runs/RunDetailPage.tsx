@@ -101,6 +101,8 @@ export function stepLabel(name: string, t: AmT): string {
       return t("step.postcompute");
     case "narrative":
       return t("step.narrative");
+    case "instructions":
+      return t("step.instructions");
     case "render":
       return t("step.render");
     case "publish":

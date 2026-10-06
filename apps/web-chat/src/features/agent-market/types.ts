@@ -26,6 +26,9 @@ export interface Manifest {
   version?: string;
   /** AM12: "request" — a run of the agent starts from what a person types, not from a file. */
   starts_from?: string;
+  /** AM11b: what a person can ask of the agent's documents in their own words (each a directive its
+   *  package applies), and what they are known to ask that it cannot do. Absent: it makes them one way. */
+  instructions?: { can?: { id: string; label: string; note?: string }[]; cannot?: { id: string; label: string; why?: string }[] };
   name?: string;
   name_en?: string;
   short_name?: string;

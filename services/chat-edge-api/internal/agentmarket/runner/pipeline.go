@@ -40,6 +40,9 @@ type runCtx struct {
 	// formOnly (AM10): this render job fills the round's own form and makes
 	// no other file.
 	formOnly bool
+	// instr (AM11b): the directives this round's documents are made with — read out of what the person
+	// typed (asked.go), ids of the package's own list.
+	instr []string
 }
 
 // blobRef is a large step output kept in object storage.
@@ -189,6 +192,13 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 		}
 		break
 	}
+	// AM11b: what the person typed with the files, read into what the package says can be asked of its
+	// documents. It changes how they are made, never a figure: the table is computed already.
+	asked, err := rc.asked(ctx, rc.run.Message)
+	if err != nil {
+		return rc.stepFailed("instructions", err)
+	}
+	rc.instr = asked.Apply
 	narrative, narrKey, err := rc.narrative(ctx, computedRef, computeKey)
 	if err != nil {
 		return rc.stepFailed("narrative", err)
@@ -226,6 +236,7 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 		if err := rc.postOutputs(ctx, rc.run.ID, arts, summary, narrative, false, gate); err != nil {
 			return r.fail(ctx, run, "outputs", err)
 		}
+		rc.sayAsked(ctx, rc.run, asked, rendered.Asked)
 		if len(arts) > 0 {
 			return r.endOpen(ctx, run, *gate)
 		}
@@ -242,6 +253,7 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 	if err := rc.postOutputs(ctx, rc.run.ID, arts, summary, narrative, false, gate); err != nil {
 		return r.fail(ctx, run, "outputs", err)
 	}
+	rc.sayAsked(ctx, rc.run, asked, rendered.Asked)
 	// An upgrade's self-test switches the install before its run reads as
 	// succeeded: whoever sees "succeeded" finds the install already switched.
 	rc.finishUpgrade(context.Background(), computedRef, true, am.NoText)

@@ -40,8 +40,10 @@ def render_all(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
 
     chart_files: dict[str, str] = {}
     chart_bindings: list[dict] = []
+    # (the pictures the report itself places: a short report has no chart section — AM11b)
+    in_report = {b["chart"] for s in model["sections"] for b in s["blocks"] if b["type"] == "chart"}
     if "docx" in formats:
-        for spec in model["charts"]:
+        for spec in [c for c in model["charts"] if c["id"] in in_report]:
             path = os.path.join("/tmp", f"chart_{spec['id']}.png")
             chart_bindings.append(render_png(spec, theme, path))
             chart_files[spec["id"]] = path
@@ -66,7 +68,7 @@ def render_all(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
             from .deck_pptx import DeckWriter
 
             meta = DeckWriter(model, computed, theme).write(path)
-            checks = quality.check_pptx(path, meta, computed, theme)
+            checks = quality.check_pptx(path, meta, computed, theme, asked=model["asked"]["applied"])
         else:
             from .table_xlsx import XlsxWriter
 
@@ -84,4 +86,5 @@ def render_all(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
                           "citations": len(computed["citations"])})
     return {"passed": all_ok, "artifacts": artifacts, "theme": {"id": theme["id"], "version": theme.get("version", 1),
                                                                "name": theme["name"]},
-            "assumptions": model["assumptions"], "sections": [s["key"] for s in model["sections"]]}
+            "assumptions": model["assumptions"], "sections": [s["key"] for s in model["sections"]],
+            "asked": model["asked"]}

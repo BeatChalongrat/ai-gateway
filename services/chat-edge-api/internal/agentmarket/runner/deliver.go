@@ -297,6 +297,8 @@ type renderOut struct {
 	Artifacts []renderedArt   `json:"artifacts"`
 	Theme     json.RawMessage `json:"theme"`
 	Passed    bool            `json:"passed"`
+	// Asked (AM11b): what the renderer did with the directives it was given
+	Asked renderAsked `json:"asked"`
 	// form (AM10): the round's own form this render filled, if any
 	form *am.RoundForm
 }
@@ -401,6 +403,10 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 	if tplKey != nil {
 		keyParts = append(keyParts, tplKey)
 	}
+	if len(rc.instr) > 0 {
+		// AM11b: documents made another way are another render (a round nobody asked anything of keeps its key)
+		keyParts = append(keyParts, map[string]any{"instructions": rc.instr})
+	}
 	key := am.StepKey(rc.run.ID, name, keyParts...)
 	out, err := rc.step(ctx, name, "deliverable", key, map[string]any{"formats": formats, "names": names, "theme_version": themeVersion}, true,
 		func(ctx context.Context) (any, float64, string, string, error) {
@@ -422,6 +428,9 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 				"run": map[string]any{"id": artifactRun.String(), "date": rc.today(), "agent_version": rc.pkg.Version,
 					"preparer": rc.preparer(ctx, parentRun), "organisation": rc.organisation(ctx), "kind": parentRun.Kind},
 				"model_info": map[string]any{"model": narrative.Model, "self_hosted": narrative.SelfHosted}}
+			if len(rc.instr) > 0 {
+				req["instructions"] = map[string]any{"apply": rc.instr}
+			}
 			if tpl != nil {
 				tpath, tclean, err := rc.r.Files.OpenLocalCopy(ctx, tplFile.StorageKey)
 				if err != nil {
@@ -450,11 +459,12 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 				Passed    bool              `json:"passed"`
 				Artifacts []json.RawMessage `json:"artifacts"`
 				Theme     json.RawMessage   `json:"theme"`
+				Asked     renderAsked       `json:"asked"`
 			}
 			if err := json.Unmarshal(mustJSON(res.Result), &r); err != nil {
 				return nil, 0, "", "", err
 			}
-			ro := renderOut{Theme: r.Theme, Passed: r.Passed}
+			ro := renderOut{Theme: r.Theme, Passed: r.Passed, Asked: r.Asked}
 			var failed []string
 			docxPath := ""
 			for _, a := range r.Artifacts {

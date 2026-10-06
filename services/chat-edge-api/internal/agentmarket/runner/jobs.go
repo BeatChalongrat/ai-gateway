@@ -82,9 +82,19 @@ func (r *Runner) renderJob(ctx context.Context, job am.Run, log *slog.Logger) er
 		Formats  []string `json:"formats"`
 		Why      string   `json:"why"`
 		FormOnly bool     `json:"form_only"` // AM10: fill the round's form, make no other file
+		// AM11b: the directives the files are to be made with, when the job was started by something the
+		// person asked of the round's documents — and what they asked (to say what became of it)
+		Instructions []string  `json:"instructions"`
+		Asked        *am.Asked `json:"asked"`
 	}
 	_ = json.Unmarshal(job.Params, &params)
 	rc.formOnly = params.FormOnly
+	// AM11b: a file made later for the same round is made the way the round's documents are made now
+	if params.Asked != nil {
+		rc.instr = params.Instructions
+	} else {
+		rc.instr = r.Store.InstructionsInForce(ctx, ps.run.ID)
+	}
 	formats := params.Formats
 	if len(formats) == 0 && !rc.formOnly {
 		_ = json.Unmarshal(ps.run.Formats, &formats)
@@ -125,6 +135,9 @@ func (r *Runner) renderJob(ctx context.Context, job am.Run, log *slog.Logger) er
 	_ = r.Store.SetFormats(ctx, r.Store.Pool, ps.run.ID, current)
 	if err := rc.postOutputs(ctx, ps.run.ID, arts, ps.summary, ps.narrative, true, nil); err != nil {
 		return r.fail(ctx, job, "outputs", err)
+	}
+	if params.Asked != nil {
+		rc.sayAsked(ctx, ps.run, *params.Asked, rendered.Asked)
 	}
 	return r.finish(rc, am.RunSucceeded, "")
 }
@@ -221,6 +234,13 @@ func (r *Runner) replyJob(ctx context.Context, job am.Run, log *slog.Logger) err
 	}
 	text := strings.TrimSpace(params.Text)
 	l := am.LangOf(ctx)
+	// AM11b: asked only when no earlier case took the message (a case's condition is evaluated in turn)
+	var askedErr error
+	asksOfDocuments := func() bool {
+		handled, err := r.replyToAsked(ctx, rc, job, parent, text, post, isQuestion(text) || asksWhy(text))
+		askedErr = err
+		return handled || err != nil
+	}
 	switch {
 	case am.HasWord(text, englishWords...):
 		_ = post(am.Text("ตอนนี้ agent ตัวนี้ทำเอกสารเป็นภาษาไทยเท่านั้นครับ ภาษาอังกฤษจะมาในรุ่นถัดไป"))
@@ -276,6 +296,14 @@ func (r *Runner) replyJob(ctx context.Context, job am.Run, log *slog.Logger) err
 		if err := r.formatCard(ctx, *parent, rc.outputFormats(), rc.pdfOffered()); err != nil {
 			return r.fail(ctx, job, "reply", err)
 		}
+	case asksOfDocuments():
+		// AM11b: words about the documents of a finished round — "ไม่ต้องใส่กราฟ", "ขอสั้นๆ ได้ไหม?" — read
+		// into what the package says can be asked (replyToAsked). It comes before the question cases: a
+		// request is often worded as a question, and a question about the figures asks nothing of the
+		// documents and falls through to them.
+		if askedErr != nil {
+			return rc.stepFailed("instructions", askedErr) // (a budget that ran out is a wait, as for any step)
+		}
 	case (isQuestion(text) || asksWhy(text)) && parent != nil:
 		_ = r.Store.PostAgentText(ctx, target, r.answerWith(ctx, rc, *parent, text, params.Knowledge))
 	case (isQuestion(text) || asksWhy(text)) && params.Knowledge != nil:
@@ -295,6 +323,48 @@ func (r *Runner) replyJob(ctx context.Context, job am.Run, log *slog.Logger) err
 		_ = r.Store.PatchItem(ctx, r.Store.Pool, params.ItemID, am.ItemPatch{Status: "handled"})
 	}
 	return r.finish(rc, am.RunSucceeded, "")
+}
+
+// replyToAsked: a typed message after a finished round that asks something of its documents. What can
+// be done starts a render job — the same computed table, no compute step — with the directives now in
+// force and the new ones; what cannot is said with its reason. False when the package takes no
+// instructions, there is no finished round, or the words asked nothing of the documents. question: the
+// message reads as a question — it is taken for a request only when it asks for something the package
+// can do ("ไม่ใส่กราฟได้ไหม?"); anything else worded as a question is still a question about the round,
+// and is answered as one, never refused as a request.
+func (r *Runner) replyToAsked(ctx context.Context, rc *runCtx, job am.Run, parent *am.Run, text string,
+	post func(am.PersonText) error, question bool) (bool, error) {
+	if !rc.pkg.Manifest.TakesInstructions() || parent == nil || parent.Status != am.RunSucceeded {
+		return false, nil
+	}
+	asked, err := rc.asked(ctx, text)
+	if err != nil {
+		return false, err
+	}
+	if asked.Nothing() || (question && len(asked.Apply) == 0) {
+		return false, nil
+	}
+	if len(asked.Apply) == 0 {
+		// nothing to make again: what was asked and cannot be done, each with its reason
+		rc.sayAsked(ctx, *parent, asked, renderAsked{})
+		return true, nil
+	}
+	var formats []string
+	_ = json.Unmarshal(parent.Formats, &formats)
+	formats = rc.allowedOf(formats)
+	if len(formats) == 0 {
+		return false, nil
+	}
+	params, _ := json.Marshal(map[string]any{"formats": formats, "why": "instruction",
+		"instructions": union(r.Store.InstructionsInForce(ctx, parent.ID), asked.Apply), "asked": asked})
+	pid := parent.ID
+	if _, _, err := r.Store.CreateRun(ctx, r.Store.Pool, am.Run{InstallID: parent.InstallID, ParentRunID: &pid,
+		TenantID: parent.TenantID, UserID: parent.UserID, Kind: am.KindRender, Params: params,
+		DefinitionVersion: parent.DefinitionVersion, Checksum: parent.Checksum, EngineChecksum: parent.EngineChecksum,
+		BindingVersion: parent.BindingVersion}, ""); err != nil {
+		return false, err
+	}
+	return true, post(am.Text("ได้ครับ กำลังทำไฟล์ใหม่ตามที่ขอ จากตัวเลขชุดเดิมของรอบนี้ ไม่คำนวณใหม่"))
 }
 
 func formatNames(fs []string) am.PersonText {

@@ -342,9 +342,17 @@ async function agentPage(lang) {
   for (const slug of [REPORT, PROCUREMENT]) {
     const short = slug.split(".").pop();
     await page.goto(`${WEB()}/chat/agents/${slug}`, { waitUntil: "load" });
-    const more = page.locator('[data-testid="am-detail-more"]');
-    await more.waitFor({ state: "attached", timeout: 60000 });
+    // (the page as it is, before anything is asked of it: a build from before AM11b has no “รายละเอียด”, and an
+    // agent this account cannot see has no page — both are said, with the picture, and the walk goes on)
+    await page.locator("h1:visible").first().waitFor({ state: "visible", timeout: 60000 }).catch(() => null);
+    await page.locator("h2:visible").first().waitFor({ state: "visible", timeout: 30000 }).catch(() => null);
     await L.wait(1500);
+    const more = page.locator('[data-testid="am-detail-more"]');
+    if (!(await more.count())) {
+      await x.shot(`${short}-01-default`, { fullPage: true });
+      x.check(false, `${short}: the page has “รายละเอียด”`, `no such control on this build · sections on screen: ${(await page.locator("h2:visible").allInnerTexts()).join(" · ") || "none"}`);
+      continue;
+    }
     x.check((await more.evaluate((d) => d.open)) === false, `${short}: “รายละเอียด” is closed until a person opens it`, await x.words(page.locator('[data-testid="am-detail-more-toggle"]')));
     const headings = await page.locator("h2:visible").allInnerTexts();
     x.check(headings.length === 2, `${short}: on screen by default — what to give it, what comes back — and no other section`, headings.join(" · "));
@@ -359,6 +367,195 @@ async function agentPage(lang) {
     await x.shot(`${short}-02-details-open`, { fullPage: true });
   }
   await done(x, `page-${lang}`);
+}
+
+// ── asked: an agent that does what it is asked (E) ────────────────────────────────────────────────
+// Three requests in plain Thai, each read back out of the finished file (docx_facts.py — the file says
+// it, not the thread), and one that cannot be done, refused with its reason. The first is typed with the
+// files; the others after the round, about its documents — the files are made again from the same
+// figures. The model that reads the words is whichever the install may use (in-house, unless the admin
+// opened the agent's switch): no word of the walk is matched by the program.
+const { execFileSync } = require("node:child_process");
+const facts = (file) => JSON.parse(execFileSync("python", [path.join(__dirname, "docx_facts.py"), file], { encoding: "utf8" }));
+const THREAD = '[data-testid="am-thread"]';
+
+async function filesOf(x, runId, label) {
+  const d = (await api(x.page, `/runs/${runId}`)).body || {};
+  const out = { version: 0, steps: (d.steps || []).map((s) => s.name) };
+  for (const fmt of ["docx", "pptx"]) {
+    const art = (d.artifacts || []).filter((a) => a.format === fmt).sort((a, b) => b.version - a.version)[0];
+    if (!art) continue;
+    const file = path.join(x.dir, `${label}_v${art.version}.${fmt}`);
+    fs.writeFileSync(file, await W.fetchFile(x.page, `${W.EDGE()}/api/v1/agent-market/artifacts/${art.id}/download`));
+    out[fmt] = facts(file);
+    out[`${fmt}_version`] = art.version;
+    out.version = Math.max(out.version, art.version);
+  }
+  return out;
+}
+/** Types words about the finished round's documents; answers "about this round" when the chip asks. */
+async function sayAfter(x, text) {
+  const { page } = x;
+  await page.locator('[data-testid="am-composer-input"]').fill(text);
+  await x.click(page.locator('[data-testid="am-composer-send"]'), `พิมพ์: ${text}`);
+  await L.wait(2000);
+  const about = page.locator('[data-testid="am-intent"][data-status="open"] [data-testid="am-intent-about"]');
+  if (await about.count()) await x.click(about.last(), "เกี่ยวกับรอบนี้ (chip)");
+}
+const threadText = (page) => page.evaluate((sel) => (document.querySelector(sel) || document.body).innerText, THREAD);
+
+async function asked() {
+  const x = await W.session("web", "asked");
+  const { page } = x;
+  await home(page);
+  await setLanguage(x, "th");
+  // an install of its own, made now: an install is pinned to the version it was installed at, and only a
+  // version whose manifest says what can be asked takes instructions
+  const mine = (await api(page, "/installs")).body?.installs || [];
+  const installId = mine.some((i) => i.slug === REPORT && i.status !== "removed") ? await W.installAnother(x, REPORT, CARD[REPORT].th) : (await W.installFromMarket(x, CARD[REPORT].th)).installId;
+  state.installs = [...new Set([...(state.installs || []), installId])];
+  state.am11b_asked_install = installId;
+  save();
+  await workspace(x, installId);
+  const manifest = ((await api(page, `/installs/${installId}`)).body || {}).manifest || {};
+  const can = ((manifest.instructions || {}).can || []).map((d) => d.label);
+  x.check(can.length >= 3, "the install's own version says what can be asked of its documents", `v${manifest.version}: ${can.join(" · ") || "nothing"}`);
+  const line = await x.words(page.locator('[data-testid="am-greeting-asks"]').first()).catch(() => "");
+  x.check(can.length > 0 && can.every((c) => line.includes(c)) && /ข้อไหนทำไม่ได้จะบอกพร้อมเหตุผล/.test(line), "the greeting says the agent takes instructions — the package's own list — and that a refusal comes with its reason", line);
+  x.check((await page.locator('[data-testid="am-greeting-form"]').count()) === 1, "… and a form", await x.words(page.locator('[data-testid="am-greeting-form"]').first()).catch(() => ""));
+  await x.shot("01-greeting");
+
+  // 1 — typed with the files
+  const said1 = `${TAG} รายงานผลประกอบการเดือนกันยายน 2569 ไม่ต้องใส่กราฟ`;
+  const { runId } = await W.sendFiles(x, installId, W.FIN, said1, "02");
+  const end = await W.finish(x, runId, "02");
+  x.check(end.run.status === "succeeded", "request 1 (with the files) — the round delivers", `${end.run.status} ${end.run.status_reason || ""}`);
+  await L.wait(2500);
+  const f1 = await filesOf(x, runId, "1-no-charts");
+  x.check(f1.docx && f1.docx.pictures === 0 && !f1.docx.headings.includes("แนวโน้มและองค์ประกอบ") && f1.docx.headings.includes("รายละเอียดรายบัญชี"),
+    "“ไม่ต้องใส่กราฟ” — the report has no chart section and no picture (read from the .docx)", f1.docx ? `${f1.docx.pictures} pictures · ${f1.docx.headings.length} sections: ${f1.docx.headings.join(" | ")}` : "no .docx");
+  x.check(f1.pptx && f1.pptx.charts === 0, "… and the slides have no chart (read from the .pptx)", f1.pptx ? `${f1.pptx.slides} slides · ${f1.pptx.charts} charts` : "no .pptx");
+  x.check(f1.steps.includes("instructions"), "the reading of the words is a step of the run", f1.steps.join(" → "));
+  let thread = await threadText(page);
+  x.check(/ทำตามที่ขอแล้ว: ไม่ใส่กราฟ/.test(thread), "the thread says what was done as asked", (thread.match(/ทำตามที่ขอแล้ว[^\n]*/) || [""])[0].slice(0, 200));
+  await page.locator(`[data-testid="am-outputs"][data-run="${runId}"]`).last().scrollIntoViewIfNeeded().catch(() => {});
+  await x.shot("03-no-charts-done");
+
+  // 2 — after the round: another order
+  const waitVersion = async (v) => waitFor(async () => {
+    const d = (await api(page, `/runs/${runId}`)).body || {};
+    return (d.artifacts || []).some((a) => a.format === "docx" && a.version >= v) ? d : null;
+  }, 420000, 2000);
+  await sayAfter(x, "เรียงจากรายการที่ต่างมากที่สุด");
+  x.check(!!(await waitVersion(2)), "request 2 (after the round) — the files are made again", "version 2");
+  await L.wait(2500);
+  const f2 = await filesOf(x, runId, "2-sorted");
+  const sizes = ((f2.docx || {}).accounts || {}).var_budget || [];
+  const mags = sizes.map((v) => Math.abs(v == null ? -1 : v));
+  x.check(mags.length > 3 && mags.every((v, i) => i === 0 || mags[i - 1] >= v) && mags[0] > mags[mags.length - 1],
+    "“เรียงจากรายการที่ต่างมากที่สุด” — the account table runs from the largest difference to the smallest (read from the .docx)", `${mags.length} rows: ${mags.slice(0, 6).join(" ≥ ")} …`);
+  x.check(f2.docx && f2.docx.pictures === 0, "… and what was asked with the files still holds: no charts in version 2", f2.docx ? `${f2.docx.pictures} pictures` : "");
+  const computes = ((await api(page, `/runs/${runId}`)).body?.steps || []).filter((s) => s.name === "compute").length;
+  x.check(computes === 1, "nothing was computed again", `${computes} compute step`);
+  thread = await threadText(page);
+  x.check(/ทำตามที่ขอแล้ว: เรียงรายละเอียดรายบัญชีจากรายการที่ต่างมากที่สุด/.test(thread), "the thread says so", (thread.match(/ทำตามที่ขอแล้ว: เรียง[^\n]*/) || [""])[0].slice(0, 220));
+
+  // 3 — short
+  await sayAfter(x, "ขอสั้นๆ หน้าเดียว");
+  x.check(!!(await waitVersion(3)), "request 3 — the files are made again", "version 3");
+  await L.wait(2500);
+  const f3 = await filesOf(x, runId, "3-brief");
+  const gone = ["แนวโน้มและองค์ประกอบ", "รายการเคลื่อนไหวสำคัญ", "รายละเอียดรายบัญชี"];
+  const must = ["สรุปผู้บริหาร", "งบกำไรขาดทุน", "รายการที่ต้องตรวจสอบ", "ข้อสมมติที่ใช้ในรอบนี้"];
+  x.check(f3.docx && gone.every((h) => !f3.docx.headings.includes(h)) && must.every((h) => f3.docx.headings.includes(h)) && f3.docx.paragraphs < f1.docx.paragraphs,
+    "“ขอสั้นๆ หน้าเดียว” — the short report: the detail sections are gone, what a report must have is there (read from the .docx)",
+    f3.docx ? `${f3.docx.headings.length} sections (was ${f1.docx.headings.length}) · ${f3.docx.paragraphs} paragraphs (was ${f1.docx.paragraphs}): ${f3.docx.headings.join(" | ")}` : "no .docx");
+  thread = await threadText(page);
+  const briefSaid = (thread.match(/ทำตามที่ขอแล้ว: รายงานฉบับย่อ[^\n]*/) || [""])[0];
+  x.check(/ยาวกว่าหนึ่งหน้า/.test(briefSaid), "the thread says what “short” is — and plainly that it is longer than one page", briefSaid.slice(0, 260));
+  await x.shot("04-after-three");
+
+  // 4 — what cannot be done: refused, with the reason, and nothing is made
+  const before = ((await api(page, `/runs/${runId}`)).body?.artifacts || []).length;
+  await sayAfter(x, "แยกตามแผนกด้วย");
+  const refusal = await waitFor(async () => ((await threadText(page)).match(/[^\n]*ทำตามที่ขอไม่ได้เพราะ[^\n]*/) || [null])[0], 240000, 2000);
+  x.check(!!refusal && /แผนก/.test(refusal) && /ยังไม่มีตัวเลขรายแผนก/.test(refusal), "“แยกตามแผนกด้วย” — refused in the card's words, with its reason", refusal || "(nothing was said)");
+  await L.wait(4000);
+  const after = ((await api(page, `/runs/${runId}`)).body?.artifacts || []).length;
+  x.check(after === before, "… and no file was made for it", `${before} → ${after} files`);
+  await x.shot("05-refused");
+
+  // the run page: the step that read the words, by name
+  await page.goto(`${WEB()}/chat/agents/runs/${runId}`, { waitUntil: "load" });
+  await page.waitForSelector('[data-testid="am-run-step"]', { timeout: 60000 }).catch(() => null);
+  await L.wait(1200);
+  const steps = await page.locator('[data-testid="am-run-step"]').allInnerTexts();
+  x.check(steps.some((s) => s.includes("อ่านคำขอที่พิมพ์มา")), "the run page names the step that read the words", steps.map((s) => s.split("\n")[0]).join(" → ").slice(0, 300));
+  await x.shot("06-run-page", { fullPage: true });
+  const model = ((await api(page, `/runs/${runId}`)).body?.steps || []).find((s) => s.name === "instructions");
+  x.mark(`the words were read by: ${(model && (model.model_id || (model.output || {}).model)) || "?"}`);
+  state.am11b_asked_run = runId;
+  save();
+  await done(x, "asked", { installId, runId, manifest_version: manifest.version, files: { f1, f2, f3 }, refusal });
+}
+
+// ── asked2: the same on a second agent — the expense audit, a workbook, and an agent no model reads
+// the documents of. One request honoured (the claims from the largest amount, read from the .xlsx with
+// openpyxl inside the sandbox image), one refused with its reason, and the run still says no model saw
+// its data: the model that read the person's words saw only the words.
+const EXPENSE = "sran.expense-audit";
+const EXPENSE_CARD = { th: "ตรวจค่าใช้จ่าย", en: "Expense Audit" };
+const EXP_DIR = path.join(L.ROOT, "backend", "agent_market", "fixtures", "expense");
+const expenseFiles = () => [
+  ...["claims_2569-10.xlsx", "policy_kb.docx"].map((n) => ({ name: n, src: path.join(EXP_DIR, n) })),
+  ...fs.readdirSync(path.join(EXP_DIR, "receipts")).map((n) => ({ name: n, src: path.join(EXP_DIR, "receipts", n) })),
+];
+const workbookFacts = (file) => JSON.parse(execFileSync("docker", ["run", "--rm", "--network", "none", "-v", `${path.dirname(file)}:/in:ro`,
+  "-v", `${__dirname}:/p:ro`, "--entrypoint", "python3", process.env.AM_SANDBOX_IMAGE || "ai-gateway-sandbox:latest", "/p/xlsx_facts.py", `/in/${path.basename(file)}`], { encoding: "utf8" }));
+
+async function asked2() {
+  const x = await W.session("web", "asked2");
+  const { page } = x;
+  await home(page);
+  await setLanguage(x, "th");
+  const mine = (await api(page, "/installs")).body?.installs || [];
+  const installId = mine.some((i) => i.slug === EXPENSE && i.status !== "removed") ? await W.installAnother(x, EXPENSE, EXPENSE_CARD.th) : (await W.installFromMarket(x, EXPENSE_CARD.th)).installId;
+  state.installs = [...new Set([...(state.installs || []), installId])];
+  save();
+  await workspace(x, installId);
+  const manifest = ((await api(page, `/installs/${installId}`)).body || {}).manifest || {};
+  const can = ((manifest.instructions || {}).can || []).map((d) => d.label);
+  const line = await x.words(page.locator('[data-testid="am-greeting-asks"]').first()).catch(() => "");
+  x.check(can.length > 0 && can.every((c) => line.includes(c)), "the greeting says what can be asked of this agent's workbook", `v${manifest.version}: ${line}`);
+  await x.shot("01-greeting");
+  const { runId } = await W.sendFiles(x, installId, expenseFiles(), `${TAG} ตรวจการเบิกเดือนตุลาคม เรียงจากยอดสูงสุด`, "02");
+  const end = await W.finish(x, runId, "02");
+  x.check(end.run.status === "succeeded", "the round delivers", `${end.run.status} ${end.run.status_reason || ""} · ${end.asked.length} question(s) answered`);
+  await L.wait(2500);
+  const d = (await api(page, `/runs/${runId}`)).body || {};
+  const file = await W.download(x, d, "xlsx", "expense-asked_v1.xlsx");
+  const facts2 = file ? workbookFacts(file) : {};
+  const amounts = (facts2.claims || []).map((c) => (typeof c.amount === "number" ? c.amount : -1));
+  x.check(amounts.length > 5 && amounts.every((v, i) => i === 0 || amounts[i - 1] >= v) && amounts[0] > amounts[amounts.length - 1],
+    "“เรียงจากยอดสูงสุด” — the claims run from the largest amount down (read from the .xlsx)", `${amounts.length} claims: ${amounts.slice(0, 6).join(" ≥ ")} …`);
+  const rows = (facts2.claims || []).map((c) => Number(c.source_row)).filter((n) => !Number.isNaN(n));
+  x.check(rows.length === amounts.length && new Set(rows).size === rows.length && rows.some((r, i) => i > 0 && r < rows[i - 1]),
+    "… every claim is still there and still names its row in the file that was sent", `rows in the source file: ${rows.slice(0, 8).join(", ")} …`);
+  x.check(d.run && d.run.model_used == null, "the run still says no model saw its data — the model that read the words saw only the words", `model_used=${d.run && d.run.model_used}`);
+  const step = (d.steps || []).find((s) => s.name === "instructions");
+  x.check(!!step, "the reading of the words is a step of the run", step ? `read by ${step.model_id || (step.output || {}).model || "?"}` : (d.steps || []).map((s) => s.name).join(" → "));
+  let thread = await threadText(page);
+  x.check(/ทำตามที่ขอแล้ว: เรียงรายการเบิกจากยอดสูงสุด/.test(thread), "the thread says what was done as asked", (thread.match(/ทำตามที่ขอแล้ว[^\n]*/) || [""])[0].slice(0, 220));
+  await x.shot("03-ordered");
+  const before = (d.artifacts || []).length;
+  await sayAfter(x, "ขอเฉพาะรายการที่มีปัญหา");
+  const refusal = await waitFor(async () => ((await threadText(page)).match(/[^\n]*ทำตามที่ขอไม่ได้เพราะ[^\n]*/) || [null])[0], 240000, 2000);
+  x.check(!!refusal && /ทุกรายการเบิกต้องอยู่ในผลตรวจครบ/.test(refusal), "“ขอเฉพาะรายการที่มีปัญหา” — refused, with its reason", refusal || "(nothing was said)");
+  await L.wait(4000);
+  const after = ((await api(page, `/runs/${runId}`)).body?.artifacts || []).length;
+  x.check(after === before, "… and no file was made for it", `${before} → ${after} files`);
+  await x.shot("04-refused");
+  await done(x, "asked2", { installId, runId, manifest_version: manifest.version, claims: facts2.claims, refusal });
 }
 
 async function cleanup() {
@@ -381,6 +578,8 @@ const phase = process.argv[2];
   else if (phase === "chats") await chats();
   else if (phase === "picker") await picker(process.argv[3] || REPORT);
   else if (phase === "page") await agentPage(process.argv[3] === "en" ? "en" : "th");
+  else if (phase === "asked") await asked();
+  else if (phase === "asked2") await asked2();
   else if (phase === "cleanup") await cleanup();
-  else throw new Error("round | money <th|en> | chats | picker <slug> | page <th|en> | cleanup");
+  else throw new Error("round | money <th|en> | chats | picker <slug> | page <th|en> | asked | asked2 | cleanup");
 })().catch((e) => { console.error(e); process.exit(1); });

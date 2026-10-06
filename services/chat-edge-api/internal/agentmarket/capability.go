@@ -115,6 +115,10 @@ type Manifest struct {
 	// are the package's own files, the caps the most one round may use.
 	StartsFrom string   `json:"starts_from"`
 	Web        *WebSpec `json:"web"`
+	// AM11b. Instructions: what a person can ask of the agent's documents in their own words, and what
+	// they are known to ask that it cannot do (instructions.go). Absent: the agent makes its documents
+	// one way.
+	Instructions *InstructionSpec `json:"instructions,omitempty"`
 }
 
 // What a manifest says of its scope.

@@ -1,7 +1,7 @@
 {
   "schema_version": "agent.market.v1",
   "id": "sran.expense-audit",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "name": "ตรวจการเบิกค่าใช้จ่ายตามนโยบายบริษัท",
   "name_en": "Expense Audit",
   "short_name": "ตรวจค่าใช้จ่าย",
@@ -115,9 +115,24 @@
   },
   "cannot": "agent ตัวนี้ไม่อนุมัติหรือปฏิเสธการเบิก ไม่บันทึกเข้าระบบบัญชี ไม่โอนเงิน และไม่ตั้งเวลาทำงานเอง ทุกข้อยกเว้นรอคนตัดสิน และไม่ส่งอีเมลเอง (คนส่งผ่านระบบได้เมื่อผู้ดูแลตั้งค่าไว้) ใช้แบบฟอร์มของบริษัทคุณแทนสมุดงานของ agent ไม่ได้ ผลเป็นสมุดงาน Excel ของ agent เท่านั้น",
   "photo_notice": "รูปถ่ายใบเสร็จอ่านได้เท่าที่ภาพชัด: ใช้เทียบยอดรวมกับยอดที่เบิก และจะถามกลับทุกครั้งที่ไม่มั่นใจ ถ้ามี PDF หรือสแกนให้ส่งแบบนั้นแทน",
+  "instructions": {
+    "can": [
+      {"id": "sort_by_amount", "label": "เรียงรายการเบิกจากยอดสูงสุด", "note": "ชีตรายการเบิกและผลตรวจ กับชีตหลักฐานและชีตผลของแต่ละกฎ เรียงจากรายการที่ยอดเบิกสูงสุดลงไป ผลตรวจและตัวเลขไม่เปลี่ยน เปลี่ยนแค่ลำดับ และทุกรายการยังบอกแถวในไฟล์ที่ส่งมา"}
+    ],
+    "cannot": [
+      {"id": "only_exceptions", "label": "เอาเฉพาะรายการที่มีปัญหา", "why": "ทุกรายการเบิกต้องอยู่ในผลตรวจครบ ทั้งที่ผ่านและที่ไม่ผ่าน — รายการที่ต้องตัดสินรวมอยู่ในชีตข้อยกเว้นของสมุดงานแล้ว"},
+      {"id": "decide", "label": "อนุมัติหรือปฏิเสธรายการเบิก", "why": "agent นี้ไม่อนุมัติและไม่ปฏิเสธการเบิก ทุกข้อยกเว้นรอคนตัดสิน"}
+    ]
+  },
   "limits": {"max_file_mb": 20, "max_files": 60},
   "self_test": "self-test.json",
   "en": {
+    "เรียงรายการเบิกจากยอดสูงสุด": "Claims ordered from the largest amount",
+    "ชีตรายการเบิกและผลตรวจ กับชีตหลักฐานและชีตผลของแต่ละกฎ เรียงจากรายการที่ยอดเบิกสูงสุดลงไป ผลตรวจและตัวเลขไม่เปลี่ยน เปลี่ยนแค่ลำดับ และทุกรายการยังบอกแถวในไฟล์ที่ส่งมา": "The sheet of claims and results, with its evidence sheet and its sheet of each rule's result, runs from the largest claim down. No result and no figure changes, only the order, and every claim still names its row in the file that was sent.",
+    "เอาเฉพาะรายการที่มีปัญหา": "Only the claims with a problem",
+    "ทุกรายการเบิกต้องอยู่ในผลตรวจครบ ทั้งที่ผ่านและที่ไม่ผ่าน — รายการที่ต้องตัดสินรวมอยู่ในชีตข้อยกเว้นของสมุดงานแล้ว": "every claim has to be in the results, passed or not — the ones a person must decide are already together on the workbook's exceptions sheet",
+    "อนุมัติหรือปฏิเสธรายการเบิก": "Approving or rejecting a claim",
+    "agent นี้ไม่อนุมัติและไม่ปฏิเสธการเบิก ทุกข้อยกเว้นรอคนตัดสิน": "this agent neither approves nor rejects a claim; every exception waits for a person to decide",
     "Excel หรือ CSV หนึ่งแถวต่อหนึ่งรายการ: เลขที่เบิก พนักงาน วันที่ หมวด ร้านค้า จำนวนเงิน ใบเสร็จ รายละเอียด (ขอคืนภาษีซื้อ และหัก ณ ที่จ่าย ถ้ามี)": "Excel or CSV, one row per claim: claim number, employee, date, category, merchant, amount, receipt, description (and claim input VAT and withholding tax, if any)",
     "PDF ดิจิทัล หรือสแกนที่เห็นยอดชัด": "A digital PDF, or a scan in which the amount is clearly visible",
     "agent ตรวจทุกรายการด้วยกฎ เรื่องที่ต้องใช้วิจารณญาณจะถามคุณ ข้อที่ไม่ผ่านกฎจะรอคนตัดสิน ไม่มีรายการใดถูกปฏิเสธอัตโนมัติ": "The agent checks every claim with rules. It asks you about matters that need judgement. Anything that does not pass a rule waits for a person to decide. No claim is rejected automatically.",

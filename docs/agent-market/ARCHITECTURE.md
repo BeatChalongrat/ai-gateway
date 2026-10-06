@@ -753,3 +753,77 @@ its end and looked for there.
 languages (`strings` by key, `en` by the Thai); its code holds keys only
 (`tests/test_am12_package_words.py`). Nothing in its code, prompts or
 manifest names a kind of thing to buy.
+
+## The agent's room, and an agent that does what it is asked (AM11b)
+
+Four things the earlier cards left unsaid, and one new mechanism.
+
+**No money on a person's screen.** A person using an agent reads the time a
+run takes and nothing about what it costs: no credits, no baht — on the line
+where a run starts, the files card, the run page, a budget notice, a failure,
+a tooltip. The accounting is unchanged (a failed run is still free, a
+finished one still charged; `budget.go`, `failure.go`); only the words left
+the screens. The figures live in the admin app (Spend). `EstimateFor`
+returns seconds only; `am11b_money_test.go` reads every sentence the server
+can say to a person and fails on one that names credits.
+
+**The picker lists what can run.** `MenuFor` lists a model only if this
+agent may use it now: a model outside the organisation is absent while the
+agent's data may not leave it (one line says so — `outside_absent`), a model
+that cannot read images is absent from a vision agent, and a model whose
+stated context window is under `MinAgentContext` (32,000 tokens) is absent
+from every agent — a 16k in-house model was listed, picked, refused by the
+gateway with `context_length_exceeded`, and another model wrote the report.
+A stored choice that is no longer listed reads as "auto" on the screen and in
+the runner (`runner/choice.go`), the same rule in both places. A listed model
+that fails to answer on the day is still rescued by another (AM4), and the
+files card says so in words.
+
+**One empty chat.** "New chat with this agent" opens the unused chat that is
+there instead of making another (`createThread` answers `reused`), listing
+the chats soft-deletes every other chat nothing ever happened in
+(`TidyEmptyThreads`: no round, no message, no file, not pinned, not named by
+the person), and a chat is named for the first thing that happens in it —
+the request, the period, the file, the words. A chat with a round is never
+touched, nor anything of a round.
+
+**Instructions.** A package may say in its manifest what a person can ask of
+its documents, and what they are known to ask that it cannot do:
+
+```json
+"instructions": {
+  "can":    [{"id": "no_charts", "label": "…", "note": "…", "unless": "…"}],
+  "cannot": [{"id": "by_department", "label": "…", "why": "…"}]
+}
+```
+
+The pieces, and who owns what:
+
+| Part | Does | Never does |
+|---|---|---|
+| a model (`runner/asked.go`, step `instructions`) | reads the person's words into ids of the two lists (`AskedPrompt`) | writes a figure, a reason, or anything applied as written |
+| `ReadAsked` (`instructions.go`) | keeps only declared ids, each once; drops a quote that is not the person's own words | trusts the answer |
+| the package's renderer | applies a directive at render time — leaves a section out, orders a table's rows (`deliverables/content.py: asked_of`) | computes: the computed table and its citations are the same with or without it |
+| the package's gate | opens the finished file and reads back that it was done (`docx.asked`, `xlsx.asked`); a file not made as asked fails | counts on a normal round — the check exists only when something was asked |
+| the thread | says what was done (`AskedDone`: the directive's own `note`) and each request not done with its reason (`AskedNotDone`: "ทำตามที่ขอไม่ได้เพราะ…") | stays silent about a request it did not honour |
+
+A reason is the package's (`why`; `unless` when this round's data cannot
+take a directive — ordering by the difference with nothing to compare) or
+the platform's (`NeverAsked`: changing a figure, skipping a check, another
+tax rule — the same for every agent). The model is never shown a reason and
+never writes one. It is one of the models the round may use (`writingModels`),
+so an agent whose data may not leave the organisation has its person's words
+read inside it. The question's system message holds no JSON (the echo guard,
+AM12); the shape is asked for in the user turn.
+
+Words typed with the files are read once, before the documents are made.
+Words typed after a finished round, about its documents, start a render job
+— the same computed table, no compute step — with the directives now in
+force and the new ones (`InstructionsInForce`; `replyToAsked`), so a file
+made later for that round (a PDF, another format) is made the same way. A
+new round starts with none.
+
+An install is pinned to its version: only an install of a version whose
+manifest has `instructions` takes them, and only such an agent's greeting
+says so (the package's own labels). An agent that declares nothing makes its
+documents one way and does not claim to listen.

@@ -692,6 +692,28 @@ func TestAM3DatasheetSaysWhichModelSeesWhat(t *testing.T) {
 	if !strings.Contains(ds.Models[0].Sees, "พิมพ์") || !strings.Contains(ds.Models[0].Sees, "ในองค์กรเท่านั้น") {
 		t.Fatalf("what the questions model sees, and when: %q", ds.Models[0].Sees)
 	}
+	// AM11b: an agent that takes instructions has what a person types with the files, or about the
+	// documents, read by a model as well — and its data sheet says so, for both kinds of agent
+	if strings.Contains(ds.Models[0].Sees, "พิมพ์มากับไฟล์") {
+		t.Fatalf("an agent that takes no instructions is said to have typed words read: %q", ds.Models[0].Sees)
+	}
+	asks := strings.Replace(visionManifest, `"permissions":`, `"instructions":{"can":[{"id":"sort_by_amount","label":"เรียงจากยอดสูงสุด"}]},"permissions":`, 1)
+	asked, _ := BuildDatasheet(Thai, Definition{Slug: "sran.invoice-processing", Manifest: json.RawMessage(asks)},
+		map[string]Binding{"model.vision": {Capability: "model.vision", Detail: vis}, "model.text": {Capability: "model.text", Detail: text}},
+		StatusPublished, time.Now())
+	if len(asked.Models) != 2 || asked.Models[0].Role != "questions" || !asked.Models[0].SelfHosted || asked.Models[0].Model != "qwen3.8-27b-fp8" ||
+		!strings.Contains(asked.Models[0].Sees, "พิมพ์มากับไฟล์หรือพิมพ์ขอเรื่องรูปแบบเอกสาร") || !strings.Contains(asked.Models[0].Sees, "ในองค์กรเท่านั้น") {
+		t.Fatalf("an extraction agent that takes instructions: %+v", asked.Models)
+	}
+	report := strings.Replace(guideManifest, `"permissions":`, `"instructions":{"can":[{"id":"no_charts","label":"ไม่ใส่กราฟ"}]},"permissions":`, 1)
+	if report == guideManifest || asks == visionManifest {
+		t.Fatal("the test's manifests have no place for the block")
+	}
+	asked, _ = BuildDatasheet(Thai, Definition{Slug: "sran.financial-report", Version: "1.8.0", Manifest: json.RawMessage(report)}, caps, StatusPublished, time.Now())
+	if len(asked.Models) != 2 || !strings.Contains(asked.Models[0].Sees, "พิมพ์มากับไฟล์ หรือพิมพ์ขอเรื่องรูปแบบเอกสาร") ||
+		!strings.Contains(asked.Models[1].Sees, "พิมพ์มากับไฟล์ หรือพิมพ์ขอเรื่องรูปแบบเอกสาร") {
+		t.Fatalf("a report agent that takes instructions: %+v", asked.Models)
+	}
 	last := ds.Retention[len(ds.Retention)-1]
 	if last["keep"] != float64(730) {
 		t.Fatalf("the duplicate index keeps 730 days: %v", last)

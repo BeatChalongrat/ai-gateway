@@ -41,7 +41,7 @@ var rawErrors = []string{
 
 // Everything a caller of fail() or stepFailed() passes as the reason.
 var failReasons = []string{"load", "interpret", "files", "clarify", "parse_failed", "vision_failed", "preflight_failed",
-	"compute_failed", "postcompute_failed", "narrative_failed", "render_failed", "publish_failed", "index", "exceptions",
+	"compute_failed", "postcompute_failed", "narrative_failed", "instructions_failed", "render_failed", "publish_failed", "index", "exceptions",
 	"outputs", "self_test_seed", "quality_gate", "package_changed", "sandbox_unavailable", "engine_missing", "no_period",
 	"too_many_rounds", "stamp_failed", "bad_format", "no_parent", "bad_params", "preview", "reply", "internal_error"}
 

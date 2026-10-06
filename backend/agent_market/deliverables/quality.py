@@ -299,18 +299,83 @@ def check_docx(path: str, model: dict, theme: dict, req: dict) -> list[dict]:
         cell = _squash(tiles.rows[0].cells[i].text) if tiles is not None else ""
         if _squash(k["value"]) not in cell or f"[{k['cite']}]" not in cell:
             tally.bad.append(f"ตัวเลขสำคัญ “{k['label']}”: ควรเป็น {k['value']} [{k['cite']}]")
-    specs = expected_charts(computed)
+    # AM11b: a report the person asked to have without charts (or short) is held to that — no chart, no
+    # table of a chart's numbers, no picture — and not to the charts of a report nobody asked to change
+    applied = list((model.get("asked") or {}).get("applied") or [])
+    chartless = "no_charts" in applied or "brief" in applied
+    specs = [] if chartless else expected_charts(computed)
     for spec in specs:
         _compare_table(tally, f"ใต้กราฟ “{spec['title']}”", _find_table(doc.tables, content_mod.chart_table(spec)["columns"]),
                        content_mod.chart_table(spec))
     out.append(tally.result("docx.figures", "ตัวเลขในรายงาน (อ่านจากไฟล์) ตรงกับที่คำนวณ", "ตัวเลขในตาราง"))
-    out.append(_chart_pictures(path, specs, theme, has_logo=bool(req.get("logo"))))
+    out.append(_chart_pictures(path, specs, theme, has_logo=bool(req.get("logo")), asked_none=chartless))
     out.append(_narrative_check(doc, model, computed))
+    if applied:
+        out.append(_asked_docx(doc, headings, model, computed, applied))
     return out
 
 
-def _chart_pictures(path: str, specs: list[dict], theme: dict, has_logo: bool) -> dict:
-    """Each chart picture in the file is the picture of the computed numbers: drawn again, compared."""
+def _asked_docx(doc, headings: list, model: dict, computed: dict, applied: list[str]) -> dict:
+    """AM11b: what the person asked of the report, read back out of the finished file — the sections
+    that were to be left out are not in it, and the table that was to be ordered is in that order by the
+    numbers in its own cells."""
+    in_file = {h[0] for h in headings}
+    tally = _Tally()
+    said = []
+    gone = []
+    if "no_charts" in applied or "brief" in applied:
+        gone.append("charts")
+    if "brief" in applied:
+        gone += [k for k in content_mod.BRIEF_LEAVES_OUT if k != "charts"]
+    for key in gone:
+        tally.n += 1
+        if content_mod.SECTION_TITLES[key] in in_file:
+            tally.bad.append(f"ขอไม่ให้มีส่วน “{content_mod.SECTION_TITLES[key]}” แต่ในไฟล์ยังมี")
+    if gone:
+        tally.n += 1
+        chart_tables = [t for t in doc.tables if t.rows and _squash(t.rows[0].cells[0].text) in
+                        {_squash(h) for h in content_mod.CHART_TABLE_HEADS}]
+        if chart_tables:
+            tally.bad.append(f"ขอไม่ใส่กราฟ แต่ในไฟล์ยังมีตารางตัวเลขของกราฟ {len(chart_tables)} ตาราง")
+        said.append("ไม่มี" + " ".join(f"“{content_mod.SECTION_TITLES[k]}”" for k in gone) + "ในไฟล์")
+    if "sort_by_variance" in applied:
+        block = next((b for s in model["sections"] if s["key"] == "accounts" for b in s["blocks"]), None)
+        if block is not None:  # (a short report has no account table to order)
+            got = _find_table(doc.tables, block["columns"])
+            cols = block["columns"]
+            sizes = []
+            for row in (got or [])[1:]:
+                if block.get("ordered_by") == "var_budget":
+                    v = _cell_money(row[cols.index("ต่างจากงบ")])
+                else:
+                    cur, pri = _cell_money(row[cols.index("งวดนี้")]), _cell_money(row[cols.index("งวดก่อน")])
+                    v = None if cur is None or pri is None else cur - pri
+                sizes.append(abs(v) if v is not None else Decimal(-1))
+            tally.n += 1
+            # (cells are whole baht: two differences less than a baht apart may read as equal or one apart)
+            if not sizes or any(b - a > 1 for a, b in zip(sizes, sizes[1:])):
+                tally.bad.append("ตารางรายละเอียดรายบัญชีในไฟล์ไม่ได้เรียงจากส่วนต่างมากไปน้อย")
+            # … and it is the table of this round's accounts, figure for figure
+            _compare_table(tally, content_mod.SECTION_TITLES["accounts"], got, block)
+            said.append(f"ตารางรายละเอียดรายบัญชี {len(sizes)} แถวเรียงจากส่วนต่าง"
+                        + ("จากงบประมาณ" if block.get("ordered_by") == "var_budget" else "จากงวดก่อน") + "มากไปน้อย")
+    label = "เอกสารเป็นไปตามที่ขอ (อ่านจากไฟล์)"
+    if tally.bad:
+        return _check("docx.asked", False, "; ".join(tally.bad[:4]), label, tally.n)
+    return _check("docx.asked", True, " · ".join(said), label, tally.n)
+
+
+def _cell_money(text) -> Decimal | None:
+    """A money cell as the report prints it: 1,284,500 · (12,400) · — (no figure)."""
+    t = _squash(text)
+    neg = t.startswith("(") and t.endswith(")")
+    d = _dec(t.strip("()"))
+    return None if d is None else (-d if neg else d)
+
+
+def _chart_pictures(path: str, specs: list[dict], theme: dict, has_logo: bool, asked_none: bool = False) -> dict:
+    """Each chart picture in the file is the picture of the computed numbers: drawn again, compared.
+    ``asked_none`` (AM11b): the person asked for no charts — any picture beside the logo fails."""
     from .charts import render_png
 
     with zipfile.ZipFile(path) as z:
@@ -327,6 +392,7 @@ def _chart_pictures(path: str, specs: list[dict], theme: dict, has_logo: bool) -
     ok = not missing and extra <= 0
     detail = (("กราฟในไฟล์ไม่ใช่กราฟของตัวเลขที่คำนวณ: " + ", ".join(missing)) if missing else
               (f"มีภาพในไฟล์เกินมา {extra} ภาพ" if extra > 0 else
+               "ไม่มีภาพกราฟในไฟล์ ตามที่ขอ" if asked_none else
                f"วาดกราฟ {len(specs)} ภาพใหม่จากตัวเลขที่คำนวณ ภาพในไฟล์ตรงทุกภาพ"))
     return _check("docx.charts", ok, detail, "กราฟในรายงานคือกราฟของตัวเลขที่คำนวณ", len(specs))
 
@@ -379,8 +445,10 @@ def _slide_text(slide) -> str:
     return "\n".join(parts)
 
 
-def check_pptx(path: str, deck: dict, computed: dict, theme: dict) -> list[dict]:
-    """``deck`` (what the writer returned) is not read for any figure: the figures come out of the file."""
+def check_pptx(path: str, deck: dict, computed: dict, theme: dict, asked=()) -> list[dict]:
+    """``deck`` (what the writer returned) is not read for any figure: the figures come out of the file.
+    ``asked`` (AM11b): the directives applied — a deck asked to have no charts has none, and that many
+    fewer slides."""
     from pptx import Presentation
 
     out = []
@@ -389,7 +457,10 @@ def check_pptx(path: str, deck: dict, computed: dict, theme: dict) -> list[dict]
                       "ไฟล์เปิดได้และโครงสร้างถูกต้อง"))
     info = pptx_inspector.inspect_pptx(path)
     n = info.get("slide_count", 0)
-    out.append(_check("pptx.slide_count", 8 <= n <= 12, f"{n} สไลด์", "จำนวนสไลด์ 8–12"))
+    no_charts = "no_charts" in asked
+    least = 8 - (len(content_mod.charts(computed)) if no_charts else 0)
+    out.append(_check("pptx.slide_count", least <= n <= 12, f"{n} สไลด์" + (" (ไม่มีสไลด์กราฟ ตามที่ขอ)" if no_charts else ""),
+                      f"จำนวนสไลด์ {least}–12"))
     prs = Presentation(path)
     allowed = set(theme["fonts"].values())
     overflows = []
@@ -425,7 +496,7 @@ def check_pptx(path: str, deck: dict, computed: dict, theme: dict) -> list[dict]
 
     tally = _Tally()
     # Charts: every chart in the file is one of the computed charts, every computed chart is there once.
-    want = expected_charts(computed)
+    want = [] if no_charts else expected_charts(computed)
     found: list[str] = []
     for i, slide in enumerate(prs.slides, start=1):
         for sh in slide.shapes:
@@ -444,7 +515,9 @@ def check_pptx(path: str, deck: dict, computed: dict, theme: dict) -> list[dict]
                     match = spec
                     break
             tally.n += sum(len(s) for s in series)
-            if match is None:
+            if match is None and no_charts:
+                tally.bad.append(f"สไลด์ {i}: ขอไม่ใส่กราฟ แต่ในไฟล์ยังมีกราฟ")
+            elif match is None:
                 tally.bad.append(f"สไลด์ {i}: กราฟในไฟล์ไม่ตรงกับตัวเลขที่คำนวณ")
             else:
                 found.append(match["id"])

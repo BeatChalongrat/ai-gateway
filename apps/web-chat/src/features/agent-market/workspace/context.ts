@@ -18,6 +18,8 @@ export interface WorkspaceCtx {
   photoNotice?: string;
   /** AM11b: this agent fills a form of the person's own — the greeting says so in one line. */
   fillsForms?: boolean;
+  /** AM11b: what can be asked of this agent's documents (its package's own words) — the greeting names them. */
+  asks?: string[];
   /** A card's own drop slot took the files of the drop now in flight, so
    *  the workspace-wide drop zone must not stage them in the composer too. */
   claimDrop?: () => void;

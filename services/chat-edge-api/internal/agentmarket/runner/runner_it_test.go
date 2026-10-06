@@ -106,6 +106,10 @@ func (e *itEnv) fakeModel(w http.ResponseWriter, r *http.Request) {
 	if strings.Contains(string(body), "choice") {
 		content = `{"choice": null}`
 	}
+	if strings.Contains(string(body), "ข้อความของผู้ใช้:") {
+		// AM11b: a person's words read into the package's directives (am11b_asked_it_test.go)
+		content = e.askedAnswer(body)
+	}
 	if strings.Contains(string(body), "จับคู่ช่องในแบบฟอร์ม") {
 		// AM8: a model's proposal for a customer's form — a formula cell and a slot that does not exist
 		// among them, which the runner must drop

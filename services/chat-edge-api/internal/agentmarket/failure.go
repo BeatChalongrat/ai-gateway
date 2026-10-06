@@ -82,6 +82,7 @@ var failureCopies = map[string]failureCopy{
 	"compute_failed":      {"คำนวณจากไฟล์ที่ส่งมาไม่สำเร็จ", nextRetry, true},
 	"postcompute_failed":  {"ตรวจผลคำนวณไม่สำเร็จ", nextRetry, true},
 	"narrative_failed":    {"เขียนคำอธิบายของรายงานไม่สำเร็จ", nextRetry, true},
+	"instructions_failed": {"อ่านคำขอที่พิมพ์มากับรอบนี้ไม่สำเร็จ", nextRetry, true},
 	"render_failed":       {"สร้างไฟล์ผลงานไม่สำเร็จ ตัวเลขคำนวณเสร็จแล้วแต่ยังไม่ได้เป็นไฟล์", nextRetry, true},
 	"publish_failed":      {"เก็บไฟล์ผลงานไม่สำเร็จ", nextLater, true},
 	"stamp_failed":        {"ลงชื่อผู้ตรวจทานบนไฟล์ไม่สำเร็จ ไฟล์เดิมที่ยังไม่ได้ลงชื่อยังใช้ได้", "กดลงชื่อตรวจทานอีกครั้ง ถ้ายังไม่สำเร็จให้กด “แจ้งปัญหา”", false},

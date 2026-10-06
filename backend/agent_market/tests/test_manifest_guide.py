@@ -87,7 +87,7 @@ class Guide(unittest.TestCase):
 
     def test_versions_were_bumped_with_the_guide(self):
         self.assertEqual({p: manifest(p)["version"] for p in PACKAGES},
-                         {"financial_report": "1.7.1", "invoice_processing": "1.7.0", "expense_audit": "1.6.0",
+                         {"financial_report": "1.8.0", "invoice_processing": "1.7.0", "expense_audit": "1.7.0",
                           "bank_reconciliation": "1.5.0", "po_matching": "1.4.0", "procurement": "1.0.0"})
 
     def test_every_package_says_whom_it_is_for_and_whose_law_it_follows(self):

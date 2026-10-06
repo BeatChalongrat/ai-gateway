@@ -699,6 +699,12 @@ func BuildDatasheet(l Lang, d Definition, caps map[string]Binding, status string
 	// words (with that run's table or card) only to a model inside the
 	// organisation, or to none (the runner's textModels).
 	typed := T(l, " · และข้อความที่คุณพิมพ์ถามเกี่ยวกับตัวเลข หรือพิมพ์ตอบการ์ดคำถามเป็นประโยค")
+	// AM11b: an agent that takes instructions has the words typed with a round's files, and the words
+	// typed about its documents afterwards, read by a model too (runner/asked.go) — with the package's
+	// list of what can be asked, and nothing of the round's data. What a model is shown is said here.
+	if m.TakesInstructions() {
+		typed += T(l, " · และข้อความที่คุณพิมพ์มากับไฟล์ หรือพิมพ์ขอเรื่องรูปแบบเอกสาร")
+	}
 	textDetail := func() (primary, fallback string, self map[string]bool) {
 		var det struct {
 			Primary    string          `json:"primary"`
@@ -739,8 +745,11 @@ func BuildDatasheet(l Lang, d Definition, caps map[string]Binding, status string
 		for _, x := range []string{primary, fallback} {
 			if x != "" && self[x] {
 				inside = true
-				ds.Models = append(ds.Models, DatasheetModel{Capability: "model.text", Model: x, Role: "questions", SelfHosted: true,
-					Sees: T(l, "เฉพาะเมื่อคุณพิมพ์ถามเกี่ยวกับตัวเลข หรือพิมพ์ตอบการ์ดคำถามเป็นประโยค: ข้อความนั้นกับตารางหรือการ์ดของรอบนั้น — ส่งให้โมเดลในองค์กรเท่านั้น")})
+				sees := T(l, "เฉพาะเมื่อคุณพิมพ์ถามเกี่ยวกับตัวเลข หรือพิมพ์ตอบการ์ดคำถามเป็นประโยค: ข้อความนั้นกับตารางหรือการ์ดของรอบนั้น — ส่งให้โมเดลในองค์กรเท่านั้น")
+				if m.TakesInstructions() {
+					sees = T(l, "เฉพาะข้อความที่คุณพิมพ์: ที่พิมพ์มากับไฟล์หรือพิมพ์ขอเรื่องรูปแบบเอกสาร และที่พิมพ์ถามเกี่ยวกับตัวเลขหรือพิมพ์ตอบการ์ดคำถามเป็นประโยค (กับตารางหรือการ์ดของรอบนั้น) — ส่งให้โมเดลในองค์กรเท่านั้น")
+				}
+				ds.Models = append(ds.Models, DatasheetModel{Capability: "model.text", Model: x, Role: "questions", SelfHosted: true, Sees: sees})
 				break
 			}
 		}

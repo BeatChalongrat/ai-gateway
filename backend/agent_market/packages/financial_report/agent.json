@@ -1,7 +1,7 @@
 {
   "schema_version": "agent.market.v1",
   "id": "sran.financial-report",
-  "version": "1.7.1",
+  "version": "1.8.0",
   "name": "รายงานผลประกอบการ + สไลด์ผู้บริหาร",
   "name_en": "Financial Report + Executive Deck",
   "short_name": "รายงานผลประกอบการ",
@@ -98,6 +98,16 @@
     "denied": ["email_send", "accounting_write", "external_share", "payment", "computer_use", "schedule"]
   },
   "cannot": "agent ตัวนี้ไม่เขียนกลับระบบบัญชี ไม่โอนเงิน และไม่ส่งอีเมลเอง (คนส่งผ่านระบบได้เมื่อผู้ดูแลตั้งค่าไว้) รายงานนี้เป็นรายงานผู้บริหาร ไม่ใช่การปิดบัญชี: ไม่มีงบแสดงฐานะการเงิน งบกระแสเงินสด หรือรายการปรับปรุง แบบฟอร์มของบริษัทที่มีกราฟ Word/PowerPoint ใช้ไม่ได้ เพราะระบบไม่ได้วาดกราฟในแบบฟอร์มใหม่",
+  "instructions": {
+    "can": [
+      {"id": "no_charts", "label": "ไม่ใส่กราฟ", "note": "รายงานและสไลด์ไม่มีกราฟและไม่มีตารางตัวเลขของกราฟ ตัวเลขอื่นเหมือนเดิมทุกตัว"},
+      {"id": "brief", "label": "รายงานฉบับย่อ", "asks": "ขอสั้นๆ · ฉบับย่อ · สรุปสั้นๆ · ขอหน้าเดียว", "note": "รายงานเหลือสรุปผู้บริหาร งบกำไรขาดทุน รายการที่ต้องตรวจสอบ ข้อสังเกต ข้อสมมติ และที่มาของตัวเลข — ไม่มีกราฟ รายการเคลื่อนไหว และรายละเอียดรายบัญชี ส่วนที่ต้องมีทุกรอบยังอยู่ครบ จึงยาวกว่าหนึ่งหน้า สไลด์ไม่เปลี่ยน"},
+      {"id": "sort_by_variance", "label": "เรียงรายละเอียดรายบัญชีจากรายการที่ต่างมากที่สุด", "note": "ตารางรายละเอียดรายบัญชีในรายงานเรียงจากส่วนต่างมากไปน้อย — ต่างจากงบประมาณเมื่อรอบนี้มีงบประมาณ ไม่มีก็ต่างจากงวดก่อน ตัวเลขไม่เปลี่ยน เปลี่ยนแค่ลำดับ", "unless": "รอบนี้ไม่มีงบประมาณและไม่มีงวดก่อนให้เทียบ จึงไม่มีส่วนต่างให้เรียง"}
+    ],
+    "cannot": [
+      {"id": "by_department", "label": "แยกตามแผนก", "why": "รายงานนี้คำนวณตัวเลขรายบัญชีจากไฟล์ที่ส่งมา ยังไม่มีตัวเลขรายแผนก"}
+    ]
+  },
   "limits": {"max_file_mb": 20, "max_files": 6},
   "self_test": "self-test.json",
   "templates": {
@@ -114,6 +124,16 @@
     }
   },
   "en": {
+    "ขอสั้นๆ · ฉบับย่อ · สรุปสั้นๆ · ขอหน้าเดียว": "Keep it short \u00b7 A short version \u00b7 A short summary \u00b7 One page please",
+    "ไม่ใส่กราฟ": "No charts",
+    "รายงานและสไลด์ไม่มีกราฟและไม่มีตารางตัวเลขของกราฟ ตัวเลขอื่นเหมือนเดิมทุกตัว": "The report and the slides have no charts and no tables of a chart's figures; every other figure is the same.",
+    "รายงานฉบับย่อ": "A short report",
+    "รายงานเหลือสรุปผู้บริหาร งบกำไรขาดทุน รายการที่ต้องตรวจสอบ ข้อสังเกต ข้อสมมติ และที่มาของตัวเลข — ไม่มีกราฟ รายการเคลื่อนไหว และรายละเอียดรายบัญชี ส่วนที่ต้องมีทุกรอบยังอยู่ครบ จึงยาวกว่าหนึ่งหน้า สไลด์ไม่เปลี่ยน": "The report keeps the executive summary, the income statement, the items to check, the observations, the assumptions and where the figures came from — without the charts, the key movements and the account detail. What every report must have is still there, so it is longer than one page. The slides do not change.",
+    "เรียงรายละเอียดรายบัญชีจากรายการที่ต่างมากที่สุด": "Account detail ordered from the largest difference",
+    "ตารางรายละเอียดรายบัญชีในรายงานเรียงจากส่วนต่างมากไปน้อย — ต่างจากงบประมาณเมื่อรอบนี้มีงบประมาณ ไม่มีก็ต่างจากงวดก่อน ตัวเลขไม่เปลี่ยน เปลี่ยนแค่ลำดับ": "The account detail table in the report runs from the largest difference to the smallest — the difference from the budget when the round has one, otherwise from the prior month. No figure changes, only the order.",
+    "รอบนี้ไม่มีงบประมาณและไม่มีงวดก่อนให้เทียบ จึงไม่มีส่วนต่างให้เรียง": "this round has no budget and no prior month to compare with, so there is no difference to order by",
+    "แยกตามแผนก": "A breakdown by department",
+    "รายงานนี้คำนวณตัวเลขรายบัญชีจากไฟล์ที่ส่งมา ยังไม่มีตัวเลขรายแผนก": "this report computes its figures per account from the files sent, and has no figures per department yet",
     "GL ของเดือนก่อนหน้า รูปแบบเดียวกับเดือนที่ทำรายงาน": "The previous month's GL, in the same format as the reporting month",
     "PDF ที่เป็นภาพสแกน (ต้องเป็นตารางที่มีตัวเลขจริง ไม่ใช่รูปภาพ)": "A scanned PDF (it must be a table with real figures, not an image)",
     "agent ตัวนี้ไม่เขียนกลับระบบบัญชี ไม่โอนเงิน และไม่ส่งอีเมลเอง (คนส่งผ่านระบบได้เมื่อผู้ดูแลตั้งค่าไว้) รายงานนี้เป็นรายงานผู้บริหาร ไม่ใช่การปิดบัญชี: ไม่มีงบแสดงฐานะการเงิน งบกระแสเงินสด หรือรายการปรับปรุง แบบฟอร์มของบริษัทที่มีกราฟ Word/PowerPoint ใช้ไม่ได้ เพราะระบบไม่ได้วาดกราฟในแบบฟอร์มใหม่": "This agent does not write back to the accounting system, does not transfer money and does not send email itself (a person can send it through the system once an admin has set this up). This report is a management report, not a closing of the books: there is no statement of financial position, no cash flow statement and no adjusting entries. A company's Word or PowerPoint form that has charts in it cannot be used, because the system does not redraw charts in a form.",
