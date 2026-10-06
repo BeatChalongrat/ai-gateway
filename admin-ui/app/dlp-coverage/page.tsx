@@ -7,7 +7,7 @@ import { api, ApiError } from "../../lib/api";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { Icon } from "../../components/ui/Icon";
 import { useT, type DictKey } from "../../lib/i18n";
-import { DLP_CATEGORY, codeWord } from "../../lib/codeWords";
+import { DETECTION_METHOD, DLP_CATEGORY, codeWord } from "../../lib/codeWords";
 
 const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
 
@@ -68,8 +68,8 @@ const PRI: Record<string, { color: string; bg: string }> = {
 
 // Severity and gap priority are human-facing levels, so they carry a
 // dictionary key, and so does a detector's category (AM11, lib/codeWords.ts);
-// the detector NAMES and detection methods (regex / ner / checksum) stay in
-// English — they are identifiers.
+// the detector NAMES stay in English — they are identifiers. A detection
+// method is a stored code like the rest and reads as a word (AM11).
 const SEV_LABEL: Record<string, DictKey> = {
   CRITICAL: "infra.severity.critical",
   HIGH: "infra.severity.high",
@@ -162,7 +162,8 @@ export default function DlpCoveragePage() {
           if (!d) return false;
           return (
             d.severity.toLowerCase().includes(q) ||
-            d.method.toLowerCase().includes(q)
+            d.method.toLowerCase().includes(q) ||
+            codeWord(DETECTION_METHOD, d.method, t).toLowerCase().includes(q)
           );
         });
         return [c, { ...info, detectors: filtered, count: filtered.length }] as [string, CategorySummary];
@@ -356,7 +357,7 @@ export default function DlpCoveragePage() {
                         color={sv.color}
                         bg={sv.bg}
                       />
-                      <Pill text={d.method} color={mt.color} bg={mt.bg} />
+                      <Pill text={codeWord(DETECTION_METHOD, d.method, t)} color={mt.color} bg={mt.bg} />
                     </div>
                   </div>
                 );

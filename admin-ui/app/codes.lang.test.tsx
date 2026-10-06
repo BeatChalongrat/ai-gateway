@@ -25,7 +25,7 @@ vi.mock("next/navigation", () => ({
 
 import { I18nProvider } from "../lib/i18n";
 import { dictionaries } from "../lib/i18n/dict";
-import { ALERT_DELIVERY, ALERT_SEVERITY, DETECTION_TYPE, DLP_CATEGORY, profileName } from "../lib/codeWords";
+import { ALERT_DELIVERY, ALERT_SEVERITY, DETECTION_METHOD, DETECTION_TYPE, DLP_CATEGORY, profileName } from "../lib/codeWords";
 import AlertEventsPage from "./alerts/events/page";
 import DlpCoveragePage from "./dlp-coverage/page";
 
@@ -140,12 +140,15 @@ describe("every code the gateway can store has a word in both languages", () => 
     category: ["identity", "financial", "credential", "secret", "pii", "network", "content_policy"],
     // backend/app/models/custom_detector.py
     detection: ["regex", "keyword_list", "semantic"],
+    // backend/app/services/dlp/detectors/*.py: the `method` of a built-in detector
+    method: ["regex", "checksum", "ner"],
   };
   it.each([
     ["severity", ALERT_SEVERITY],
     ["delivery", ALERT_DELIVERY],
     ["category", DLP_CATEGORY],
     ["detection", DETECTION_TYPE],
+    ["method", DETECTION_METHOD],
   ] as const)("%s", (kind, words) => {
     for (const code of stored[kind]) {
       const key = words[code];

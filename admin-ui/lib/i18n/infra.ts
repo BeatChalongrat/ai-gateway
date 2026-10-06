@@ -19,14 +19,14 @@ export const en = {
   "infra.testFailed": "Test failed",
   "infra.errorStatus": "Error {status}",
 
-  "infra.severity.critical": "critical",
-  "infra.severity.high": "high",
-  "infra.severity.medium": "medium",
-  "infra.severity.low": "low",
+  "infra.severity.critical": "Critical",
+  "infra.severity.high": "High",
+  "infra.severity.medium": "Medium",
+  "infra.severity.low": "Low",
 
-  "infra.priority.high": "high",
-  "infra.priority.medium": "medium",
-  "infra.priority.low": "low",
+  "infra.priority.high": "High",
+  "infra.priority.medium": "Medium",
+  "infra.priority.low": "Low",
 
   // AM11: a detector's category, as a word (lib/codeWords.ts)
   "infra.category.identity": "Identity numbers",
@@ -44,6 +44,8 @@ export const en = {
   "infra.detection.regex": "Pattern (regex)",
   "infra.detection.keyword_list": "Keyword list",
   "infra.detection.semantic": "By meaning",
+  "infra.method.checksum": "Check digit",
+  "infra.method.ner": "Name recognition (NER)",
 
   "infra.dlp.totalDetectors": "Total detectors",
   "infra.dlp.detectorCount": "{n} detectors",
@@ -506,6 +508,8 @@ export const th: Record<keyof typeof en, string> = {
   "infra.detection.regex": "รูปแบบ (regex)",
   "infra.detection.keyword_list": "รายการคำ",
   "infra.detection.semantic": "ตามความหมาย",
+  "infra.method.checksum": "ตรวจเลขตรวจสอบ",
+  "infra.method.ner": "รู้จำชื่อ (NER)",
 
   "infra.dlp.totalDetectors": "ตัวตรวจจับทั้งหมด",
   "infra.dlp.detectorCount": "ตัวตรวจจับ {n} รายการ",

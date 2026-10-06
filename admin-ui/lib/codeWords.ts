@@ -52,6 +52,13 @@ export const DETECTION_TYPE: Record<string, DictKey> = {
   semantic: "infra.detection.semantic",
 };
 
+/** How a built-in detector detects (the `method` of a detector class): regex | checksum | ner. */
+export const DETECTION_METHOD: Record<string, DictKey> = {
+  regex: "infra.detection.regex",
+  checksum: "infra.method.checksum",
+  ner: "infra.method.ner",
+};
+
 /**
  * The built-in policy profiles (backend/app/services/policy/profiles.py), by id, with the name
  * the backend seeds them under. A profile is named by this app only while it still carries that
