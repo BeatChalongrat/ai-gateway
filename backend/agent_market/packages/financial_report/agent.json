@@ -1,7 +1,7 @@
 {
   "schema_version": "agent.market.v1",
   "id": "sran.financial-report",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "name": "รายงานผลประกอบการ + สไลด์ผู้บริหาร",
   "name_en": "Financial Report + Executive Deck",
   "short_name": "รายงานผลประกอบการ",
@@ -91,7 +91,7 @@
       "ไม่ให้โมเดลเป็นผู้คำนวณตัวเลข"
     ],
     "wrong_file": "ถ้าส่งไฟล์ที่ไม่ใช่ข้อมูลบัญชี agent จะบอกว่าอ่านอะไรไม่ได้และขอไฟล์ใหม่ ไม่มีอะไรถูกบันทึกเข้าระบบบัญชี ไฟล์ที่ส่งมาอยู่ในห้องทำงานของ agent นี้ของคุณเท่านั้น",
-    "time_note": "ปกติราว 2 นาที ไฟล์ที่มีหลายพันรายการจะนานขึ้น ถ้า agent ถามคำถาม มันจะรอคำตอบของคุณโดยไม่ใช้เครดิตระหว่างรอ"
+    "time_note": "ปกติราว 2 นาที ไฟล์ที่มีหลายพันรายการจะนานขึ้น ถ้า agent ถามคำถาม มันจะรอคำตอบของคุณ"
   },
   "permissions": {
     "default": "read_only",
@@ -141,7 +141,7 @@
     "ถ้ามีแบบฟอร์มของบริษัท ส่งไฟล์แบบฟอร์มมาในรอบนั้นแล้วบอกว่าให้ใส่ในฟอร์มนี้ได้ แบบฟอร์มนั้นใช้กับรอบนั้นรอบเดียว ถ้าช่องไหนไม่ชัดว่ารับค่าอะไร agent จะให้คุณยืนยันก่อนกรอก แบบฟอร์มไม่ต้องมีเครื่องหมายอะไร: ระบบอ่านช่องว่างที่อยู่ข้างหรือใต้ป้ายชื่อในตาราง ถ้ากรอกได้ไม่ครบจะส่งมาเป็นฉบับร่างพร้อมรายชื่อช่องที่ยังกรอกไม่ได้ และถ้า agent มีค่าให้ไม่ถึงครึ่งของช่องที่ต้องกรอก จะไม่กรอกให้และบอกว่าเป็นช่องใด": "If your company has its own form, send the form file in that run and ask for this form to be filled in. The form is used for that run only. If it is not clear what value a field takes, the agent asks you to confirm before filling it. The form needs no markers: the system reads the blank cells beside or below a label in a table. If not every field can be filled, the form is delivered as a draft with a list of the fields that could not be filled. If the agent has a value for fewer than half of the fields to be filled, it does not fill the form and says which fields they are.",
     "ถ้าส่งไฟล์ที่ไม่ใช่ข้อมูลบัญชี agent จะบอกว่าอ่านอะไรไม่ได้และขอไฟล์ใหม่ ไม่มีอะไรถูกบันทึกเข้าระบบบัญชี ไฟล์ที่ส่งมาอยู่ในห้องทำงานของ agent นี้ของคุณเท่านั้น": "If you send a file that is not accounting data, the agent says what it could not read and asks for a new file. Nothing is posted to the accounting system. The files you send stay in your own workspace for this agent only.",
     "บัญชีแยกประเภทของเดือนที่จะทำรายงาน": "General ledger for the reporting month",
-    "ปกติราว 2 นาที ไฟล์ที่มีหลายพันรายการจะนานขึ้น ถ้า agent ถามคำถาม มันจะรอคำตอบของคุณโดยไม่ใช้เครดิตระหว่างรอ": "Usually about 2 minutes. A file with several thousand entries takes longer. If the agent asks a question, it waits for your answer and uses no credits while it waits.",
+    "ปกติราว 2 นาที ไฟล์ที่มีหลายพันรายการจะนานขึ้น ถ้า agent ถามคำถาม มันจะรอคำตอบของคุณ": "Usually about 2 minutes. A file with several thousand entries takes longer. If the agent asks a question, it waits for your answer.",
     "ผู้ช่วยทำรายงานผลประกอบการ": "Financial report assistant",
     "รหัสบัญชีกับชื่อบัญชี และยอดงบประมาณแยกคอลัมน์ละเดือน": "Account code and account name, with the budget amounts in one column per month",
     "รหัสบัญชีตรงกับใน GL": "Account codes the same as in the GL",

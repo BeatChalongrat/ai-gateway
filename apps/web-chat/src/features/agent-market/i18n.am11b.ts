@@ -14,9 +14,8 @@ export const am11bTh = {
   "ws.footer.files": "agent นี้อ่านเฉพาะไฟล์ที่คุณส่งให้",
   "ws.footer.request": "agent นี้อ่านเฉพาะคำขอและไฟล์ที่คุณส่ง กับหน้าเว็บสาธารณะที่มันเปิดเอง",
 
-  // E — an agent that does what it is asked: the greeting says it takes instructions, and a form when it fills one
-  "greeting.also": "อยากให้ทำต่างจากนี้ บอกได้เลย เช่น “ไม่ต้องใส่กราฟ” หรือ “ขอสั้น ๆ หน้าเดียว”",
-  "greeting.alsoForm": "อยากให้ทำต่างจากนี้ บอกได้เลย เช่น “ไม่ต้องใส่กราฟ” หรือ “ขอสั้น ๆ หน้าเดียว” — หรือแนบแบบฟอร์มที่อยากให้กรอก",
+  // E — nobody can use a feature nothing mentions: an agent that fills a person's own form says so in its greeting
+  "greeting.form": "มีแบบฟอร์มของบริษัทที่อยากให้กรอก แนบมาในแชทนี้ได้เลย",
 } as const;
 
 export const am11bEn = {
@@ -26,6 +25,5 @@ export const am11bEn = {
   "ws.footer.files": "This agent reads only the files you give it.",
   "ws.footer.request": "This agent reads only the request and the files you send, and the public web pages it opens itself.",
 
-  "greeting.also": "Want it done differently? Just say so — “no charts”, or “keep it to one page”.",
-  "greeting.alsoForm": "Want it done differently? Just say so — “no charts”, or “keep it to one page” — or attach a form you want filled in.",
+  "greeting.form": "If you have a form of your own you want filled in, attach it in this chat.",
 } as const satisfies Record<keyof typeof am11bTh, string>;

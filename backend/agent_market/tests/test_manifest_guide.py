@@ -21,6 +21,19 @@ def manifest(pkg):
         return json.load(f)
 
 
+
+def _strings(node):
+    """Every string of a manifest, keys of its English map included."""
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, dict):
+        for k, v in node.items():
+            yield k
+            yield from _strings(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _strings(v)
+
 class Guide(unittest.TestCase):
     def test_every_package_has_a_complete_guide(self):
         for pkg in PACKAGES:
@@ -61,9 +74,20 @@ class Guide(unittest.TestCase):
             blob = json.dumps({"summary": m["summary"], "guide": m["guide"]}, ensure_ascii=False)
             self.assertIsNone(JARGON.search(blob), f"{pkg}: {JARGON.search(blob)}")
 
+    def test_no_manifest_tells_a_person_what_a_run_costs(self):
+        """AM11b: a person using an agent never sees credits — a package's own words included. The
+        accounting word (เดบิต/เครดิต, debit/credit) is the work, not the price."""
+        import json as _json
+        import re as _re
+        for pkg in PACKAGES:
+            for text in _strings(manifest(pkg)):
+                if "เดบิต" in text or "debit" in text.lower() or "บัตรเครดิต" in text or "credit card" in text.lower() or "credit note" in text.lower():
+                    continue
+                self.assertIsNone(_re.search("เครดิต|(^|[^a-z])credits?([^a-z]|$)", text, _re.I), f"{pkg}: {text[:120]}")
+
     def test_versions_were_bumped_with_the_guide(self):
         self.assertEqual({p: manifest(p)["version"] for p in PACKAGES},
-                         {"financial_report": "1.7.0", "invoice_processing": "1.7.0", "expense_audit": "1.6.0",
+                         {"financial_report": "1.7.1", "invoice_processing": "1.7.0", "expense_audit": "1.6.0",
                           "bank_reconciliation": "1.5.0", "po_matching": "1.4.0", "procurement": "1.0.0"})
 
     def test_every_package_says_whom_it_is_for_and_whose_law_it_follows(self):

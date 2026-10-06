@@ -16,6 +16,8 @@ export interface WorkspaceCtx {
   maxMb?: number;
   /** The agent's note on photos (manifest photo_notice). */
   photoNotice?: string;
+  /** AM11b: this agent fills a form of the person's own — the greeting says so in one line. */
+  fillsForms?: boolean;
   /** A card's own drop slot took the files of the drop now in flight, so
    *  the workspace-wide drop zone must not stage them in the composer too. */
   claimDrop?: () => void;

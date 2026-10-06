@@ -243,6 +243,7 @@ function AgentItem({ item }: { item: ThreadItem }) {
 
 function Greeting({ p }: { p: GreetingPayload }) {
   const t = useAmT();
+  const ws = useWorkspace();
   const needs = p.needs ?? [];
   const produces = p.produces ?? [];
   return (
@@ -262,6 +263,12 @@ function Greeting({ p }: { p: GreetingPayload }) {
       ) : null}
       {produces.length ? (
         <p className="mt-2 text-xs text-text-muted">{`${t("greeting.produces")}: ${produces.map((o) => o.label).join(", ")}`}</p>
+      ) : null}
+      {/* AM11b: nobody can use a feature nothing mentions — an agent that fills a person's own form says so */}
+      {ws?.fillsForms ? (
+        <p className="mt-1 text-xs text-text-muted" data-testid="am-greeting-form">
+          {t("greeting.form")}
+        </p>
       ) : null}
     </div>
   );

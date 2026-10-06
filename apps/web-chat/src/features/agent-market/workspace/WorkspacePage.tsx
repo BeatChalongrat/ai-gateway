@@ -216,6 +216,7 @@ function Workspace({ installId, threadId, runId, beside }: { installId: string; 
       accept,
       maxMb,
       photoNotice,
+      fillsForms: formAccept.length > 0,
       claimDrop: () => {
         claimedAt.current = Date.now();
       },
@@ -225,7 +226,7 @@ function Workspace({ installId, threadId, runId, beside }: { installId: string; 
       admin: snap.admin,
       expectedSeconds: estimate.seconds,
     }),
-    [installId, icon, title, thread.merge, accept, maxMb, photoNotice, selfTestSig, threadId, snap.admin, estimate.seconds],
+    [installId, icon, title, thread.merge, accept, maxMb, photoNotice, formAccept.length, selfTestSig, threadId, snap.admin, estimate.seconds],
   );
 
   // ?run=<id>: once, when the thread has loaded — the thread moving on afterwards does not pull the reader back
