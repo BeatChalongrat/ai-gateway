@@ -6,6 +6,12 @@
 // ready, filled — or filled short, with every slot it lacks named: a partly
 // filled form is delivered as what it is and is not a pass. The form is this
 // round's only; the agent's saved form is never changed from here.
+//
+// AM11 — what a form lacks is a list under its own heading ("ช่องที่ยังกรอกไม่ได้"),
+// each field with why. A form the agent has a value for less than half of is
+// refused before any work: the card says how many fields the form expects,
+// how many have a value, names the rest, and offers the mapping screen — never
+// a file. A form that cannot be used says why in words.
 
 import { useEffect, useState } from "react";
 import { FileCheck2, FileWarning, FileSearch } from "lucide-react";
@@ -29,6 +35,24 @@ const STATUS: Record<string, AmKey> = {
   unfilled: "form.unfilled",
   failed: "form.failed",
 };
+
+// why the filler cannot use a form at all, in the words the mapping screen already uses for it
+const FAILED_WHY: Record<string, AmKey> = {
+  chart_not_updated: "tpl.reason.chart_not_updated",
+  unsupported_location: "tpl.reason.unsupported_location",
+};
+
+/** What the card says for the form as it stands. */
+function sentence(p: FormPayload, t: (key: AmKey, vars?: Record<string, string>) => string): string {
+  if (p.status === "refused") {
+    return p.reason === "no_fields"
+      ? t("form.refused.noFields")
+      : t("form.refused.tooFew", { fields: String(p.fields ?? 0), mapped: String(p.mapped ?? 0) });
+  }
+  if (p.status === "failed" && p.reason && FAILED_WHY[p.reason]) return t("form.failedWhy", { why: t(FAILED_WHY[p.reason]) });
+  const n = p.status === "unfilled" ? (p.unfilled?.length ?? 0) || 1 : (p.open ?? 0);
+  return t(STATUS[p.status] ?? "form.inspecting", { n: String(n) });
+}
 
 /** The mapping screen's data for a round's form (what the person mapped wins over what was proposed). */
 export function inspectOf(d: RunFormDetail): TemplateInspect {
@@ -62,9 +86,12 @@ export function FormCard({ p }: { p: FormPayload }) {
   }, [open, p.run_id]);
 
   const unfilled = p.unfilled ?? [];
-  const bad = p.status === "unfilled" || p.status === "failed";
+  const whys = p.unfilled_why ?? [];
+  const refused = p.status === "refused";
+  const bad = p.status === "unfilled" || p.status === "failed" || refused;
   const Icon = p.status === "filled" ? FileCheck2 : bad ? FileWarning : FileSearch;
-  const canMap = p.status === "needs_mapping" || p.status === "ready" || p.status === "filled" || p.status === "unfilled";
+  // a refused form may still be mapped by hand, when it has fields at all
+  const canMap = p.status === "needs_mapping" || p.status === "ready" || p.status === "filled" || p.status === "unfilled" || (refused && p.reason !== "no_fields");
   const why = personText(p.why ?? "");
 
   const download = () => {
@@ -95,23 +122,32 @@ export function FormCard({ p }: { p: FormPayload }) {
             {p.name}
           </div>
           <p className="mt-0.5 text-sm text-text-secondary" data-testid="am-form-text">
-            {t(STATUS[p.status] ?? "form.inspecting", { n: String(p.status === "unfilled" ? unfilled.length || 1 : p.open ?? 0) })}
+            {sentence(p, t)}
           </p>
           {p.status === "failed" && why ? <p className="mt-0.5 text-xs text-text-secondary">{why}</p> : null}
           {unfilled.length ? (
-            <ul className="mt-1.5 flex flex-wrap gap-1.5" aria-label={t("form.unfilledAria")} data-testid="am-form-unfilled">
-              {unfilled.map((label) => (
-                <li key={label} className="rounded bg-status-warning/10 px-1.5 py-0.5 text-[11px] text-text-primary">
-                  {label}
-                </li>
-              ))}
-            </ul>
+            <div className="mt-2 rounded-lg bg-status-warning/10 px-3 py-2">
+              <div className="text-xs font-semibold text-text-primary" id={`form-unfilled-${p.file_id}`}>
+                {t("form.unfilledTitle")}
+              </div>
+              <ul className="mt-1 space-y-0.5" aria-labelledby={`form-unfilled-${p.file_id}`} data-testid="am-form-unfilled">
+                {unfilled.map((label, i) => {
+                  const because = personText(whys[i] ?? "");
+                  return (
+                    <li key={`${label}-${i}`} className="text-xs text-text-primary">
+                      <span className="font-medium">{label}</span>
+                      {because ? <span className="text-text-secondary">{` — ${because}`}</span> : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
           ) : null}
           <p className="mt-1.5 text-[11px] text-text-muted">{t("form.thisRoundOnly")}</p>
           <div className="mt-2 flex flex-wrap gap-2">
             {canMap ? (
               <Button type="button" variant={p.status === "needs_mapping" ? "primary" : "secondary"} size="sm" onClick={() => setOpen(true)} data-testid="am-form-map">
-                {p.status === "needs_mapping" ? t("form.map") : t("form.remap")}
+                {p.status === "needs_mapping" || refused ? t("form.map") : t("form.remap")}
               </Button>
             ) : null}
             {p.artifact_id ? (

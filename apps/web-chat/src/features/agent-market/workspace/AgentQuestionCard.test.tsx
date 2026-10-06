@@ -258,18 +258,31 @@ describe("AgentQuestionCard (typed input, AM2)", () => {
 
 // AM4: the live walkthrough in the owner's desktop app (English) showed the
 // agent's question card as "The assistant has a question … Something else …
-// Reply in your own words instead … Skip · Answer": the shared chat card
-// follows the app's language. Inside an agent's workspace it is Thai.
-describe("AgentQuestionCard in an English app", () => {
-  it("asks in Thai, every word of the card", () => {
-    useI18nStore.setState({ locale: "en" });
+// Reply in your own words instead … Skip · Answer" inside a workspace that was
+// otherwise Thai: the shared chat card follows the app's language. AM4 made the
+// card Thai there; AM11 makes the workspace follow the app instead, so the card
+// and everything around it are one language — whichever the app is in.
+describe("AgentQuestionCard follows the app's language", () => {
+  it("in a Thai app: asks in Thai, every word of the card", () => {
     render(<AgentQuestionCard card={{ ...open, questions: [dc, lang] }} />);
     const card = screen.getByTestId("am-question-card");
     const text = card.textContent ?? "";
     expect(text).toContain("ผู้ช่วยมีคำถาม");
     expect(text).toContain("อย่างอื่น");
+    expect(text).toContain("ค่าแนะนำ: ใช่ D คือเดบิต — รอคำตอบของคุณก่อนคำนวณ");
     for (const en of ["The assistant has a question", "Something else", "Reply in your own words", "Skip", "Answer", "choose"]) {
       expect(text).not.toContain(en);
     }
+  });
+
+  it("in an English app: the card's own words and the workspace's words around it are English", () => {
+    useI18nStore.setState({ locale: "en" });
+    render(<AgentQuestionCard card={{ ...open, questions: [dc, lang] }} />);
+    const text = screen.getByTestId("am-question-card").textContent ?? "";
+    expect(text).toContain("Something else");
+    // the workspace's own lines: what is recommended, and that the answer is remembered
+    expect(text).toContain("Recommended: ใช่ D คือเดบิต — waiting for your answer before calculating");
+    expect(text).toContain("Your answer will be remembered as the default for the next run.");
+    for (const th of ["อย่างอื่น", "ค่าแนะนำ", "รอคำตอบของคุณ", "คำตอบของคุณจะถูกจำไว้"]) expect(text).not.toContain(th);
   });
 });

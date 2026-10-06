@@ -15,7 +15,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { amApi, errorMessage } from "../api";
 import { extensionOf } from "../format";
 import { useAmT } from "../i18n";
-import { COMPLETED_OPEN, outcomeKey } from "../outcome";
+import { COMPLETED_OPEN, NOT_TIED } from "../outcome";
 import type { IntentPayload, OutputArtifact, ThreadItem } from "../types";
 import { cls } from "../ui";
 import { useWorkspace } from "./context";
@@ -24,10 +24,11 @@ import type { RoundInfo } from "./rounds";
 function roundLabel(t: ReturnType<typeof useAmT>, round: RoundInfo): string {
   if (round.kind === "self_test") return t("round.selfTest");
   if (round.status === "succeeded") return round.period ? t("round.done", { period: round.period }) : t("round.doneNoPeriod");
-  // AM6: a round that delivered its draft with the gate open is finished, with a note
+  // AM6: a round that delivered its draft with the gate open is finished, with a note.
+  // AM11: each outcome has its own sentence, with a period and without — nothing is glued in.
   if (round.outcome === COMPLETED_OPEN) {
-    const state = t(outcomeKey(round.outcome, round.reason) ?? "outcome.open.gate");
-    return round.period ? t("round.open", { period: round.period, state }) : t("round.openNoPeriod", { state });
+    if (round.reason === NOT_TIED) return round.period ? t("round.open.notTied", { period: round.period }) : t("round.open.notTiedNoPeriod");
+    return round.period ? t("round.open.gate", { period: round.period }) : t("round.open.gateNoPeriod");
   }
   if (round.status === "cancelled") return t("round.cancelled");
   return round.period ? t("round.failed", { period: round.period }) : t("round.failedNoPeriod");
@@ -160,7 +161,15 @@ export function IntentChip({ item }: { item: ThreadItem }) {
   const p = (item.payload ?? {}) as IntentPayload;
   const [busy, setBusy] = useState<"new_round" | "about_last" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const period = p.last_round?.period_label ? ` ${p.last_round.period_label} ` : "นี้";
+  const period = p.last_round?.period_label?.trim() ?? "";
+  // the sentence for a round that names its period, and the one for a round that does not
+  const body = p.files?.length
+    ? period
+      ? t("intent.bodyFiles", { period })
+      : t("intent.bodyFilesNoPeriod")
+    : period
+      ? t("intent.bodyText", { period })
+      : t("intent.bodyTextNoPeriod");
   const open = p.status === "open";
   const choose = (choice: "new_round" | "about_last") => {
     setBusy(choice);
@@ -190,9 +199,7 @@ export function IntentChip({ item }: { item: ThreadItem }) {
       data-status="open"
     >
       <p className="text-sm font-semibold text-text-primary">{t("intent.title")}</p>
-      <p className="mt-0.5 text-sm text-text-secondary">
-        {p.files?.length ? t("intent.bodyFiles", { period }) : t("intent.bodyText", { period })}
-      </p>
+      <p className="mt-0.5 text-sm text-text-secondary">{body}</p>
       {p.fresh ? <p className="mt-1.5 text-xs text-text-secondary">{t("intent.fresh")}</p> : null}
       <div className="mt-3 flex flex-wrap gap-2">
         <Button type="button" size="sm" onClick={() => choose("new_round")} loading={busy === "new_round"} disabled={!!busy} data-testid="am-intent-new">

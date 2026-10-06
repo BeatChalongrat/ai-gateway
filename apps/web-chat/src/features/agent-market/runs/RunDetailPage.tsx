@@ -506,7 +506,14 @@ function QualityList({ artifacts }: { artifacts: Artifact[] }) {
   if (!q.total) return null;
   return (
     <div className="mt-3">
-      <div className="text-xs font-medium text-text-secondary">{t("outputs.quality", { pass: String(q.pass), total: String(q.total) })}</div>
+      {/* the same three sentences as the files card (the sentence takes {failed}; this passed {pass}/{total}, so "{failed}" was printed as written) */}
+      <div className="text-xs font-medium text-text-secondary">
+        {q.pass !== q.total
+          ? t("outputs.quality", { failed: String(q.total - q.pass) })
+          : q.values > 0
+            ? t("outputs.qualityValues", { values: String(q.values) })
+            : t("outputs.qualityAll")}
+      </div>
       <ul className="mt-1.5 flex flex-col gap-1">
         {q.checks.map((c, i) => (
           <CheckLine key={`${c.name ?? c.label}-${i}`} ok={c.ok}>
@@ -547,7 +554,7 @@ function StepsTab({ steps }: { steps: Step[] }) {
   );
 }
 
-/** A step's script: a file name reads as a name; the runner's own rule-written narrative is said in Thai (AM4). */
+/** A step's script: a file name reads as a name; the runner's own rule-written narrative is said in words (AM4), in the reader's language. */
 const SCRIPT_KEY: Record<string, AmKey> = { fallback_narrative: "step.script.rules" };
 export function scriptLabel(script: string, t: AmT): string {
   return SCRIPT_KEY[script] ? t(SCRIPT_KEY[script]!) : script;

@@ -1,5 +1,7 @@
 // AM4 — make it simple:
-//   * the whole surface is Thai, whatever the app's language;
+//   * the whole surface is one language. AM4 made that Thai whatever the
+//     app's language; AM11: it is the app's language, Thai or English, and
+//     these tests read it in Thai (the last describe reads it in English);
 //   * the workspace header has one obvious action ("ที่มาของตัวเลข") and
 //     everything else in one menu; an empty workspace says in one loud
 //     sentence what to drop in;
@@ -58,8 +60,8 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ enabled: true }) })));
   // Modal reads matchMedia for its mobile sheet; jsdom has none.
   vi.stubGlobal("matchMedia", (q: string) => ({ matches: false, media: q, addEventListener: () => {}, removeEventListener: () => {} }));
-  // AM4: the owner's app is in English — the agents must still read Thai
-  useI18nStore.setState({ locale: "en" });
+  // AM11: the agents read in the app's language; these tests were written against the Thai words
+  useI18nStore.setState({ locale: "th" });
 });
 afterEach(() => {
   cleanup();
@@ -109,7 +111,7 @@ const doneRound: ThreadItem[] = [
 ];
 
 describe("the workspace, simple and Thai", () => {
-  it("one obvious action in the header, the rest in one menu — Thai under an English app", async () => {
+  it("one obvious action in the header, the rest in one menu — Thai under a Thai app", async () => {
     handler = workspaceHandler(doneRound);
     render(<WorkspacePage installId="i-1" />);
     const action = await screen.findByTestId("am-ws-view-run");
@@ -283,10 +285,12 @@ describe("no English left where a person reads", () => {
     expect(table.textContent).not.toMatch(/revenue|operating_expenses/);
   });
 
-  it("the document theme is named in Thai", () => {
+  it("the document theme is named in Thai, and in English under an English app", () => {
     const d = { key: "theme", value: { id: "navy" }, source: "install", label: "ธีมเอกสาร" } as never;
     expect(describeValue(d, tAm)).toEqual(["กรมท่า"]);
     expect(describeValue({ key: "theme", value: { id: "teal" } } as never, tAm)).toEqual(["เขียวหยก"]);
+    useI18nStore.setState({ locale: "en" });
+    expect(describeValue(d, tAm)).toEqual(["Navy"]);
   });
 });
 
@@ -294,9 +298,86 @@ describe("no English left where a person reads", () => {
 // step list said "fallback_narrative" for the narrative step of an agent whose
 // words come from rules. A script's file name reads as a name; that did not.
 describe("the run page's steps", () => {
-  it("say how the words were written, in Thai", () => {
+  it("say how the words were written, in the reader's language", () => {
     expect(scriptLabel("fallback_narrative", tAm)).toBe(tAm("step.script.rules"));
     expect(tAm("step.script.rules")).toMatch(/[฀-๿]/);
     expect(scriptLabel("metrics.py@1.1.0", tAm)).toBe("metrics.py@1.1.0");
+    useI18nStore.setState({ locale: "en" });
+    expect(scriptLabel("fallback_narrative", tAm)).toBe("Written from rules, no model used");
+    expect(scriptLabel("fallback_narrative", tAm)).not.toMatch(/fallback_narrative|[฀-๿]/);
+  });
+});
+
+// AM11 — the rule AM4 set ("Thai, whatever the app's language") is replaced: the
+// workspace follows the app. What is asserted here is the app's own words; the
+// agent's name, its greeting and the period of a run are the package's and the
+// server's, shown as they arrive.
+describe("AM11 — the workspace follows the app's language", () => {
+  it("under an English app the header, the menu and the round's divider read in English", async () => {
+    useI18nStore.setState({ locale: "en" });
+    handler = workspaceHandler(doneRound);
+    render(<WorkspacePage installId="i-1" />);
+    const action = await screen.findByTestId("am-ws-view-run");
+    expect(action.textContent).toBe("Source of figures");
+    fireEvent.click(screen.getByTestId("am-ws-more"));
+    const menu = screen.getByTestId("am-ws-menu");
+    for (const label of ["New chat with this agent", "Pin to the top of the left sidebar", "Activity overview", "Agent settings", "Report a problem"]) {
+      expect(within(menu).getByText(label)).toBeTruthy();
+    }
+    expect(menu.textContent ?? "").not.toMatch(/[฀-๿]/);
+    // "รอบ" is a run, never a round; the period is the server's own label
+    expect(screen.getByTestId("am-round-divider").textContent).toContain("กันยายน 2569 run · finished");
+    expect(screen.getByTestId("am-round-start").textContent).toContain("Start a new run");
+    for (const thai of ["ที่มาของตัวเลข", "เริ่มรอบใหม่", "แจ้งปัญหา"]) expect(document.body.textContent ?? "").not.toContain(thai);
+  });
+
+  it("the empty workspace's sentence is the dictionary's around the agent's own label, in either language", async () => {
+    expect(dropSentence(manifest)).toBe("ส่งบัญชีแยกประเภทของเดือนที่จะปิดมาได้เลย");
+    useI18nStore.setState({ locale: "en" });
+    expect(dropSentence(manifest)).toBe("To start, send: บัญชีแยกประเภทของเดือนที่จะปิด");
+    handler = workspaceHandler([doneRound[0]!]);
+    render(<WorkspacePage installId="i-1" />);
+    expect((await screen.findByTestId("am-empty-sentence")).textContent).toBe("To start, send: บัญชีแยกประเภทของเดือนที่จะปิด");
+    expect(screen.getByTestId("am-empty-pick").textContent).toBe("Choose files");
+  });
+
+  it("the round-boundary chip asks in English, with the period and without it", () => {
+    useI18nStore.setState({ locale: "en" });
+    const ctx: WorkspaceCtx = { installId: "i-1", merge: () => {} };
+    const chip = (payload: Record<string, unknown>): ThreadItem => ({ id: "chip-1", install_id: "i-1", kind: "intent", payload, rev: 5, created_at: at(9) });
+    const withPeriod = render(
+      <WorkspaceContext.Provider value={ctx}>
+        <IntentChip item={chip({ status: "open", files: [{ id: "f", name: "GL_10.xlsx", size: 1 }], last_round: { period_label: "September 2026" } })} />
+      </WorkspaceContext.Provider>,
+    );
+    expect(screen.getByText("Start a new run?")).toBeTruthy();
+    expect(screen.getByTestId("am-intent").textContent).toContain("These files arrived after the September 2026 run finished");
+    withPeriod.unmount();
+    render(
+      <WorkspaceContext.Provider value={ctx}>
+        <IntentChip item={chip({ status: "open", text: "what about VAT?" })} />
+      </WorkspaceContext.Provider>,
+    );
+    const text = screen.getByTestId("am-intent").textContent ?? "";
+    expect(text).toContain("This run has already finished");
+    expect(text).not.toMatch(/[฀-๿]|\{period\}/);
+  });
+
+  it("in Thai the same chip reads as it always did, with the period and without it", () => {
+    const ctx: WorkspaceCtx = { installId: "i-1", merge: () => {} };
+    const chip = (payload: Record<string, unknown>): ThreadItem => ({ id: "chip-1", install_id: "i-1", kind: "intent", payload, rev: 5, created_at: at(9) });
+    const withPeriod = render(
+      <WorkspaceContext.Provider value={ctx}>
+        <IntentChip item={chip({ status: "open", files: [{ id: "f", name: "GL_10.xlsx", size: 1 }], last_round: { period_label: "กันยายน 2569" } })} />
+      </WorkspaceContext.Provider>,
+    );
+    expect(screen.getByTestId("am-intent").textContent).toContain("ได้รับไฟล์หลังจากรอบ กันยายน 2569 เสร็จแล้ว — จะเริ่มรอบใหม่ด้วยไฟล์นี้");
+    withPeriod.unmount();
+    render(
+      <WorkspaceContext.Provider value={ctx}>
+        <IntentChip item={chip({ status: "open", text: "แล้ว VAT ล่ะ" })} />
+      </WorkspaceContext.Provider>,
+    );
+    expect(screen.getByTestId("am-intent").textContent).toContain("รอบนี้เสร็จไปแล้ว — ข้อความนี้เป็นการเริ่มรอบใหม่");
   });
 });

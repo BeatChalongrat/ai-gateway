@@ -86,7 +86,7 @@ beforeEach(() => {
   };
   raw.mockImplementation(async (path: string, init?: RequestInit) => handler(path, init));
   vi.stubGlobal("matchMedia", (q: string) => ({ matches: false, media: q, addEventListener: () => {}, removeEventListener: () => {} }));
-  useI18nStore.setState({ locale: "en" });
+  useI18nStore.setState({ locale: "th" }); // AM11: the workspace follows the app's language; these tests read it in Thai
 });
 afterEach(() => {
   cleanup();

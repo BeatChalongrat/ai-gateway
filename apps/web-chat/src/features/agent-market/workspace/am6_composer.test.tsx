@@ -109,7 +109,7 @@ beforeEach(async () => {
   mockApi.getKnowledgeAvailability.mockResolvedValue({ available: true });
   mockApi.listKnowledgeBases.mockReset();
   mockApi.listKnowledgeBases.mockResolvedValue({ knowledge_bases: KBS });
-  useI18nStore.setState({ locale: "en" }); // the owner's app runs in English; the workspace is Thai
+  useI18nStore.setState({ locale: "th" }); // AM11: the workspace follows the app's language; these tests read it in Thai
   useChatStore.setState({ ...chatInitial }, true);
   useVoiceStore.setState({ ...voiceInitial, inputMethod: "web-speech", isRecording: false, transcript: "", interimTranscript: "", error: null }, true);
   useModelStore.setState({ models: [] });
@@ -131,7 +131,7 @@ const attach = (...names: string[]) =>
   fireEvent.change(screen.getByTestId("am-composer-file"), { target: { files: names.map((n) => new File(["x"], n)) } });
 const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
-/** The chat's composer, read in Thai as the workspace reads it. */
+/** The chat's composer, in the app's language as the workspace reads too (AM11; `Thai` sets no language any more). */
 function chatComposer(conversationId: string | null = "c1") {
   return render(
     <Thai>
@@ -389,7 +389,6 @@ describe("AM6 — an answer that used knowledge says so", () => {
   };
 
   it("one line under the answer, then the sources as the chat lists them", () => {
-    useI18nStore.setState({ locale: "th" });
     const chat = render(
       <MessageBubble
         convId="c1"
@@ -413,7 +412,6 @@ describe("AM6 — an answer that used knowledge says so", () => {
       chip: chat.getAllByTestId("kb-source-chip")[0]!.outerHTML,
     };
     chat.unmount();
-    useI18nStore.setState({ locale: "en" });
 
     render(<ThreadItems items={[item("agent_text", { text: "ค่าที่ปรึกษาอยู่ในหมวด 5300", knowledge })]} />);
     const block = screen.getByTestId("am-agent-knowledge");

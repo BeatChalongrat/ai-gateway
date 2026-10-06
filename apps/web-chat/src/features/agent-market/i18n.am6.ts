@@ -1,7 +1,8 @@
 // AM6 — the agent's model menu is the chat's, and the workspace composer's
 // affordances: what the menu says about models an agent cannot use, the
 // short placeholder, the suggestions above the composer, and what is said
-// about a knowledge base. Thai, like the rest of Agent Market.
+// about a knowledge base. Thai and English, like the rest of Agent Market
+// (AM11): the same keys in both, checked by the type.
 
 export const am6Th = {
   // the model menu: the two lines that are not on the rows
@@ -32,8 +33,13 @@ export const am6Th = {
   // the same, where it stands in a line of counts
   "outcome.open.notTiedCount": "เสร็จแล้วแต่ยังไม่ลงตัว",
   "outcome.open.gateCount": "เสร็จแล้วแต่ยังไม่ผ่านเกณฑ์",
-  "round.open": "รอบ {period} · {state}",
-  "round.openNoPeriod": "รอบนี้{state}",
+  // the same, on the line that closes the round — a sentence of its own for each
+  // outcome, with its period and without (AM11: no fragment is glued into another,
+  // so each language keeps its own word order)
+  "round.open.notTied": "รอบ {period} · เสร็จแล้ว · ยังไม่ลงตัว",
+  "round.open.notTiedNoPeriod": "รอบนี้เสร็จแล้ว · ยังไม่ลงตัว",
+  "round.open.gate": "รอบ {period} · เสร็จแล้ว · ยังไม่ผ่านเกณฑ์ของ agent",
+  "round.open.gateNoPeriod": "รอบนี้เสร็จแล้ว · ยังไม่ผ่านเกณฑ์ของ agent",
   "stepStatus.open": "เสร็จแล้ว มีหมายเหตุ",
   "outputs.draftDone": "ร่าง — งานของรอบนี้เสร็จและส่งไฟล์ให้แล้ว",
   "review.unavailable": "ยังตรวจทานและลงชื่อรอบนี้ไม่ได้ เพราะไฟล์ของรอบนี้เป็นร่าง",
@@ -162,3 +168,165 @@ export const am6Th = {
   "email.noRecipient": "ใส่อีเมลของผู้รับอย่างน้อยหนึ่งคน",
   "email.none": "ไม่มี",
 } as const;
+
+export const am6En = {
+  // the model menu: the two lines that are not on the rows
+  "model.hidden": "Hidden: {n} that cannot do this work",
+  "model.hiddenWhy": "Hidden: {n} that cannot do this work · {why}",
+  "model.blocked": "Greyed-out models cannot be chosen under the organisation's policy",
+
+  // the composer
+  "composer.placeholderTo": "Message {name}…",
+  "composer.placeholderAgent": "Message the agent…",
+  "composer.suggest.aria": "Examples of what you can do",
+  "composer.suggest.attach": "Attach files to start a new run",
+  "composer.suggest.ask": "Ask about the latest run's figures",
+  "composer.suggest.askText": "Explain the figures of the latest run",
+  "composer.suggest.formats": "Request the latest run's files in another format",
+  "composer.suggest.sample": "See the results from the sample files",
+  "composer.suggest.datasheet": "See what this agent reads",
+
+  // knowledge answers questions; it is never the source of a figure in a deliverable
+  "knowledge.askOnly": "The knowledge base is used only to answer questions, never for the figures in documents",
+  "knowledge.from": "From the knowledge base “{base}” · not part of the report",
+
+  // a run that delivered its work while the agent's gate did not pass: a
+  // result, charged like any run that delivers, and never said as a failure
+  "outcome.open.notTied": "Finished · not reconciled",
+  "outcome.open.gate": "Finished · the agent's criteria not yet met",
+  // the same, where it stands in a line of counts ("Succeeded 5 · finished, not reconciled 2 · failed 1")
+  "outcome.open.notTiedCount": "finished, not reconciled",
+  "outcome.open.gateCount": "finished, criteria not met",
+  // the same, on the line that closes the run
+  "round.open.notTied": "{period} run · finished · not reconciled",
+  "round.open.notTiedNoPeriod": "This run is finished · not reconciled",
+  "round.open.gate": "{period} run · finished · the agent's criteria not yet met",
+  "round.open.gateNoPeriod": "This run is finished · the agent's criteria not yet met",
+  "stepStatus.open": "Done, with a note",
+  "outputs.draftDone": "Draft — this run's work is finished and its files have been delivered",
+  "review.unavailable": "This run cannot be reviewed and signed off yet, because its files are a draft.",
+  "review.unavailableWhy": "This run cannot be reviewed and signed off yet: {why}",
+  "dash.kpi.runsSubOpen": "Succeeded {ok} · {state} {open} · failed {failed}",
+  "dash.open": "Runs that finished without meeting the agent's criteria",
+  "dash.costNotCharged": "Cost the system paid but did not charge: {credits} credits",
+
+  // the invoice ↔ PO agent: how deep every line was tested is never hidden
+  "po.passed": "Passed · ready to submit for approval",
+  "po.blocked": "Blocked",
+  "po.person": "Needs a decision",
+  "po.invoices": "Invoices: {n}",
+  "po.baht": "THB {baht}",
+  "po.depth": "3-way match: {three} lines · 2-way match: {two} lines",
+  "po.depthUnlinked": " · not yet matched to a PO: {n} lines",
+  "po.twoWayNote": "Lines with a 2-way match compare the quantity with what was ordered only. They are not checked against a goods receipt.",
+  "po.reasons": "Reasons for not passing",
+  "po.reasonLine": "Invoices: {n} · THB {baht}",
+  "po.noApproval": "The agent approves no invoice for payment. Approval and payment belong to people.",
+
+  // a receipt confirmed here: offered, never required
+  "receipt.title": "Confirm goods received (optional)",
+  "receipt.body": "These lines have been invoiced but have no goods receipt yet. If you know the goods have arrived, you can confirm it here. Your name is recorded as the person who confirmed. If you do not confirm, this run's results still stand.",
+  "receipt.line": "PO {po} · line {line}",
+  "receipt.lineNoNumber": "PO {po}",
+  "receipt.ordered": "Ordered {qty} {unit}",
+  "receipt.all": "All received",
+  "receipt.partial": "Partly received",
+  "receipt.quantity": "Quantity received",
+  "receipt.confirm": "Confirm this quantity",
+  "receipt.done": "Goods receipt recorded. This run is being recalculated with it — the new set of files will appear below.",
+  "receipt.none": "No lines are waiting for a goods receipt to be confirmed.",
+  "receipt.badQuantity": "Enter the quantity received as a number greater than 0.",
+
+  // settings an agent declares
+  "declared.title": "Values used for checks",
+  "declared.body": "The values the agent uses to decide what passes. You can change them at any time; a change applies from the next run.",
+  "declared.unset": "Not set yet",
+  "declared.askOnce": "the agent asks once, in the first run",
+  "declared.range": "Enter a value from {min} to {max}",
+  "declared.maxLength": "No more than {n} characters",
+  "declared.notNumber": "Enter a number.",
+
+  // whom an agent is made for
+  "scope.generic": "Works for any company",
+  "scope.org": "For this organisation only",
+  "jurisdiction.TH": "Thai law and tax",
+
+  // what a run costs, said before it starts
+  "estimate.aria": "Cost of a run",
+
+  // reminders: nothing runs without a person
+  "remind.title": "Reminders to do a run",
+  "remind.body": "Set the day and time you want to be reminded. When the time comes, the system opens a run that waits for your files, and notifies you.",
+  "remind.none": "No reminders set yet.",
+  "remind.status.active": "On",
+  "remind.status.stopped": "Stopped",
+  "remind.waiting": "The {period} run is waiting for files",
+  "remind.waitingNoPeriod": "A run is waiting for files",
+  "remind.openRound": "Open this run",
+  "remind.snooze": "Snooze",
+  "remind.snoozeDays": "Snooze {n} d",
+  "remind.skip": "Skip this run",
+  "remind.stop": "Stop",
+  "remind.resume": "Turn on again",
+  "remind.delete": "Delete",
+  "remind.actions": "Manage the reminder {label}",
+  "remind.add": "Add reminder",
+  "remind.addTitle": "Add reminder",
+  "remind.label": "Reminder name",
+  "remind.labelPlaceholder": "e.g. Month-end close",
+  "remind.every": "Remind",
+  "remind.every.month": "Every month",
+  "remind.every.week": "Every week",
+  "remind.day": "Day of the month",
+  "remind.weekday": "Day",
+  "remind.weekday.1": "Monday",
+  "remind.weekday.2": "Tuesday",
+  "remind.weekday.3": "Wednesday",
+  "remind.weekday.4": "Thursday",
+  "remind.weekday.5": "Friday",
+  "remind.weekday.6": "Saturday",
+  "remind.weekday.7": "Sunday",
+  "remind.time": "Time (Thai time)",
+  "remind.needLabel": "Name the reminder first.",
+  "remind.badTime": "Enter the time as hours:minutes, e.g. 09:00.",
+  "remind.reach.inApp": "Notify in the app",
+  "remind.reach.desktop": "Notify on the desktop (while the app is running, even with its window closed)",
+  "remind.reach.browser": "Notify in the browser (once notifications are allowed)",
+  "remind.reach.email": "Send an email",
+  "remind.reach.noEmail": "No email yet",
+
+  // a notification, in the app
+  "notify.aria": "Notifications from agents",
+  "notify.open": "Open",
+  "notify.snooze1": "Snooze 1 day",
+  "notify.skip": "Skip this run",
+  "notify.stop": "Stop reminding",
+  "notify.close": "Close",
+  "notify.snoozed": "Reminder snoozed for 1 day.",
+  "notify.skipped": "This run was skipped.",
+  "notify.stopped": "This reminder is stopped. You can turn it on again in the agent's settings.",
+
+  // a drafted e-mail: drafting needs nothing; sending needs a person's approval of that very message
+  "email.draft": "Draft an email",
+  "email.drafted": "Email drafted — it is in the chat below.",
+  "email.title": "Email draft",
+  "email.subject": "Subject",
+  "email.body": "Message",
+  "email.attachments": "Attachments",
+  "email.copy": "Copy",
+  "email.copied": "Copied",
+  "email.to": "To",
+  "email.cc": "Cc",
+  "email.recipientsHint": "Type the recipients' email addresses yourself, separated by commas. The system does not read recipients from documents.",
+  "email.send": "Send this email",
+  "email.confirmTitle": "Check the email before sending",
+  "email.confirmBody": "This email will be sent exactly as shown below, once, and only to the recipients you typed.",
+  "email.confirm": "Confirm and send",
+  "email.sending": "Sending…",
+  "email.sentTitle": "Sent",
+  "email.sentLine": "Sent to {to} on {when} · approved by {who}",
+  "email.sentCc": "Cc {cc}",
+  "email.failedLine": "Sending to {to} failed on {when} · approved by {who}",
+  "email.noRecipient": "Enter at least one recipient's email address.",
+  "email.none": "None",
+} as const satisfies Record<keyof typeof am6Th, string>;

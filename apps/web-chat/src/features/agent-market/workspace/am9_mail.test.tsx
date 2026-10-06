@@ -69,10 +69,31 @@ describe("which mailbox sends", () => {
     fireEvent.click(screen.getByTestId("am-email-connect"));
     await waitFor(() => expect(open).toHaveBeenCalledWith("https://backend.example/portal/connectors/oauth/start?ticket=t", "_blank", "noopener,noreferrer"));
     // AM10: the ticket says which client asks, so the page the consent ends on is written for a browser tab
-    expect(fetchMock).toHaveBeenCalledWith(`${GATEWAY_URL}/portal/connectors/mail/ticket?client=web`, { method: "POST", credentials: "include" });
+    // AM11: the ticket is asked with the client, the screen's language and where the person is
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const asked = new URL(url);
+    expect(`${asked.origin}${asked.pathname}`).toBe(`${GATEWAY_URL}/portal/connectors/mail/ticket`);
+    expect(Object.fromEntries(asked.searchParams)).toEqual({ client: "web", lang: "th", return_to: window.location.href });
+    expect(init).toEqual({ method: "POST", credentials: "include" });
     expect(screen.getByText(/ขอเฉพาะสิทธิ์ส่งอีเมล ไม่ขอสิทธิ์อ่าน/)).toBeTruthy();
     // connected in the other tab: checking again turns the card to the person's own mailbox
     fireEvent.click(screen.getByTestId("am-email-connect-check"));
+    await waitFor(() => expect(screen.getByTestId("am-email-transport").getAttribute("data-transport")).toBe("mailbox"));
+  });
+
+  it("AM11: coming back to the tab looks again by itself — nothing to press", async () => {
+    vi.spyOn(window, "open").mockImplementation(() => null);
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ ticket: "t", start_url: "https://backend.example/portal/connectors/oauth/start?ticket=t" }) })));
+    raw.mockImplementation(async (path: string) =>
+      path === "/agent-market/email-drafts/d-1" ? json({ draft: draft({ transport: "mailbox", mailbox: { available: true, connected: true } }) }) : json({}, 404),
+    );
+    render(<EmailDraftCard draft={draft({ transport: "organisation", mailbox: { available: true, connected: false } })} />);
+    // before the consent page was opened, a return to the tab asks nothing
+    window.dispatchEvent(new Event("focus"));
+    expect(raw).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("am-email-connect"));
+    await screen.findByTestId("am-email-connect-check");
+    window.dispatchEvent(new Event("focus"));
     await waitFor(() => expect(screen.getByTestId("am-email-transport").getAttribute("data-transport")).toBe("mailbox"));
   });
 

@@ -14,8 +14,8 @@
 // the hint and checks the value before sending. Evidence that names a page
 // or the text read there (E2 cards) also gets a one-line source.
 // AM4: every card renders TypedQuestionCard — the same markup, keys and
-// answers as the app's card, but always in Thai (the app's card follows the
-// app's language).
+// answers as the app's card. AM11: in the app's language, like the app's
+// card (AM4 had it always in Thai).
 
 import { useEffect, useState } from "react";
 import { CircleCheck, MessageCircleQuestion } from "lucide-react";

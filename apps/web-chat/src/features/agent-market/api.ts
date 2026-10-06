@@ -10,6 +10,7 @@
 
 import { api, CHAT_API_BASE, sharedRefresh } from "@/lib/api";
 import { redirectToPortalLogin } from "@/lib/auth";
+import { useI18nStore } from "@/lib/i18n";
 
 import { tAm } from "./i18n";
 import type {
@@ -98,10 +99,19 @@ async function toError(res: Response): Promise<AmError> {
   return new AmError(env?.error?.code ?? `HTTP_${res.status}`, env?.error?.message || tAm("error.generic"), res.status);
 }
 
+/** AM11: the screen's language, said with every call — the server answers in it (an error, an estimate,
+ *  what it writes into a thread), and a run started now is in it. Accept-Language needs no CORS
+ *  allowance; the server reads it only when it is exactly one tag, which is what this sends. */
+export function withLang(init: RequestInit = {}): RequestInit {
+  const headers = new Headers(init.headers ?? undefined);
+  headers.set("Accept-Language", useI18nStore.getState().locale);
+  return { ...init, headers };
+}
+
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   let res: Response;
   try {
-    res = await api.raw(`${BASE}${path}`, init);
+    res = await api.raw(`${BASE}${path}`, withLang(init));
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") throw err;
     throw new AmError("NETWORK_ERROR", tAm("error.network"), 0);
@@ -119,7 +129,7 @@ function send<T>(method: string, path: string, body?: unknown): Promise<T> {
 }
 
 async function saveBlob(path: string, filename: string): Promise<void> {
-  const res = await api.raw(`${BASE}${path}`);
+  const res = await api.raw(`${BASE}${path}`, withLang());
   if (!res.ok) throw await toError(res);
   const url = URL.createObjectURL(await res.blob());
   const a = document.createElement("a");
@@ -150,6 +160,7 @@ function uploadOnce<T>(path: string, file: File, opts: UploadOptions, retried: b
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${CHAT_API_BASE}${path}`);
+    xhr.setRequestHeader("Accept-Language", useI18nStore.getState().locale); // AM11: as withLang()
     xhr.withCredentials = true;
     xhr.timeout = UPLOAD_TIMEOUT_MS;
     xhr.upload.onprogress = (e) => {
@@ -221,7 +232,7 @@ export const amApi = {
     call<{ items: ThreadItem[] | null; cursor: number }>(`/installs/${id(installId)}/thread?after=${after}${threadQ(thread)}`),
   /** The raw SSE response; the caller parses it (lib/stream parseSSE). */
   events: (installId: string, after: number, signal: AbortSignal, thread?: string | null) =>
-    api.raw(`${BASE}/installs/${id(installId)}/events?after=${after}${threadQ(thread)}`, { signal }),
+    api.raw(`${BASE}/installs/${id(installId)}/events?after=${after}${threadQ(thread)}`, withLang({ signal })),
 
   upload: (installId: string, file: File, opts: UploadOptions = {}) =>
     uploadOnce(`${BASE}/installs/${id(installId)}/files`, file, opts, false, (b) => (b as { file?: AmFile } | null)?.file),

@@ -53,7 +53,7 @@ const chatModel = (id: string, o: Partial<ModelEntry> = {}): ModelEntry => ({
 });
 
 beforeEach(() => {
-  useI18nStore.setState({ locale: "en" }); // the owner's app runs in English; the workspace is Thai
+  useI18nStore.setState({ locale: "th" }); // AM11: the workspace follows the app's language; these tests read it in Thai
   useModelStore.setState({
     loaded: true,
     loading: false,
@@ -103,11 +103,25 @@ describe("AM5 — the control is the chat's model control", () => {
     expect(trigger.outerHTML.replace(' aria-label="โมเดลที่อ่านเอกสาร: typhoon-ocr"', "").replace(' data-testid="am-model-control"', "")).toBe(want);
   });
 
-  it("reads Thai in an English app", () => {
+  // AM11: the control is the chat's and reads in the app's language, like the chat's
+  // (AM4 had it Thai inside an English app).
+  it("reads in the app's language: Thai in a Thai app", () => {
     mount(agentModels());
     expect(screen.getByTestId("am-model-control").textContent).toBe("อัตโนมัติ");
+    expect(screen.getByTestId("am-model-control").getAttribute("aria-label")).toBe("โมเดลที่อ่านเอกสาร: อัตโนมัติ");
     fireEvent.click(screen.getByTestId("am-model-control"));
     expect(screen.getByPlaceholderText("ค้นหาโมเดล…")).toBeTruthy();
     expect(screen.getByTestId("am-model-menu").textContent).not.toContain("Auto");
+  });
+
+  it("reads in the app's language: English in an English app", () => {
+    useI18nStore.setState({ locale: "en" });
+    mount(agentModels());
+    const control = screen.getByTestId("am-model-control");
+    expect(control.textContent).toBe("Auto");
+    expect(control.getAttribute("aria-label")).toBe("Model that reads the documents: Auto");
+    fireEvent.click(control);
+    expect(screen.getByPlaceholderText("Search models…")).toBeTruthy();
+    expect(screen.getByTestId("am-model-menu").textContent).not.toContain("อัตโนมัติ");
   });
 });

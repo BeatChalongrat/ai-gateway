@@ -2,17 +2,18 @@
 
 // An agent's question card IS the app's QuestionCard (AM5) — the same
 // markup, test ids, number keys, Enter, Skip and free reply, the same
-// QuestionAnswerPayload out, so toAnswerBody() is unchanged. Two things are
-// this surface's own, and both are passed in rather than copied:
+// QuestionAnswerPayload out, so toAnswerBody() is unchanged. One thing is
+// this surface's own, and it is passed in rather than copied:
 //   * a question that takes a typed value (`input: {kind, hint}`, the
 //     invoice agent's E2 cards: an amount, a tax ID, a date, a rate, text)
 //     brings its own "Something else" field: the hint as placeholder and
 //     label, and the check of typed.ts — an invalid value gets an inline
 //     reason and the card does not send until it is fixed (the server checks
-//     again);
-//   * the card is Thai whatever the app's language (AM4: the live
-//     walkthrough in an English desktop app showed "The assistant has a
-//     question … Skip · Answer" inside the workspace).
+//     again).
+// The card reads in the app's language, like the workspace around it (AM11;
+// AM4 had it Thai whatever the app's language). What the hint shows as an
+// example follows the language too — 15/09/2569 in Thai, 15/09/2026 in
+// English — and typed.ts reads either, in either language.
 
 import { useMemo } from "react";
 

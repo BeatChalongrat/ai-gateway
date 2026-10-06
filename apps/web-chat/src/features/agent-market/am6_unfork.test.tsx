@@ -239,10 +239,23 @@ describe("AM6 — a dialog in Agent Market is the app's Modal", () => {
     expect(within(dialog).getByTestId("am-signoff-send")).toBeTruthy();
   });
 
-  it("reads in Thai inside an English app, and closes", () => {
+  // AM11: the dialog is the app's and reads in the app's language — title, body and the
+  // app's own Close alike (AM4 had Agent Market's part in Thai inside an English app).
+  it("reads in the app's language — English in an English app, Thai in a Thai one — and closes", () => {
     useI18nStore.setState({ locale: "en" });
+    const english = render(<SignOffButton runId="r-1" />);
+    fireEvent.click(screen.getByTestId("am-signoff-open"));
+    const dialog = screen.getByTestId("am-signoff-dialog");
+    expect(dialog.getAttribute("aria-label")).toBe("Review and sign off");
+    expect(dialog.textContent ?? "").not.toMatch(/[฀-๿]/);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.queryByTestId("am-signoff-dialog")).toBeNull();
+    english.unmount();
+
+    useI18nStore.setState({ locale: "th" });
     render(<SignOffButton runId="r-1" />);
     fireEvent.click(screen.getByTestId("am-signoff-open"));
+    expect(screen.getByTestId("am-signoff-dialog").getAttribute("aria-label")).toBe("ตรวจทานและลงชื่อ");
     fireEvent.click(within(screen.getByTestId("am-signoff-dialog")).getByRole("button", { name: "ปิด" }));
     expect(screen.queryByTestId("am-signoff-dialog")).toBeNull();
   });

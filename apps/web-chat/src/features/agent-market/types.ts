@@ -426,11 +426,18 @@ export interface FormPayload {
   run_id: string;
   file_id: string;
   name: string;
-  status: "inspecting" | "needs_mapping" | "ready" | "filled" | "unfilled" | "failed" | string;
+  status: "inspecting" | "needs_mapping" | "ready" | "filled" | "unfilled" | "failed" | "refused" | string;
   /** slots a person still has to map */
   open?: number;
-  /** labels of the slots the delivered form lacks (the customer's own words) */
+  /** labels of the fields that could not be filled — of a delivered draft, or of a refused form (the customer's own words) */
   unfilled?: string[] | null;
+  /** AM11: why each of them has no value, in the same order (the server's sentence) */
+  unfilled_why?: string[] | null;
+  /** AM11: why a form was refused ("too_few_fields", "no_fields") or cannot be used (the filler's code) */
+  reason?: string;
+  /** AM11: how many fields the form expects filled, and how many the agent has a value for */
+  fields?: number;
+  mapped?: number;
   artifact_id?: string;
   why?: string;
   text?: string;

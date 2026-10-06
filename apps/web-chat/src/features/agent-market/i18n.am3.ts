@@ -1,8 +1,8 @@
 // Agent Market AM3 (self-serve) — the feature's new strings, merged into
-// i18n.ts. Thai is the primary language; English carries the same keys (the
-// type makes a missing English key a compile error). Written for someone who
-// has never seen the product: every message says what happened or why, and
-// what to do next.
+// i18n.ts. Thai and English carry the same keys (AM11: the type makes a key
+// that is in one of them only a compile error, in either direction). Written
+// for someone who has never seen the product: every message says what
+// happened or why, and what to do next.
 
 export const am3Th = {
   // left rail
@@ -236,3 +236,234 @@ export const am3Th = {
 } as const;
 
 export type Am3Key = keyof typeof am3Th;
+
+export const am3En = {
+  // left rail
+  "rail.mine": "My agents ({n})",
+  "rail.all": "View all ({n})",
+  "rail.pin": "Pin {name} to the top",
+  "rail.unpin": "Unpin {name}",
+  "rail.disabled": "Temporarily off",
+  "rail.waitingTotal": "Runs waiting for your answer: {n}",
+  "rail.sharedNew": "A colleague has shared work with you",
+  "rail.searchTitle": "Agents matching your search",
+  "rail.searchAria": "Agents matching your search",
+  "rail.searchDetails": "View details",
+  "rail.searchNone": "No agents match “{q}”",
+
+  // all my agents
+  "mine.title": "All my agents ({n})",
+  "mine.body": "Pinned agents come first, then the most recently used. Pin the ones you use often to keep them at the top of the left sidebar.",
+  "mine.filter": "Filter by name",
+  "mine.lastUsed": "Last used {when}",
+  "mine.noMatch": "No agents match your search.",
+  "mine.none": "No agents installed yet — choose one from Agent Market.",
+  "mine.waiting": "Runs waiting for your answer: {n} — open an agent with an orange badge to answer.",
+  "mine.rowWaiting": "Waiting for an answer: {n}",
+
+  // market
+  "market.readFirst": "Read before installing",
+  "market.hasSample": "Real samples to open",
+  "market.unpublished": "Not published",
+  "market.shared": "Shared with me",
+  "market.sharedBy": "Shared by {who} · {when}",
+  "market.sharedNew": "New",
+
+  // an agent's page, for a stranger
+  "guide.for": "Who it is for",
+  "guide.how": "How to use it",
+  "guide.needs": "Which files it needs, and what a good file looks like",
+  "guide.good": "Files that read well",
+  "guide.avoid": "What usually makes a file unreadable",
+  "guide.sampleInputs": "The real sample files the agent is tested with — download them to compare with your own",
+  "guide.sampleInputsAll": "Other sample files",
+  "guide.sampleInput": "Sample file",
+  "guide.produces": "What you get back",
+  "guide.sampleOutputs": "The real output the agent produced from the sample files — open it before installing",
+  "guide.sampleOutput": "Sample output",
+  "guide.sampleLoading": "Loading the sample output…",
+  "guide.sampleNone": "No sample output to open yet — during installation the system tests with sample data and shows you the real files first.",
+  "guide.never": "What this agent will never do",
+  "guide.asks": "What the agent will ask you",
+  "guide.wrongFile": "If you send the wrong file",
+  "guide.beforeInstall": "Before you install",
+  "guide.whoSees": "Who sees your documents",
+  "guide.whoSeesBody": "Which part of the data each model sees, and whether it runs inside the organisation or outside.",
+  "guide.cost": "Estimated cost and time",
+  "guide.datasheet": "Agent data sheet",
+  "guide.installNote": "Installing does not read your files. The system asks a few setup questions, then tests with sample data first. You can uninstall at any time.",
+  "guide.disabled": "An admin has switched this agent off for now. It cannot be installed and new work cannot be started. Work already done is all still here.",
+  "guide.disabledReason": "An admin has switched this agent off for now: {reason} — it cannot be installed and new work cannot be started. Work already done is all still here.",
+  "guide.cannotInstallDisabled": "It can be installed again once an admin switches it on",
+  "guide.unpublished": "This agent is not yet published in the organisation, and most people cannot see this page — you can because you are allowed to try agents before they are published. Publishing is done on the Agent Market page of the admin app.",
+
+  // who sees what
+  "trust.inOrg": "Runs inside the organisation",
+  "trust.external": "External provider",
+  "trust.sees": "Sees: {what}",
+  "trust.externalNote": "Used only when the model inside the organisation cannot answer. It sees only the data in the line above, never your original files.",
+  "trust.noModelAtAll": "No language model sees your documents",
+  "trust.role.primary": "Main model",
+  "trust.role.fallback": "Backup model",
+  "trust.role.vision": "Reads scans and photos",
+  "trust.role.questions": "Reads what you type as a question or an answer",
+
+  // cost
+  "cost.sample": "Real sample: {credits} credits (≈ THB {baht}), took {time}",
+  "cost.sampleNoTime": "Real sample: {credits} credits (≈ THB {baht})",
+  "cost.org": "In our organisation (30 days, {runs} runs): typically {credits} credits (≈ THB {baht}) a run, taking about {time}",
+  "cost.perDocument": "Average per document: {credits} credits (≈ THB {baht})",
+  "cost.typical": "A run takes about {time}",
+  "cost.unknown": "No cost figures yet — they appear after the first run",
+  "cost.note": "Charged to the Agent Market credit budget your admin sets for you each month. Your chat credits are not touched.",
+
+  // data sheet
+  "ds.kicker": "Agent data sheet",
+  "ds.print": "Print",
+  "ds.reads": "What it reads",
+  "ds.limits": "Up to {mb} MB per file · up to {files} files at a time",
+  "ds.produces": "What it produces",
+  "ds.models": "Models that see the data",
+  "ds.modelsBody": "As the system is set up now. Every figure is calculated by scripts; no model ever sets a figure.",
+  "ds.storage": "Where files are kept, and for how long",
+  // {where} is ds.storageLocal or ds.storageS3, which bring their own preposition
+  "ds.storageLine": "Kept {where} (folder {prefix}). Only the owner of the work and the people the owner shares it with can open them.",
+  "ds.storageLocal": "on the organisation's server",
+  "ds.storageS3": "in the organisation's file storage (S3)",
+  "ds.what": "What",
+  "ds.keep": "Kept for",
+  "ds.keepHours": "{n} hours",
+  "ds.keepDays": "{n} days",
+  "ds.keepWhileInstalled": "As long as the agent is installed",
+  "ds.keepAccountDeletion": "All deleted when the account is deleted",
+  "ds.isolation": "Isolation",
+  "ds.permissions": "Permissions, and what it does not do",
+  "ds.generated": "Generated from the agent's description and the system's settings on {when} · {runner}",
+  "ds.runnerOk": "the processing service is running ({v})",
+  "ds.runnerDown": "the processing service is not ready right now",
+
+  // install wizard: why and what if wrong
+  "wiz.whyLabel": "Why we ask:",
+  "wiz.ifWrongLabel": "If you get it wrong or skip it:",
+  "wiz.why.source": "Every accounting system names its columns differently. With one of your files to look at, the system can work out which column is which.",
+  "wiz.ifWrong.source": "You can skip it. The system works it out during a real run and asks you when it is unsure — the file uploaded here is used only to read its column headings.",
+  "wiz.why.mapping": "So that the figures come from the right columns — debit and credit are not swapped, for example.",
+  "wiz.ifWrong.mapping": "A wrong mapping gives wrong figures, but the agent asks when the totals do not balance or the data looks unusual — you can change it later in settings.",
+  "wiz.why.company_tax": "Used to check that tax invoices are issued in your company's name. Input VAT cannot be claimed on an invoice issued in another name.",
+  "wiz.ifWrong.company_tax": "If the number is wrong, valid tax invoices will be questioned as “not issued in the company's name” — you can change it later in settings.",
+  "wiz.why.policy": "Every limit used to check expense claims comes from this table only — not from a policy document, and not from a model.",
+  "wiz.ifWrong.policy": "If a limit is wrong, claims are raised as exceptions for a person to decide. No claim is ever rejected automatically — you can change the table later in settings.",
+  "wiz.why.theme": "The company name and colours appear on the files the agent produces.",
+  "wiz.ifWrong.theme": "No figure is affected — you can change it later and request new files from the same figures.",
+  "wiz.why.formats": "Choose the files you want from every run, so you do not have to say so each time.",
+  "wiz.ifWrong.formats": "You can always request other file types in the workspace, with no recalculation.",
+  "wiz.why.template": "If your company has its own Word, Excel or PowerPoint form, the agent also puts the figures into that form.",
+  "wiz.ifWrong.template": "Optional — you can skip it. The agent still produces its standard files, and you can add a form later in settings.",
+  "wiz.why.selftest": "So that you see the real files the agent produces, from the sample data that comes with it, before using it on your own files.",
+  "wiz.ifWrong.selftest": "The test never touches your files. If it does not pass, try again or press “Report a problem”. You can also skip it and test later in settings.",
+  "wiz.stepTemplate": "Company form",
+  "wiz.templateTitle": "Company form (optional)",
+  "wiz.templateBody": "Upload the form your company uses, then choose which value goes in which field. If you do not have one yet, skip this — you can add it later in settings.",
+  "wiz.templateSkip": "Skip for now",
+  "wiz.selftestFilesTitle": "The real files the agent produced from the sample data — open them before using it on your own files",
+  "wiz.selftestFilesBody": "These are the same kind of files you will get from your own. If anything looks wrong, press “Report a problem”.",
+  "wiz.selftestNoFiles": "The test has finished, but there are no files yet — open this run's details page to see its steps.",
+  "wiz.selftestFailed": "The test with sample data did not pass",
+  "wiz.selftestFailedNext": "Your files and data were not used or changed — try again. If it still does not pass, press “Report a problem”, or skip it for now and test later.",
+  "wiz.selftestAgain": "Test again",
+  "wiz.installedDone": "Installation complete — the agent is ready for your files. Press “Go to workspace” and attach them.",
+
+  // holidays (the expense audit): the company's own calendar, off until confirmed
+  "policy.holidaysOn": "Holiday checks are on, using the confirmed company holidays ({n}). Saturdays and Sundays are checked too.",
+  "policy.holidaysOff": "Holiday checks stay off until the company confirms its own holiday calendar — for now only Saturdays and Sundays are checked.",
+  "policy.holidaysConfirm": "These are our company's holidays",
+  "policy.holidaysConfirmHint": "Tick only when the list above matches your company's holiday announcement (not bank holidays or public holidays).",
+
+  // report a problem
+  "problem.button": "Report a problem",
+  "problem.title": "Report a problem with this run",
+  "problem.body": "Say briefly what happened. Your admin will see it together with the run, the step it stopped at and the page you have open.",
+  "problem.label": "What happened",
+  "problem.placeholder": "e.g. Sales in the report do not agree with the GL, or I do not know which file to send",
+  "problem.attached": "Sent along automatically: the run number, its status, the step it stopped at and the page you are on — none of your files are attached.",
+  "problem.send": "Send to admin",
+  "problem.empty": "Write one short sentence about what happened before sending.",
+  "problem.sent": "Sent to your admin (reference #{ref}).",
+
+  // budget — {which} opens the sentence: "Your", "The … department's", "This agent's"
+  "budget.whichUser": "Your",
+  "budget.whichDepartment": "The {name} department's",
+  "budget.whichInstall": "This agent's",
+  "budget.low": "{which} credit budget is running low this month ({left} credits left) — if you need more, ask {who} for an increase.",
+  "budget.out": "{which} credit budget for this month is used up, so new runs will wait — ask {who} for an increase. Your files and finished work are all still here, and ordinary chat works as usual.",
+  "budget.contactFallback": "your organisation's Agent Market admin",
+  "budget.resume": "Continue",
+  "budget.resumed": "Continued from where it stopped.",
+
+  // workspace header
+  "ws.pin": "Pin",
+  "ws.unpin": "Unpin",
+
+  // sign-off
+  "review.button": "Review and sign off",
+  "review.title": "Review and sign off",
+  "review.body": "Your name, the time and your note go on a new version of this run's files and are kept in the history.",
+  "review.name": "Name to print on the documents",
+  "review.namePlaceholder": "Can be left blank",
+  "review.nameHint": "If left blank, the system uses your account name.",
+  "review.note": "Note (optional)",
+  "review.notePlaceholder": "e.g. Checked against the trial balance",
+  "review.what": "The figures do not change. The system makes a new version of the files with the reviewer's name on the first page of the report, the first slide and the first sheet of the Excel file. The version before review is kept. Every exception must be decided first.",
+  "review.send": "Confirm review",
+  "review.done": "Review by {name} recorded — the name is being added to the files, and the new files will appear in the workspace shortly.",
+  "review.none": "Nobody has reviewed this run yet.",
+  "review.listTitle": "Reviews",
+  "review.viaShare": "Via a shared link",
+  "review.stamp.queued": "Adding the name to the files",
+  "review.stamp.done": "Name added to the files",
+  "review.stamp.failed": "The name could not be added to the files",
+  "review.noteLine": "Note: {note}",
+  "review.outputsBadge": "Reviewed by {name} · {when}",
+  "review.skipped": "Files the name could not be added to: {files}",
+
+  // share
+  "share.button": "Share with a colleague",
+  "share.title": "Share this run with a colleague",
+  "share.body": "Only for people in the organisation, who must sign in with the email you enter to open it.",
+  "share.email": "Colleague's email",
+  "share.emailPlaceholder": "name@company",
+  "share.canReview": "Allow them to review and sign off",
+  "share.canReviewHint": "If not ticked, your colleague can only view the files and exceptions.",
+  "share.canReviewTag": "Can review",
+  "share.expiry": "Link valid for",
+  "share.days": "{n} days",
+  "share.never": "No expiry",
+  "share.rules": "There are no public links, and nothing is sent outside the organisation. The system does not send an email — copy the link and send it yourself. You can stop sharing at any time.",
+  "share.send": "Share",
+  "share.linkReady": "Shared — copy this link and send it to your colleague.",
+  "share.copy": "Copy",
+  "share.copied": "Copied",
+  "share.copyFor": "Copy the link for {email}",
+  "share.current": "Currently shared with",
+  "share.until": "Until {when}",
+  "share.opened": "opened",
+  "share.notOpened": "not opened yet",
+  "share.revoke": "Stop sharing",
+  "share.revokeFor": "Stop sharing with {email}",
+
+  // a shared run
+  "shared.kicker": "Shared with you by {who}",
+  "shared.finished": "Finished {when}",
+  "shared.readOnly": "You can view only. The owner of the run can stop sharing at any time.",
+  "shared.canReview": "You can view this run, and review and sign it off. The owner of the run can stop sharing at any time.",
+  "shared.until": "(link valid until {when})",
+  "shared.files": "Files",
+  "shared.reviews": "Reviews",
+  "shared.exceptions": "Exceptions and decisions",
+  "shared.assumptions": "Assumptions used in this run",
+  "shared.exOpen": "Awaiting decision",
+  "shared.exDecided": "Decided",
+  "shared.exNoted": "Noted",
+  "shared.decision": "Decision: {label}",
+  "shared.refusedTitle": "This link cannot be opened",
+} as const satisfies Record<keyof typeof am3Th, string>;

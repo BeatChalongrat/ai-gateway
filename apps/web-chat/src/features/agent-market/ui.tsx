@@ -26,7 +26,6 @@ import {
 
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { LocaleScope } from "@/lib/i18n";
 import { useThemeStore } from "@/stores/themeStore";
 
 import { useAmT } from "./i18n";
@@ -37,11 +36,12 @@ export function cls(...parts: Array<string | false | null | undefined>): string 
   return parts.filter(Boolean).join(" ");
 }
 
-/** AM5: the app's own components (the composer, a message, a file card, the
- *  model picker) read in Thai inside Agent Market, whatever the app's
- *  language — the surface is Thai (AM4) and shows them, not copies of them. */
+/** AM5 wrapped the app's own components (the composer, a message, a file
+ *  card, the model picker) so that they read in Thai inside Agent Market.
+ *  AM11: Agent Market follows the app's language, and so do they — this sets
+ *  no language any more. The name and the shape stay, so no caller changes. */
 export function Thai({ children }: { children: ReactNode }) {
-  return <LocaleScope locale="th">{children}</LocaleScope>;
+  return <>{children}</>;
 }
 
 /** Middle dot separator, kept out of JSX text. */

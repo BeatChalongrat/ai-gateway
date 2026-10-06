@@ -4,8 +4,14 @@
 // error's text, and cleans what it stores and serves (failure.go). This is
 // the same rule once more, at the last place before the screen: whatever
 // arrives — from an older server, from a row written before the rule — an
-// exception, a type name, a stack frame, a transport error, a step id or a
-// sentence of an error message in English is not shown.
+// exception, a type name, a stack frame, a transport error or a step id is
+// not shown.
+//
+// AM11: a sentence in English is no longer a sign of an error — a run in
+// English is written in English. What tells a sentence written for a person
+// from an error's text in English is the server's reader (reads.go: by the
+// language each item was written in, strict Thai for a Thai one); this second
+// look keeps the shapes an error has in any language.
 
 const ERROR_TEXT: RegExp[] = [
   /\btraceback\b|\bstack ?trace\b|\bpanic:|\bgoroutine \d|\bnil pointer\b|\bsegmentation fault\b|\berrno\b/i,
@@ -22,8 +28,6 @@ const ERROR_TEXT: RegExp[] = [
 const ENGINE_WORDS: RegExp[] = [
   // an identifier: a step id, a reason code, a finding key (file names are taken out first)
   /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/,
-  // a sentence in English: three lower-case words in a row
-  /\b[a-z]{2,}(?:\s+[a-z]{2,}){2,}\b/,
 ];
 
 // a file's name is the person's own (or a deliverable's): never read as an identifier

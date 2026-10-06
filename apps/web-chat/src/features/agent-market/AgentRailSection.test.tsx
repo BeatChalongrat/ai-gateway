@@ -9,7 +9,7 @@
 //   * a run waiting for an answer is never hidden: a badge with the count on
 //     the section (collapsed too) and on the agent, even past the cap;
 //   * the sidebar's search text (Ctrl+K) shows matching agents.
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { raw } = vi.hoisted(() => ({ raw: vi.fn() }));
@@ -133,7 +133,29 @@ describe("AgentRailSection", () => {
 
   it("the workspace's own list of agents is named the same way (not “AGENT ของฉัน”)", () => {
     expect(amDictionaries.th["ws.myAgents"]).toBe("Agent ของฉัน");
-    expect("en" in amDictionaries).toBe(false); // AM4: the surface is Thai whatever the app's language
+    // AM11: the surface follows the app's language — there is an English dictionary beside the Thai one,
+    // and the two name the list the same way in each language
+    expect(Object.keys(amDictionaries).sort()).toEqual(["en", "th"]);
+    expect(amDictionaries.en["ws.myAgents"]).toBe("My agents");
+    expect(amDictionaries.en["market.mine"]).toBe(amDictionaries.en["ws.myAgents"]);
+    expect(amDictionaries.th["market.mine"]).toBe(amDictionaries.th["ws.myAgents"]);
+  });
+
+  it("AM11: the section follows the app's language — Thai, English, and back, without a reload", async () => {
+    flagOn();
+    // the agent's own name is the person's data; kept in Latin letters here so every Thai letter on the screen is the app's
+    rail = { installs: [row("i-1", "Month-end close", { waiting: 1 })], waiting_total: 1, prefs: {} };
+    render(<AgentRailSection />);
+    const toggle = await screen.findByTestId("agent-rail-toggle");
+    expect(toggle.textContent).toContain("Agent ของฉัน (1)");
+    act(() => useI18nStore.getState().setLocale("en"));
+    expect(screen.getByTestId("agent-rail-toggle").textContent).toContain("My agents (1)");
+    const section = screen.getByTestId("agent-rail-section");
+    expect(section.getAttribute("aria-label")).toBe("Agent Market and installed agents");
+    expect(section.textContent ?? "").not.toMatch(/[฀-๿]/);
+    act(() => useI18nStore.getState().setLocale("th"));
+    expect(screen.getByTestId("agent-rail-toggle").textContent).toContain("Agent ของฉัน (1)");
+    expect(screen.getByTestId("agent-rail-section").getAttribute("aria-label")).toBe("Agent Market และ agent ที่ติดตั้ง");
   });
 
   it("pinned first, then recently used, about five — never alphabetical; a waiting agent past the cap still shows", async () => {

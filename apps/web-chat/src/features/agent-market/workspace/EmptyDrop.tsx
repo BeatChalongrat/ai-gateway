@@ -8,17 +8,19 @@ import { FileUp } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 
-import { useAmT } from "../i18n";
+import { tAm, useAmT, type AmT } from "../i18n";
 import type { Manifest } from "../types";
 import { EstimateLine } from "./Estimate";
 import { UploadInfo } from "./UploadInfo";
 
-/** "ส่ง<the first required input>มาได้เลย" — from the agent's own manifest. */
-export function dropSentence(manifest: Manifest | null | undefined): string | null {
+/** "ส่ง<the first required input>มาได้เลย" / "To start, send: <…>" — the label is the
+ *  agent's own (its manifest); the sentence around it is the dictionary's. A
+ *  component passes its own `t`, so the sentence follows a change of language. */
+export function dropSentence(manifest: Manifest | null | undefined, t: AmT = tAm): string | null {
   const inputs = manifest?.inputs ?? [];
   const main = inputs.find((i) => i.required) ?? inputs[0];
   if (!main?.label) return null;
-  return `ส่ง${main.label.trim()}มาได้เลย`;
+  return t("empty.send", { label: main.label.trim() });
 }
 
 export function EmptyDrop({
@@ -32,7 +34,7 @@ export function EmptyDrop({
   estimate?: string | null;
 }) {
   const t = useAmT();
-  const sentence = dropSentence(manifest) ?? t("empty.fallback");
+  const sentence = dropSentence(manifest, t) ?? t("empty.fallback");
   const inputs = manifest?.inputs ?? [];
   const main = inputs.find((i) => i.required) ?? inputs[0];
   const optional = inputs.filter((i) => i !== main && i.label);

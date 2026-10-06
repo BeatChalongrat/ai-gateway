@@ -65,7 +65,7 @@ const tied: OutputsPayload = {
 };
 
 beforeEach(() => {
-  useI18nStore.setState({ locale: "en" });
+  useI18nStore.setState({ locale: "th" }); // AM11: the workspace follows the app's language; these tests read it in Thai
   // Modal reads matchMedia for its mobile sheet; jsdom has none.
   window.matchMedia = ((q: string) => ({ matches: false, media: q, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia;
 });

@@ -26,6 +26,8 @@ import { Modal } from "@/components/ui/Modal";
 import { GATEWAY_URL } from "@/lib/auth";
 
 import { AmError, amApi, errorMessage } from "../api";
+import { useI18nStore } from "@/lib/i18n";
+
 import { useAmLocale, useAmT } from "../i18n";
 import { formatDateTime } from "../format";
 import type { EmailDraft, EmailSend } from "../types";
@@ -88,9 +90,18 @@ export function connectClient(): "web" | "desktop" {
 
 /** AM9: open the provider's consent page for the person's own mailbox (the backend's connect ticket,
  *  the same flow the desktop's connectors use; only the send scope is asked for). */
+/** AM11: what the ticket is asked with — which client, the screen's language (the page the flow ends
+ *  on is in it), and, from a browser tab, where the person is (the page offers the way back here). */
+export function connectQuery(): string {
+  const client = connectClient();
+  const q = new URLSearchParams({ client, lang: useI18nStore.getState().locale });
+  if (client === "web" && typeof window !== "undefined" && window.location.href.length <= 300) q.set("return_to", window.location.href);
+  return q.toString();
+}
+
 async function openMailboxConnect(): Promise<boolean> {
   try {
-    const res = await fetch(`${GATEWAY_URL}/portal/connectors/mail/ticket?client=${connectClient()}`, { method: "POST", credentials: "include" });
+    const res = await fetch(`${GATEWAY_URL}/portal/connectors/mail/ticket?${connectQuery()}`, { method: "POST", credentials: "include" });
     if (!res.ok) return false;
     const body = (await res.json()) as { start_url?: string };
     if (!body.start_url || !/^https?:\/\//.test(body.start_url)) return false;
@@ -107,6 +118,25 @@ function MailboxLine({ draft, onDraft }: { draft: EmailDraft; onDraft: (d: Email
   const [opened, setOpened] = useState(false);
   const [failed, setFailed] = useState(false);
   const canConnect = !!draft.mailbox?.available && !draft.mailbox?.connected;
+  // AM11: the consent page is in another tab (or the system browser); when the person comes back to this
+  // one it looks again by itself — nobody should have to find a button to learn the mailbox is connected
+  const draftId = draft.id;
+  useEffect(() => {
+    if (!opened || !canConnect) return;
+    const look = () => {
+      if (document.visibilityState !== "visible") return;
+      amApi.emailDraft(draftId).then(
+        (r) => r?.draft && onDraft(r.draft),
+        () => {},
+      );
+    };
+    document.addEventListener("visibilitychange", look);
+    window.addEventListener("focus", look);
+    return () => {
+      document.removeEventListener("visibilitychange", look);
+      window.removeEventListener("focus", look);
+    };
+  }, [opened, canConnect, draftId, onDraft]);
   if (!draft.transport && !canConnect) return null;
   return (
     <div className="mt-2 flex flex-col gap-1.5" data-testid="am-email-transport" data-transport={draft.transport || "none"}>

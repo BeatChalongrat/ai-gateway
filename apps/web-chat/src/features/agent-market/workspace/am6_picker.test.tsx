@@ -102,7 +102,7 @@ beforeEach(() => {
   raw.mockReset();
   handler = () => json({ error: { code: "NOT_FOUND", message: "ไม่พบ" } }, 404);
   raw.mockImplementation(async (path: string, init?: RequestInit) => handler(path, init));
-  useI18nStore.setState({ locale: "en" }); // the owner's app runs in English; the workspace is Thai
+  useI18nStore.setState({ locale: "th" }); // AM11: the workspace follows the app's language; these tests read it in Thai
   useModelStore.setState({ loaded: true, loading: false, loadFailed: false, models: CHAT_MODELS } as never);
   useToastStore.getState().clear();
   window.matchMedia = ((q: string) => ({ matches: false, media: q, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false })) as unknown as typeof window.matchMedia;
@@ -124,14 +124,12 @@ function openMenu(first: AgentModels = agentModels()): HTMLElement {
   return screen.getByTestId("am-model-menu");
 }
 
-/** The chat's own model menu for the same person, read in Thai as the workspace reads it. */
+/** The chat's own model menu for the same person — in the app's language, as the workspace reads too (AM11). */
 function chatMenu<T>(read: (menu: HTMLElement) => T, props: { needsVision?: boolean } = {}): T {
-  useI18nStore.setState({ locale: "th" });
   const chat = render(<ModelSelector activeModelId="auto" compact {...props} />);
   fireEvent.click(chat.getByTestId("model-trigger-label"));
   const got = read(chat.getByRole("listbox"));
   chat.unmount();
-  useI18nStore.setState({ locale: "en" });
   return got;
 }
 

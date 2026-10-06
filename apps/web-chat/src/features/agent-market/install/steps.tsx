@@ -495,8 +495,12 @@ export function CompanyTaxStep({ installId, onNext }: { installId: string; onNex
 
 /** The document palettes (deliverables/theme.py): primary, accent, surface.
  *  These depict the DOCUMENT's colours, so they are values, not app tokens. */
-/** The presets when /theme cannot be read (the control plane's own list and names). */
-const FALLBACK_PRESETS = (["navy", "teal", "charcoal"] as const).map((id) => ({ id, name: tAm(`theme.preset.${id}`) }));
+/** The presets when /theme cannot be read (the control plane's own list). They carry
+ *  no name: a name is read from the dictionary where it is shown (AM11 — a name
+ *  looked up here, once, when the module loads, would stay in the language of
+ *  that moment, which is before the person's own language is known). */
+const FALLBACK_PRESETS: ThemePreset[] = ["navy", "teal", "charcoal"].map((id) => ({ id, name: "" }));
+const PRESET_NAMES: Record<string, AmKey> = { navy: "theme.preset.navy", teal: "theme.preset.teal", charcoal: "theme.preset.charcoal" };
 
 const SWATCHES: Record<string, [string, string, string]> = {
   navy: ["#12264A", "#2F6FD6", "#F3F5F9"],
@@ -602,7 +606,7 @@ export function ThemeStep({
                     <span key={c} className="h-8 w-4" style={{ backgroundColor: c }} />
                   ))}
                 </span>
-                <span className="min-w-0 truncate text-sm text-text-primary">{p.name}</span>
+                <span className="min-w-0 truncate text-sm text-text-primary">{p.name || (PRESET_NAMES[p.id] ? t(PRESET_NAMES[p.id]!) : p.id)}</span>
               </button>
             );
           })}

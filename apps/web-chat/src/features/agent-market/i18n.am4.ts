@@ -1,5 +1,7 @@
 // Agent Market AM4 (make it simple) — the feature's new strings, merged into
-// i18n.ts. Thai only: the whole surface is Thai whatever the app's language.
+// i18n.ts. Thai and English (AM11): the surface follows the app's language,
+// and the two objects hold the same keys — the type makes a key that is in
+// one of them only a compile error.
 
 export const am4Th = {
   // the workspace header: one obvious action, everything else in one menu
@@ -19,6 +21,8 @@ export const am4Th = {
   "ws.newChatFailed": "เปิดแชทใหม่ไม่สำเร็จ",
 
   // an empty workspace: one sentence, the loudest thing on the page
+  // ({label} is the agent's own name for its first required file)
+  "empty.send": "ส่ง{label}มาได้เลย",
   "empty.pick": "เลือกไฟล์",
   "empty.drop": "หรือลากไฟล์มาวางตรงนี้",
   "empty.fallback": "ส่งไฟล์ที่ต้องการให้ agent ทำมาได้เลย",
@@ -45,10 +49,14 @@ export const am4Th = {
   "round.selfTest": "ทดสอบกับข้อมูลตัวอย่าง · เสร็จ",
   "round.startFailed": "เริ่มรอบใหม่ไม่สำเร็จ",
 
-  // the round-boundary chip: never guess what the person meant
+  // the round-boundary chip: never guess what the person meant. Each sentence
+  // has its own form for a round that names its period and for one that does
+  // not (AM11: no fragment is glued in, so each language keeps its word order).
   "intent.title": "เริ่มรอบใหม่?",
-  "intent.bodyFiles": "ได้รับไฟล์หลังจากรอบ{period}เสร็จแล้ว — จะเริ่มรอบใหม่ด้วยไฟล์นี้ หรือเป็นคำถามเกี่ยวกับรอบที่แล้ว",
-  "intent.bodyText": "รอบ{period}เสร็จไปแล้ว — ข้อความนี้เป็นการเริ่มรอบใหม่ หรือเป็นคำถามเกี่ยวกับรอบที่แล้ว",
+  "intent.bodyFiles": "ได้รับไฟล์หลังจากรอบ {period} เสร็จแล้ว — จะเริ่มรอบใหม่ด้วยไฟล์นี้ หรือเป็นคำถามเกี่ยวกับรอบที่แล้ว",
+  "intent.bodyFilesNoPeriod": "ได้รับไฟล์หลังจากรอบนี้เสร็จแล้ว — จะเริ่มรอบใหม่ด้วยไฟล์นี้ หรือเป็นคำถามเกี่ยวกับรอบที่แล้ว",
+  "intent.bodyText": "รอบ {period} เสร็จไปแล้ว — ข้อความนี้เป็นการเริ่มรอบใหม่ หรือเป็นคำถามเกี่ยวกับรอบที่แล้ว",
+  "intent.bodyTextNoPeriod": "รอบนี้เสร็จไปแล้ว — ข้อความนี้เป็นการเริ่มรอบใหม่ หรือเป็นคำถามเกี่ยวกับรอบที่แล้ว",
   "intent.new": "เริ่มรอบใหม่",
   "intent.about": "ถามเกี่ยวกับรอบที่แล้ว",
   "intent.fresh": "ไม่ต้องลบแชทเพื่อเริ่มใหม่ — รอบเก่ายังเก็บไว้ครบพร้อมที่มาของตัวเลข และรอบใหม่ไม่ใช้ไฟล์หรือตัวเลขของรอบเก่า",
@@ -108,3 +116,113 @@ export const am4Th = {
 } as const;
 
 export type Am4Key = keyof typeof am4Th;
+
+export const am4En = {
+  // the workspace header: one obvious action, everything else in one menu
+  "ws.provenance": "Source of figures",
+  "ws.provenanceTitle": "Which file and row every figure of the latest run comes from, and how it was calculated",
+  "ws.more": "More options",
+  "ws.menu.newChat": "New chat with this agent",
+  "ws.menu.chats": "Chats with this agent",
+  "ws.menu.pin": "Pin to the top of the left sidebar",
+  "ws.menu.unpin": "Unpin",
+  "ws.menu.overview": "Activity overview",
+  "ws.menu.settings": "Agent settings",
+  "ws.menu.problem": "Report a problem",
+  "ws.chatRounds": "Runs: {n}",
+  "ws.chatWaiting": "Waiting for an answer",
+  "ws.chatCurrent": "Current chat",
+  "ws.newChatFailed": "Could not open a new chat",
+
+  // an empty workspace: one sentence, the loudest thing on the page
+  // ({label} is the agent's own name for its first required file)
+  "empty.send": "To start, send: {label}",
+  "empty.pick": "Choose files",
+  "empty.drop": "or drag files here",
+  "empty.fallback": "Send the files you want the agent to work on",
+  "empty.needs": "Needed",
+
+  // where people upload
+  "upload.scanTip": "For paper documents, a 300 DPI scan always reads more accurately than a phone photo, at no extra cost.",
+  "upload.notArchive": "This is not your company's document archive — keep your originals where they are. The system keeps a copy, and the evidence of which file each figure was calculated from.",
+  "upload.keepYears": "Files of successful runs are kept for {years} years, as the organisation requires",
+  "upload.infoLabel": "How long the files you send are kept",
+
+  // a finished run: a divider, its files, and the next run one click away
+  "round.done": "{period} run · finished",
+  "round.doneNoPeriod": "This run is finished",
+  "round.failed": "{period} run · failed",
+  "round.failedNoPeriod": "This run failed",
+  "round.cancelled": "This run was cancelled",
+  "round.start": "Start a new run",
+  "round.starting": "Starting…",
+  "round.carry": "A new run keeps your settings and remembered answers. It does not use the files, figures or answers of the previous run.",
+  "round.show": "view this run",
+  "round.hide": "collapse this run",
+  "round.files": "This run's files",
+  "round.selfTest": "Test with sample data · finished",
+  "round.startFailed": "Could not start a new run",
+
+  // the run-boundary chip: never guess what the person meant
+  "intent.title": "Start a new run?",
+  "intent.bodyFiles": "These files arrived after the {period} run finished — start a new run with them, or is this a question about the last run?",
+  "intent.bodyFilesNoPeriod": "These files arrived after this run finished — start a new run with them, or is this a question about the last run?",
+  "intent.bodyText": "The {period} run has already finished — does this message start a new run, or is it a question about the last run?",
+  "intent.bodyTextNoPeriod": "This run has already finished — does this message start a new run, or is it a question about the last run?",
+  "intent.new": "Start a new run",
+  "intent.about": "Ask about the last run",
+  "intent.fresh": "There is no need to delete the chat to start afresh — earlier runs are kept in full with their source of figures, and a new run does not use the files or figures of an earlier one.",
+  "intent.chosenNew": "A new run was started",
+  "intent.chosenAbout": "Treated as a question about the last run",
+  "intent.failed": "Could not send your answer",
+
+  // the run panel: the one line that always shows, the rest folded for members
+  "outputs.details": "Details of checks, credits and models",
+  "outputs.seenBy": "Scanned or photographed documents were read by {model} ({where})",
+  "outputs.seenNone": "No model saw the documents — every value was read from the files and calculated by scripts",
+  "outputs.writtenBy": "No model saw the original files · the commentary was written by {model} ({where}) from the calculated tables",
+  "outputs.writtenByRules": "No model saw the original files · the commentary was written by the agent's rules (no model the organisation allows could answer)",
+  "outputs.notChosen": "You chose {chosen}, but this run used {used} instead — {why}",
+  "outputs.notChosenWhy": "the chosen model did not answer, or the organisation does not allow it at the moment",
+  "outputs.noneInstead": "You chose {chosen}, but no model the organisation allows was available for this run, so the documents were read only by scripts on the organisation's own machines",
+  "where.inOrg": "in the organisation",
+  "where.outside": "outside the organisation",
+
+  // what the agent's model is for (AM6: the menu itself is the chat's; its two lines are in i18n.am6.ts)
+  "model.label": "Model that reads the documents",
+  "model.labelText": "Model that writes the commentary",
+
+  // what is kept, for how long, and whose it is
+  "storage.title": "Stored files",
+  "storage.used": "{size} used (files sent in {uploads} · output files {outputs})",
+  "storage.warn": "Storage is close to the {limit} the organisation has set — scans and photos take many times more space than report files. Tell your admin if you need more.",
+  "storage.deleteNote": "If you delete your account: your chats and settings are deleted. The files of successful runs are the organisation's accounting evidence and are kept for the period the organisation sets.",
+
+  // the market grid
+  "market.more": "Show more",
+  "market.less": "Show less",
+  "market.soonNote": "Not available yet",
+
+  // installing in one click
+  "install.recommended": "Use all recommended settings",
+  "install.recommendedBody": "Installs with the commonly used settings, then tests with sample data straight away — every setting can be changed later in the agent's settings.",
+  "install.custom": "Set it up step by step",
+  "install.recommending": "Installing…",
+  "install.recommendedFailed": "Could not install the agent",
+  "install.doneSelfTest": "Installation complete. Testing with sample data — the result will appear in the workspace in a few seconds.",
+
+  // the run page
+  "run.provenanceTitle": "Source of figures",
+  "run.accessLog": "Admins who opened this run",
+  "run.accessLine": "{who} · {when} · reason: “{reason}”",
+  "run.evidenceRemoved": "An admin removed this run's files before the end of the retention period — the record that this run took place is still kept.",
+  "ds.keepYears": "{n} years (from the day the run finished)",
+  "ds.keepOrgRecord": "Chats and settings: deleted · evidence of successful runs: kept",
+  "file.status.active": "Used in this run",
+  "file.status.removed": "Removed",
+  "file.status.pending": "Awaiting decision",
+  "file.status.nextRound": "Kept for the next run",
+  "file.status.staged": "Not used yet",
+
+  "step.script.rules": "Written from rules, no model used",
+} as const satisfies Record<keyof typeof am4Th, string>;

@@ -4,8 +4,9 @@
 // turn and "working" indicator were separate implementations of the chat's,
 // and looked it. Each test renders the chat's component and the workspace's
 // and compares what a person sees: the same elements with the same classes,
-// because they are the same component. The workspace stays Thai inside an
-// English app (AM4), so the shared components are read in Thai there.
+// because they are the same component. AM11: the workspace follows the app's
+// language, so the shared components read as they do in the chat — the tests
+// here read both in Thai, and one reads the composer in English.
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -105,10 +106,15 @@ describe("AM5 — the workspace composer is the chat's composer", () => {
     expect(agentLook).toEqual(chatLook);
   });
 
-  it("stays Thai inside an English app", () => {
+  // AM11 — the rule this replaces (AM4): "stays Thai inside an English app".
+  it("follows the app's language: Thai in a Thai app, English in an English one", () => {
+    const thai = render(<Composer installId="i-1" onSent={vi.fn()} />);
+    expect(screen.getByTestId("am-composer-send").getAttribute("aria-label")).toBe("ส่ง");
+    thai.unmount();
     useI18nStore.setState({ locale: "en" });
     render(<Composer installId="i-1" onSent={vi.fn()} />);
-    expect(screen.getByTestId("am-composer-send").getAttribute("aria-label")).toBe("ส่ง");
+    expect(screen.getByTestId("am-composer-send").getAttribute("aria-label")).toBe("Send");
+    expect(screen.getByTestId("am-composer-input").getAttribute("placeholder")).toBe("Message the agent…");
   });
 
   it("a staged file is the chat's file card (progress while it uploads, remove on it)", () => {

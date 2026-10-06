@@ -6,6 +6,9 @@ import type { AmT } from "./i18n";
 
 const NUMERIC = /^[+-]?\d+(\.\d+)?$/;
 
+// An amount is written the same way in Thai and in English — 1,284,500.00, a
+// percentage 10.5% (GLOSSARY.md §4) — so one set of formatters serves both
+// languages; only dates and the words around a number follow the language.
 const money = new Intl.NumberFormat("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 const oneDecimal = new Intl.NumberFormat("th-TH", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const signedOneDecimal = new Intl.NumberFormat("th-TH", {
@@ -82,7 +85,7 @@ export function signOf(v: unknown): number {
   return n.startsWith("-") ? -1 : 1;
 }
 
-/** 72_000 → "1 นาที 12 วินาที" (units from the feature dictionary). */
+/** 72_000 → "1 นาที 12 วินาที" / "1 min 12 s" (units from the feature dictionary, in the language of `t`). */
 export function formatDuration(ms: number | null | undefined, t: AmT): string {
   const total = Math.max(0, Math.floor((ms ?? 0) / 1000));
   const h = Math.floor(total / 3600);
@@ -95,22 +98,38 @@ export function formatDuration(ms: number | null | undefined, t: AmT): string {
   return parts.join(" ");
 }
 
-function intlLocale(locale: string): string {
-  return locale === "th" ? "th-TH" : "en-GB";
+// AM11 — a date follows the language (docs/agent-market/GLOSSARY.md §4):
+// Thai is th-TH's own (Buddhist era: "28 ก.ย. 2569"); English is written
+// "28 Sep 2026" and "28 Sep 2026, 10:05". The English one is put together
+// from the parts rather than left to en-GB's own pattern, whose short
+// September is "Sept" in today's browsers — every other month has three
+// letters there, and so has this one here.
+function englishDate(d: Date, withTime: boolean): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    ...(withTime ? { hour: "2-digit", minute: "2-digit", hourCycle: "h23" } : {}),
+  }).formatToParts(d);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+  const date = `${part("day")} ${part("month").slice(0, 3)} ${part("year")}`;
+  return withTime ? `${date}, ${part("hour")}:${part("minute")}` : date;
 }
 
 export function formatDateTime(iso: string | null | undefined, locale: string): string {
   if (!iso) return DASH;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return DASH;
-  return new Intl.DateTimeFormat(intlLocale(locale), { dateStyle: "medium", timeStyle: "short" }).format(d);
+  if (locale !== "th") return englishDate(d, true);
+  return new Intl.DateTimeFormat("th-TH", { dateStyle: "medium", timeStyle: "short" }).format(d);
 }
 
 export function formatDate(iso: string | null | undefined, locale: string): string {
   if (!iso) return DASH;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return DASH;
-  return new Intl.DateTimeFormat(intlLocale(locale), { day: "numeric", month: "short", year: "numeric" }).format(d);
+  if (locale !== "th") return englishDate(d, false);
+  return new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "short", year: "numeric" }).format(d);
 }
 
 /** Milliseconds between two ISO times (or until now when `end` is empty). */
