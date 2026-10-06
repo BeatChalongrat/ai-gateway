@@ -441,9 +441,10 @@ function FailedRound({ p }: { p: AgentTextPayload }) {
   );
 }
 
-/** "จำไว้เป็นค่าตั้งต้นรอบหน้า · แก้ได้" → the text, then "แก้ได้" as a link. */
+/** "จำไว้เป็นค่าตั้งต้นรอบหน้า · แก้ได้" → the text, then "แก้ได้" as a link. AM11: the server
+ *  writes a run in the run's language, so its English ending is taken off the same way. */
 export function splitNotice(text: string): string {
-  return text.replace(/\s*[··]?\s*แก้ได้\s*$/u, "").trim();
+  return text.replace(/\s*[··]?\s*(?:แก้ได้|can be changed)\s*$/u, "").trim();
 }
 
 function Notice({ p }: { p: NoticePayload }) {

@@ -42,6 +42,7 @@ import { ErrorPanel, Thai } from "./ui";
 import { resetAgentMarketForTest } from "./useAgentMarket";
 import { WorkspaceContext } from "./workspace/context";
 import { OutputsCard } from "./workspace/OutputsCard";
+import { splitNotice } from "./workspace/ThreadView";
 
 const THAI = /[\u0E00-\u0E7F]/;
 const json = (body: unknown, status = 200) => ({ ok: status < 400, status, text: async () => JSON.stringify(body) });
@@ -294,5 +295,13 @@ describe("AM11 — numbers, dates and examples follow the language; what a perso
       expect(checkTyped("date", "31/02/2026")).toEqual({ ok: false, reason: "typed.err.date" });
       expect(checkTyped("money", "12,850.70 บาท")).toEqual({ ok: true, value: "12850.70" });
     }
+  });
+});
+
+describe("AM11 — a sentence the server wrote in the run's language is handled as its Thai one is", () => {
+  it("the notice that ends in a link loses its ending in either language, and nothing else", () => {
+    expect(splitNotice("จำไว้เป็นค่าตั้งต้นรอบหน้า · แก้ได้")).toBe("จำไว้เป็นค่าตั้งต้นรอบหน้า");
+    expect(splitNotice("Remembered as the default for the next run · can be changed")).toBe("Remembered as the default for the next run");
+    expect(splitNotice("The period can be changed in the settings.")).toBe("The period can be changed in the settings.");
   });
 });
