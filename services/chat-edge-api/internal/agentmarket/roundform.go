@@ -356,9 +356,13 @@ func (a *API) roundForm(ctx context.Context, tx pgx.Tx, in Install, c middleware
 		return nil, err
 	}
 	params, _ := json.Marshal(map[string]any{"file_id": f.ID, "template": true, "run_id": run.ID})
+	// AM11: the job that reads a form is one per upload, not one per content. Keyed by the file's
+	// content, a second drop of the same form into the same run found the first drop's finished job
+	// and queued nothing — the card then said "reading the form" for good. An upload has its own id;
+	// the same request sent twice names the same upload and still makes one job.
 	if _, _, err := a.store.CreateRun(ctx, tx, Run{InstallID: in.ID, TenantID: c.TenantUUID, UserID: c.UserID,
 		Kind: KindMappingPreview, Params: params, DefinitionVersion: in.DefinitionVersion, Checksum: in.Checksum,
-		EngineChecksum: run.EngineChecksum, BindingVersion: in.BindingVersion, ThreadID: o.thread}, "form:"+run.ID.String()+":"+f.SHA256); err != nil {
+		EngineChecksum: run.EngineChecksum, BindingVersion: in.BindingVersion, ThreadID: o.thread}, "form:"+run.ID.String()+":"+f.ID.String()); err != nil {
 		return nil, err
 	}
 	return run, nil

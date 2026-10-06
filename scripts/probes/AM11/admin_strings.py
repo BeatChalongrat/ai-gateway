@@ -53,7 +53,7 @@ def judge(text):
         return "name", "a package's id (what an operator searches by); the words around it are Thai"
     if t == "agent" or " agent " in " %s " % t and not re.search(r"\b(fallback|production|override|sync|audit log)\b", t):
         return "name", "\"agent\" is written in Latin letters on the Thai screen too (GLOSSARY.md §2)"
-    if re.search(r"qwen3\.8|gpt-image|Kling|Wan\b", t):
+    if re.search(r"qwen3\.8|deepseek-v\d|gpt-image|Kling|Wan\b", t):
         return "name", "a model's id or name"
     if re.search(r"\.env|AGENT_MARKET_SMTP_PASSWORD|smtp\.example", t):
         return "name", "the name of a setting or a file, or an example address — typed exactly as shown"
