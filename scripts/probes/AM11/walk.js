@@ -19,10 +19,10 @@
 //   consent            the page a connector's consent flow ends on, reached through the backend's own
 //                      ticket → start → the stand-in consent page → callback, in each language, for a
 //                      flow begun on the web (the way back to where the person was) and for one begun
-//                      in the desktop app (the page the system browser shows, the link it hands the
-//                      app, and the Connectors page the app opens on it). All of it in a browser: the
-//                      desktop app itself is not driven (that the app follows the link is its own
-//                      test, apps/desktop/test/connector-return.test.ts).
+//                      in the desktop app (the page the system browser shows and the link it hands the
+//                      app). All of it in a browser: the desktop app itself is not driven — that the
+//                      app follows the link to its Connectors page is its own test
+//                      (apps/desktop/test/connector-return.test.ts), and that page exists only in the app.
 //   cleanup [web]      the walk's installs (by id), its runs' evidence and its chats.
 //
 //   SMOKE_TARGET=test node scripts/probes/AM11/walk.js forms web
@@ -468,19 +468,10 @@ async function consent() {
       }
     }
   }
-  // where the desktop app lands on that link: its Connectors page, saying what came back
-  for (const [status, lang] of [["ok", "en"], ["error", "th"], ["ok", "th"], ["error", "en"]]) {
-    await home(page);
-    await setLanguage(x, lang);
-    await page.goto(`${WEB()}/chat/connectors?connected=mail&status=${status}`, { waitUntil: "load" });
-    const notice = page.locator('[data-testid="connector-return"]');
-    const there = await notice.waitFor({ state: "visible", timeout: 30000 }).then(() => true, () => false);
-    await L.wait(1500);
-    const text = there ? await x.words(notice) : "";
-    await x.shot(`connectors-${status}-${lang}`);
-    x.check(there && (lang === "en" ? !THAI.test(text) : THAI.test(text)), `the Connectors page (${lang}) says what came back: ${status}`, text.slice(0, 160));
-    seen[`landing-${status}-${lang}`] = text;
-  }
+  // Where the app lands on that link — its Connectors page, saying what came back — exists only inside the
+  // desktop app (the page is the host's): it is not in a browser, and is not looked for here. It is
+  // covered by ConnectorReturnNotice.test.tsx and apps/desktop/test/connector-return.test.ts, and by a
+  // walk inside the app when one is run.
   await home(page);
   await setLanguage(x, found);
   fs.writeFileSync(path.join(x.dir, "consent.json"), JSON.stringify(seen, null, 1));
