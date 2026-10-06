@@ -388,17 +388,18 @@ func InBoth(say func(Lang) string) PersonText {
 // the English side what the English rule shows. Whoever writes the text
 // picks the side, as for any other text.
 func FromPackage(s string, otherwise PersonText, declared ...string) PersonText {
-	return readBoth(otherwise, func(r *Reader) string { return r.Shown(s) }, declared...)
+	e := englishOfPackage(s) // the English the package's manifest gives for it, if it gives one
+	return readBoth(otherwise, func(r *Reader) string { return r.Shown(s) }, func(r *Reader) string { return r.Shown(e) }, declared...)
 }
 
 // readBoth reads a package's or a model's words by each language's rule, and
 // says the platform's own sentence in a language whose rule shows nothing.
-func readBoth(otherwise PersonText, read func(*Reader) string, declared ...string) PersonText {
+func readBoth(otherwise PersonText, read, readEnglish func(*Reader) string, declared ...string) PersonText {
 	th, en := thaiReader, plainReader
 	if len(declared) > 0 {
 		th, en = readerFor(Thai, declared...), readerFor(English, declared...)
 	}
-	out := PersonText{s: read(th), e: read(en)}
+	out := PersonText{s: read(th), e: readEnglish(en)}
 	if out.s == "" {
 		out.s = otherwise.s
 	}
@@ -437,7 +438,8 @@ func labelRead(r *Reader, s string) string {
 // a period, an agent's name). Unlike a sentence it may be a bare value —
 // "GL", "กันยายน 2569", a file's name — and needs no Thai word to be one.
 func LabelFromPackage(s string, otherwise PersonText, declared ...string) PersonText {
-	return readBoth(otherwise, func(r *Reader) string { return labelRead(r, s) }, declared...)
+	e := englishOfPackage(s)
+	return readBoth(otherwise, func(r *Reader) string { return labelRead(r, s) }, func(r *Reader) string { return labelRead(r, e) }, declared...)
 }
 
 // FromModel is a sentence a model wrote (an answer about the round's

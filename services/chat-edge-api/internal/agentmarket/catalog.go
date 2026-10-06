@@ -483,16 +483,16 @@ func (s *Store) AgentStatsFor(ctx context.Context, org, slug string, days int) (
 // ── the catalog itself ───────────────────────────────────────────────────
 
 type catalogEntry struct {
-	Slug         string          `json:"slug"`
-	Version      string          `json:"version"`
-	Name         string          `json:"name"`
-	Manifest     json.RawMessage `json:"manifest"`
-	InstallID    *uuid.UUID      `json:"install_id,omitempty"`
-	SampleRunID  *uuid.UUID      `json:"sample_run_id,omitempty"`
-	Status       string          `json:"status"`
-	StatusReason string          `json:"status_reason,omitempty"`
-	Sample       *SampleSummary  `json:"sample,omitempty"`
-	Stats        *AgentStats     `json:"stats,omitempty"`
+	Slug         string         `json:"slug"`
+	Version      string         `json:"version"`
+	Name         string         `json:"name"`
+	Manifest     shownManifest  `json:"manifest"` // AM11: in the language of the screen it is sent to
+	InstallID    *uuid.UUID     `json:"install_id,omitempty"`
+	SampleRunID  *uuid.UUID     `json:"sample_run_id,omitempty"`
+	Status       string         `json:"status"`
+	StatusReason string         `json:"status_reason,omitempty"`
+	Sample       *SampleSummary `json:"sample,omitempty"`
+	Stats        *AgentStats    `json:"stats,omitempty"`
 	// AM6: what the agent's manifest says of itself (capability.go)
 	Scope        string `json:"scope"`
 	Jurisdiction string `json:"jurisdiction"`
@@ -509,7 +509,7 @@ func (a *API) entryFor(ctx context.Context, acc Access, d Definition, states map
 	if !ok {
 		st = CatalogState{Status: StatusUnpublished}
 	}
-	e := catalogEntry{Slug: d.Slug, Version: d.Version, Name: d.Name, Manifest: d.Manifest, Status: st.Status, StatusReason: st.Reason,
+	e := catalogEntry{Slug: d.Slug, Version: d.Version, Name: d.Name, Manifest: shownManifest(d.Manifest), Status: st.Status, StatusReason: st.Reason,
 		Scope: ScopeOrgSpecific}
 	if m, err := ParseManifest(d.Manifest); err == nil {
 		e.Name = m.NameIn(LangOf(ctx), d.Name) // AM11: an agent is named in the screen's language
@@ -600,7 +600,7 @@ func (a *API) catalogItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"slug": d.Slug, "version": d.Version, "name": e.Name,
-		"manifest": d.Manifest, "checksum": d.Checksum, "instructions": d.Instructions, "status": e.Status,
+		"manifest": shownManifest(d.Manifest), "checksum": d.Checksum, "instructions": d.Instructions, "status": e.Status,
 		"status_reason": e.StatusReason, "install_id": e.InstallID, "sample": e.Sample, "stats": e.Stats,
 		"scope": e.Scope, "jurisdiction": e.Jurisdiction})
 }
@@ -655,14 +655,17 @@ type Datasheet struct {
 // that asks for the sheet; what the manifest says of the agent is the
 // package's, in the language the package was written in.
 func BuildDatasheet(l Lang, d Definition, caps map[string]Binding, status string, now time.Time) (Datasheet, error) {
-	m, err := ParseManifest(d.Manifest)
+	// AM11: the sheet is built from the manifest as a screen in l reads it — the package's own words
+	// in the English the package gives for them, where it gives one
+	shown := ManifestIn(l, d.Manifest)
+	m, err := ParseManifest(shown)
 	if err != nil {
 		return Datasheet{}, err
 	}
 	var extra struct {
 		Guide *Guide `json:"guide"`
 	}
-	_ = json.Unmarshal(d.Manifest, &extra)
+	_ = json.Unmarshal(shown, &extra)
 	ds := Datasheet{Slug: d.Slug, Version: d.Version, Name: m.NameIn(l, d.Name), Summary: m.Summary, Status: status, Generated: now,
 		Scope: m.ScopeSaid(), Jurisdiction: m.Jurisdiction,
 		Limits: map[string]int{"max_file_mb": m.Limits.MaxFileMB, "max_files": m.Limits.MaxFiles},

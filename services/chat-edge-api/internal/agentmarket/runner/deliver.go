@@ -721,7 +721,10 @@ func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts [
 	if run.Period != nil {
 		out.PeriodLabel = am.Text("%s", am.Period(*run.Period))
 	}
-	if v, ok := summary["period_label"].(string); ok {
+	// the package's own name for the period is used when it says something else than the run's month
+	// (a quarter, a year). When it is that month as a Thai reader says it, it is formatting, and the
+	// platform's text already says it in both languages ("กันยายน 2569" / "September 2026")
+	if v, ok := summary["period_label"].(string); ok && (run.Period == nil || strings.TrimSpace(v) != am.PeriodLabel(*run.Period)) {
 		out.PeriodLabel = am.LabelFromPackage(v, out.PeriodLabel)
 	}
 	out.Credits = run.CreditsSpent

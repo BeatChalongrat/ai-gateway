@@ -47,6 +47,9 @@ const defCols = `id, slug, version, name, manifest, instructions, checksum, engi
 func scanDef(r pgx.Row) (Definition, error) {
 	var d Definition
 	err := r.Scan(&d.ID, &d.Slug, &d.Version, &d.Name, &d.Manifest, &d.Instructions, &d.Checksum, &d.EngineChecksum, &d.Status, &d.UpdatedAt)
+	if err == nil {
+		AddPackageEnglish(d.Manifest) // AM11: whoever reads a definition knows the English its manifest carries
+	}
 	return d, err
 }
 

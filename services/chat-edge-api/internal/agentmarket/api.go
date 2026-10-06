@@ -102,6 +102,11 @@ func NewAPI(ctx context.Context, cfg Config, dsn string, files storage.Backend, 
 		log.Info("agent-market organisation created from AGENT_MARKET_ALLOWED_EMAILS / AGENT_MARKET_ADMIN_EMAILS",
 			"allowed", len(cfg.AllowedEmails), "admins", len(cfg.AdminEmails))
 	}
+	// AM11: the English every registered package carries for its own words — an English item's reader
+	// takes them as written for a person, and a thread is read before any definition is
+	if err := store.LearnPackageEnglish(ctx); err != nil {
+		log.Warn("agent-market: the packages' English could not be read at start (learnt as definitions are read)", "err", err)
+	}
 	return &API{cfg: cfg, store: store, files: files, log: log.With("component", "agent-market"), closeFn: pool.Close,
 		smtp: NewSMTPMailer(store, log), personMail: personMailFrom(cfg)}, nil
 }
@@ -761,7 +766,7 @@ func (a *API) getInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	spent, _ := a.store.SpentThisMonth(r.Context(), in.ID)
-	writeJSON(w, http.StatusOK, map[string]any{"install": in, "manifest": def.Manifest, "defaults": nonNil(defaults),
+	writeJSON(w, http.StatusOK, map[string]any{"install": in, "manifest": shownManifest(def.Manifest), "defaults": nonNil(defaults),
 		"look":   a.store.LookForSlug(r.Context(), in.Slug),
 		"budget": map[string]any{"credits": in.BudgetCredits, "spent_this_month": spent}})
 }
