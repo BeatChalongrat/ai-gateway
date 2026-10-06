@@ -91,3 +91,30 @@ func TestAM11bTheMenuListsOnlyWhatCanRun(t *testing.T) {
 		t.Fatalf("open: %q outside_absent=%v reason=%q choice=%q", got, open.OutsideAbsent, open.BlockedReason, open.Choice)
 	}
 }
+
+// AM11b B — a model that cannot take an agent's question is not in its menu. Found by the walk: an
+// in-house model with a 16,384-token window was listed for the report agent, picked, refused by the
+// gateway (context_length_exceeded), and another model wrote the report.
+func TestAM11bAModelWhoseWindowCannotTakeTheQuestionIsNotListed(t *testing.T) {
+	rm := RunnerModels{Primary: "qwen", Vision: "qwen", SelfHosted: map[string]bool{"qwen": true, "small-8b": true, "mid": true, "unstated": true},
+		Catalog: []CatalogModel{{ID: "qwen", Vision: true, Context: 131072}, {ID: "small-8b", Context: 16384}, {ID: "mid", Context: 32768}, {ID: "unstated"}}}
+	text := Manifest{Narrative: "model"}
+	text.Capabilities.Required = []string{"model.text"}
+	p := MenuFor(Install{ModelChoice: "small-8b"}, text, Egress{}, rm)
+	var ids []string
+	for _, m := range p.Models {
+		ids = append(ids, m.ID)
+	}
+	if got := strings.Join(ids, " "); got != "mid qwen unstated" {
+		t.Fatalf("the menu: %q", got)
+	}
+	// a pick of it from before is no pick, and picking it now is refused
+	if ok, _ := p.ChoiceAllowed("small-8b"); ok || p.Choice != ModelAuto {
+		t.Fatalf("a model with a 16k window can still be chosen: allowed=%v choice=%q", ok, p.Choice)
+	}
+	// the runner's own configured model is taken as able, whatever its stated window
+	rm.Catalog[0].Context = 8192
+	if p := MenuFor(Install{}, text, Egress{}, rm); len(p.Models) == 0 || p.Models[1].ID != "qwen" {
+		t.Fatalf("the runner's own model left the menu: %+v", p.Models)
+	}
+}

@@ -304,8 +304,20 @@ async function picker(slug) {
     }
     const models = [...new Set(((d && d.steps) || []).filter((s) => s.kind === "ai" && s.model_id).map((s) => s.model_id))];
     const want = id === "auto" ? served.auto_model : id;
-    ran.push({ row: rowName, picked: id, ran: models, status: d && d.run.status });
-    x.check(models.length > 0 && models.every((m) => m === want), `${rowName}: the model that ran is the model that was picked`, `picked ${id} · ran ${models.join(", ") || "none"}${id === "auto" ? ` (อัตโนมัติ is ${served.auto_model} now)` : ""}`);
+    const same = models.length > 0 && models.every((m) => m === want);
+    const tried = (((d && d.steps) || []).find((st) => st.name === "narrative") || {}).output;
+    const why = tried && Array.isArray(tried.tried) ? tried.tried.map((t) => String(t).slice(0, 110)).join(" ‖ ") : "";
+    ran.push({ row: rowName, picked: id, ran: models, same, status: d && d.run.status, why });
+    if (same) {
+      x.check(true, `${rowName}: the model that ran is the model that was picked`, `picked ${id} · ran ${models.join(", ")}${id === "auto" ? ` (อัตโนมัติ is ${served.auto_model} now)` : ""}`);
+    } else {
+      // the picked model did not answer (owner policy: rescue with another, and tell the person). It must be
+      // said in words on the files card — a pick is never swapped in silence
+      await workspace(x, installId);
+      const seen = await x.words(page.locator(`[data-testid="am-outputs"][data-run="${runId}"] [data-testid="am-outputs-seen-by"]`).last());
+      x.check(/คุณเลือก .+ ไว้ แต่รอบนี้ใช้ .+ แทน/.test(seen), `${rowName}: it did not answer, another model did, and the files card says so in words`, `picked ${id} · ran ${models.join(", ") || "none"} · ${seen.slice(0, 160)} · ${why}`);
+      x.mark(`RESCUED ${rowName}: ${why}`);
+    }
     if (slug === PROCUREMENT && d && d.run.status === "awaiting_input") await api(page, `/runs/${runId}/cancel`, { method: "POST" });
   }
   await done(x, `picker-${slug.split(".").pop()}`, { listed, rows: names, picked: ran, listed_count: listed.length, picked_count: pickAt });

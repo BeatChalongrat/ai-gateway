@@ -42,7 +42,18 @@ type CatalogModel struct {
 	SelfHosted bool    `json:"self_hosted"`
 	InPrice    float64 `json:"input_price_per_1m"`
 	OutPrice   float64 `json:"output_price_per_1m"`
+	// Context is the model's context window in tokens, as the gateway states it (0: not stated).
+	Context int `json:"context_window,omitempty"`
 }
+
+// MinAgentContext is the smallest context window a model needs to do an
+// agent's job: the agent's instructions, the round's table or a saved page,
+// and room for the answer. AM11b's walk picked an in-house model with a
+// window of 16,384 for the report agent; the commentary's question was 13,800
+// tokens, the gateway answered context_length_exceeded, and another model
+// wrote the report. A model that cannot take the question cannot be used for
+// the agent — so it is not in its menu.
+const MinAgentContext = 32000
 
 // RunnerModels is what the runner publishes about models.
 type RunnerModels struct {
@@ -146,15 +157,21 @@ func (rm RunnerModels) find(id string) (CatalogModel, bool) {
 	return CatalogModel{}, false
 }
 
-// canRead: the model can do this agent's job (a vision agent needs a model that reads images).
+// canRead: the model can do this agent's job — its context window, where
+// the gateway states one, takes an agent's question (MinAgentContext), and a
+// vision agent needs a model that reads images. The models the runner itself
+// is configured with are taken as able.
 func (rm RunnerModels) canRead(use, id string) bool {
+	c, ok := rm.find(id)
+	if ok && c.Context > 0 && c.Context < MinAgentContext && id != rm.Primary && id != rm.Fallback && id != rm.Vision {
+		return false
+	}
 	if use != "vision" {
 		return true
 	}
 	if id == rm.Vision {
 		return true
 	}
-	c, ok := rm.find(id)
 	return ok && c.Vision
 }
 

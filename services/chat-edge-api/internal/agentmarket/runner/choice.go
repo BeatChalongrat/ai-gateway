@@ -69,6 +69,7 @@ func (m *ModelClient) Catalog(ctx context.Context) []am.CatalogModel {
 			SelfHosted   bool    `json:"self_hosted"`
 			InputPrice   float64 `json:"input_price_per_1m"`
 			OutputPrice  float64 `json:"output_price_per_1m"`
+			Context      int     `json:"context_window"`
 			Capabilities *struct {
 				Vision bool `json:"vision"`
 			} `json:"capabilities"`
@@ -80,7 +81,7 @@ func (m *ModelClient) Catalog(ctx context.Context) []am.CatalogModel {
 	models := make([]am.CatalogModel, 0, len(out.Data))
 	for _, d := range out.Data {
 		models = append(models, am.CatalogModel{ID: d.ID, SelfHosted: d.SelfHosted, InPrice: d.InputPrice, OutPrice: d.OutputPrice,
-			Vision: d.Capabilities != nil && d.Capabilities.Vision})
+			Context: d.Context, Vision: d.Capabilities != nil && d.Capabilities.Vision})
 	}
 	m.catalog.models = models
 	return models
@@ -157,10 +158,26 @@ func (rc *runCtx) choice() string {
 	if c == am.ModelAuto || rc.r == nil || rc.r.Model == nil {
 		return c
 	}
-	if !rc.mayUse(c) || (am.ModelUse(rc.pkg.Manifest) == "vision" && !rc.r.Model.readsImages(c)) {
+	if !rc.mayUse(c) || (am.ModelUse(rc.pkg.Manifest) == "vision" && !rc.r.Model.readsImages(c)) || rc.r.Model.windowTooSmall(c) {
 		return am.ModelAuto
 	}
 	return c
+}
+
+// windowTooSmall: the gateway states a context window for this model that
+// cannot take an agent's question (am.MinAgentContext) — the menu does not
+// list such a model (am.MenuFor), and a pick of it from before is no pick.
+// The models the runner itself is configured with are taken as able.
+func (m *ModelClient) windowTooSmall(id string) bool {
+	if m == nil || id == m.Primary || id == m.Fallback || id == m.VisionModel {
+		return false
+	}
+	for _, c := range m.catalog.models {
+		if c.ID == id {
+			return c.Context > 0 && c.Context < am.MinAgentContext
+		}
+	}
+	return false
 }
 
 // mayUse: the organisation lets this model see the round's data.
