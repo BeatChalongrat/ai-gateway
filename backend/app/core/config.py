@@ -218,6 +218,12 @@ class Settings(BaseSettings):
     # back to the desktop with reason=not_configured.
     connector_oauth_google_client_id: str = ""
     connector_oauth_google_client_secret: str = ""
+    # Where the Google connectors' consent page and token exchange are. Empty
+    # (every real deployment) = Google's own. A test stack names a stand-in
+    # here, so the consent round trip can be walked in a browser without a
+    # Google client; nothing else reads these.
+    connector_oauth_google_authorize_url: str = ""
+    connector_oauth_google_token_url: str = ""
     connector_oauth_slack_client_id: str = ""
     connector_oauth_slack_client_secret: str = ""
     connector_oauth_github_client_id: str = ""

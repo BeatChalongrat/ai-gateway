@@ -41,7 +41,7 @@ import { loadConfig, resolveConfigPath, type ShellConfig } from "./config";
 import { installLocalCaTrust, installNodeFetchTrust, loadLocalCa, netRequestFetch, trustedHostsOf } from "./local-ca";
 import { CONNECTOR_OAUTH_FILENAME, ConnectorOAuth, ConnectorTokenStore, RegistrationFile } from "./connector-oauth";
 import { ConnectorTools } from "./connector-mcp";
-import { parseAppLink, parseIntent, parseLoginTicket, type AppLink } from "./deep-link";
+import { connectorsPageUrl, parseAppLink, parseConnectorReturn, parseIntent, parseLoginTicket, type AppLink } from "./deep-link";
 import { GatewayClient } from "./gateway-client";
 import { GrantStore, defaultForbiddenRoots } from "./grants";
 import { HostTools } from "./host-tools";
@@ -1396,6 +1396,14 @@ function handleDeepLink(url: string): void {
   // E2: the OAuth callback (nonce-bound; SessionController decides).
   if (parseLoginTicket(url, config.protocolScheme) !== null) {
     void sessionController?.handleDeepLink(url);
+    return;
+  }
+  // A connector's consent flow, come back from the system browser: land on the
+  // Connectors page, which says what was connected (or that nothing was).
+  const back = parseConnectorReturn(url, config.protocolScheme);
+  if (back !== null) {
+    log.info(`CONNECTOR RETURN: ${back.connector} ${back.status}${back.reason ? ` (${back.reason})` : ""}`);
+    navigateMain(connectorsPageUrl(pageOrigin(), back));
     return;
   }
   // FIX34 Part B: app links (Claude's shape). Malformed → dropped quietly.

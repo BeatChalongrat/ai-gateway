@@ -160,6 +160,16 @@ def connector_config(connector_id: str) -> dict[str, Any]:
     return cfg
 
 
+def endpoint(connector_id: str, key: str) -> str:
+    """A connector's ``authorize_url`` or ``token_url``: the provider's own,
+    unless this deployment's settings name another for the provider (a test
+    stack's stand-in — see ``connector_oauth_google_authorize_url``)."""
+    from app.core.config import settings
+
+    cfg = connector_config(connector_id)
+    return getattr(settings, f"{cfg['settings_prefix']}_{key}", "") or cfg[key]
+
+
 def client_credentials(connector_id: str) -> tuple[str, str]:
     """Resolve (client_id, client_secret) from settings for a connector."""
     from app.core.config import settings
@@ -319,7 +329,7 @@ def exchange_code_for_tokens(
     client_id, client_secret = client_credentials(connector_id)
     try:
         resp = httpx.post(
-            cfg["token_url"],
+            endpoint(connector_id, "token_url"),
             data={
                 "grant_type": "authorization_code",
                 "code": code,
@@ -351,7 +361,7 @@ def refresh_access_token(
     client_id, client_secret = client_credentials(connector_id)
     try:
         resp = httpx.post(
-            cfg["token_url"],
+            endpoint(connector_id, "token_url"),
             data={
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,

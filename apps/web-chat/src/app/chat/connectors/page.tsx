@@ -21,6 +21,7 @@ import { toast } from "@/components/ui/Toast";
 import { tOutside, useT } from "@/lib/i18n";
 import { useDesktopOnlyRoute } from "@/hooks/useDesktopOnlyRoute";
 import { ConnectorIcon } from "@/components/chat/connectorIcons";
+import { ConnectorReturnNotice } from "@/components/chat/ConnectorReturnNotice";
 import { connectorAccess } from "@/lib/connectorCapability";
 import { hostApi, type CatalogConnectorDto, type ConnectorOAuthStatusDto, type InstalledConnectorDto } from "@/lib/hostApi";
 import { catalogText, connectorStateText } from "@/lib/hostCatalogText";
@@ -284,6 +285,9 @@ function ConnectorMarketplace() {
             ) : null}
           </div>
         </div>
+
+        {/* a consent flow that ended in the system browser lands here; the notice says what the broker holds */}
+        <ConnectorReturnNotice />
 
         <div className="mt-6">
           <Input

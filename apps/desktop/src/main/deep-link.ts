@@ -6,6 +6,8 @@
 //                                            the ticket is opaque; the nonce
 //                                            that redeems it never leaves the
 //                                            host process)
+//   <scheme>://oauth/callback?connector=<id>&status=…   a connector's consent
+//                                            flow, come back (below)
 //   <scheme>://signin | <scheme>://cancel     INTENTS from the shell-owned
 //                                            signed-out view, delivered as a
 //                                            refused navigation — the page
@@ -49,6 +51,51 @@ export function parseLoginTicket(url: string | null | undefined, scheme: string)
   if (parsed.searchParams.has("connector")) return null; // connector variant — not ours
   const ticket = parsed.searchParams.get("ticket");
   return ticket !== null && TICKET_PATTERN.test(ticket) ? ticket : null;
+}
+
+// ── a connector's consent flow, come back ───────────────────────────────────
+//
+//   <scheme>://oauth/callback?connector=<id>&status=ok|error[&reason=<code>]
+//
+// The broker's return page bounces here from the system browser when a person
+// has connected (or refused to connect) a mailbox or another connector. It
+// carries no token and no ticket — only which connector, how it went, and a
+// coarse reason code. The app lands on its Connectors page, which says so
+// (connectorsPageUrl); before this it only came forward.
+
+const CONNECTOR_PATTERN = /^[a-z0-9][a-z0-9_-]{0,39}$/;
+const REASON_PATTERN = /^[a-z][a-z_]{0,39}$/;
+
+export interface ConnectorReturn {
+  readonly connector: string;
+  readonly status: "ok" | "error";
+  readonly reason: string | null;
+}
+
+export function parseConnectorReturn(url: string | null | undefined, scheme: string): ConnectorReturn | null {
+  if (!url || url.length > MAX_URL_LENGTH) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== `${scheme}:`) return null;
+  if (parsed.host !== "oauth" || parsed.pathname !== "/callback" || parsed.hash !== "") return null;
+  if (parsed.searchParams.has("ticket")) return null; // the sign-in variant — never both
+  const connector = parsed.searchParams.get("connector");
+  const status = parsed.searchParams.get("status");
+  if (connector === null || !CONNECTOR_PATTERN.test(connector)) return null;
+  if (status !== "ok" && status !== "error") return null;
+  const reason = parsed.searchParams.get("reason");
+  return { connector, status, reason: reason !== null && REASON_PATTERN.test(reason) ? reason : null };
+}
+
+/** The app's Connectors page, told which connector came back and how it went. */
+export function connectorsPageUrl(origin: string, back: ConnectorReturn): string {
+  const q = new URLSearchParams({ connected: back.connector, status: back.status });
+  if (back.reason) q.set("reason", back.reason);
+  return `${origin}/chat/connectors?${q.toString()}`;
 }
 
 export function parseIntent(url: string | null | undefined, scheme: string): Intent | null {

@@ -114,21 +114,30 @@ def _deep_link_url(connector_id: str, status: str, reason: str | None = None) ->
 RETURN_CLIENTS = ("web", "desktop")
 _DEFAULT_CLIENT = "desktop"
 
+_RETURN_LANGS = ("th", "en")
+
 _RETURN_PAGE = """<!doctype html>
-<html lang="th"><head>
+<html lang="{html_lang}"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-{refresh}<title>SRAN — {title_en}</title>
-<style>body{{font-family:'Segoe UI',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#111;color:#eee}}main{{text-align:center;max-width:440px;padding:24px}}h1{{font-size:20px;margin:0 0 4px}}h2{{font-size:14px;font-weight:400;color:#aab;margin:0 0 16px}}p{{font-size:14px;line-height:1.6;color:#ccd;margin:0 0 12px}}a{{color:#7ab8ff}}</style>
+<meta name="color-scheme" content="light dark">
+{refresh}<title>SRAN — {title}</title>
+<style>
+:root{{--bg:#f6f7f9;--card:#fff;--line:#e3e6eb;--ink:#17181c;--soft:#5b6270;--accent:#1d4ed8;--on:#fff}}
+@media (prefers-color-scheme:dark){{:root{{--bg:#111318;--card:#17181c;--line:#2a2d35;--ink:#eef0f4;--soft:#a3abb9;--accent:#8fb0ff;--on:#0b1020}}}}
+body{{font-family:'Segoe UI','Sarabun',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:var(--bg);color:var(--ink)}}
+main{{text-align:center;max-width:440px;margin:16px;padding:32px 28px;background:var(--card);border:1px solid var(--line);border-radius:16px}}
+h1{{font-size:20px;margin:0 0 6px}}h2{{font-size:14px;font-weight:400;color:var(--soft);margin:0 0 16px}}
+p{{font-size:14px;line-height:1.6;color:var(--soft);margin:0 0 12px}}
+a{{color:var(--accent)}}a.go{{display:inline-block;margin-top:8px;padding:10px 18px;border-radius:10px;background:var(--accent);color:var(--on);text-decoration:none;font-weight:600}}
+small{{font-size:12px;color:var(--soft)}}
+</style>
 </head><body data-client="{client}" data-status="{status}"><main>
-<h1>{title_th}</h1>
-<h2>{title_en}</h2>
-<p>{next_th}</p>
-<p>{next_en}</p>
-{link}</main></body></html>"""
+{body}</main></body></html>"""
 
 _TITLES = {"ok": ("เชื่อมต่อแล้ว", "Connected"), "error": ("เชื่อมต่อไม่สำเร็จ", "Connection failed")}
-# What to do next, per client and outcome (Thai, English).
+# What to do next, per client and outcome (Thai, English) — for a caller that
+# named no language (an older client): both are shown, as before.
 _NEXT = {
     ("web", "ok"): ("ปิดแท็บนี้ แล้วกลับไปที่แท็บ SRAN Chat ที่เปิดค้างไว้ จากนั้นกด “ตรวจอีกครั้ง”",
                     "Close this tab and go back to your SRAN Chat tab, then press “Check again”."),
@@ -143,40 +152,138 @@ _NEXT = {
                            "This link has expired or was already used. Close this page and connect again from SRAN."),
 }
 
+# The same, for a client that says which language its screen is in: one
+# language, and what really happens next. The web tab the person came from
+# learns by itself that the connection is there (it looks again when it is
+# shown), so nothing has to be pressed; with a way back the page offers it,
+# without one it says what to do with this tab. The desktop app opens its
+# Connectors page when the link reaches it.
+_SAID = {
+    "th": {
+        "title": {"ok": "เชื่อมต่อแล้ว", "error": "ยังไม่ได้เชื่อมต่อ"},
+        ("web", "ok"): "กลับไปที่ SRAN Chat เพื่อทำต่อได้เลย แท็บที่เปิดค้างไว้จะรู้เองว่าเชื่อมต่อแล้ว ไม่ต้องกดอะไรเพิ่ม",
+        ("web", "error"): "ยังไม่มีอะไรถูกเปลี่ยน กลับไปที่ SRAN Chat แล้วกดเชื่อมต่ออีกครั้งได้ทุกเมื่อ",
+        ("desktop", "ok"): "แอป SRAN Desktop กำลังเปิดหน้า Connectors ให้ ปิดหน้าต่างนี้ได้เลย",
+        ("desktop", "error"): "ยังไม่มีอะไรถูกเปลี่ยน แอป SRAN Desktop กำลังเปิดหน้า Connectors ให้ลองอีกครั้ง ปิดหน้าต่างนี้ได้เลย",
+        ("unknown", "error"): "ลิงก์นี้หมดอายุหรือถูกใช้ไปแล้ว ปิดหน้านี้ แล้วกดเชื่อมต่ออีกครั้งจาก SRAN",
+        "back": "กลับไปที่ SRAN Chat",
+        "close": "ปิดแท็บนี้ แล้วกลับไปที่แท็บ SRAN Chat ที่เปิดค้างไว้",
+        "open": "เปิด SRAN Desktop",
+    },
+    "en": {
+        "title": {"ok": "Connected", "error": "Nothing was connected"},
+        ("web", "ok"): "Go back to SRAN Chat to carry on. The tab you came from sees the connection by itself; there is nothing more to press.",
+        ("web", "error"): "Nothing has changed. Go back to SRAN Chat and connect again whenever you like.",
+        ("desktop", "ok"): "The SRAN Desktop app is opening its Connectors page. You can close this window.",
+        ("desktop", "error"): "Nothing has changed. The SRAN Desktop app is opening its Connectors page so you can try again. You can close this window.",
+        ("unknown", "error"): "This link has expired or was already used. Close this page and connect again from SRAN.",
+        "back": "Back to SRAN Chat",
+        "close": "Close this tab and go back to your SRAN Chat tab.",
+        "open": "Open SRAN Desktop",
+    },
+}
+
 
 def _return_client(value: object) -> str:
     return value if value in RETURN_CLIENTS else _DEFAULT_CLIENT
 
 
+def _return_lang(value: object) -> str:
+    return value if value in _RETURN_LANGS else ""
+
+
+def _safe_return_to(value: object, origin: str | None) -> str:
+    """Where the web page may send the person back to: a place of the web chat
+    itself, on the origin that asked for the ticket — or nowhere.
+
+    The value came from a client and ends up as a link on a page of ours, so
+    it is taken only when all of this holds: http(s); no credentials; its
+    origin is the request's own ``Origin`` AND one this deployment serves
+    (``cors_origins``); its path is under ``/chat``; nothing in it needs
+    escaping to sit inside an attribute. Anything else is no link at all.
+    """
+    from urllib.parse import urlsplit
+
+    from app.core.config import settings
+
+    if not isinstance(value, str) or not value or len(value) > 300 or not origin:
+        return ""
+    if any(ch in value for ch in '"<>\'`\\ \t\r\n'):
+        return ""
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return ""
+    if parts.scheme not in ("http", "https") or not parts.netloc or "@" in parts.netloc:
+        return ""
+    theirs = f"{parts.scheme}://{parts.netloc}"
+    if theirs != origin.rstrip("/") or theirs not in {o.rstrip("/") for o in settings.cors_origins_list}:
+        return ""
+    if parts.path != "/chat" and not parts.path.startswith("/chat/"):
+        return ""
+    return value
+
+
 def _return_response(
-    client: str, connector_id: str, status: str, reason: str | None = None
+    client: str,
+    connector_id: str,
+    status: str,
+    reason: str | None = None,
+    *,
+    lang: str = "",
+    return_to: str = "",
 ) -> HTMLResponse:
-    """The page the consent flow ends on, written for the client that began it.
+    """The page the consent flow ends on, written for the person who began it.
 
     ``web``: the person is in a browser tab the web chat opened — the page
-    says so and has no desktop link at all. ``desktop``: the page bounces to
-    the app. Some browsers block a plain 302 to a custom scheme, so it (a)
+    says so, has no desktop link at all, and offers the way back to where
+    they were (``return_to``, already checked by ``_safe_return_to``).
+    ``desktop``: the page bounces to the app, which opens its Connectors
+    page. Some browsers block a plain 302 to a custom scheme, so it (a)
     meta-refreshes to the ``sran://`` link immediately and (b) keeps a
     clickable fallback. ``unknown`` (no state row to say who asked): neutral
-    words, the app link only as a fallback. Either way the page — and the
-    link — carries only the connector id and a coarse status code; tokens
-    and provider error text never appear here.
+    words, the app link only as a fallback.
+
+    ``lang`` is the language of the screen that asked: the page is in that
+    one language. A caller that named none gets Thai and English together,
+    as every page did before. Either way the page — and the link — carries
+    only the connector id and a coarse status code; tokens and provider
+    error text never appear here.
     """
+    from html import escape
+
     status = "ok" if status == "ok" else "error"
+    lang = _return_lang(lang)
+    refresh = link = ""
+    url = _deep_link_url(connector_id, status, reason) if client != "web" else ""
+    if client == "desktop":
+        refresh = f'<meta http-equiv="refresh" content="0;url={escape(url, quote=True)}">\n'
+    if lang:
+        said = _SAID[lang]
+        title = said["title"][status]
+        sentence = said.get((client, status)) or said[("unknown", "error")]
+        body = f"<h1>{title}</h1>\n<p>{sentence}</p>\n"
+        if client == "web":
+            if return_to:
+                body += f'<p><a class="go" href="{escape(return_to, quote=True)}">{said["back"]}</a></p>\n'
+            else:
+                body += f'<p>{said["close"]}</p>\n'
+            if reason:
+                body += f"<p><small>({escape(reason)})</small></p>\n"
+        else:
+            body += f'<p><a href="{escape(url, quote=True)}">{said["open"]}</a></p>\n'
+        return HTMLResponse(_RETURN_PAGE.format(html_lang=lang, refresh=refresh, title=title, body=body,
+                                                client=client, status=status))
     title_th, title_en = _TITLES[status]
     next_th, next_en = _NEXT.get((client, status)) or _NEXT[("unknown", "error")]
-    refresh = link = ""
     if client != "web":
-        url = _deep_link_url(connector_id, status, reason)
-        if client == "desktop":
-            refresh = f'<meta http-equiv="refresh" content="0;url={url}">\n'
         link = f'<p><a href="{url}">เปิด SRAN Desktop · Open SRAN Desktop</a></p>\n'
     elif reason:
         # No link to carry it: the coarse reason stays readable for support, nothing else.
-        link = f'<p style="font-size:12px;color:#778">({reason})</p>\n'
-    return HTMLResponse(_RETURN_PAGE.format(
-        refresh=refresh, title_th=title_th, title_en=title_en, next_th=next_th, next_en=next_en,
-        link=link, client=client, status=status))
+        link = f"<p><small>({reason})</small></p>\n"
+    body = f"<h1>{title_th}</h1>\n<h2>{title_en}</h2>\n<p>{next_th}</p>\n<p>{next_en}</p>\n{link}"
+    return HTMLResponse(_RETURN_PAGE.format(html_lang="th", refresh=refresh, title=title_en, body=body,
+                                            client=client, status=status))
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +332,8 @@ def create_connect_ticket(
     connector_id: str,
     request: Request,
     client: str = Query(default=_DEFAULT_CLIENT, pattern="^(web|desktop)$"),
+    lang: str = Query(default="", pattern="^(th|en)?$"),
+    return_to: str = Query(default="", max_length=300),
     user: PortalUserORM = Depends(get_portal_user),
     ticket_store: OneShotStore = Depends(get_connector_ticket_store),
 ):
@@ -238,7 +347,11 @@ def create_connect_ticket(
     ``client`` says who is asking (``web``: a browser tab of the web chat;
     ``desktop``: the desktop app, the default for callers that say nothing).
     It rides the ticket and the state so the page the flow ends on is
-    written for that client.
+    written for that client. ``lang`` is the language of the screen that
+    asks (none = an older client: the page says it in both), and
+    ``return_to`` — the web chat only — is where the person was, offered
+    as the way back when it is a place of the web chat on the origin that
+    asked (``_safe_return_to``).
     """
     try:
         connector_config(connector_id)
@@ -251,6 +364,8 @@ def create_connect_ticket(
             "tenant_id": user.tenant_id,
             "connector_id": connector_id,
             "client": client,
+            "lang": lang,
+            "return_to": _safe_return_to(return_to, request.headers.get("origin")) if client == "web" else "",
         },
         token=mint_ticket_token(),
     )
@@ -288,13 +403,15 @@ def oauth_start(
         )
     connector_id = payload.get("connector_id") or ""
     client = _return_client(payload.get("client"))
+    lang, return_to = _return_lang(payload.get("lang")), str(payload.get("return_to") or "")
     try:
         cfg = connector_config(connector_id)
         client_id, _ = connector_oauth_service.client_credentials(connector_id)
     except UnknownConnector:
-        return _return_response(client, connector_id or "unknown", "error", "unknown_connector")
+        return _return_response(client, connector_id or "unknown", "error", "unknown_connector",
+                                lang=lang, return_to=return_to)
     except ConnectorNotConfigured:
-        return _return_response(client, connector_id, "error", "not_configured")
+        return _return_response(client, connector_id, "error", "not_configured", lang=lang, return_to=return_to)
 
     verifier, challenge = generate_pkce()
     state = state_store.put(
@@ -304,11 +421,13 @@ def oauth_start(
             "connector_id": connector_id,
             "code_verifier": verifier,
             "client": client,
+            "lang": lang,
+            "return_to": return_to,
         }
     )
     callback_url = str(request.url_for("connector_oauth_callback"))
     authorize_url = (
-        f"{cfg['authorize_url']}?"
+        f"{connector_oauth_service.endpoint(connector_id, 'authorize_url')}?"
         + urlencode(
             {
                 "client_id": client_id,
@@ -348,11 +467,13 @@ def oauth_callback(
         return _return_response("unknown", "unknown", "error", "invalid_state")
     connector_id = row.get("connector_id") or "unknown"
     client = _return_client(row.get("client"))
+    # the state was written by /oauth/start from a ticket whose return_to was checked when it was minted
+    said = {"lang": _return_lang(row.get("lang")), "return_to": str(row.get("return_to") or "") if client == "web" else ""}
     if error:
         # User hit "Deny" at the provider (or the provider errored).
-        return _return_response(client, connector_id, "error", "provider_denied")
+        return _return_response(client, connector_id, "error", "provider_denied", **said)
     if not code:
-        return _return_response(client, connector_id, "error", "missing_code")
+        return _return_response(client, connector_id, "error", "missing_code", **said)
 
     callback_url = str(request.url_for("connector_oauth_callback"))
     try:
@@ -364,7 +485,7 @@ def oauth_callback(
         )
     except (TokenExchangeFailed, ConnectorNotConfigured, UnknownConnector) as exc:
         logger.warning("Connector %s code exchange failed: %s", connector_id, exc)
-        return _return_response(client, connector_id, "error", "exchange_failed")
+        return _return_response(client, connector_id, "error", "exchange_failed", **said)
 
     cfg = connector_config(connector_id)
     existing = _row_for(session, row["user_id"], connector_id)
@@ -386,7 +507,7 @@ def oauth_callback(
     existing.scopes = tokens.get("scopes") or cfg["scopes"]
     session.flush()
 
-    return _return_response(client, connector_id, "ok")
+    return _return_response(client, connector_id, "ok", **said)
 
 
 # ---------------------------------------------------------------------------
