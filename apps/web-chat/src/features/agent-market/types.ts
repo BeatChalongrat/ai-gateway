@@ -1020,7 +1020,7 @@ export interface AgentDashboard {
   /** cost_not_charged (AM6): what the platform paid for rounds that delivered nothing. */
   spend: { credits: number; cost_not_charged?: number; per_succeeded_run: number | null; per_document: number | null; budget_credits: number };
   models: { model: string; self_hosted: boolean; runs: number }[] | null;
-  last_self_test: { status: string; outcome?: string; reason?: string; version?: string; finished_at?: string | null } | null;
+  last_self_test: { status: string; outcome?: string; reason?: string; why?: string; version?: string; finished_at?: string | null } | null;
 }
 
 // ── AM3: self-serve (agentmarket/org.go, catalog.go, rail.go, budget.go,

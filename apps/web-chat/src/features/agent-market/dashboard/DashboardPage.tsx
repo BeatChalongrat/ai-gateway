@@ -431,7 +431,8 @@ function SelfTestLine({ d }: { d: AgentDashboard }) {
   return (
     <p className="mt-2 text-xs text-text-muted" data-testid="am-dash-selftest">
       {t("dash.selfTest", { status, v: st.version ?? "", when: st.finished_at ? formatDateTime(st.finished_at, locale) : "—" })}
-      {st.reason && !open ? ` · ${st.reason}` : null}
+      {/* AM11: why, in the server's words — the reason's code is never printed */}
+      {!open && personText(st.why ?? "") ? ` · ${personText(st.why ?? "")}` : null}
     </p>
   );
 }

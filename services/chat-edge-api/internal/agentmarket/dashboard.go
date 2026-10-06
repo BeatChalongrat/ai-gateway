@@ -117,9 +117,11 @@ type DashModel struct {
 }
 
 type DashSelfTest struct {
-	Status   string     `json:"status"`
-	Outcome  string     `json:"outcome"`
-	Reason   string     `json:"reason"`
+	Status  string `json:"status"`
+	Outcome string `json:"outcome"`
+	Reason  string `json:"reason"`
+	// AM11: why it did not finish, in words (Reason is the code, which a page does not show)
+	Why      PersonText `json:"why,omitzero"`
 	Version  string     `json:"version"`
 	Finished *time.Time `json:"finished_at"`
 }
@@ -364,6 +366,9 @@ func (s *Store) Dashboard(ctx context.Context, in Install, since time.Time) (Das
 		Scan(&st.Status, &open, &st.Reason, &st.Version, &st.Finished)
 	if err == nil {
 		st.Outcome = OutcomeOf(st.Status, open)
+		if st.Status == "failed" && st.Reason != "" {
+			st.Why = failureLabel(st.Reason)
+		}
 		d.LastSelfTest = &st
 	}
 	return d, nil
