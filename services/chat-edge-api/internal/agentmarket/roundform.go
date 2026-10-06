@@ -47,6 +47,10 @@ const (
 	FormFilled       = "filled"        // delivered, every slot holds its value
 	FormUnfilled     = "unfilled"      // delivered beside the agent's files, not passed
 	FormFailed       = "failed"        // the form cannot be used (a blocking slot, a file that cannot be read)
+	// AM11: refused before any work — the agent has a value for less than half of the blanks the form
+	// expects filled (they are named), or the file has nothing that takes a value. A person may still
+	// map it themselves; a mapping that covers enough makes it ready.
+	FormRefused = "refused"
 )
 
 // RoundForm is what a round carries about its form.
@@ -75,10 +79,16 @@ type FormPayload struct {
 	Name       string     `json:"name"`
 	Status     string     `json:"status"`
 	Open       int        `json:"open"`     // slots a person still has to map
-	Unfilled   []string   `json:"unfilled"` // slot labels the delivered form lacks
+	Unfilled   []string   `json:"unfilled"` // the labels of the fields that could not be filled (delivered, or refused)
 	ArtifactID string     `json:"artifact_id,omitempty"`
 	Why        PersonText `json:"why,omitzero"`
 	Text       PersonText `json:"text"`
+	// AM11: why each field in Unfilled has no value (same order); why the form was refused or cannot be
+	// used, as a code the page words; how many blanks the form expects filled and how many have a value.
+	UnfilledWhy []PersonText `json:"unfilled_why,omitempty"`
+	Reason      string       `json:"reason,omitempty"`
+	Fields      int          `json:"fields,omitempty"`
+	Mapped      int          `json:"mapped,omitempty"`
 }
 
 func (FormPayload) itemKind() string { return "form" }
@@ -130,19 +140,71 @@ func FormText(f RoundForm) PersonText {
 		return Text("กรอก %s ให้แล้ว ใช้เฉพาะรอบนี้ — แบบฟอร์มที่ตั้งไว้ของ agent ไม่ถูกเปลี่ยน", Name(f.Name))
 	case FormUnfilled:
 		return Text("กรอก %s ได้ไม่ครบ %s ช่อง ส่งมาให้ดูแล้ว แต่ยังไม่ควรส่งต่อ — ดูชื่อช่องด้านล่าง", Name(f.Name), Count(len(f.Unfilled)))
+	case FormRefused:
+		if f.Why == RefusedNoFields {
+			return Text("ไม่พบช่องให้กรอกในแบบฟอร์ม %s — ระบบอ่านช่องว่างที่อยู่ข้างหรือใต้ป้ายชื่อในตาราง ช่องที่มีเครื่องหมาย ชื่อช่วงเซลล์ใน Excel "+
+				"และช่องกรอกของ Word ลองส่งแบบฟอร์มที่มีช่องแบบนี้ แบบฟอร์มที่ตั้งไว้ของ agent ไม่ถูกเปลี่ยน", Name(f.Name))
+		}
+		_, lacking, asked := FormRefusal(f.Slots, formMapping(f))
+		return Text("ยังไม่กรอก %s ให้ — แบบฟอร์มมีช่องที่ต้องกรอก %s ช่อง agent นี้มีค่าให้ %s ช่อง ซึ่งไม่ถึงครึ่ง ดูชื่อช่องที่ยังไม่มีค่าด้านล่าง "+
+			"ถ้าช่องใดรับค่าของ agent ได้ กด “จับคู่ช่อง” เพื่อเลือกเอง ยังไม่มีไฟล์ใดถูกสร้างหรือเปลี่ยน",
+			Name(f.Name), Count(asked), Count(asked-len(lacking)))
 	case FormFailed:
-		if f.Why != "" {
-			return Text("ใช้แบบฟอร์ม %s ไม่ได้: %s", Name(f.Name), Words(FromPackage(f.Why, NoText)))
+		if why := formWhy(f.Why); !why.Empty() {
+			return Text("ใช้แบบฟอร์ม %s ไม่ได้ — %s แบบฟอร์มที่ตั้งไว้ของ agent ไม่ถูกเปลี่ยน", Name(f.Name), Words(why))
 		}
 		return Text("ใช้แบบฟอร์ม %s ไม่ได้ — ลองบันทึกเป็น .docx .xlsx หรือ .pptx แบบธรรมดาแล้วส่งใหม่", Name(f.Name))
 	}
 	return Text("แบบฟอร์ม %s", Name(f.Name))
 }
 
+// formWhy says in words why the filler cannot use a form at all (the filler's own code for it); nothing
+// for a code it does not know — the sentence then says what to try instead.
+func formWhy(code string) PersonText {
+	switch code {
+	case "chart_not_updated":
+		return Text("มีกราฟที่เก็บตัวเลขไว้ในตัวเอง ระบบวาดใหม่ไม่ได้ จึงจะยังแสดงตัวเลขเดิม ลบกราฟออกแล้วส่งใหม่")
+	case "unsupported_location":
+		return Text("มีช่องที่อยู่ในส่วนของไฟล์ที่ระบบเติมไม่ได้ เช่น เชิงอรรถ หรือข้อความในกราฟ ย้ายช่องมาไว้ในเนื้อหาแล้วส่งใหม่")
+	}
+	return NoText
+}
+
+// unfilledWhy says in words why one field of a delivered form has no value (template_out.WHY_TH's codes).
+func unfilledWhy(code, packageWords string) PersonText {
+	switch code {
+	case "not_mapped":
+		return Text("ยังว่าง — ไม่ได้จับคู่ค่าให้ช่องนี้")
+	case "no_value":
+		return Text("รอบนี้ไม่มีค่าให้ช่องนี้")
+	case "wrong_label":
+		return Text("ป้ายข้างช่องนี้ไม่ตรงกับป้ายที่จับคู่ไว้")
+	}
+	return FromPackage(packageWords, Text("กรอกช่องนี้ไม่ได้"))
+}
+
+// formMapping is what a form is mapped to so far: the person's mapping, else what was proposed.
+func formMapping(f RoundForm) map[string]string {
+	if len(f.Mapping) > 0 {
+		return f.Mapping
+	}
+	return f.Proposal
+}
+
+// NeedsDecision: a slot somebody has to decide about before a form is filled — every fillable slot,
+// except a cell beside a title or a note of an unmarked form (AM11: read as a possible place, not as a
+// blank the form expects filled; Side is set by a reader that tells the two apart).
+func NeedsDecision(sl TemplateSlot) bool {
+	if !sl.Fillable {
+		return false
+	}
+	return !(sl.Kind == "target" && sl.Side != "" && !sl.Required)
+}
+
 func openSlots(f RoundForm) int {
 	n := 0
 	for _, sl := range f.Slots {
-		if sl.Fillable && f.Mapping[sl.Key] == "" && f.Proposal[sl.Key] == "" {
+		if NeedsDecision(sl) && f.Mapping[sl.Key] == "" && f.Proposal[sl.Key] == "" {
 			n++
 		}
 	}
@@ -158,22 +220,39 @@ func FormItemPayload(run uuid.UUID, f RoundForm) FormPayload {
 	}
 	for _, u := range f.Unfilled {
 		var x struct {
-			Label string `json:"label"`
-			Key   string `json:"key"`
+			Label  string `json:"label"`
+			Key    string `json:"key"`
+			Why    string `json:"why"`
+			Reason string `json:"reason"`
 		}
 		if json.Unmarshal(u, &x) == nil {
-			if x.Label != "" {
-				p.Unfilled = append(p.Unfilled, x.Label)
-			} else if x.Key != "" {
-				p.Unfilled = append(p.Unfilled, x.Key)
+			label := x.Label
+			if label == "" {
+				label = x.Key
+			}
+			if label != "" {
+				p.Unfilled = append(p.Unfilled, label)
+				p.UnfilledWhy = append(p.UnfilledWhy, unfilledWhy(x.Reason, x.Why))
 			}
 		}
 	}
+	// AM11: a refused form names the fields the agent has nothing for; a form that cannot be used says why
+	switch f.Status {
+	case FormRefused:
+		p.Reason = f.Why
+		if f.Why == RefusedTooFew {
+			_, lacking, asked := FormRefusal(f.Slots, formMapping(f))
+			p.Fields, p.Mapped = asked, asked-len(lacking)
+			for _, l := range lacking {
+				p.Unfilled = append(p.Unfilled, l)
+				p.UnfilledWhy = append(p.UnfilledWhy, Text("agent นี้ไม่มีค่าสำหรับช่องนี้"))
+			}
+		}
+	case FormFailed:
+		p.Reason = f.Why
+	}
 	if f.ArtifactID != nil {
 		p.ArtifactID = f.ArtifactID.String()
-	}
-	if f.Why != "" {
-		p.Why = FromPackage(f.Why, NoText)
 	}
 	return p
 }
@@ -394,7 +473,11 @@ func (a *API) putRunForm(w http.ResponseWriter, r *http.Request) {
 	if len(slots) == 0 {
 		slots = f.Slots
 	}
-	if msg := CheckTemplateMapping(slots, body.Mapping, spec); msg != "" {
+	msg := CheckTemplateMapping(slots, body.Mapping, spec)
+	if msg == "" {
+		msg = CheckFormCoverage(slots, body.Mapping)
+	}
+	if msg != "" {
 		say(w, http.StatusBadRequest, "BAD_MAPPING", "detail", msg)
 		return
 	}

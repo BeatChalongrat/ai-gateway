@@ -100,25 +100,28 @@ func (rc *runCtx) proposeMapping(ctx context.Context, result json.RawMessage) (j
 	user := mappingPrompt(open, rc.pkg.Manifest.Templates)
 	var picked map[string]string
 	c, _, err := rc.r.Model.CompleteWith(ctx, models, mappingSystem, user, func(s string) error {
+		// the key must be there: an answer without it is not a reading of the form that found nothing
 		var v struct {
-			Mapping map[string]string `json:"mapping"`
+			Mapping *map[string]string `json:"mapping"`
 		}
-		if err := json.Unmarshal([]byte(extractJSON(s)), &v); err != nil {
+		if err := json.Unmarshal([]byte(extractJSON(s)), &v); err != nil || v.Mapping == nil {
 			return fmt.Errorf("ไม่ใช่ JSON ที่มี mapping")
 		}
-		picked = v.Mapping
+		picked = *v.Mapping
 		return nil
 	})
 	credits := c.CostUSD * rc.r.CreditsPerUSD
-	if err != nil || len(picked) == 0 {
+	if err != nil {
 		return result, credits, ""
 	}
+	// AM11: a model that answered has read the form's labels, whatever it proposed — a form it found
+	// nothing in for this agent is known to be one the agent cannot fill (decideForm)
+	out["read_by"] = c.Model
 	merged := keepValid(slots, proposal, picked, spec)
-	if len(merged) == len(proposal) {
-		return result, credits, c.Model
+	if len(merged) > len(proposal) {
+		out["proposal"] = merged
+		out["proposed_by"] = c.Model
 	}
-	out["proposal"] = merged
-	out["proposed_by"] = c.Model
 	b, err := json.Marshal(out)
 	if err != nil {
 		return result, credits, c.Model

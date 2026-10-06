@@ -15,11 +15,13 @@ import (
 //
 // inspectRoundForm reads a form dropped into a round (the same inspection
 // and model proposal as the install's form, template.go) and writes what it
-// found on the round: ready when every fillable slot has a proposal the
-// mapping check accepts — then the fill follows at once if the round has its
-// figures, or in its render step — and needs_mapping otherwise, which opens
-// the mapping screen on the form's item. The install's saved form is never
-// touched.
+// found on the round: ready when every slot that needs a decision has a
+// proposal the mapping check accepts — then the fill follows at once if the
+// round has its figures, or in its render step — and needs_mapping otherwise,
+// which opens the mapping screen on the form's item. AM11: a form the model
+// read and found a value for less than half of the blanks it expects filled
+// is refused before any work, with those blanks named (decideForm). The
+// install's saved form is never touched.
 
 func (r *Runner) inspectRoundForm(ctx context.Context, rc *runCtx, job am.Run, f am.File, runID uuid.UUID) error {
 	form, err := r.Store.RoundForm(ctx, r.Store.Pool, runID)
@@ -60,19 +62,15 @@ func (r *Runner) inspectRoundForm(ctx context.Context, rc *runCtx, job am.Run, f
 		Proposal   map[string]string `json:"proposal"`
 		Blocking   []json.RawMessage `json:"blocking"`
 		ProposedBy string            `json:"proposed_by"`
+		ReadBy     string            `json:"read_by"`
 	}
 	_ = json.Unmarshal(mustJSON(out), &res)
 	form.Slots, form.Proposal, form.ProposedBy = res.Slots, res.Proposal, res.ProposedBy
 	var spec am.TemplateSpec
 	_ = json.Unmarshal(rc.pkg.Manifest.Templates, &spec)
-	switch {
-	case len(res.Blocking) > 0:
-		form.Status = am.FormFailed
-		form.Why = blockingWhy(res.Blocking)
-	case formObvious(res.Slots, res.Proposal, spec):
-		form.Status, form.Mapping = am.FormReady, res.Proposal
-	default:
-		form.Status = am.FormNeedsMapping
+	form.Status, form.Why = decideForm(res.Slots, res.Proposal, res.ReadBy, res.Blocking, spec)
+	if form.Status == am.FormReady {
+		form.Mapping = res.Proposal
 	}
 	if err := r.Store.SyncFormItem(ctx, r.Store.Pool, parent, form); err != nil {
 		return r.fail(ctx, job, "template", err)
@@ -88,14 +86,45 @@ func (r *Runner) inspectRoundForm(ctx context.Context, rc *runCtx, job am.Run, f
 	return r.finish(rc, am.RunSucceeded, "")
 }
 
-// formObvious: every fillable slot has a proposal the mapping check accepts —
-// nothing for a person to decide.
+// decideForm says what becomes of a form that was just read (AM11), in this order:
+//
+//	failed         the filler cannot use it at all (a chart it would leave with old numbers, a marker it
+//	               cannot reach) — the filler's reason;
+//	refused        nothing in the file takes a value; or a model read the form's labels and the agent has
+//	               a value for less than half of the blanks the form expects filled. Nothing is made; the
+//	               blanks are named and a person may map them themselves;
+//	ready          every slot that needs a decision has a proposal the mapping check accepts;
+//	needs_mapping  everything else: a person decides on the mapping screen, and the save runs the same
+//	               refusal check (am.CheckFormCoverage).
+//
+// Without a model that read the form (none the organisation lets see documents) nothing is known about
+// what the agent could fill, so the form is never refused for it here: the person maps it.
+func decideForm(slots []am.TemplateSlot, proposal map[string]string, readBy string, blocking []json.RawMessage,
+	spec am.TemplateSpec) (status, why string) {
+	if len(blocking) > 0 {
+		return am.FormFailed, blockingWhy(blocking)
+	}
+	refusal, _, _ := am.FormRefusal(slots, proposal)
+	switch {
+	case refusal == am.RefusedNoFields:
+		return am.FormRefused, refusal
+	case formObvious(slots, proposal, spec):
+		return am.FormReady, ""
+	case refusal == am.RefusedTooFew && readBy != "":
+		return am.FormRefused, refusal
+	}
+	return am.FormNeedsMapping, ""
+}
+
+// formObvious: every slot that needs a decision has a proposal the mapping check accepts — nothing for
+// a person to decide. A cell beside a title or a note of an unmarked form (am.NeedsDecision) is offered
+// on the mapping screen and needs none.
 func formObvious(slots []am.TemplateSlot, proposal map[string]string, spec am.TemplateSpec) bool {
 	if len(slots) == 0 {
 		return false
 	}
 	for _, sl := range slots {
-		if sl.Blocking || (sl.Fillable && proposal[sl.Key] == "") {
+		if sl.Blocking || (am.NeedsDecision(sl) && proposal[sl.Key] == "") {
 			return false
 		}
 	}

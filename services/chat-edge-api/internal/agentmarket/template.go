@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,6 +64,59 @@ type TemplateSlot struct {
 	// cannot reach) — refused before any work, with its reason.
 	Context  string `json:"context,omitempty"`
 	Blocking bool   `json:"blocking,omitempty"`
+	// AM11: a blank found by its label in a form that carries no marker (kind "target"). Required: the
+	// form expects it filled (a colon, a drawn cell, a list of fields, a table of a Word form) — a title
+	// with an empty cell beside it is not. Side and LabelAt say where its label is; the filled file is
+	// opened again and the label read there.
+	Required bool   `json:"required,omitempty"`
+	Side     string `json:"side,omitempty"`
+	LabelAt  string `json:"label_at,omitempty"`
+}
+
+// Why a form is refused before any work (AM11).
+const (
+	RefusedTooFew   = "too_few_fields" // the agent has a value for less than half of the blanks the form expects filled
+	RefusedNoFields = "no_fields"      // the file has nothing that takes a value
+)
+
+// refuseBelow: a form is filled when the agent has a value for at least this share of the blanks it
+// expects filled. Under it the result would be a mostly empty form with an agent's name on it; the
+// form is refused instead, and the blanks it has nothing for are named. With fewer than
+// refuseFrom such blanks there is too little to judge by, and the form is filled and its gaps named.
+const (
+	refuseBelowNum, refuseBelowDen = 1, 2
+	refuseFrom                     = 3
+)
+
+// FormRefusal says whether a form is refused before any work, given what is mapped so far: the reason
+// ("" = not refused), the labels of the expected blanks nothing is mapped to, and how many blanks the
+// form expects filled. Only the blanks of an unmarked form count: a marker, a named cell or a control a
+// person left "not used" was their decision about their own form (AM8).
+func FormRefusal(slots []TemplateSlot, mapping map[string]string) (why string, lacking []string, asked int) {
+	fillable := 0
+	mapped := 0
+	for _, s := range slots {
+		if !s.Fillable {
+			continue
+		}
+		fillable++
+		if s.Kind != "target" || !s.Required {
+			continue
+		}
+		asked++
+		if mapping[s.Key] != "" {
+			mapped++
+		} else {
+			lacking = append(lacking, s.Label)
+		}
+	}
+	if fillable == 0 {
+		return RefusedNoFields, nil, 0
+	}
+	if asked >= refuseFrom && mapped*refuseBelowDen < asked*refuseBelowNum {
+		return RefusedTooFew, lacking, asked
+	}
+	return "", nil, asked
 }
 
 // TemplateSpec is the manifest's "templates" block: the fields and lists an
@@ -213,7 +267,11 @@ func (a *API) saveTemplate(w http.ResponseWriter, r *http.Request) {
 		say(w, http.StatusUnsupportedMediaType, "TEMPLATE_FILE_TYPE")
 		return
 	}
-	if msg := CheckTemplateMapping(body.Slots, body.Mapping, spec); msg != "" {
+	msg := CheckTemplateMapping(body.Slots, body.Mapping, spec)
+	if msg == "" {
+		msg = CheckFormCoverage(body.Slots, body.Mapping)
+	}
+	if msg != "" {
 		say(w, http.StatusBadRequest, "BAD_MAPPING", "detail", msg)
 		return
 	}
@@ -330,6 +388,28 @@ func CheckTemplateMapping(slots []TemplateSlot, mapping map[string]string, spec 
 		}
 	}
 	return ""
+}
+
+// CheckFormCoverage says why a mapping a person saves is not enough to fill the form at all ("" when it
+// is): AM11 — a form left mostly empty is not filled; the blanks nothing was chosen for are named. Asked
+// at the save, after CheckTemplateMapping, and by the runner once a model has read the form — never of a
+// mapping that is still being put together pair by pair.
+func CheckFormCoverage(slots []TemplateSlot, mapping map[string]string) string {
+	why, lacking, asked := FormRefusal(slots, mapping)
+	if why != RefusedTooFew {
+		return ""
+	}
+	return "แบบฟอร์มนี้มีช่องที่ต้องกรอก " + strconv.Itoa(asked) + " ช่อง เลือกค่าให้แล้ว " + strconv.Itoa(asked-len(lacking)) +
+		" ช่อง ซึ่งไม่ถึงครึ่ง จึงยังไม่กรอกให้ — ช่องที่ยังไม่มีค่า: " + quotedList(lacking)
+}
+
+// quotedList is the customer's own labels, each in quotation marks (they are theirs, read as written).
+func quotedList(labels []string) string {
+	out := make([]string, 0, len(labels))
+	for _, l := range labels {
+		out = append(out, quoted(l))
+	}
+	return strings.Join(out, ", ")
 }
 
 func contains(xs []string, x string) bool {

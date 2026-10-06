@@ -309,7 +309,9 @@ var itemSchema = map[string]field{
 	// AM10: the round's own form, as its item follows it (the slot labels a
 	// delivered form lacks are the customer's own, shown as written)
 	"form": obj(map[string]field{"run_id": id, "file_id": id, "name": file, "status": code, "open": number,
-		"unfilled": list(person), "artifact_id": id, "why": text(fromPackage), "text": text(fromPackage)}),
+		"unfilled": list(person), "artifact_id": id, "why": text(fromPackage), "text": text(fromPackage),
+		// AM11: the reason each named field has no value; why a form was refused, as a code; the counts
+		"unfilled_why": list(text(fromEither)), "reason": code, "fields": number, "mapped": number}),
 	// what the person wrote and sent is theirs
 	"user_text":  {class: asPerson},
 	"user_files": {class: asPerson},

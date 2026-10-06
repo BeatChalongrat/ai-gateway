@@ -52,6 +52,8 @@ type itEnv struct {
 	lying   atomic.Bool
 	root    string
 	install am.Install
+	// AM11: when set, the stand-in model maps a form by its labels (am11_form_it_test.go)
+	formLabels map[string]string
 }
 
 func newIT(t *testing.T) *itEnv {
@@ -109,6 +111,9 @@ func (e *itEnv) fakeModel(w http.ResponseWriter, r *http.Request) {
 		// among them, which the runner must drop
 		content = `{"mapping":{"CompanyName":"company","Period":"period","Subtotal":"subtotal_thb","VatAmount":"vat_thb",` +
 			`"GrandTotal":"total_thb","NoSuchSlot":"company"}}`
+		if e.formLabels != nil {
+			content = mappingByLabel(body)
+		}
 	}
 	model := "fake-self-hosted"
 	if strings.Contains(string(body), "image_url") {
