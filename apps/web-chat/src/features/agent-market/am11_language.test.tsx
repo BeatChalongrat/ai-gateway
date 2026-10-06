@@ -337,3 +337,20 @@ describe("AM11 — a run's period is said in the screen's language", () => {
     expect(periodLabel(null, "th")).toBe("");
   });
 });
+
+describe("AM11 — a code is the engine's name for a thing, never what a person reads", () => {
+  it("a step the page has no words for is still named in words, in both languages", async () => {
+    const { stepLabel } = await import("./runs/RunDetailPage");
+    for (const locale of ["th", "en"] as const) {
+      useI18nStore.setState({ locale });
+      for (const id of ["check:template.recalculate", "check:pdf", "some_new_step"]) {
+        const label = stepLabel(id, tAm);
+        expect(label).not.toContain(id);
+        expect(label).not.toMatch(/[a-z]+[_:.][a-z]/);
+        expect(/[ก-๙]/.test(label)).toBe(locale === "th");
+      }
+    }
+    useI18nStore.setState({ locale: "th" });
+    expect(stepLabel("render", tAm)).toBe(tAm("step.render"));
+  });
+});

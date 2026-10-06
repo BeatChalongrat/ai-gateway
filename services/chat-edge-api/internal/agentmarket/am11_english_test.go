@@ -719,3 +719,88 @@ func TestAnAgentIsNamedInTheScreensLanguage(t *testing.T) {
 		}
 	}
 }
+
+// A setting's row keeps the name it was saved with; a setting's own name is not the person's data, so
+// the list names it in the reader's language whoever saved it. A name somebody gave is left alone.
+func TestASettingIsNamedInTheReadersLanguage(t *testing.T) {
+	m, err := ParseManifest(json.RawMessage(testManifest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := rulesOf(m)
+	saved := []Default{
+		{Key: "company", Label: settingLabel(Thai, "company"), Note: T(Thai, settingNote)},
+		{Key: "currency", Label: settingLabel(English, "currency"), Note: T(English, settingNote)},
+		{Key: "company", Label: "ชื่อที่ผู้ใช้ตั้งเอง", Note: "บันทึกของผู้ใช้"},
+		{Key: "year_convention", Label: "ปีในไฟล์เป็น พ.ศ. หรือ ค.ศ.", Note: "จากคำตอบในรอบก่อน"},
+	}
+	en, th := rules.shown(English, saved), rules.shown(Thai, saved)
+	if en[0].Label != "Company name on documents" || en[0].Note != "Changed on the remembered answers page" {
+		t.Errorf("a setting saved from a Thai screen, read on an English one: %q / %q", en[0].Label, en[0].Note)
+	}
+	if th[1].Label != settingLabel(Thai, "currency") || th[1].Note != T(Thai, settingNote) {
+		t.Errorf("a setting saved from an English screen, read on a Thai one: %q / %q", th[1].Label, th[1].Note)
+	}
+	for _, got := range [][]Default{en, th} {
+		if got[2].Label != saved[2].Label || got[2].Note != saved[2].Note || got[3].Label != saved[3].Label || got[3].Note != saved[3].Note {
+			t.Errorf("a name or a note somebody gave was changed: %+v / %+v", got[2], got[3])
+		}
+	}
+	if saved[0].Label != settingLabel(Thai, "company") {
+		t.Error("the stored rows were changed in place")
+	}
+}
+
+// A row of the dashboard says what it counts in words: a failed run's recorded reason is a code (said
+// by the reason's own sentence, in both languages) or already the sentence a person was told; a code
+// nobody has a sentence for is the platform's sentence for a run that did not finish — never the code.
+func TestADashboardRowSaysWhatItCountsInWords(t *testing.T) {
+	for _, reason := range FailureReasons() {
+		label := failureLabel(reason)
+		want := FailureFor(reason, FailureFacts{}).What
+		if label.In(Thai) != want.In(Thai) || label.In(English) != want.In(English) || label.In(English) == "" {
+			t.Errorf("%s: %q / %q", reason, label.In(Thai), label.In(English))
+		}
+		if strings.Contains(label.In(Thai), reason) || strings.Contains(label.In(English), reason) {
+			t.Errorf("%s: the code is in its own label", reason)
+		}
+		if thaiLetters(label.In(English)) {
+			t.Errorf("%s: Thai in the English label: %q", reason, label.In(English))
+		}
+	}
+	generic := FailureFor("", FailureFacts{}).What
+	for _, code := range []string{"brand_new_code", "engine step failed: exit status 2", ""} {
+		if got := failureLabel(code); got.In(Thai) != generic.In(Thai) || got.In(English) != generic.In(English) {
+			t.Errorf("%q: %q / %q, want the platform's own sentence", code, got.In(Thai), got.In(English))
+		}
+	}
+	said := "ยังไม่มีตารางนโยบายการเบิกที่ใช้ได้"
+	if got := failureLabel(said); got.In(Thai) != said {
+		t.Errorf("a recorded sentence is shown as it was told: %q", got.In(Thai))
+	}
+}
+
+// An error's text is not shown in part. The Thai reader shows nothing of it (no Thai word); the
+// reader of an English item must not show the ordinary words it happens to be made of.
+func TestAnEnglishLineShapedLikeAnErrorIsNotShownInPart(t *testing.T) {
+	for _, text := range []string{
+		"engine step failed: exit status 2",
+		"Error: the file was not found",
+		"the run timed out while reading the file",
+		"render failed: converter 502",
+	} {
+		if got := ShownIn(English, text); got != "" {
+			t.Errorf("%q is shown on an English item as %q", text, got)
+		}
+		if got := ShownIn(Thai, text); got != "" {
+			t.Errorf("%q is shown on a Thai item as %q", text, got)
+		}
+	}
+	// a sentence of the product's own is shown whole, and a line with Thai words is read as before
+	if got := ShownIn(English, "Remembered as the default for the next run · can be changed"); got == "" {
+		t.Error("a sentence of the product's own was withheld")
+	}
+	if got := ShownIn(Thai, "จำไว้เป็นค่าตั้งต้นรอบหน้า · แก้ได้"); got == "" {
+		t.Error("a Thai sentence was withheld")
+	}
+}

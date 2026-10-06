@@ -765,6 +765,10 @@ func (a *API) getInstall(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "defaults")
 		return
 	}
+	// AM11: a setting is named in the reader's language, whoever saved it
+	if m, err := ParseManifest(def.Manifest); err == nil {
+		defaults = rulesOf(m).shown(langOfWriter(w), defaults)
+	}
 	spent, _ := a.store.SpentThisMonth(r.Context(), in.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"install": in, "manifest": shownManifest(def.Manifest), "defaults": nonNil(defaults),
 		"look":   a.store.LookForSlug(r.Context(), in.Slug),
@@ -803,7 +807,7 @@ func (a *API) listDefaults(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "defaults")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"defaults": nonNil(list), "declared": rules.values(langOfWriter(w), list)})
+	writeJSON(w, http.StatusOK, map[string]any{"defaults": nonNil(rules.shown(langOfWriter(w), list)), "declared": rules.values(langOfWriter(w), list)})
 }
 
 func (a *API) putDefault(w http.ResponseWriter, r *http.Request) {
@@ -842,7 +846,7 @@ func (a *API) putDefault(w http.ResponseWriter, r *http.Request) {
 		label = rules.label(l, key)
 	}
 	if err := a.store.SetDefault(r.Context(), a.store.Pool, in.ID, Default{Key: key, Value: kept, Source: "settings",
-		Label: label, Note: T(l, "แก้ในหน้าค่าที่จำไว้")}); err != nil {
+		Label: label, Note: T(l, settingNote)}); err != nil {
 		a.fail(w, err, "default")
 		return
 	}

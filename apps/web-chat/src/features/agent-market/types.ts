@@ -978,6 +978,8 @@ export interface DashCount {
   key: string;
   count: number;
   open?: number;
+  /** AM11: what the row counts, in words (a question's heading, a failure as a person is told it). */
+  label?: string;
 }
 
 /** GET /installs/{id}/dashboard (agentmarket/dashboard.go). */

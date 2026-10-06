@@ -94,7 +94,7 @@ async function ownRun(x, client, lang) {
   // the company's name, which a person gives once in the install's settings (the same request that page sends):
   // without it the agent has no value for a form's "company" field, and says so
   if (process.env.AM11_NO_COMPANY !== "1") {
-    const saved = await api(page, `/installs/${installId}/defaults/company`, { method: "PUT", body: JSON.stringify({ value: COMPANY }) });
+    const saved = await api(page, `/installs/${installId}/defaults/company`, { method: "PUT", headers: { "Accept-Language": lang }, body: JSON.stringify({ value: COMPANY }) });
     x.check(saved.status === 200, "the company's name is saved on the install", `${saved.status}`);
   }
   // the install's own workspace (a second copy is made on the wizard's page and is not opened by it)
@@ -277,7 +277,7 @@ async function forms(client) {
 const PAGES = ["/chat", "/chat/settings", "/chat/tasks", "/chat/skills", "/chat/connectors", "/chat/memory", "/chat/knowledge", "/chat/projects",
   "/chat/archive", "/chat/writing-style"];
 // what a Thai screen keeps in Latin letters on purpose: names, formats, standards, version marks (GLOSSARY.md §5)
-const KEEP = /^(SRAN|Chat|AI|Agent|Market|agent|Connectors?|Skills?|Canvas|MCP|PDF|DOCX|XLSX|PPTX|CSV|TXT|PNG|JPG|XML|JSON|Excel|Word|PowerPoint|Google|GitHub|Slack|Gmail|Drive|Calendar|Chrome|OpenAI|Whisper|LibreOffice|Sarabun|URL|API|ID|KB|MB|GB|DPI|OK|vs|Ctrl|Shift|Enter|Esc|Alt|Tab|Mod|VAT|WHT|GL|PO|GR|THB|USD|Tax|Python|docx|xlsx|pptx|pdf|csv|xml|xlsm|txt|png|jpg|jpeg)$/;
+const KEEP = /^(SRAN|Chat|AI|Agent|Market|agent|Connectors?|Skills?|Canvas|MCP|PDF|DOCX|XLSX|PPTX|CSV|TXT|PNG|JPG|XML|JSON|Excel|Word|PowerPoint|Google|GitHub|Slack|Gmail|Drive|Calendar|Chrome|OpenAI|Whisper|LibreOffice|Sarabun|URL|API|ID|KB|MB|GB|DPI|OK|vs|Ctrl|Shift|Enter|Esc|Alt|Tab|Mod|VAT|WHT|GL|PO|GR|THB|USD|Tax|Python|docx|xlsx|pptx|pdf|csv|xml|xlsm|txt|png|jpg|jpeg|chat|html|conversations|json|ZIP|zip)$/;
 // what is on screen without being anybody's words to translate: what people typed, a model's answer, names of models
 const TYPED = ['[data-testid="conversation-item"]', "[data-conversation-id]", '[data-testid="assistant-body"]', '[data-testid="model-row-name"]',
   '[data-testid="model-trigger-label"]', "code", "pre", "kbd", '[data-testid="memory-content"]', '[data-testid="memory-origin"] a',
@@ -288,7 +288,9 @@ const leaks = (page, locale) => R.leaks(page, locale, { notApps: TYPED, keep: KE
  *  and, apart, what is the person's own in it: the names of their files and the labels of their forms. */
 async function apiWords(page, st) {
   const said = new Set();
-  const own = new Set([TAG, ...W.FIN.map((f) => f.name), ...fs.readdirSync(FORMS)]);
+  const own = new Set([TAG, COMPANY, ...W.FIN.map((f) => f.name), ...fs.readdirSync(FORMS)]);
+  // what a person named: every install of theirs carries the title it was given when it was made
+  for (const i of (await api(page, "/installs")).body?.installs || []) if (i && i.title) own.add(String(i.title));
   const take = (v) => {
     if (typeof v === "string") { const t = v.replace(/\s+/g, " ").trim(); if (t.length >= 3) said.add(t); } else if (Array.isArray(v)) v.forEach(take); else if (v && typeof v === "object") Object.values(v).forEach(take);
   };
@@ -317,7 +319,9 @@ async function apiWords(page, st) {
 const squash = (s) => s.replace(/\s+/g, "").toLowerCase();
 /** Whose words a string on screen is: the person's, the server's or a package's, or the app's own. */
 function pile(text, words) {
-  const t = squash(text);
+  // a line of a list is read without its bullet ("· ครบ")
+  const t = squash(text.replace(/^[\s·—–-]+/, ""));
+  if (words.said.some((w) => squash(w) === t)) return words.own.some((w) => squash(w) === t) ? "person" : "server";
   const inside = (list, min) => list.some((w) => { const v = squash(w); return v.length >= min && (v.includes(t) || t.includes(v)); });
   if (inside(words.own, 3)) return "person";
   if (inside(words.said, 4)) return "server";

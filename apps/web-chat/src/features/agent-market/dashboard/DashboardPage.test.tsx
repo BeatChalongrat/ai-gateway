@@ -134,8 +134,12 @@ describe("DashboardPage", () => {
     expect(time.textContent).toContain("รอคน1 ชั่วโมง 1 นาที1 วัน 1 ชั่วโมง");
 
     const reasons = within(screen.getByTestId("am-dash-reasons")).getAllByTestId("am-dash-bar");
-    expect(reasons.map((b) => b.textContent)).toEqual(["เกินวงเงินต่อครั้ง6 · รอ 4", "brand_new_code3 · รอ 3"]);
-    expect(within(screen.getByTestId("am-dash-questions")).getAllByTestId("am-dash-bar")[0]!.textContent).toBe("expense_weekend_holiday4 · รอ 1");
+    // AM11: a code the page has no words for is never shown as the code — the row says what it is
+    expect(reasons.map((b) => b.textContent)).toEqual(["เกินวงเงินต่อครั้ง6 · รอ 4", "เหตุผลที่ agent บันทึกไว้3 · รอ 3"]);
+    expect(reasons[1]!.getAttribute("data-key")).toBe("brand_new_code");
+    expect(within(screen.getByTestId("am-dash-questions")).getAllByTestId("am-dash-bar")[0]!.textContent).toBe("คำถามของ agent4 · รอ 1");
+    // a failure whose recorded reason is the sentence a person was told is shown as that sentence
+    expect(within(screen.getByTestId("am-dash-failures")).getAllByTestId("am-dash-bar")[0]!.textContent).toBe("ยังไม่มีตารางนโยบายการเบิกที่ใช้ได้2");
     expect(within(screen.getByTestId("am-dash-confidence")).getAllByTestId("am-dash-bar").map((b) => b.getAttribute("data-key"))).toEqual([
       "high",
       "medium",

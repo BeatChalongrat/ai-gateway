@@ -388,6 +388,18 @@ func (r *Reader) Shown(text string) string {
 // shownLine is Shown for one line.
 func (r *Reader) shownLine(text string) string {
 	ps := r.read(text)
+	// AM11: an error's text in Thai has no Thai word and so says nothing. In English it is made of
+	// ordinary words, some of them the product's own ("step", "failed", "status") — showing those
+	// would show half an error. A line with no Thai word that has an error's shape is not shown at all.
+	if (r == nil || !r.thaiOnly) && LooksLikeError(text) {
+		thai := false
+		for _, p := range ps {
+			thai = thai || p.kind == pThai
+		}
+		if !thai {
+			return ""
+		}
+	}
 	// a parenthesis that holds anything refused is left out of its sentence
 	for i := 0; i < len(ps); i++ {
 		if ps[i].s != "(" {

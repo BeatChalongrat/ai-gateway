@@ -110,7 +110,9 @@ export function stepLabel(name: string, t: AmT): string {
     case "stopped":
       return t("step.stopped");
   }
-  return name;
+  // AM11: a step's id is the engine's name for it, never what a person reads ("check:template.recalculate")
+  if (name.startsWith("check:")) return t("step.check");
+  return t("step.other");
 }
 
 export function RunDetailPage({ runId, initialTab }: { runId: string; initialTab?: string | null }) {

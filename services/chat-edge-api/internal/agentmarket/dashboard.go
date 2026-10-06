@@ -50,6 +50,9 @@ type DashCount struct {
 	Key   string `json:"key"`
 	Count int64  `json:"count"`
 	Open  int64  `json:"open,omitempty"`
+	// AM11: what the row counts, in words — a question as it was last asked, a failure as a person
+	// is told it. The key is the engine's name for it and is not what a page shows.
+	Label PersonText `json:"label,omitzero"`
 }
 
 type DashRuns struct {
@@ -192,6 +195,38 @@ func (s *Store) Dashboard(ctx context.Context, in Install, since time.Time) (Das
 		GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20`, id, since); err != nil {
 		return d, err
 	}
+	// each question by the heading its card last carried (the platform's own question by its own name)
+	headers := map[string]string{}
+	rows, qerr := s.Pool.Query(ctx, `SELECT DISTINCT ON (q->>'code') q->>'code', coalesce(q->>'header', '')
+		FROM agent_market.agent_run_clarifications c JOIN agent_market.agent_runs r ON r.id = c.run_id,
+		     jsonb_array_elements(CASE WHEN jsonb_typeof(c.questions) = 'array' THEN c.questions ELSE '[]'::jsonb END) q
+		WHERE r.install_id = $1 AND r.kind = 'run' AND c.kind = 'questions' AND c.created_at >= $2
+		ORDER BY q->>'code', c.created_at DESC`, id, since)
+	if qerr != nil {
+		return d, qerr
+	}
+	for rows.Next() {
+		var code *string
+		var header string
+		if err := rows.Scan(&code, &header); err != nil {
+			rows.Close()
+			return d, err
+		}
+		if code != nil {
+			headers[*code] = header
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return d, err
+	}
+	for i, q := range d.Questions {
+		if q.Key == OutputSetCode {
+			d.Questions[i].Label = Text("ชุดไฟล์")
+			continue
+		}
+		d.Questions[i].Label = LabelFromPackage(headers[q.Key], NoText)
+	}
 	// the exceptions it left, and what people decided
 	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE e.status = 'open'), count(*) FILTER (WHERE e.status = 'resolved'),
 		count(*) FILTER (WHERE e.status = 'noted')
@@ -217,6 +252,9 @@ func (s *Store) Dashboard(ctx context.Context, in Install, since time.Time) (Das
 		FROM agent_market.agent_runs WHERE install_id = $1 AND kind = 'run' AND status = 'failed' AND NOT gate_open AND created_at >= $2
 		GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20`, id, since); err != nil {
 		return d, err
+	}
+	for i, f := range d.Failures {
+		d.Failures[i].Label = failureLabel(f.Key)
 	}
 	if d.Open, err = s.counts(ctx, `SELECT left(coalesce(nullif(status_reason, ''), 'gate_not_passed'), 120), count(*), 0
 		FROM agent_market.agent_runs WHERE install_id = $1 AND kind = 'run' AND status = 'failed' AND gate_open AND created_at >= $2
@@ -368,4 +406,16 @@ func (a *API) dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	d.Days = days
 	writeJSON(w, http.StatusOK, d)
+}
+
+// failureLabel is a failed run's recorded reason as a row of the dashboard
+// says it. The runner records a reason's code, and for some failures the
+// sentence a person was told (a package's own). A code is said by its own
+// sentence; a sentence is shown as a person may read it; anything else is the
+// platform's sentence for a run that did not finish.
+func failureLabel(recorded string) PersonText {
+	if _, code := failureCopies[recorded]; code && recorded != "" {
+		return FailureFor(recorded, FailureFacts{}).What
+	}
+	return FromPackage(recorded, FailureFor("", FailureFacts{}).What)
 }

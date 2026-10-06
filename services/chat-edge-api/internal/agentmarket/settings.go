@@ -259,6 +259,32 @@ func (r settingRules) labelText(key string) PersonText {
 // label is labelText in l — for a row, which keeps one language.
 func (r settingRules) label(l Lang, key string) string { return r.labelText(key).In(l) }
 
+// settingNote is what a setting's row says of where it is changed.
+const settingNote wording = "แก้ในหน้าค่าที่จำไว้"
+
+// shown is the list as a screen in l reads it (AM11). A setting's row keeps
+// the name and the note it was saved with, in the language of the screen
+// that saved it — but a setting's name is not the person's data: a row whose
+// name is this agent's own name for that setting, in either language, is
+// named in the reader's. A name somebody gave (a remembered answer's
+// question, a label a client sent) is left exactly as it is.
+func (r settingRules) shown(l Lang, list []Default) []Default {
+	out := make([]Default, len(list))
+	copy(out, list)
+	for i, d := range out {
+		if r.known(d.Key) {
+			name := r.labelText(d.Key)
+			if d.Label != "" && (d.Label == name.In(Thai) || d.Label == name.In(English)) {
+				out[i].Label = name.In(l)
+			}
+		}
+		if d.Note == T(Thai, settingNote) || d.Note == T(English, settingNote) {
+			out[i].Note = T(l, settingNote)
+		}
+	}
+	return out
+}
+
 // check reads a value for a key that is known: the value as it is kept, or
 // the code and the sentence of the refusal (BAD_SETTING for a setting the
 // agent declares, BAD_VALUE for one of the platform's). The sentence carries

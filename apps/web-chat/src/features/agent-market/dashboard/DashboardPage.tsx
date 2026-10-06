@@ -24,6 +24,7 @@ import { COMPLETED_OPEN, NOT_TIED, outcomeKey } from "../outcome";
 import type { AgentDashboard, InstallDetail } from "../types";
 import { BackLink, Card, cls, ErrorPanel, FeatureGate, PageShell, PageSkeleton, Pill } from "../ui";
 import { reasonLabelKey } from "../exceptions/exceptions";
+import { personText } from "../workspace/personText";
 import { settingsHref, workspaceHref } from "../workspace/context";
 import { bars, CONFIDENCE_ORDER, formatRate, formatSeconds, isEmpty, RANGES, recordBars, TIER_ORDER, type Bar } from "./dashboard";
 
@@ -130,10 +131,20 @@ function Dashboard({ installId }: { installId: string }) {
   const failed = counted ? data.runs.failed ?? 0 : data.runs.by_status?.failed ?? 0;
   const notCharged = data.spend.cost_not_charged ?? 0;
   const perDoc = data.spend.per_document ?? data.spend.per_succeeded_run;
-  const reasonLabel = (key: string) => {
+  // AM11: a code is the engine's name for a thing, never what a person reads — the feature's own
+  // label for the code, else the words the server sends with the row, else a row that says it is one
+  // the page has no words for
+  const reasonLabel = (key: string, said?: string) => {
     const k = reasonLabelKey(key);
-    return k ? t(k) : key;
+    return k ? t(k) : personText(said ?? "") || t("reason.unknown");
   };
+  // a question is named by the heading its card carried; one with no heading is still a question
+  const questionLabel = (key: string, said?: string) => {
+    const k = reasonLabelKey(key);
+    return k ? t(k) : personText(said ?? "") || t("dash.questionOther");
+  };
+  // a failure's recorded reason may itself be the sentence a person was told (an older server sends only that)
+  const failureLabel = (key: string, said?: string) => personText(said ?? "") || (/^[A-Za-z0-9_.:-]+$/.test(key) ? "" : personText(key)) || t("progress.title.failed");
 
   return (
     <PageShell width="max-w-5xl">
@@ -266,12 +277,12 @@ function Dashboard({ installId }: { installId: string }) {
 
             <Card>
               <h2 className="text-sm font-semibold text-text-primary">{t("dash.questions")}</h2>
-              <Bars rows={bars(data.questions)} label={reasonLabel} empty={t("dash.noQuestions")} testId="am-dash-questions" />
+              <Bars rows={bars(data.questions)} label={questionLabel} empty={t("dash.noQuestions")} testId="am-dash-questions" />
             </Card>
 
             <Card>
               <h2 className="text-sm font-semibold text-text-primary">{t("dash.failures")}</h2>
-              <Bars rows={bars(data.failures)} label={(k) => k} empty={t("dash.noFailures")} testId="am-dash-failures" />
+              <Bars rows={bars(data.failures)} label={failureLabel} empty={t("dash.noFailures")} testId="am-dash-failures" />
             </Card>
 
             {data.open?.length ? (
@@ -373,7 +384,7 @@ function Tile({ label, value, sub, tone }: { label: string; value: string; sub?:
   );
 }
 
-function Bars({ rows, label, empty, testId }: { rows: Bar[]; label: (key: string) => string; empty?: string; testId: string }) {
+function Bars({ rows, label, empty, testId }: { rows: Bar[]; label: (key: string, said?: string) => string; empty?: string; testId: string }) {
   const t = useAmT();
   if (!rows.length) return empty ? <p className="mt-1.5 text-xs text-text-muted">{empty}</p> : null;
   return (
@@ -381,7 +392,7 @@ function Bars({ rows, label, empty, testId }: { rows: Bar[]; label: (key: string
       {rows.map((r) => (
         <li key={r.key} data-testid="am-dash-bar" data-key={r.key}>
           <div className="flex items-baseline justify-between gap-3 text-xs">
-            <span className="min-w-0 break-words text-text-primary">{label(r.key)}</span>
+            <span className="min-w-0 break-words text-text-primary">{label(r.key, r.label)}</span>
             <span className="shrink-0 tabular-nums text-text-secondary">
               {formatInt(r.count)}
               {r.open ? <span className="text-status-warning">{` · ${t("dash.openN", { n: formatInt(r.open) })}`}</span> : null}

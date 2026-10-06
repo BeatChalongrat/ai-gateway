@@ -43,12 +43,14 @@ export interface Bar {
   open: number;
   /** width against the largest count, 0-100 */
   pct: number;
+  /** AM11: the row in words, when the server says them */
+  label?: string;
 }
 
 export function bars(rows: DashCount[] | null | undefined): Bar[] {
   const list = (rows ?? []).filter((r) => r && r.count > 0);
   const max = Math.max(1, ...list.map((r) => r.count));
-  return list.map((r) => ({ key: r.key, count: r.count, open: r.open ?? 0, pct: Math.round((r.count / max) * 100) }));
+  return list.map((r) => ({ key: r.key, count: r.count, open: r.open ?? 0, pct: Math.round((r.count / max) * 100), ...(r.label ? { label: r.label } : {}) }));
 }
 
 /** A {key: count} record as bars, in a fixed order (keys not in it follow). */
