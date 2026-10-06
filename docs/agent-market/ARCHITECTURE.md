@@ -487,11 +487,14 @@ layer uses its terms.
 - **What a person may read, in English.** In Thai, "text written for a person"
   is decided by the script (`reads.go`). In English it is decided by
   vocabulary: a word is readable when one of the product's own English
-  sentences uses it. This is weaker than the Thai rule — an error can be made
-  of ordinary English words — so the list of error shapes is asked as before,
-  no English sentence of ours may read like one, and a thread item says which
-  language it was written in (`"lang"`): a Thai item is read by the strict Thai
-  rule exactly as before AM11.
+  sentences (or a package's own English) uses it. This is weaker than the Thai
+  rule — an error can be made of ordinary English words — so the list of error
+  shapes is asked as before, no English sentence of ours may read like one,
+  and a line with no Thai word that has an error's shape is not shown at all
+  (the Thai reader shows nothing of "engine step failed: exit status 2"; the
+  English one was showing "… step failed: … status 2"). A thread item says
+  which language it was written in (`"lang"`): a Thai item is read by the
+  strict Thai rule exactly as before AM11.
 - **Numbers, dates and money** follow the language where they are formatting:
   `28 ก.ย. 2569` / `28 Sep 2026`, `กันยายน 2569` / `September 2026`, the
   Buddhist era on a Thai screen only. The values never change, and no rule of
@@ -506,13 +509,40 @@ layer uses its terms.
   half one language and half the other. What is said *in the thread* follows
   the run: the platform's sentences, and a model's answer to a question a
   person typed there.
-- **What is not in English yet.** The packages: no package lists English.
-  What a check asks, the labels of a run's figures and every word inside a
-  generated document are written by the package in Thai (about two thousand
-  strings woven into the code that computes and re-reads them). An engine step
-  is told the run's language (`"lang"`) and does not act on it yet. On an
-  English screen a run therefore reads English around Thai — the platform's
-  sentences in English, the agent's own questions and its documents in Thai —
+- **What a package's manifest says is the package's, in both languages.** What
+  a person reads before a run exists — what the agent is, what it needs and
+  gives back, what it cannot do, its settings and their help, its guide — is
+  in the manifest, and its English is there too, under `"en"`: a flat map from
+  each Thai string, exactly as the manifest has it, to its English (261 strings
+  in the five packages). The server sends a manifest in the screen's language
+  (`english_package.go`: `ManifestIn`; `"en"` itself never leaves the server),
+  names an agent by `name_en` on an English screen, builds the data sheet from
+  it, and reads a package's string that it puts into a card from the same map.
+  Three things in a manifest are not words and are never translated: a sample
+  file's path; the values an install starts with (`install.defaults` — the
+  expense policy's categories and prohibited merchants become the customer's
+  own on the first save and are matched against the customer's Thai claims);
+  and a literal a person must find or type as their files have it (the sheet
+  the bank agent reads is “รายการค้างยกไป” in English too, with what it means
+  beside it). `test_manifest_english.py` (Python lane) and
+  `am11_packages_test.go` fail a Thai string with no English, an entry left
+  over, Thai in an English entry, a placeholder or a number that differs, and
+  an English for anything that is data.
+- **A code is the engine's name for a thing, never what a page shows.** A
+  setting is named in the reader's language whoever saved it (its own name is
+  not the person's data; a name somebody gave is left alone). The dashboard's
+  rows carry their words from the server — a question by the heading its card
+  last carried, a failed run by the sentence a person is told for that reason —
+  and the web has a sentence for a code it does not know ("A question the agent
+  asks", "A step of the agent"), never the code.
+- **What is not in English yet.** What a package's *engine* writes while it
+  runs: a check's question, the labels of a run's figures, the lines of the
+  quality check on the files card, and every word inside a generated document
+  (about two thousand strings woven into the code that computes and re-reads
+  them). No package lists English in `languages`; an engine step is told the
+  run's language (`"lang"`) and does not act on it yet. On an English screen a
+  run therefore reads English around Thai — everything the platform and the
+  manifest say in English, the engine's own lines and its documents in Thai —
   and an agent's page says so before a person installs it.
 
 ## A form with no marker in it (AM11)
@@ -551,6 +581,10 @@ Now (`deliverables/template_fill.py`, `template_out.py`, `template.go`,
   makes the form ready; a save that covers less than half is refused with the
   names. With no model to read the form, nothing is known about what the agent
   could fill, and the person maps it.
+- **The same form again.** A form dropped into the same run a second time is
+  read and filled a second time: the jobs that read and fill it are one per
+  upload. (Keyed by the file's content, as they were, the second drop found
+  the first drop's finished job and its card stayed at "reading the form".)
 - **What is still not read as a blank** — and is therefore neither filled nor
   named: a line of underscores or dots after a label in running text
   ("ผู้จัดทำ: ______"), a signature line, a blank under a heading on a sheet
