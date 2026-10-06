@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 import Badge from "../../../components/ui/Badge";
 import { useI18n } from "../../../lib/i18n";
 import { amAdmin, amErrorMessage, type ProblemReport } from "../../../lib/agentMarketApi";
-import { LoadError, Loading, code, formatDateTime, linkStyle, muted, secondary, stepLabel } from "./shared";
+import { LoadError, Loading, code, formatDateTime, linkStyle, muted, outcomeLabel, secondary, stepLabel } from "./shared";
 
 export default function ProblemsSection({ admin }: { admin: boolean }) {
   const { t } = useI18n();
@@ -75,7 +75,9 @@ function ProblemRow({ p, admin, reload }: { p: ProblemReport; admin: boolean; re
 
   const where = [
     p.slug ? `${p.slug} ${p.version}`.trim() : "",
-    p.run_status ? t("am.problems.runStatus", { status: p.run_status, reason: p.run_reason || "—" }) : "",
+    // AM11: the round's status in words. Its reason is a code of ours and is not printed:
+    // the step it stopped at and that step's error are on the next line, the code on the row.
+    p.run_status ? t("am.problems.runStatus", { status: outcomeLabel(p.run_status, p.run_reason, t) }) : "",
     p.page,
   ].filter(Boolean);
 
@@ -89,6 +91,7 @@ function ProblemRow({ p, admin, reload }: { p: ProblemReport; admin: boolean; re
       }}
       data-testid="am-problem"
       data-status={p.status}
+      data-run-reason={p.run_reason || undefined}
     >
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.5rem" }}>
         <span style={{ fontWeight: 600, fontSize: "0.875rem", color: "var(--text-primary)" }}>{`#${p.ref}`}</span>
