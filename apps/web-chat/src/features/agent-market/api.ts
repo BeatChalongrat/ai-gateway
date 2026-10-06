@@ -349,7 +349,8 @@ export const amApi = {
   // ── AM4: rounds, threads, the agent's model ─────────────────────────────
 
   threads: (installId: string) => call<{ threads: AgentThread[] | null }>(`/installs/${id(installId)}/threads`),
-  newThread: (installId: string) => send<{ thread: AgentThread }>("POST", `/installs/${id(installId)}/threads`),
+  /** AM11b: when an empty chat is already there the server answers with it (`reused`) instead of making another. */
+  newThread: (installId: string) => send<{ thread: AgentThread; reused?: boolean }>("POST", `/installs/${id(installId)}/threads`),
   /** AM10: the form a person dropped into a round, and the mapping they confirm for it (that round only). */
   runForm: (runId: string) => call<RunFormDetail>(`/runs/${id(runId)}/template`),
   saveRunForm: (runId: string, body: { slots: TemplateSlot[]; mapping: Record<string, string> }) =>

@@ -72,7 +72,8 @@ export function WorkspaceMenu({
       (r) => {
         setBusy(false);
         setOpen(false);
-        if (r?.thread?.id) router.push(workspaceHref(installId, r.thread.id));
+        // AM11b: the button opens the empty chat that is already there — the first chat has no id
+        if (r?.thread) router.push(workspaceHref(installId, r.thread.id));
       },
       (err) => {
         setBusy(false);

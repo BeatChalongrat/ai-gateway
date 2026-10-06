@@ -126,6 +126,7 @@ func init() {
 		"แก้สาเหตุแล้วส่งไฟล์มาใหม่เพื่อเริ่มรอบใหม่ ถ้าไม่แน่ใจว่าต้องแก้อะไรให้กด “แจ้งปัญหา”": "Fix the cause, then send the files again to start a new run. If you are not sure what to fix, press “Report a problem”.",
 		"แก้ในหน้าค่าที่จำไว้": "Changed on the remembered answers page",
 		"แชทแรก":     "First chat",
+		"แชทใหม่":    "New chat",
 		"แชทใหม่ · ": "New chat · ",
 		"ได้รับ %s ระหว่างที่กำลังทำรอบนี้ จะให้รวมในรอบนี้ หรือเก็บไว้ทำรอบใหม่ครับ":                                                                             "I received %s while working on this run. Include in this run, or keep for a new run?",
 		"ไฟล์ของรอบนี้ส่งให้แล้วเป็นฉบับร่าง มีคำว่า “ร่าง” กำกับบนหน้าแรก ไฟล์ที่ส่งมาและผลงานของรอบก่อน ๆ ยังอยู่ครบ":                                           "This run's files have been delivered as a draft, marked “Draft” on the first page. The files you sent and the work of earlier runs are all still here.",

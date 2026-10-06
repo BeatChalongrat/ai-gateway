@@ -174,19 +174,31 @@ func (s *Store) ListThreads(ctx context.Context, in Install) ([]Thread, error) {
 					WHERE r.install_id = $1 AND r.kind = 'run' AND r.thread_id IS NOT DISTINCT FROM t.id AND r.period IS NOT NULL
 					ORDER BY r.created_at DESC LIMIT 1),
 				EXISTS (SELECT 1 FROM agent_market.agent_runs r
-					WHERE r.install_id = $1 AND r.thread_id IS NOT DISTINCT FROM t.id AND r.status = 'awaiting_input')
+					WHERE r.install_id = $1 AND r.thread_id IS NOT DISTINCT FROM t.id AND r.status = 'awaiting_input'),
+				(SELECT i.payload->>'text' FROM agent_market.agent_thread_items i
+					WHERE i.install_id = $1 AND i.thread_id IS NOT DISTINCT FROM t.id AND i.kind = 'user_text'
+					  AND i.payload->>'handled_as' IN ('new_run', 'web_closed') ORDER BY i.created_at LIMIT 1),
+				(SELECT i.payload->'files'->0->>'name' FROM agent_market.agent_thread_items i
+					WHERE i.install_id = $1 AND i.thread_id IS NOT DISTINCT FROM t.id AND i.kind = 'user_files'
+					ORDER BY i.created_at LIMIT 1),
+				(SELECT i.payload->>'text' FROM agent_market.agent_thread_items i
+					WHERE i.install_id = $1 AND i.thread_id IS NOT DISTINCT FROM t.id AND i.kind IN ('user_text', 'user_files')
+					  AND btrim(coalesce(i.payload->>'text', '')) <> '' ORDER BY i.created_at LIMIT 1)
 			FROM t ORDER BY t.pinned_at DESC NULLS LAST, 5 DESC`, in.ID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []Thread{}
+	// what each chat began with (AM11b): the request a round was started from, the first file, the first words
+	began := map[int][3]string{}
 	for rows.Next() {
 		var t Thread
-		var title, period *string
-		if err := rows.Scan(&t.ID, &t.CreatedAt, &title, &t.PinnedAt, &t.LastAt, &t.Rounds, &period, &t.Waiting); err != nil {
+		var title, period, request, file, words *string
+		if err := rows.Scan(&t.ID, &t.CreatedAt, &title, &t.PinnedAt, &t.LastAt, &t.Rounds, &period, &t.Waiting, &request, &file, &words); err != nil {
 			return nil, err
 		}
+		began[len(out)] = [3]string{strOr(request), strOr(file), strOr(words)}
 		if period != nil {
 			t.Period = *period
 		}
@@ -198,9 +210,14 @@ func (s *Store) ListThreads(ctx context.Context, in Install) ([]Thread, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	// A chat a person did not name is named for what it is: the period of its
-	// latest round ("กันยายน 2569"); before any round, "แชทแรก" or when it began
-	// ("แชทใหม่ · 28 ก.ย. 2569", with the time when two began the same day).
+	// A chat a person did not name is named for what it is (AM10), from the first
+	// thing that happened in it (AM11b): the request a round was started from
+	// (an agent that works from what a person types), else the period of its
+	// latest round ("กันยายน 2569"), else its first file, else the first words
+	// typed in it. Only a chat nothing has happened in yet is "แชทใหม่" — and
+	// there is one of those at a time (createThread, TidyEmptyThreads), so it
+	// needs no date; "แชทใหม่ · 28 ก.ย. 2569" is left for telling two chats of
+	// one period apart.
 	// AM11: such a name is made when the list is read, so it is in the language
 	// of the request that reads it.
 	l := LangOf(ctx)
@@ -225,6 +242,10 @@ func (s *Store) ListThreads(ctx context.Context, in Install) ([]Thread, error) {
 		if out[i].Named {
 			continue
 		}
+		if request := shortTitle(began[i][0]); request != "" {
+			out[i].Title = request
+			continue
+		}
 		if out[i].Period != "" {
 			// two chats of one period are told apart by when they began
 			out[i].Title = PeriodLabelIn(l, out[i].Period)
@@ -233,9 +254,96 @@ func (s *Store) ListThreads(ctx context.Context, in Install) ([]Thread, error) {
 			}
 			continue
 		}
-		out[i].Title = name(out[i], sameDay[name(out[i], false)] > 1)
+		switch file, words := shortTitle(began[i][1]), shortTitle(began[i][2]); {
+		case file != "":
+			out[i].Title = file
+		case words != "":
+			out[i].Title = words
+		case out[i].ID == nil:
+			out[i].Title = T(l, "แชทแรก")
+		default:
+			out[i].Title = T(l, "แชทใหม่")
+		}
 	}
 	return out, nil
+}
+
+// shortTitle is a person's words, or a file's name, as the name of a chat: one line, 48 letters at most.
+func shortTitle(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > 48 {
+		return strings.TrimSpace(string(r[:47])) + "…"
+	}
+	return s
+}
+
+// UnusedThread is a chat nothing has happened in: no job of any kind but the
+// install's own sample run, nothing the person sent, not pinned and not named
+// by them. ID nil is the install's first chat.
+type UnusedThread struct {
+	ID        *uuid.UUID
+	CreatedAt time.Time
+}
+
+// UnusedThreads lists an install's chats nothing has happened in, newest first.
+func (s *Store) UnusedThreads(ctx context.Context, q Querier, in Install) ([]UnusedThread, error) {
+	rows, err := q.Query(ctx, `
+		WITH t AS (
+			SELECT NULL::uuid AS id, i.created_at, i.first_chat_title AS title, i.first_chat_pinned_at AS pinned_at
+			FROM agent_market.agent_installs i WHERE i.id = $1 AND i.first_chat_deleted_at IS NULL
+			UNION ALL
+			SELECT id, created_at, title, pinned_at FROM agent_market.agent_threads WHERE install_id = $1 AND deleted_at IS NULL
+		)
+		SELECT t.id, t.created_at FROM t
+		WHERE t.pinned_at IS NULL AND btrim(coalesce(t.title, '')) = ''
+		  AND NOT EXISTS (SELECT 1 FROM agent_market.agent_runs r
+				WHERE r.install_id = $1 AND r.thread_id IS NOT DISTINCT FROM t.id AND r.kind <> 'self_test')
+		  AND NOT EXISTS (SELECT 1 FROM agent_market.agent_thread_items i
+				WHERE i.install_id = $1 AND i.thread_id IS NOT DISTINCT FROM t.id AND i.kind IN ('user_text', 'user_files'))
+		ORDER BY t.created_at DESC`, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UnusedThread
+	for rows.Next() {
+		var u UnusedThread
+		if err := rows.Scan(&u.ID, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// TidyEmptyThreads leaves an install one empty chat at most (AM11b): every
+// chat nothing has happened in is taken off the list but one — the first chat
+// when it is one of them (it is the install's own and is not removed), else
+// the newest. A chat with a round, a message or a file, a pinned one and one
+// the person named are never touched, and nothing of any round is.
+func (s *Store) TidyEmptyThreads(ctx context.Context, q Querier, in Install) (int, error) {
+	unused, err := s.UnusedThreads(ctx, q, in)
+	if err != nil || len(unused) < 2 {
+		return 0, err
+	}
+	keep := unused[0].ID // the newest
+	for _, u := range unused {
+		if u.ID == nil {
+			keep = nil // the first chat stays
+		}
+	}
+	var gone []uuid.UUID
+	for _, u := range unused {
+		if u.ID != nil && (keep == nil || *u.ID != *keep) {
+			gone = append(gone, *u.ID)
+		}
+	}
+	if len(gone) == 0 {
+		return 0, nil
+	}
+	tag, err := q.Exec(ctx, `UPDATE agent_market.agent_threads SET deleted_at = now()
+		WHERE install_id = $1 AND id = ANY($2) AND deleted_at IS NULL`, in.ID, gone)
+	return int(tag.RowsAffected()), err
 }
 
 // RoundStartedSince: "เริ่มรอบใหม่" was pressed in this thread after the given time.
@@ -366,6 +474,11 @@ func (a *API) listThreads(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// AM11b: one empty chat at a time — the rows of chats nothing ever happened in go, but one
+	if _, err := a.store.TidyEmptyThreads(r.Context(), a.store.Pool, in); err != nil {
+		a.fail(w, err, "thread")
+		return
+	}
 	list, err := a.store.ListThreads(r.Context(), in)
 	if err != nil {
 		a.fail(w, err, "thread")
@@ -376,6 +489,10 @@ func (a *API) listThreads(w http.ResponseWriter, r *http.Request) {
 
 // createThread is "แชทใหม่กับ agent นี้": a new conversation, greeted like the
 // first; it shares the install's settings and remembered answers only.
+//
+// AM11b: when a chat nothing has happened in is already there, the button
+// opens it instead of making a second one (the answer says "reused"; a first
+// chat has no id). Pressing it five times leaves one empty chat, not five.
 func (a *API) createThread(w http.ResponseWriter, r *http.Request) {
 	in, c, ok := a.ownedInstall(w, r)
 	if !ok || !a.agentGate(w, r, in.Slug, false) {
@@ -398,6 +515,25 @@ func (a *API) createThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	l := langOfWriter(w)
+	if unused, err := a.store.UnusedThreads(ctx, tx, in); err != nil {
+		a.fail(w, err, "thread")
+		return
+	} else if len(unused) > 0 {
+		u := unused[0]
+		for _, x := range unused {
+			if x.ID == nil {
+				u = x // the first chat, when it is empty too
+			}
+		}
+		title := T(l, "แชทใหม่")
+		if u.ID == nil {
+			title = T(l, "แชทแรก")
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"reused": true,
+			"thread": Thread{ID: u.ID, Title: title, CreatedAt: u.CreatedAt, LastAt: u.CreatedAt}})
+		return
+	}
 	id, at, err := a.store.CreateThread(ctx, tx, in)
 	if err != nil {
 		a.fail(w, err, "thread")
@@ -411,8 +547,7 @@ func (a *API) createThread(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "thread")
 		return
 	}
-	l := langOfWriter(w)
-	writeJSON(w, http.StatusOK, map[string]any{"thread": Thread{ID: &id, Title: T(l, "แชทใหม่ · ") + DateIn(l, at), CreatedAt: at, LastAt: at}})
+	writeJSON(w, http.StatusOK, map[string]any{"thread": Thread{ID: &id, Title: T(l, "แชทใหม่"), CreatedAt: at, LastAt: at}})
 }
 
 // startRound is the divider's "เริ่มรอบใหม่": one click, no typing. It opens the

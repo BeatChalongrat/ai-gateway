@@ -282,7 +282,7 @@ function Workspace({ installId, threadId, runId, beside }: { installId: string; 
           return;
         }
         amApi.newThread(installId).then(
-          (n) => router.replace(workspaceHref(installId, n.thread.id)),
+          (n) => router.replace(workspaceHref(installId, n.thread?.id)),
           () => router.replace("/chat/agents"),
         );
       },

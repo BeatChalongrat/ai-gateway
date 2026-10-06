@@ -12,13 +12,31 @@ import (
 // AM10: chats under each agent — named for what they are, renamed, pinned,
 // deleted without losing a working paper.
 
+// newChat is a second chat beside the ones that are there. AM11b: "new chat" opens an empty chat that
+// is already there instead of making another — so, as a person would have, someone types a word into
+// every chat nothing has happened in before a new one is asked for.
 func (e *testEnv) newChat(in Install) string {
 	e.t.Helper()
-	code, body := e.do("POST", "/installs/"+in.ID.String()+"/threads", nil)
-	if code != 200 {
-		e.t.Fatalf("new thread: %d %v", code, body)
+	for i := 0; i < 6; i++ {
+		code, body := e.do("POST", "/installs/"+in.ID.String()+"/threads", nil)
+		if code != 200 {
+			e.t.Fatalf("new thread: %d %v", code, body)
+		}
+		th := body["thread"].(map[string]any)
+		if body["reused"] != true {
+			return th["id"].(string)
+		}
+		var thread *uuid.UUID
+		if s, ok := th["id"].(string); ok {
+			u := uuid.MustParse(s)
+			thread = &u
+		}
+		if _, _, err := e.store.AddItemIn(context.Background(), e.store.Pool, in.ID, thread, in.TenantID, in.UserID, nil, UserMessage{Text: "ทดสอบ"}, nil); err != nil {
+			e.t.Fatal(err)
+		}
 	}
-	return body["thread"].(map[string]any)["id"].(string)
+	e.t.Fatal("no new chat after six tries")
+	return ""
 }
 
 func (e *testEnv) chats(in Install) []map[string]any {
@@ -52,8 +70,10 @@ func TestAChatIsNamedForItsRoundRenamedAndPinned(t *testing.T) {
 	in := e.install()
 	tid := e.newChat(in)
 	list := e.chats(in)
-	if len(list) != 2 || chatTitled(list, "main")["title"] != "แชทแรก" || !strings.HasPrefix(chatTitled(list, tid)["title"].(string), "แชทใหม่") {
-		t.Fatalf("before any round a chat is named for when it began: %v", list)
+	// AM11b: an empty chat is "แชทใหม่", with no date (there is one at a time); the first chat, which has
+	// words in it now, is named for them
+	if len(list) != 2 || chatTitled(list, "main")["title"] != "ทดสอบ" || chatTitled(list, tid)["title"] != "แชทใหม่" {
+		t.Fatalf("before any round a chat is named for what is in it: %v", list)
 	}
 	// a round names the chat by its period
 	run := e.finishedRun(in, "2026-09", "")
