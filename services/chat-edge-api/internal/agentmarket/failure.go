@@ -36,21 +36,15 @@ type Failure struct {
 	What     PersonText   `json:"what"`
 	Next     PersonText   `json:"next"`
 	Files    PersonText   `json:"files"`
-	Charged  PersonText   `json:"charged"`
-	Credits  float64      `json:"credits"`
 	CanRetry bool         `json:"can_retry"`
 	Failed   []PersonText `json:"failed_checks,omitempty"`
 }
 
 // FailureFacts is what the four sentences depend on besides the reason.
 type FailureFacts struct {
-	Kind string // the run's kind
-	// Credits is what the round is still charged after it ended: nothing,
-	// unless an earlier pass of the same round was delivered (a document
-	// brought back into a finished round, whose second pass then failed).
-	Credits  float64
-	HasFiles bool // the round has files of the person's that a retry can use
-	KeepDays int  // how long a failed round's files are kept (0 = unknown)
+	Kind     string // the run's kind
+	HasFiles bool   // the round has files of the person's that a retry can use
+	KeepDays int    // how long a failed round's files are kept (0 = unknown)
 	// FailedChecks are the quality gate's failed checks, in the package's own
 	// Thai words ("รายงาน: หัวข้อครบทุกส่วน").
 	FailedChecks []string
@@ -97,7 +91,7 @@ var failureCopies = map[string]failureCopy{
 	"engine_missing":      {"รุ่นของ agent ที่ติดตั้งไว้ไม่มีในระบบแล้ว", "อัปเกรดเป็นรุ่นใหม่ในหน้าตั้งค่าของ agent แล้วกด “ลองใหม่ด้วยไฟล์เดิม”", true},
 	"no_period":           {"หางวด (เดือน) ของข้อมูลในไฟล์ไม่เจอ", "ส่งไฟล์ที่มีคอลัมน์วันที่ หรือพิมพ์บอกงวด เช่น “ปิดงบเดือนกันยายน 2569”", false},
 	"too_many_rounds":     {"คำตอบกับไฟล์ในรอบนี้ยังขัดกันอยู่หลายครั้ง จึงหยุดไว้ก่อน", "ตรวจคำตอบในการ์ดคำถาม แล้วกด “ลองใหม่ด้วยไฟล์เดิม”", true},
-	"budget_exhausted":    {"งบเครดิตของ agent นี้สำหรับเดือนนี้หมดแล้ว รอบนี้จึงหยุดไว้", "ขอเพิ่มงบจากผู้ดูแล Agent Market แล้วกด “ลองใหม่ด้วยไฟล์เดิม” แชทปกติยังใช้ได้ตามเดิม", true},
+	"budget_exhausted":    {"งบของ agent นี้สำหรับเดือนนี้หมดแล้ว รอบนี้จึงหยุดไว้", "ขอเพิ่มงบจากผู้ดูแล Agent Market แล้วกด “ลองใหม่ด้วยไฟล์เดิม” แชทปกติยังใช้ได้ตามเดิม", true},
 	"self_test_seed":      {"เตรียมข้อมูลตัวอย่างสำหรับทดสอบไม่สำเร็จ", "กดทดสอบกับข้อมูลตัวอย่างอีกครั้งในหน้าตั้งค่า ถ้ายังไม่สำเร็จให้กด “แจ้งปัญหา”", false},
 	"bad_format":          {"ชนิดไฟล์ที่ขอยังสร้างให้ไม่ได้", "เลือกชนิดไฟล์อื่นจาก “ขอไฟล์เพิ่ม”", false},
 	"internal_error":      {"ระบบของ agent หยุดทำงานกลางรอบนี้", nextRetry, true},
@@ -136,7 +130,7 @@ func FailureFor(reason string, facts FailureFacts) Failure {
 		what = FromPackage(facts.GateWhat, Text("งานของรอบนี้ยังไม่ผ่านเกณฑ์ของ agent และยังไม่ได้ส่งไฟล์ให้"))
 		next = FromPackage(facts.GateNext, Text(nextFixed))
 	}
-	f := Failure{Reason: reason, What: what, Next: next, Credits: facts.Credits}
+	f := Failure{Reason: reason, What: what, Next: next}
 	f.CanRetry = c.retry && facts.HasFiles && facts.Kind == KindRun
 	if !f.CanRetry && c.retry {
 		// nothing of the person's to try again with (a self-test, a follow-up job)
@@ -162,18 +156,15 @@ func FailureFor(reason string, facts FailureFacts) Failure {
 	default:
 		f.Files = Text("ไฟล์ที่ส่งมาในรอบนี้และผลงานของรอบก่อน ๆ ยังอยู่ครบ")
 	}
-	// AM6: a round that delivered nothing is charged nothing
-	f.Charged = Text("รอบนี้ไม่คิดเครดิต เพราะยังไม่ได้ส่งงานให้")
-	if facts.Credits > 0 {
-		f.Charged = Text("ครั้งนี้ไม่คิดเครดิต เพราะยังไม่ได้ส่งงานให้ ส่วน %s เครดิตที่คิดไปแล้วเป็นของไฟล์ชุดที่ส่งให้ก่อนหน้านี้", Credits(facts.Credits))
-	}
+	// AM6: a round that delivered nothing is charged nothing. AM11b: that is accounting, not screen text —
+	// a person using an agent is told nothing of credits; the admin's Spend page has it.
 	return f
 }
 
 // Text is the failure as one paragraph (a thread item's text; the web shows
-// the four parts on the chat's failed-turn card).
+// the three parts on the chat's failed-turn card).
 func (f Failure) Text() PersonText {
-	return Text("%s — %s %s %s", Words(f.What), Words(f.Next), Words(f.Files), Words(f.Charged))
+	return Text("%s — %s %s", Words(f.What), Words(f.Next), Words(f.Files))
 }
 
 // ── a round that finished with its gate open (AM6) ───────────────────────
@@ -181,19 +172,16 @@ func (f Failure) Text() PersonText {
 // Completion is a round that delivered its work while its package's gate did
 // not pass, as a person reads it: not an error.
 type Completion struct {
-	Code    string     `json:"code"` // the gate's code; the web never shows it
-	Title   PersonText `json:"title"`
-	What    PersonText `json:"what"`
-	Next    PersonText `json:"next"`
-	Files   PersonText `json:"files"`
-	Charged PersonText `json:"charged"`
-	Credits float64    `json:"credits"`
+	Code  string     `json:"code"` // the gate's code; the web never shows it
+	Title PersonText `json:"title"`
+	What  PersonText `json:"what"`
+	Next  PersonText `json:"next"`
+	Files PersonText `json:"files"`
 }
 
 // CompletionFacts is what the sentences depend on besides the gate's code.
 type CompletionFacts struct {
-	Credits  float64 // what the round was charged
-	KeepDays int     // how long the round's own files are kept (0 = unknown)
+	KeepDays int // how long the round's own files are kept (0 = unknown)
 	// GateWhat and GateNext are the package's own sentences, read from its
 	// computed table.
 	GateWhat string
@@ -234,28 +222,19 @@ func GateWords(passed bool, code, what, next string) (PersonText, PersonText) {
 // CompletionFor builds what a person reads. It takes the gate's code, the
 // package's sentences and facts about the round — never an error.
 func CompletionFor(code string, facts CompletionFacts) Completion {
-	c := Completion{Code: code, Title: CompletionTitle(code), Credits: facts.Credits,
+	c := Completion{Code: code, Title: CompletionTitle(code),
 		What: FromPackage(facts.GateWhat, openWhat(code)), Next: FromPackage(facts.GateNext, Text(nextDraft))}
 	c.Files = Text("ไฟล์ของรอบนี้ส่งให้แล้วเป็นฉบับร่าง มีคำว่า “ร่าง” กำกับบนหน้าแรก ไฟล์ที่ส่งมาและผลงานของรอบก่อน ๆ ยังอยู่ครบ")
 	if facts.KeepDays > 0 {
 		c.Files = Text("ไฟล์ของรอบนี้ส่งให้แล้วเป็นฉบับร่าง มีคำว่า “ร่าง” กำกับบนหน้าแรก ไฟล์ที่ส่งมาในรอบนี้ยังอยู่ครบและเก็บไว้ให้อีก %s วัน "+
 			"ผลงานของรอบก่อน ๆ ไม่ถูกแตะต้อง", Count(facts.KeepDays))
 	}
-	switch {
-	case facts.Credits <= 0:
-		c.Charged = Text("รอบนี้ไม่ได้ใช้เครดิต")
-	case code == GateNotTied:
-		c.Charged = Text("รอบนี้ใช้ไป %s เครดิต งานของรอบนี้เสร็จและส่งไฟล์ให้แล้ว จึงคิดเครดิตตามปกติ แม้ยอดจะยังไม่ลงตัว", Credits(facts.Credits))
-	default:
-		c.Charged = Text("รอบนี้ใช้ไป %s เครดิต งานของรอบนี้เสร็จและส่งไฟล์ให้แล้ว จึงคิดเครดิตตามปกติ แม้งานจะยังไม่ผ่านเกณฑ์ของ agent",
-			Credits(facts.Credits))
-	}
 	return c
 }
 
 // Text is the completion as one paragraph (a thread item's text).
 func (c Completion) Text() PersonText {
-	return Text("%s — %s %s %s %s", Words(c.Title), Words(c.What), Words(c.Next), Words(c.Files), Words(c.Charged))
+	return Text("%s — %s %s %s", Words(c.Title), Words(c.What), Words(c.Next), Words(c.Files))
 }
 
 // ── the list of AM5 ──────────────────────────────────────────────────────

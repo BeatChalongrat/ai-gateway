@@ -59,7 +59,7 @@ describe("OutputsCard with a filled template", () => {
     render(<OutputsCard outputs={outputs} />);
     // AM4: folded for a member — trust signals, not daily reading
     expect(screen.queryByText("เปิดไฟล์ตรวจซ้ำ ผ่านทุกเรื่อง")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "รายละเอียดการตรวจ เครดิต และโมเดล" }));
+    fireEvent.click(screen.getByRole("button", { name: "รายละเอียดการตรวจ และโมเดล" }));
     expect(screen.getByText("เปิดไฟล์ตรวจซ้ำ ผ่านทุกเรื่อง")).toBeTruthy();
     expect(screen.getByText("เติมค่าลงแบบฟอร์มได้")).toBeTruthy();
     expect(screen.getByText("คำนวณสูตรในแบบฟอร์มใหม่")).toBeTruthy();

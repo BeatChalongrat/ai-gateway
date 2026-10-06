@@ -401,7 +401,7 @@ func (s *Store) fireOne(ctx context.Context, now time.Time, failed []uuid.UUID, 
 		if m.WaitingRunID != nil {
 			var closed bool
 			closed, err = s.closeWaitingRound(ctx, tx, *m.WaitingRunID, "reminder_next_period",
-				Text("มีรอบใหม่ของงวดถัดไปแล้ว รอบของงวด %s ที่ยังไม่ได้รับไฟล์จึงปิดไว้ ไม่คิดเครดิต ส่งไฟล์ของงวดนั้นมาเมื่อไรก็เริ่มรอบใหม่ได้",
+				Text("มีรอบใหม่ของงวดถัดไปแล้ว รอบของงวด %s ที่ยังไม่ได้รับไฟล์จึงปิดไว้ ส่งไฟล์ของงวดนั้นมาเมื่อไรก็เริ่มรอบใหม่ได้",
 					ReminderPeriod(strOr(m.FiredPeriod))))
 			if closed {
 				cancelled = 1
@@ -592,7 +592,7 @@ func (s *Store) openReminderRound(ctx context.Context, tx pgx.Tx, m Reminder, pe
 		Question: Text("ถึงเวลา%s %s แล้ว ส่งไฟล์ของงวดนี้มาได้เลย รอบนี้จะเริ่มเมื่อได้รับไฟล์", Name(m.Label), label).In(l),
 		Options: []Option{
 			{Label: T(l, "รอก่อน จะอัปโหลดให้"), Description: T(l, "รอบนี้รอไฟล์อยู่ และจะเริ่มเมื่อได้รับไฟล์"), Value: json.RawMessage(`"wait"`)},
-			{Label: T(l, "ยกเลิกรอบนี้"), Description: T(l, "ปิดรอบนี้ไว้ก่อน ไม่คิดเครดิต"), Value: json.RawMessage(`"cancel"`)},
+			{Label: T(l, "ยกเลิกรอบนี้"), Description: T(l, "ปิดรอบนี้ไว้ก่อน"), Value: json.RawMessage(`"cancel"`)},
 		},
 		Default: json.RawMessage(`"wait"`), DefaultLabel: T(l, "รอก่อน จะอัปโหลดให้"), Request: req}
 	qs, _ := json.Marshal([]Question{q})
@@ -604,8 +604,7 @@ func (s *Store) openReminderRound(ctx context.Context, tx pgx.Tx, m Reminder, pe
 	rid := run.ID
 	for _, item := range []ItemPayload{
 		Progress{RunID: run.ID.String(), Kind: KindRun, Status: RunAwaitingInput, Outcome: RunAwaitingInput, Reason: "reminder_waiting_files"},
-		AgentText{Text: Text("ถึงเวลา%s %s แล้ว — การเตือนที่ตั้งไว้ (%s) เปิดรอบนี้รอไฟล์ไว้ให้ ยังไม่มีอะไรทำงานจนกว่าคุณจะส่งไฟล์ "+
-			"รอบนี้ยังไม่ใช้เครดิต", Name(m.Label), label, Words(m.Rule.Text())), RunID: run.ID.String()},
+		AgentText{Text: Text("ถึงเวลา%s %s แล้ว — การเตือนที่ตั้งไว้ (%s) เปิดรอบนี้รอไฟล์ไว้ให้ ยังไม่มีอะไรทำงานจนกว่าคุณจะส่งไฟล์", Name(m.Label), label, Words(m.Rule.Text())), RunID: run.ID.String()},
 		CardItemPayload(card, NoText, NoText),
 	} {
 		if _, _, err := s.AddItem(ctx, tx, in.ID, in.TenantID, in.UserID, &rid, item, nil); err != nil {
@@ -952,7 +951,7 @@ func (a *API) skipReminder(w http.ResponseWriter, r *http.Request) {
 		period := cur.Rule.PeriodOf(cur.NextDueAt)
 		if cur.Waiting && cur.FiredPeriod != nil {
 			closed, err := a.store.closeWaitingRound(ctx, tx, *cur.WaitingRunID, "reminder_skipped",
-				Text("ข้ามงวด %s ตามที่คุณเลือก รอบที่รอไฟล์อยู่จึงปิดไว้ ไม่คิดเครดิต", ReminderPeriod(*cur.FiredPeriod)))
+				Text("ข้ามงวด %s ตามที่คุณเลือก รอบที่รอไฟล์อยู่จึงปิดไว้", ReminderPeriod(*cur.FiredPeriod)))
 			if err != nil {
 				return err
 			}

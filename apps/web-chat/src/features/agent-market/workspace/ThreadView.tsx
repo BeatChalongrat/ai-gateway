@@ -333,7 +333,6 @@ function OpenRound({ c, runId }: { c: Completion; runId?: string }) {
     { id: "am-open-what", text: say(c.what), look: "mt-1 text-text-primary" },
     { id: "am-open-next", text: say(c.next), look: "mt-1 text-text-primary" },
     { id: "am-open-files", text: say(c.files), look: "mt-1.5 text-xs" },
-    { id: "am-open-charged", text: say(c.charged), look: "mt-0.5 text-xs" },
   ].filter((l) => !!l.text);
   return (
     <NoteCard data-testid="am-round-open" data-tone="open">
@@ -369,7 +368,6 @@ function FailedRound({ p }: { p: AgentTextPayload }) {
   const what = f ? say(f.what) || t("failed.generic") : say(p.text) || t("failed.generic");
   const next = f ? say(f.next) : "";
   const files = f ? say(f.files) : "";
-  const charged = f ? say(f.charged) : "";
   const runId = p.run_id;
   const retry = () => {
     if (!runId) return;
@@ -406,11 +404,6 @@ function FailedRound({ p }: { p: AgentTextPayload }) {
             {files ? (
               <p className="mt-1 pl-6 text-xs text-text-secondary" data-testid="am-failed-files">
                 {files}
-              </p>
-            ) : null}
-            {charged ? (
-              <p className="mt-0.5 pl-6 text-xs text-text-secondary" data-testid="am-failed-charged">
-                {charged}
               </p>
             ) : null}
             <div className="flex flex-wrap items-center gap-x-4 pl-6">

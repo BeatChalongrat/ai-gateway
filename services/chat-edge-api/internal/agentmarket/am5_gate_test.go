@@ -70,7 +70,7 @@ func TestTheManifestSaysItsGateAndWhoMaySignIt(t *testing.T) {
 
 func TestAGateThatDoesNotPassReadsAsThePackageSaidIt(t *testing.T) {
 	// AM6: the draft was delivered — a completed round that stays open, in the package's own sentences
-	c := CompletionFor("not_tied", CompletionFacts{KeepDays: 7, Credits: 3,
+	c := CompletionFor("not_tied", CompletionFacts{KeepDays: 7,
 		GateWhat: "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท", GateNext: "ขอรายการเดินบัญชีฉบับเต็มของงวดนี้จากธนาคาร"})
 	if c.What.String() != "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท" || c.Next.String() != "ขอรายการเดินบัญชีฉบับเต็มของงวดนี้จากธนาคาร" {
 		t.Fatalf("the package's own sentences: %q · %q", c.What, c.Next)
@@ -81,8 +81,9 @@ func TestAGateThatDoesNotPassReadsAsThePackageSaidIt(t *testing.T) {
 	if !strings.Contains(c.Files.String(), "ร่าง") || !strings.Contains(c.Files.String(), "7 วัน") {
 		t.Fatalf("the draft was delivered and the files are kept: %q", c.Files)
 	}
-	if c.Credits != 3 || !strings.Contains(c.Charged.String(), "3 เครดิต") || !strings.Contains(c.Charged.String(), "แม้ยอดจะยังไม่ลงตัว") {
-		t.Fatalf("what was charged, and that it is charged although it does not tie: %q", c.Charged)
+	// AM11b: what it was charged is accounting, not screen text — the person is told nothing of credits
+	if strings.Contains(c.Text().String(), "เครดิต") || strings.Contains(c.Text().In(English), "credit") {
+		t.Fatalf("a round that finished open names credits: %q", c.Text())
 	}
 	if !strings.HasPrefix(c.Text().String(), "เสร็จแล้ว · ยังไม่ลงตัว — ยังไม่ลงตัว ต่างกัน 21,435.00 บาท") {
 		t.Fatalf("the round's message starts with it: %q", c.Text())
@@ -108,7 +109,7 @@ func TestAGateThatDoesNotPassReadsAsThePackageSaidIt(t *testing.T) {
 	// and the same files are not offered again (they give the same verdict)
 	f := FailureFor("not_tied", FailureFacts{Kind: KindRun, HasFiles: true, KeepDays: 7,
 		GateWhat: "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท", GateNext: "ขอรายการเดินบัญชีฉบับเต็มของงวดนี้จากธนาคาร"})
-	if f.What.String() != "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท" || f.CanRetry || f.Credits != 0 || !strings.Contains(f.Charged.String(), "ไม่คิดเครดิต") {
+	if f.What.String() != "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท" || f.CanRetry || strings.Contains(f.Text().String(), "เครดิต") || strings.Contains(f.Text().In(English), "credit") {
 		t.Fatalf("%+v", f)
 	}
 	// a round that does not tie is not among the failures any more

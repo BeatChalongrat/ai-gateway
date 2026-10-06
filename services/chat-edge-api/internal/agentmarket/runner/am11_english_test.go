@@ -87,15 +87,15 @@ func TestTheProgressCardIsWrittenInTheRunsLanguage(t *testing.T) {
 }
 
 func TestAFailureAndACompletionAreWrittenInTheRunsLanguage(t *testing.T) {
-	// a failure: the reason's own sentences, the files' fate, the charge
+	// a failure: the reason's own sentences and the files' fate (AM11b: nothing of the charge)
 	facts := am.FailureFacts{Kind: am.KindRun, HasFiles: true, KeepDays: 7}
 	f := am.FailureFor("compute_failed", facts)
 	const thai = "คำนวณจากไฟล์ที่ส่งมาไม่สำเร็จ — กด “ลองใหม่ด้วยไฟล์เดิม” ได้เลย ถ้ายังไม่สำเร็จอีกให้กด “แจ้งปัญหา” ผู้ดูแลจะเห็นรอบนี้พร้อมขั้นตอนที่หยุด " +
-		"ไฟล์ที่ส่งมาในรอบนี้ยังอยู่ครบและเก็บไว้ให้อีก 7 วัน ผลงานของรอบก่อน ๆ ไม่ถูกแตะต้อง รอบนี้ไม่คิดเครดิต เพราะยังไม่ได้ส่งงานให้"
+		"ไฟล์ที่ส่งมาในรอบนี้ยังอยู่ครบและเก็บไว้ให้อีก 7 วัน ผลงานของรอบก่อน ๆ ไม่ถูกแตะต้อง"
 	item := am.AgentText{Text: f.Text(), Tone: "error", Failure: &f}
 	var th, en struct {
 		Text    string
-		Failure struct{ What, Next, Files, Charged string }
+		Failure struct{ What, Next, Files string }
 	}
 	_ = json.Unmarshal([]byte(written(t, am.Thai, item)), &th)
 	_ = json.Unmarshal([]byte(written(t, am.English, item)), &en)
@@ -104,7 +104,7 @@ func TestAFailureAndACompletionAreWrittenInTheRunsLanguage(t *testing.T) {
 	}
 	if hasThai(en.Text) || !strings.HasPrefix(en.Text, "The calculation from the files you sent could not be completed — Press “Try again with the same files”.") ||
 		!strings.Contains(en.Text, "“Try again with the same files”") || !strings.Contains(en.Text, "7 days") ||
-		en.Failure.What == "" || en.Failure.Next == "" || en.Failure.Files == "" || en.Failure.Charged == "" || hasThai(en.Failure.Charged) {
+		en.Failure.What == "" || en.Failure.Next == "" || en.Failure.Files == "" || strings.Contains(strings.ToLower(en.Text), "credit") || strings.Contains(th.Text, "เครดิต") {
 		t.Fatalf("an English run's failure:\n%s\n%+v", en.Text, en.Failure)
 	}
 	// the checks that did not pass are said in the run's language, the file's kind and all
@@ -120,12 +120,12 @@ func TestAFailureAndACompletionAreWrittenInTheRunsLanguage(t *testing.T) {
 		}
 	}
 	// a run that finished with its gate open
-	c := am.CompletionFor(am.GateNotTied, am.CompletionFacts{Credits: 1134.58, KeepDays: 7})
+	c := am.CompletionFor(am.GateNotTied, am.CompletionFacts{KeepDays: 7})
 	if got := c.Text().In(am.Thai); !strings.HasPrefix(got, "เสร็จแล้ว · ยังไม่ลงตัว — งบกระทบยอดยังไม่ลงตัว ยอดหลังปรับปรุงของธนาคารและของบัญชียังไม่เท่ากัน ") ||
-		!strings.Contains(got, "รอบนี้ใช้ไป 1,134.58 เครดิต") {
+		strings.Contains(got, "เครดิต") {
 		t.Fatalf("a Thai run's completion changed: %s", got)
 	}
-	if got := c.Text().In(am.English); hasThai(got) || !strings.HasPrefix(got, "Finished · not reconciled — ") || !strings.Contains(got, "1,134.58 credits") ||
+	if got := c.Text().In(am.English); hasThai(got) || !strings.HasPrefix(got, "Finished · not reconciled — ") || strings.Contains(got, "credit") ||
 		!strings.Contains(got, "Draft") {
 		t.Fatalf("an English run's completion: %s", got)
 	}

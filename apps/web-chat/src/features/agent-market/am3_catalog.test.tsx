@@ -150,12 +150,14 @@ describe("the agent's page, for a stranger", () => {
     expect(models[0]!.textContent).toContain("qwen3.8-27b-fp8");
     expect(within(models[0]!).getByTestId("am-model-where").textContent).toBe("ทำงานในองค์กร");
     expect(within(models[1]!).getByTestId("am-model-where").textContent).toBe("ผู้ให้บริการภายนอก");
-    const cost = within(before).getByTestId("am-cost").textContent ?? "";
-    expect(cost).toContain("2,400 เครดิต"); // the real sample run
-    expect(cost).toContain("≈ 0.03 บาท"); // 2400 / 3,000,000 × 35
-    expect(cost).toContain("42 วินาที");
-    expect(cost).toContain("5 รอบ"); // the organisation's own median (≥ 3 runs)
-    expect(cost).toContain("1 นาทีต่อหน้า");
+    // AM11b: how long a run takes — the time, and only the time. No credits, no baht.
+    expect(within(before).queryByTestId("am-cost")).toBeNull();
+    const time = within(before).getByTestId("am-time").textContent ?? "";
+    expect(time).toContain("42 วินาที"); // the real sample run
+    expect(time).toContain("5 รอบ"); // the organisation's own median (≥ 3 runs)
+    expect(time).toContain("1 นาทีต่อหน้า");
+    expect(time).not.toMatch(/เครดิต|บาท|credit|baht|THB|฿/i);
+    expect(before.textContent).not.toMatch(/เครดิต|credit/i);
     // the install button is inside the same box, after the models
     // AM4: one click with the recommended settings, the step-by-step wizard one link away
     expect(within(before).getByTestId("am-detail-install").textContent).toContain("ใช้ค่าแนะนำทั้งหมด");

@@ -25,7 +25,6 @@ import { useAmLocale, useAmT, type AmKey, type AmT } from "../i18n";
 import {
   DASH,
   elapsedBetween,
-  formatCredits,
   formatDateTime,
   formatDuration,
   formatMoney,
@@ -445,10 +444,6 @@ function Overview({ data, computed, steps }: { data: RunDetail; computed: Comput
           ))}
         </ol>
         <p className="mt-4 rounded-lg bg-bg-base px-3 py-2.5 text-xs leading-relaxed text-text-secondary">{t("run.scriptNote")}</p>
-        <p className="mt-3 text-xs text-text-muted">
-          {t("run.credits", { n: formatCredits(run.credits_spent ?? 0) })}
-          {data.budget ? ` · ${t("run.budget", { credits: formatCredits(data.budget.credits), spent: formatCredits(data.budget.spent_this_month) })}` : null}
-        </p>
       </Card>
 
       <div className="order-1 flex min-w-0 flex-col gap-4 lg:order-2">
@@ -592,7 +587,6 @@ function StepRow({ s }: { s: Step }) {
     s.attempt && s.attempt > 1 ? t("step.attempt", { n: String(s.attempt) }) : null,
     s.script_id ? scriptLabel(s.script_id, t) : null,
     s.model_id || null,
-    s.credits ? t("step.credits", { n: formatCredits(s.credits) }) : null,
   ].filter(Boolean) as string[];
   return (
     <li className="rounded-xl border border-border bg-bg-surface px-4 py-3" data-testid="am-run-step" data-step-status={status}>

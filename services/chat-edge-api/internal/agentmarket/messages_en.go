@@ -55,7 +55,7 @@ var userMessagesEn = map[string]string{
 	"NOT_REVIEWABLE":           "Review and sign-off is not possible because {why} — {next}. The review has not been recorded.",
 	"CANNOT_REVIEW":            "This link allows viewing only, not reviewing — ask the owner of the run to share it again with “Allow them to review and sign off” ticked. Nothing has been saved.",
 	"EMPTY_PROBLEM":            "You have not said what happened yet — type one short sentence and send again. Nothing has been sent.",
-	"BUDGET_STILL_EXHAUSTED":   "The credit budget {which} is still used up for this month — ask {contact} for an increase. This run will wait here. Your files and the answers you gave are all still here.",
+	"BUDGET_STILL_EXHAUSTED":   "The budget {which} is still used up for this month — ask {contact} for an increase. This run will wait here. Your files and the answers you gave are all still here.",
 	"NOT_BUDGET_PARKED":        "This run is no longer waiting for budget — reload this page to see its current status. Nothing was changed.",
 	"BAD_BUDGET":               "A budget must be a number of credits that is not negative (or left blank to use the default) — correct it and save again. The previous value was not changed.",
 	"BAD_ACCESS":               "Access must be Off, Listed people only or Everyone in the organisation — choose again. Nothing was changed.",

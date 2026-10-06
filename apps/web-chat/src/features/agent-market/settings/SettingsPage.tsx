@@ -21,7 +21,7 @@ import { Button, ButtonLink } from "@/components/ui/Button";
 
 import { AmError, amApi, errorMessage } from "../api";
 import { useAmLocale, useAmT, type AmKey, type AmT } from "../i18n";
-import { formatCredits, formatDateTime, formatMoney, formatMoney2 } from "../format";
+import { formatDateTime, formatMoney, formatMoney2 } from "../format";
 import type { DeclaredSetting, Default, InstallDetail, Manifest, ThemePreset } from "../types";
 import { BackLink, cls, ErrorPanel, FeatureGate, PageShell, PageSkeleton, Pill } from "../ui";
 import { notifyInstallsChanged } from "../useAgentMarket";
@@ -203,9 +203,6 @@ function Settings({ installId }: { installId: string }) {
           <span>{t("ws.dashboard")}</span>
         </ButtonLink>
       </div>
-      <p className="mt-3 text-sm text-text-secondary" data-testid="am-budget">
-        {t("settings.budget", { spent: formatCredits(detail.budget?.spent_this_month ?? 0), credits: formatCredits(detail.budget?.credits ?? 0) })}
-      </p>
 
       <section className="mt-6" aria-labelledby="am-remembered">
         <h2 id="am-remembered" className="text-sm font-semibold text-text-primary">

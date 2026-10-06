@@ -69,6 +69,7 @@ export default function ChatLayout({
     }
     mainRef.current?.focus();
   }, [pathname]);
+  const inAgentRoom = pathname?.startsWith("/chat/agents") ?? false;
   const pageLabel = pathname?.startsWith("/chat/knowledge")
     ? t("menu.knowledgeBase")
     : pathname?.startsWith("/chat/projects")
@@ -279,7 +280,11 @@ export default function ChatLayout({
             the chat area, above the composer. Positions itself
             absolutely against this relative <main>; the panel opens
             upward from the pill. */}
-        <CreditBadge />
+        {/* AM11b: not in an agent's room (/chat/agents…). A person using an
+            agent sees no credits: what an agent's run costs is the admin's
+            business, and this pill — the chat's own balance, which agents do
+            not draw on — reads as the price of what is on the page. */}
+        {inAgentRoom ? null : <CreditBadge />}
       </main>
 
       <ShortcutsDialog

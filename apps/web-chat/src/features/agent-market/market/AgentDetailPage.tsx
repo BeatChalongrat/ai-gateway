@@ -26,7 +26,7 @@ import { AgentTile, BackLink, Card, CheckLine, ErrorPanel, FeatureGate, PageShel
 import { useAgentMarket } from "../useAgentMarket";
 import { runHref, workspaceHref } from "../workspace/context";
 import { formatsLabel } from "./MarketPage";
-import { CostLines, ModelList, ScopeLine, useDatasheet, useSample } from "./trust";
+import { ModelList, ScopeLine, TimeLines, useDatasheet, useSample } from "./trust";
 
 const DENY_KEYS = new Set(["email_send", "accounting_write", "external_share", "payment", "computer_use", "schedule"]);
 
@@ -308,7 +308,7 @@ function Detail({ slug }: { slug: string }) {
             </div>
             <h2 className="mt-5 text-sm font-semibold text-text-primary">{t("guide.cost")}</h2>
             <div className="mt-1.5">
-              <CostLines manifest={m} sample={item.sample ?? sample?.sample} stats={item.stats} pricing={snap.pricing} />
+              <TimeLines manifest={m} sample={item.sample ?? sample?.sample} stats={item.stats} />
             </div>
             <div className="mt-5 flex flex-col gap-2">
               {installed ? (

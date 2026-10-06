@@ -805,7 +805,7 @@ func BuildDatasheet(l Lang, d Definition, caps map[string]Binding, status string
 	ds.Isolation = []string{
 		T(l, "ทุกขั้นตอนทำงานในกล่องแยก (sandbox) ที่ไม่มีเครือข่าย ออกอินเทอร์เน็ตไม่ได้"),
 		T(l, "ตัวแปลง PDF อยู่ในเครือข่ายภายในที่ไม่มีทางออกไปภายนอก"),
-		T(l, "agent ใช้กุญแจ API ของตัวเอง แยกจากแชท และมีงบเครดิตของตัวเอง"),
+		T(l, "agent ใช้กุญแจ API ของตัวเอง แยกจากแชท"),
 	}
 	ds.Runner = map[string]any{}
 	return ds, nil

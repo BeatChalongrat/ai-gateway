@@ -19,7 +19,7 @@ import { Spinner } from "@/components/ui/Spinner";
 
 import { AmError, amApi, errorMessage } from "../api";
 import { useAmLocale, useAmT, type AmKey } from "../i18n";
-import { DASH, formatCredits, formatDate, formatDateTime, formatInt } from "../format";
+import { formatDate, formatDateTime, formatInt } from "../format";
 import { COMPLETED_OPEN, NOT_TIED, outcomeKey } from "../outcome";
 import type { AgentDashboard, InstallDetail } from "../types";
 import { BackLink, Card, cls, ErrorPanel, FeatureGate, PageShell, PageSkeleton, Pill } from "../ui";
@@ -129,8 +129,7 @@ function Dashboard({ installId }: { installId: string }) {
   // AM6: a server that counts rounds finished open sends failures without them
   const counted = typeof data.runs.completed_open === "number";
   const failed = counted ? data.runs.failed ?? 0 : data.runs.by_status?.failed ?? 0;
-  const notCharged = data.spend.cost_not_charged ?? 0;
-  const perDoc = data.spend.per_document ?? data.spend.per_succeeded_run;
+  // AM11b: what the agent spends is not on a person's dashboard — cost is the admin's (admin app › Spend)
   // AM11: a code is the engine's name for a thing, never what a person reads — the feature's own
   // label for the code, else the words the server sends with the row, else a row that says it is one
   // the page has no words for
@@ -219,17 +218,7 @@ function Dashboard({ installId }: { installId: string }) {
               sub={data.waiting.open_exceptions ? t("dash.oldest", { age: formatSeconds(data.waiting.oldest_exception_s, t) }) : t("dash.nothingWaiting")}
               tone={data.waiting.open_exceptions ? "warning" : null}
             />
-            <Tile
-              label={data.spend.per_document !== null ? t("dash.kpi.perDoc") : t("dash.kpi.perRun")}
-              value={perDoc === null ? DASH : formatCredits(perDoc)}
-              sub={t("dash.kpi.spendSub", { credits: formatCredits(data.spend.credits), budget: formatCredits(data.spend.budget_credits) })}
-            />
           </div>
-          {notCharged > 0 ? (
-            <p className="mt-2 text-xs text-text-muted" data-testid="am-dash-not-charged">
-              {t("dash.costNotCharged", { credits: formatCredits(notCharged) })}
-            </p>
-          ) : null}
 
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
             <Card>

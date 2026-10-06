@@ -879,13 +879,13 @@ func TestAM12TheSampleOfAnAgentOnTheWebIsNoBasisForWhatARunCosts(t *testing.T) {
 		t.Fatal(err)
 	}
 	// the sample IS what the store would go by for any agent …
-	if est, err := e.store.EstimateFor(ctx, e.api.cfg, in.OrgID, webSlug, false); err != nil || est.Basis != EstimateSample || est.Credits == nil {
+	if est, err := e.store.EstimateFor(ctx, in.OrgID, webSlug); err != nil || est.Basis != EstimateSample || est.Seconds == nil {
 		t.Fatalf("the store's own estimate, from the sample: %+v %v", est, err)
 	}
 	// … and is not what the workspace of an agent on the web is told
 	out := e.mustDo(200, "GET", "/installs/"+in.ID.String()+"/estimate", nil)
 	line, _ := out["line"].(string)
-	if out["basis"] != "none" || out["credits"] != nil || out["seconds"] != nil || !strings.HasPrefix(line, "ยังไม่มีข้อมูลค่าใช้จ่ายของ agent นี้") {
+	if out["basis"] != "none" || out["seconds"] != nil || line != "" {
 		t.Fatalf("an agent on the web, with a sample and no run of its own: %v", out)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -154,7 +155,7 @@ func visible(t *testing.T, kind string, payload json.RawMessage) []string {
 	}
 	out := []string{p.Text}
 	if p.Failure != nil {
-		out = append(out, p.Failure.What, p.Failure.Next, p.Failure.Files, p.Failure.Charged)
+		out = append(out, p.Failure.What, p.Failure.Next, p.Failure.Files)
 		out = append(out, p.Failure.Failed...)
 	}
 	for _, s := range p.Steps {
@@ -223,16 +224,16 @@ func TestAFailedRoundNeverShowsTheErrorItFailedWith(t *testing.T) {
 		}
 		text, f := lastFailure(t, e, run)
 		if f == nil {
-			t.Fatalf("%s: the failure has its four parts: %q", reason, text)
+			t.Fatalf("%s: the failure has its three parts: %q", reason, text)
 		}
-		for _, part := range []string{"what", "next", "files", "charged"} {
+		for _, part := range []string{"what", "next", "files"} {
 			if s, _ := f[part].(string); strings.TrimSpace(s) == "" {
 				t.Fatalf("%s: the failure says %q: %v", reason, part, f)
 			}
 		}
-		for _, part := range []string{"what", "next", "files", "charged"} {
+		for _, part := range []string{"what", "next", "files"} {
 			if !strings.Contains(text, f[part].(string)) {
-				t.Fatalf("%s: the message's text carries all four parts (%s missing): %q", reason, part, text)
+				t.Fatalf("%s: the message's text carries all three parts (%s missing): %q", reason, part, text)
 			}
 		}
 	}
@@ -248,8 +249,12 @@ func TestAFailedRoundSaysWhatItChargedAndThatTheFilesAreKept(t *testing.T) {
 	free := e.round(am.KindRun, true)
 	_ = e.r.fail(ctx, free, "parse_failed", errors.New(rawErrors[0]))
 	_, f := lastFailure(t, e, free)
-	if f["charged"] != "รอบนี้ไม่คิดเครดิต เพราะยังไม่ได้ส่งงานให้" || f["credits"].(float64) != 0 {
-		t.Fatalf("nothing was charged: %v", f)
+	// AM11b: nothing of credits is said to the person — and nothing was charged (the run's own figure)
+	if _, said := f["charged"]; said || f["credits"] != nil || strings.Contains(fmt.Sprint(f), "เครดิต") {
+		t.Fatalf("the failure names credits: %v", f)
+	}
+	if cur, err := e.store.RunByID(ctx, free.ID); err != nil || cur.CreditsSpent != 0 {
+		t.Fatalf("nothing was charged: %v %v", cur.CreditsSpent, err)
 	}
 	if f["can_retry"] != true || !strings.Contains(f["files"].(string), "ยังอยู่ครบ") || !strings.Contains(f["files"].(string), "7 วัน") {
 		t.Fatalf("the files are safe for 7 days and the round can be tried again with them: %v", f)
@@ -261,8 +266,8 @@ func TestAFailedRoundSaysWhatItChargedAndThatTheFilesAreKept(t *testing.T) {
 	_ = e.store.Charge(ctx, paid.InstallID, paid.ID, "k-compute", 11.5, "", nil)
 	_ = e.r.fail(ctx, paid, "render_failed", errors.New(rawErrors[0]))
 	_, f = lastFailure(t, e, paid)
-	if f["credits"].(float64) != 0 || f["charged"] != "รอบนี้ไม่คิดเครดิต เพราะยังไม่ได้ส่งงานให้" {
-		t.Fatalf("a round that delivered nothing is not charged: %v", f)
+	if cur, err := e.store.RunByID(ctx, paid.ID); err != nil || cur.CreditsSpent != 0 || strings.Contains(fmt.Sprint(f), "เครดิต") {
+		t.Fatalf("a round that delivered nothing is not charged, and its failure names no credits: %v %v %v", cur.CreditsSpent, err, f)
 	}
 	// a round without a file of the person's (a self-test) offers no "same files"
 	st := e.round(am.KindSelfTest, false)

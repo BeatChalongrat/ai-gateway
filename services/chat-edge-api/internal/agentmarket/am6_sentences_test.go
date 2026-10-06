@@ -250,30 +250,29 @@ func TestEveryMessageOfThePlatformReadsAsWrittenForAPerson(t *testing.T) {
 	}
 	// every failed round, every round that finished open
 	for _, reason := range append(FailureReasons(), "", "load", "some_reason_nobody_named") {
-		for _, facts := range []FailureFacts{{Kind: KindRun, HasFiles: true, KeepDays: 7}, {Kind: KindSelfTest}, {Kind: KindRun, Credits: 12.5, HasFiles: true},
+		for _, facts := range []FailureFacts{{Kind: KindRun, HasFiles: true, KeepDays: 7}, {Kind: KindSelfTest}, {Kind: KindRun, HasFiles: true},
 			{Kind: KindRun, HasFiles: true, FailedChecks: []string{"รายงาน: หัวข้อครบทุกส่วน", "PDF: แปลงเป็น PDF (ตัวแปลงเอกสารยังไม่พร้อม)"}}} {
 			f := FailureFor(reason, facts)
 			check("failure "+reason, f.Text().String())
-			for _, part := range []PersonText{f.What, f.Next, f.Files, f.Charged} {
+			for _, part := range []PersonText{f.What, f.Next, f.Files} {
 				check("failure "+reason, part.String())
 			}
 		}
 	}
 	for _, code := range []string{GateNotTied, "gate_not_passed", "stock_not_counted"} {
-		for _, facts := range []CompletionFacts{{Credits: 1134.58, KeepDays: 7, GateWhat: "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท",
+		for _, facts := range []CompletionFacts{{KeepDays: 7, GateWhat: "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท",
 			GateNext: "ขอรายการเดินบัญชีฉบับเต็มของงวดนี้จากธนาคาร"}, {}} {
 			c := CompletionFor(code, facts)
 			check("completion "+code, c.Text().String())
-			for _, part := range []PersonText{c.Title, c.What, c.Next, c.Files, c.Charged} {
+			for _, part := range []PersonText{c.Title, c.What, c.Next, c.Files} {
 				check("completion "+code, part.String())
 			}
 		}
 	}
-	// what a round costs, before it starts
-	c, thb, s := 1134.58, 39.71, 40.2
-	for _, e := range []Estimate{{}, {Credits: &c}, {Credits: &c, THB: &thb, Seconds: &s}} {
-		check("estimate", estimateLine(e, true).String())
-		check("estimate", estimateLine(e, false).String())
+	// how long a run takes, before it starts (AM11b: the time, and only the time)
+	short, long := 40.2, 260.0
+	for _, e := range []Estimate{{Seconds: &short}, {Seconds: &long}} {
+		check("estimate", estimateLine(e).String())
 	}
 	// notices
 	limit := 1000.0

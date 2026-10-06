@@ -29,7 +29,7 @@ export const am4Th = {
   "empty.needs": "ที่ต้องใช้",
 
   // where people upload
-  "upload.scanTip": "ถ้าเป็นเอกสารกระดาษ สแกนที่ 300 DPI อ่านได้แม่นกว่ารูปถ่ายจากมือถือเสมอ และไม่มีค่าใช้จ่ายเพิ่ม",
+  "upload.scanTip": "ถ้าเป็นเอกสารกระดาษ สแกนที่ 300 DPI อ่านได้แม่นกว่ารูปถ่ายจากมือถือเสมอ",
   "upload.notArchive": "ที่นี่ไม่ใช่ที่เก็บเอกสารของบริษัท — เก็บต้นฉบับไว้ตามเดิม ระบบเก็บสำเนาและหลักฐานว่าตัวเลขคำนวณจากไฟล์ใด",
   "upload.keepYears": "ไฟล์ของรอบที่สำเร็จเก็บ {years} ปีตามที่องค์กรกำหนด",
   "upload.infoLabel": "ไฟล์ที่ส่งเก็บไว้นานเท่าไร",
@@ -65,7 +65,7 @@ export const am4Th = {
   "intent.failed": "ส่งคำตอบไม่สำเร็จ",
 
   // the run panel: the one line that always shows, the rest folded for members
-  "outputs.details": "รายละเอียดการตรวจ เครดิต และโมเดล",
+  "outputs.details": "รายละเอียดการตรวจ และโมเดล",
   "outputs.seenBy": "เอกสารที่เป็นสแกนหรือรูปถ่ายอ่านโดย {model} ({where})",
   "outputs.seenNone": "ไม่มีโมเดลใดเห็นเอกสาร — ทุกค่าอ่านจากไฟล์และคำนวณด้วยสคริปต์",
   "outputs.writtenBy": "ไม่มีโมเดลใดเห็นไฟล์ต้นฉบับ · คำบรรยายเขียนโดย {model} ({where}) จากตารางที่คำนวณแล้ว",
@@ -143,7 +143,7 @@ export const am4En = {
   "empty.needs": "Needed",
 
   // where people upload
-  "upload.scanTip": "For paper documents, a 300 DPI scan always reads more accurately than a phone photo, at no extra cost.",
+  "upload.scanTip": "For paper documents, a 300 DPI scan always reads more accurately than a phone photo.",
   "upload.notArchive": "This is not your company's document archive — keep your originals where they are. The system keeps a copy, and the evidence of which file each figure was calculated from.",
   "upload.keepYears": "Files of successful runs are kept for {years} years, as the organisation requires",
   "upload.infoLabel": "How long the files you send are kept",
@@ -177,7 +177,7 @@ export const am4En = {
   "intent.failed": "Could not send your answer",
 
   // the run panel: the one line that always shows, the rest folded for members
-  "outputs.details": "Details of checks, credits and models",
+  "outputs.details": "Details of checks and models",
   "outputs.seenBy": "Scanned or photographed documents were read by {model} ({where})",
   "outputs.seenNone": "No model saw the documents — every value was read from the files and calculated by scripts",
   "outputs.writtenBy": "No model saw the original files · the commentary was written by {model} ({where}) from the calculated tables",

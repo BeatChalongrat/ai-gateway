@@ -788,11 +788,8 @@ func (r *Runner) endOpen(ctx context.Context, run am.Run, gate gateView) error {
 	// the verdict stays on the run's steps, for the run page
 	r.keepOnRun(bg, run, gate.Reason(), (&gateErr{gate: gate, draft: true}).Error())
 	r.logger().Info("run finished with its gate open", "run", run.ID, "gate", gate.Reason())
-	facts := am.CompletionFacts{Credits: run.CreditsSpent, KeepDays: int(orDefault(r.ScratchTTL, 7*24*time.Hour).Hours() / 24),
+	facts := am.CompletionFacts{KeepDays: int(orDefault(r.ScratchTTL, 7*24*time.Hour).Hours() / 24),
 		GateWhat: gate.What, GateNext: gate.Next}
-	if cur, e := r.Store.RunByID(bg, run.ID); e == nil {
-		facts.Credits = cur.CreditsSpent
-	}
 	c := am.CompletionFor(gate.Reason(), facts)
 	_ = r.Store.PostAgentText(bg, run, am.AgentText{Text: c.Text(), Tone: "open", Completion: &c})
 	if run.Kind == am.KindSelfTest {
@@ -804,14 +801,10 @@ func (r *Runner) endOpen(ctx context.Context, run am.Run, gate gateView) error {
 }
 
 // failure is the failed round as a person reads it: the reason's own
-// sentences, what the round is still charged now that it has ended (nothing,
-// unless an earlier pass of it was delivered), and whether its files can be
-// tried again.
+// sentences and whether its files can be tried again. (What it was charged is
+// the admin's to read, on the Spend page — AM11b.)
 func (r *Runner) failure(ctx context.Context, run am.Run, reason string, err error) am.Failure {
 	facts := am.FailureFacts{Kind: run.Kind, KeepDays: int(orDefault(r.ScratchTTL, 7*24*time.Hour).Hours() / 24), Lang: run.Lang()}
-	if cur, e := r.Store.RunByID(ctx, run.ID); e == nil {
-		facts.Credits = cur.CreditsSpent
-	}
 	if run.Kind == am.KindRun {
 		if files, e := r.Store.RunFiles(ctx, run.ID, "active"); e == nil && len(files) > 0 {
 			facts.HasFiles = true

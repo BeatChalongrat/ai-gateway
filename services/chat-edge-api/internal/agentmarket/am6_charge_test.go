@@ -217,7 +217,10 @@ func TestSigningARoundThatDoesNotTieSaysWhatItIs(t *testing.T) {
 	}
 }
 
-func TestTheCostIsSaidBeforeTheRoundStarts(t *testing.T) {
+// AM11b: a person using an agent never sees credits or baht. The line where a run starts is the time,
+// and only the time ("ราว 25 วินาที"); with nothing measured there is no line; and what the chat app is
+// sent carries no figure of cost at all. (AM6 said the cost here; the admin's Spend page has it.)
+func TestOnlyTheTimeIsSaidBeforeARunStarts(t *testing.T) {
 	e := newEnvCfg(t, func(c *Config) { c.CreditsPerUSD, c.THBPerUSD = 1000, 35 })
 	if e == nil {
 		return
@@ -225,19 +228,24 @@ func TestTheCostIsSaidBeforeTheRoundStarts(t *testing.T) {
 	ctx := context.Background()
 	in := e.installBank()
 	path := "/installs/" + in.ID.String() + "/estimate"
-	always := "คิดเครดิตเมื่องานเสร็จและส่งไฟล์ให้แล้ว"
-	free := "รอบที่ระบบขัดข้องไม่คิดเครดิต"
-	// nothing is known yet
+	noMoney := func(when string, out map[string]any) string {
+		t.Helper()
+		b, _ := json.Marshal(out)
+		for _, word := range []string{"credits", "thb", "เครดิต", "บาท", "credit", "cost", "THB"} {
+			if strings.Contains(string(b), word) {
+				t.Fatalf("%s: what the chat app is sent names %q: %s", when, word, b)
+			}
+		}
+		line, _ := out["line"].(string)
+		return line
+	}
+	// nothing is known yet: no line at all
 	out := e.mustDo(200, "GET", path, nil)
 	t.Logf("nothing known: %s", jsonOf(out))
-	if out["credits"] != nil || out["thb"] != nil || out["seconds"] != nil || out["basis"] != "none" || out["basis_runs"].(float64) != 0 {
+	if line := noMoney("nothing known", out); line != "" || out["seconds"] != nil || out["basis"] != "none" || out["basis_runs"].(float64) != 0 {
 		t.Fatalf("nothing known: %v", out)
 	}
-	line, _ := out["line"].(string)
-	if !strings.HasPrefix(line, "ยังไม่มีข้อมูลค่าใช้จ่ายของ agent นี้") || !strings.Contains(line, always) || !strings.Contains(line, free) {
-		t.Fatalf("the line when nothing is known: %q", line)
-	}
-	// the catalog's sample run
+	// the catalog's sample run (it was charged 800 credits — the admin's to know)
 	d, _ := e.store.DefinitionBySlug(ctx, "sran.bank-reconciliation")
 	sample, err := e.store.CreateCatalogSample(ctx, d, nil, 1)
 	if err != nil {
@@ -252,58 +260,47 @@ func TestTheCostIsSaidBeforeTheRoundStarts(t *testing.T) {
 	if err := e.store.Finish(ctx, sample.ID, "", RunSucceeded, ""); err != nil {
 		t.Fatal(err)
 	}
-	// two rounds of the organisation's own are not enough to go by
+	// two runs of the organisation's own are not enough to go by
 	e.endedRun(in, RunSucceeded, "", 30, 1000)
 	e.openRun(in, 40, 1134.58)
 	out = e.mustDo(200, "GET", path, nil)
 	t.Logf("the catalog's sample: %s", jsonOf(out))
-	if out["basis"] != "sample" || out["credits"].(float64) != 800 || out["thb"].(float64) != 28 || out["basis_runs"].(float64) != 1 {
-		t.Fatalf("the catalog's sample: %v", out)
+	if line := noMoney("the sample", out); line != "ราว 25 วินาที" || out["basis"] != "sample" || out["basis_runs"].(float64) != 1 {
+		t.Fatalf("the line from the sample: %q · %v", line, out)
 	}
 	if s := out["seconds"].(float64); s < 24 || s > 27 {
 		t.Fatalf("the sample's seconds: %v", s)
 	}
-	line, _ = out["line"].(string)
-	if !strings.HasPrefix(line, "รอบหนึ่งใช้ประมาณ 800 เครดิต (≈ 28.00 บาท) ราว 25 วินาที") || !strings.Contains(line, always) ||
-		!strings.Contains(line, "ไม่ว่ายอดจะลงตัวหรือไม่") || !strings.Contains(line, free) {
-		t.Fatalf("the line from the sample: %q", line)
-	}
-	// three delivered rounds — one of them did not tie — and rounds that delivered nothing are not counted
+	// three delivered runs — one of them did not tie — and runs that delivered nothing are not counted
 	e.endedRun(in, RunSucceeded, "", 50, 1200)
 	e.endedRun(in, RunFailed, "render_failed", 300, 90000)
 	e.endedRun(in, RunCancelled, "cancelled_by_user", 300, 90000)
 	out = e.mustDo(200, "GET", path, nil)
-	t.Logf("the organisation's own rounds: %s", jsonOf(out))
-	if out["basis"] != "own_runs" || out["basis_runs"].(float64) != 3 || out["credits"].(float64) != 1134.58 {
-		t.Fatalf("the organisation's own rounds: %v", out)
+	t.Logf("the organisation's own runs: %s", jsonOf(out))
+	line := noMoney("own runs", out)
+	if line != "ราว 40 วินาที" || out["basis"] != "own_runs" || out["basis_runs"].(float64) != 3 {
+		t.Fatalf("the line from the organisation's runs: %q · %v", line, out)
 	}
 	if s := out["seconds"].(float64); s < 39 || s > 42 {
-		t.Fatalf("the median round's seconds: %v", s)
-	}
-	if thb := out["thb"].(float64); thb < 39.70 || thb > 39.72 {
-		t.Fatalf("in baht: %v", thb)
-	}
-	line, _ = out["line"].(string)
-	if !strings.HasPrefix(line, "รอบหนึ่งใช้ประมาณ 1,130 เครดิต (≈ 39.71 บาท) ราว 40 วินาที") || !strings.Contains(line, always) || !strings.Contains(line, free) {
-		t.Fatalf("the line from the organisation's rounds: %q", line)
+		t.Fatalf("the median run's seconds: %v", s)
 	}
 	if technicalText(line) {
 		t.Fatalf("the line reads technical: %q", line)
 	}
-	// another organisation's rounds, and rounds older than 90 days, are not this organisation's estimate
+	// in English it is the time too, and nothing else
+	if code, en := e.do("GET", path, nil, "Accept-Language", "en"); code != 200 || en["line"] != "about 40 sec" {
+		t.Fatalf("the line on an English screen: %d %v", code, en["line"])
+	}
+	// another organisation's runs, and runs older than 90 days, are not this organisation's estimate
 	if _, err := e.store.Pool.Exec(ctx, `UPDATE agent_market.agent_runs SET created_at = now() - interval '120 days'
 		WHERE install_id = $1 AND kind = 'run'`, in.ID); err != nil {
 		t.Fatal(err)
 	}
 	if out = e.mustDo(200, "GET", path, nil); out["basis"] != "sample" {
-		t.Fatalf("rounds older than 90 days: %v", out)
+		t.Fatalf("runs older than 90 days: %v", out)
 	}
 	// someone else's install is not found
 	if code, _ := e.do("GET", path, nil, "X-Test-User", uuid.NewString()); code != 404 {
 		t.Fatalf("someone else's install: %d", code)
-	}
-	b, _ := json.Marshal(out)
-	if strings.Contains(string(b), "null,") && out["credits"] == nil {
-		t.Fatalf("a sample is known: %s", b)
 	}
 }

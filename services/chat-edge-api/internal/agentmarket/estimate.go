@@ -6,20 +6,22 @@ import (
 	"net/http"
 )
 
-// ── What a round costs, said before it starts (AM6) ──────────────────────
+// ── How long a run takes, said before it starts (AM6 · AM11b) ────────────
 //
-// AM5 charged 1,134.58 credits for a round that ended "ยังไม่ลงตัว", and the
-// person found out afterwards. The rule is now said where a round starts:
-// what a round of this agent usually costs, and when it is charged — when
-// the work is finished and its files delivered, whether or not the numbers
-// agree; never for a round the system failed.
+// AM6 put a line where a run starts: what a run of this agent usually costs,
+// how long it takes, and when it is charged. AM11b: a person using an agent
+// never sees credits or baht — what a run costs is the admin's business and
+// has its page (admin app › Agent Market › Spend). What is left is the reason
+// the line exists at all: waiting without knowing how long is unkind. So the
+// line is the time and nothing else ("ราว 20 วินาที"), and when nothing has
+// been measured there is no line.
 //
-// The figure is the median of the organisation's own delivered rounds of the
-// agent over the last 90 days (a round that finished with its gate open is a
-// delivered round) once there are three of them; until then the catalog's
+// The time is the median of the organisation's own delivered runs of the
+// agent over the last 90 days (a run that finished with its gate open is a
+// delivered run) once there are three of them; until then the catalog's
 // sample run; with neither, nothing is claimed.
 
-// MinEstimateRuns is how many delivered rounds of its own an organisation
+// MinEstimateRuns is how many delivered runs of its own an organisation
 // needs before its estimate comes from them.
 const MinEstimateRuns = 3
 
@@ -30,97 +32,55 @@ const (
 	EstimateNone    = "none"
 )
 
-// Estimate is what a round of an installed agent costs.
+// Estimate is how long a run of an installed agent takes. It carries no
+// figure of cost: this is what the chat app is sent.
 type Estimate struct {
-	Credits   *float64   `json:"credits"` // nil: nothing is known yet
-	THB       *float64   `json:"thb"`
-	Seconds   *float64   `json:"seconds"`
+	Seconds   *float64   `json:"seconds"` // nil: nothing is known yet
 	Basis     string     `json:"basis"`
 	BasisRuns int        `json:"basis_runs"`
-	Line      PersonText `json:"line"` // the one sentence the workspace shows before a round starts
+	Line      PersonText `json:"line"` // the one line the workspace shows before a run starts ("" when nothing is known)
 }
 
-const (
-	chargedWhen     = "คิดเครดิตเมื่องานเสร็จและส่งไฟล์ให้แล้ว"
-	chargedWhenOpen = "คิดเครดิตเมื่องานเสร็จและส่งไฟล์ให้แล้ว ไม่ว่ายอดจะลงตัวหรือไม่"
-	neverCharged    = "รอบที่ระบบขัดข้องไม่คิดเครดิต"
-)
-
-// EstimateFor measures one agent for one organisation. gated: the agent has a
-// completion gate, so a round of it can finish without its numbers agreeing.
-func (s *Store) EstimateFor(ctx context.Context, cfg Config, org, slug string, gated bool) (Estimate, error) {
+// EstimateFor measures one agent for one organisation.
+func (s *Store) EstimateFor(ctx context.Context, org, slug string) (Estimate, error) {
 	e := Estimate{Basis: EstimateNone}
 	var n int
-	var credits, secs *float64
+	var secs *float64
 	err := s.Pool.QueryRow(ctx, `
 		SELECT count(*)::int,
-			percentile_cont(0.5) WITHIN GROUP (ORDER BY r.credits_spent)::float8,
 			percentile_cont(0.5) WITHIN GROUP (ORDER BY
 				greatest(extract(epoch FROM r.finished_at - r.started_at) - r.awaiting_ms / 1000.0, 0))::float8
 		FROM agent_market.agent_runs r JOIN agent_market.agent_installs i ON i.id = r.install_id
 		WHERE i.org_id = $1 AND i.slug = $2 AND i.status <> 'catalog' AND r.kind = 'run'
 			AND (r.status = 'succeeded' OR (r.status = 'failed' AND r.gate_open))
 			AND r.created_at >= now() - interval '90 days' AND r.started_at IS NOT NULL AND r.finished_at IS NOT NULL`,
-		orgOr(org), slug).Scan(&n, &credits, &secs)
+		orgOr(org), slug).Scan(&n, &secs)
 	if err != nil {
 		return e, err
 	}
 	switch {
-	case n >= MinEstimateRuns && credits != nil:
-		e.Basis, e.BasisRuns, e.Credits, e.Seconds = EstimateOwnRuns, n, credits, secs
+	case n >= MinEstimateRuns && secs != nil:
+		e.Basis, e.BasisRuns, e.Seconds = EstimateOwnRuns, n, secs
 	default:
 		if smp, err := s.CatalogSampleFor(ctx, slug); err == nil && smp.Status == RunSucceeded {
-			c := smp.Credits
-			e.Basis, e.BasisRuns, e.Credits, e.Seconds = EstimateSample, 1, &c, smp.Seconds
+			e.Basis, e.BasisRuns, e.Seconds = EstimateSample, 1, smp.Seconds
 		}
 	}
 	if e.Seconds != nil {
 		v := math.Round(*e.Seconds*10) / 10
 		e.Seconds = &v
 	}
-	if e.Credits != nil && cfg.CreditsPerUSD > 0 {
-		thb := math.Round(*e.Credits/cfg.CreditsPerUSD*cfg.THBPerUSD*100) / 100
-		e.THB = &thb
-	}
-	e.Line = estimateLine(e, gated)
+	e.Line = estimateLine(e)
 	return e, nil
 }
 
-// estimateLine is the estimate as one sentence.
-func estimateLine(e Estimate, gated bool) PersonText {
-	when := Text(chargedWhen)
-	if gated {
-		when = Text(chargedWhenOpen)
+// estimateLine is the estimate as the one line a person reads: the time, and
+// only the time. Nothing measured: no line.
+func estimateLine(e Estimate) PersonText {
+	if e.Seconds == nil || *e.Seconds <= 0 {
+		return PersonText{}
 	}
-	if e.Credits == nil {
-		return Text("ยังไม่มีข้อมูลค่าใช้จ่ายของ agent นี้ · %s · %s", Words(Text(chargedWhen)), Words(Text(neverCharged)))
-	}
-	cost := Text("รอบหนึ่งใช้ประมาณ %s เครดิต", Credits(about(*e.Credits)))
-	if e.THB != nil {
-		switch {
-		case *e.THB > 0 && *e.THB < 0.01:
-			cost = Text("%s (น้อยกว่า 0.01 บาท)", Words(cost))
-		default:
-			cost = Text("%s (≈ %s บาท)", Words(cost), Baht(*e.THB))
-		}
-	}
-	if e.Seconds != nil && *e.Seconds > 0 {
-		cost = Text("%s ราว %s", Words(cost), Words(aboutSeconds(*e.Seconds)))
-	}
-	return Text("%s · %s · %s", Words(cost), Words(when), Words(Text(neverCharged)))
-}
-
-// about rounds a figure to three digits that mean something: an estimate
-// says "ประมาณ 1,130", not "1,134.58".
-func about(v float64) float64 {
-	if v <= 0 {
-		return 0
-	}
-	if v < 100 {
-		return math.Round(v*10) / 10
-	}
-	p := math.Pow(10, math.Floor(math.Log10(v))-2)
-	return math.Round(v/p) * p
+	return Text("ราว %s", Words(aboutSeconds(*e.Seconds)))
 }
 
 // aboutSeconds says a duration roughly: to five seconds under a minute and a
@@ -143,23 +103,22 @@ func (a *API) estimate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	gated, web := false, false
+	web := false
 	if def, err := a.store.DefinitionByID(ctx, in.DefinitionID); err == nil {
 		if m, err := ParseManifest(def.Manifest); err == nil {
-			gated, web = m.CompletionGate, m.UsesWeb()
+			web = m.UsesWeb()
 		}
 	}
-	e, err := a.store.EstimateFor(ctx, a.cfg, in.OrgID, in.Slug, gated)
+	e, err := a.store.EstimateFor(ctx, in.OrgID, in.Slug)
 	if err != nil {
 		a.fail(w, err, "install")
 		return
 	}
 	if web && e.Basis == EstimateSample {
 		// AM12: the sample of an agent on the web runs on pages kept with the package — it searches nothing,
-		// opens nothing and asks no model, so it says nothing of what a real run costs. Until the
-		// organisation has runs of its own, the cost is said to be not known yet.
+		// opens nothing and asks no model, so it says nothing of how long a real run takes. Until the
+		// organisation has runs of its own, nothing is claimed.
 		e = Estimate{Basis: EstimateNone}
-		e.Line = estimateLine(e, gated)
 	}
 	writeJSON(w, http.StatusOK, e)
 }

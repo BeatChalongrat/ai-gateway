@@ -46,7 +46,6 @@ export const am6Th = {
   "review.unavailableWhy": "ยังตรวจทานและลงชื่อรอบนี้ไม่ได้: {why}",
   "dash.kpi.runsSubOpen": "สำเร็จ {ok} · {state} {open} · ไม่สำเร็จ {failed}",
   "dash.open": "รอบที่เสร็จแล้วแต่ยังไม่ผ่านเกณฑ์ของ agent",
-  "dash.costNotCharged": "ค่าใช้จ่ายที่ระบบจ่ายแต่ไม่ได้คิดเครดิต {credits} เครดิต",
 
   // the invoice ↔ PO agent: how deep every line was tested is never hidden
   "po.passed": "ผ่าน · พร้อมเสนออนุมัติ",
@@ -89,8 +88,8 @@ export const am6Th = {
   "scope.org": "เฉพาะองค์กรนี้",
   "jurisdiction.TH": "กฎหมายและภาษีของไทย",
 
-  // what a round costs, said before it starts
-  "estimate.aria": "ค่าใช้จ่ายของรอบ",
+  // how long a round takes, said before it starts (AM11b: the time, and only the time)
+  "estimate.aria": "เวลาโดยประมาณของรอบ",
 
   // reminders: nothing runs without a person
   "remind.title": "เตือนให้ทำรอบ",
@@ -208,7 +207,6 @@ export const am6En = {
   "review.unavailableWhy": "This run cannot be reviewed and signed off yet: {why}",
   "dash.kpi.runsSubOpen": "Succeeded {ok} · {state} {open} · failed {failed}",
   "dash.open": "Runs that finished without meeting the agent's criteria",
-  "dash.costNotCharged": "Cost the system paid but did not charge: {credits} credits",
 
   // the invoice ↔ PO agent: how deep every line was tested is never hidden
   "po.passed": "Passed · ready to submit for approval",
@@ -251,8 +249,8 @@ export const am6En = {
   "scope.org": "For this organisation only",
   "jurisdiction.TH": "Thai law and tax",
 
-  // what a run costs, said before it starts
-  "estimate.aria": "Cost of a run",
+  // how long a run takes, said before it starts (AM11b: the time, and only the time)
+  "estimate.aria": "About how long a run takes",
 
   // reminders: nothing runs without a person
   "remind.title": "Reminders to do a run",

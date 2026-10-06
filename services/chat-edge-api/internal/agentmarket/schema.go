@@ -325,6 +325,7 @@ var itemSchema = map[string]field{
 	"agent_text": obj(map[string]field{
 		"text":   text(fromEither).orBy(agentTextOther),
 		"run_id": id, "tone": code, "review_id": id,
+		// ("credits" and "charged" are on items written before AM11b; they pass, and no client shows them)
 		"failure": obj(map[string]field{"reason": code, "credits": number, "can_retry": number,
 			"what":          text(fromPlatform).orBy(failureWhat),
 			"next":          text(fromPlatform),

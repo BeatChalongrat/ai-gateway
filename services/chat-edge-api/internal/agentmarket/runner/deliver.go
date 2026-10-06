@@ -733,7 +733,8 @@ func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts [
 	if v, ok := summary["period_label"].(string); ok && (run.Period == nil || strings.TrimSpace(v) != am.PeriodLabel(*run.Period)) {
 		out.PeriodLabel = am.LabelFromPackage(v, out.PeriodLabel)
 	}
-	out.Credits = run.CreditsSpent
+	// AM11b: what the run was charged is not put on the files card — a person using an agent sees no
+	// credits; the admin's Spend page has them.
 	if gate != nil {
 		what, next := gate.words()
 		out.Gate = &am.OutputsGate{Passed: gate.Passed, What: what, Next: next}

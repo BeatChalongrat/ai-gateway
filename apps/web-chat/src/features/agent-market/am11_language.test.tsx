@@ -154,7 +154,8 @@ describe("AM11 — in English, not one Thai letter of the app's own", () => {
     expect(card.textContent).toContain("Files from the September 2026 run");
     expect(screen.getByTestId("am-outputs-seen-by").textContent).toContain("the commentary was written by qwen3.8-27b-fp8 (in the organisation)");
     expect(screen.getByTestId("am-outputs-details-body").textContent).toContain("Files reopened and rechecked — figures agreeing with the calculation: 61");
-    expect(card.textContent).toContain("Credits used: 1,200");
+    // AM11b: the files card says nothing of what the run cost
+    expect(card.textContent).not.toMatch(/credit/i);
     expect(card.textContent).toContain("Source of figures");
     expect(thaiOnScreen()).toEqual([]);
   });
@@ -164,7 +165,8 @@ describe("AM11 — in English, not one Thai letter of the app's own", () => {
     expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Remembered answers and settings");
     expect(screen.getByRole("link", { name: "Back to workspace" })).toBeTruthy();
     expect(screen.getByTestId("am-settings-dashboard").textContent).toBe("Overview");
-    expect(screen.getByTestId("am-budget").textContent).toBe("Credits used this month: 1,200 of a budget of 30,000");
+    // AM11b: the settings page says nothing of credits or a budget's figures
+    expect(screen.queryByTestId("am-budget")).toBeNull();
     for (const heading of ["Remembered answers", "Set at installation", "Uninstall"]) {
       expect(screen.getByRole("heading", { level: 2, name: heading })).toBeTruthy();
     }
@@ -200,7 +202,7 @@ describe("AM11 — in Thai, the Thai words, as they always were", () => {
     render(<SettingsPage installId="i-1" />);
     expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("ค่าที่จำไว้และการตั้งค่า");
     expect(screen.getByRole("link", { name: "กลับห้องทำงาน" })).toBeTruthy();
-    expect(screen.getByTestId("am-budget").textContent).toBe("ใช้เครดิตเดือนนี้ 1,200 จากงบ 30,000");
+    expect(screen.queryByTestId("am-budget")).toBeNull();
   });
 });
 

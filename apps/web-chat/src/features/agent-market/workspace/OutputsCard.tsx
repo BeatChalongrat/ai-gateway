@@ -18,7 +18,7 @@ import { formatBytes } from "@/lib/fileUtil";
 
 import { amApi, errorMessage } from "../api";
 import { useAmT, type AmKey } from "../i18n";
-import { extensionOf, formatCredits, formatMoney, formatMoney2 } from "../format";
+import { extensionOf, formatMoney, formatMoney2 } from "../format";
 import { COMPLETED_OPEN, delivered } from "../outcome";
 import type { NotIncluded, OutputArtifact, OutputsPayload, QualityCheck } from "../types";
 import { cls, Pill } from "../ui";
@@ -129,8 +129,7 @@ export function OutputsCard({
   const isDraft = !!outputs.draft;
   const count = (v: unknown) => (typeof v === "number" ? String(v) : "0");
   const modelLine = outputs.model?.model ? `${outputs.model.model} · ${outputs.model.self_hosted ? t("ws.modelInOrg") : t("ws.modelExternal")}` : null;
-  const creditLine = outputs.credits ? t("outputs.credits", { n: formatCredits(outputs.credits) }) : null;
-  const hasDetails = q.total > 0 || !!creditLine || !!modelLine;
+  const hasDetails = q.total > 0 || !!modelLine;
 
   return (
     <div className="rounded-xl border border-border bg-bg-surface px-4 py-3" data-testid="am-outputs" data-run={outputs.run_id}>
@@ -256,8 +255,8 @@ export function OutputsCard({
                   </ul>
                 </div>
               ) : null}
-              {modelLine || creditLine ? (
-                <p className="text-[11px] text-text-muted">{[modelLine, creditLine].filter(Boolean).join(" · ")}</p>
+              {modelLine ? (
+                <p className="text-[11px] text-text-muted">{modelLine}</p>
               ) : null}
             </div>
           ) : null}

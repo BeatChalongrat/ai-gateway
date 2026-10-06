@@ -78,7 +78,9 @@ describe("AM5 — a failed round", () => {
     expect(within(card).getByTestId("am-failed-what").textContent).toBe(failure.what);
     expect(within(card).getByTestId("am-failed-next").textContent).toBe(failure.next);
     expect(within(card).getByTestId("am-failed-files").textContent).toBe(failure.files);
-    expect(within(card).getByTestId("am-failed-charged").textContent).toBe(failure.charged);
+    // AM11b: what was or was not charged is not said to the person — not even from a card written before
+    expect(within(card).queryByTestId("am-failed-charged")).toBeNull();
+    expect(card.textContent).not.toContain(failure.charged);
     // said once: the four parts are not repeated as one paragraph
     expect(card.textContent!.split(failure.files).length).toBe(2);
   });

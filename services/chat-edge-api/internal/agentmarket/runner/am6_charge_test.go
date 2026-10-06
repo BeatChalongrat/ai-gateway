@@ -112,8 +112,9 @@ func TestACrashedRoundCostsThePersonNothing(t *testing.T) {
 	sent, _ := json.Marshal(crashed)
 	t.Logf("the thread item of a crashed round: %s", sent)
 	f := crashed["failure"].(map[string]any)
-	if f["credits"].(float64) != 0 || !strings.Contains(f["charged"].(string), "ไม่คิดเครดิต") || strings.Contains(f["charged"].(string), "12.5") {
-		t.Fatalf("the round says it was not charged: %v", f)
+	// AM11b: it was charged nothing (above, the run's own figure) and the person is told nothing of credits
+	if _, said := f["charged"]; said || f["credits"] != nil || strings.Contains(string(sent), "เครดิต") || strings.Contains(string(sent), "12.5") {
+		t.Fatalf("the failure of a crashed round names credits: %v", f)
 	}
 	// the rows are kept for the admin, marked; the run keeps what the platform paid
 	rows := e.ledger(run.ID)

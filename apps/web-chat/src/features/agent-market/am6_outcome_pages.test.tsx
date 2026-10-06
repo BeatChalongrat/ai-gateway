@@ -228,12 +228,13 @@ describe("AM6 — the dashboard and the admins' spend", () => {
     expect(open.textContent).not.toContain("lines_unmatched");
   });
 
-  it("the dashboard shows what the platform paid and charged to nobody", async () => {
+  it("AM11b: a person's dashboard says nothing of what the platform paid or charged", async () => {
     handler = dashboard(dash);
     render(<DashboardPage installId="i-1" />);
-    const line = await screen.findByTestId("am-dash-not-charged");
-    expect(line.textContent).toContain(NOT_CHARGED);
-    expect(line.textContent).toContain("212.5");
+    const kpis = await screen.findByTestId("am-dash-kpis");
+    expect(screen.queryByTestId("am-dash-not-charged")).toBeNull();
+    expect(kpis.textContent).not.toMatch(/เครดิต|credit|212\.5/i);
+    expect(document.body.textContent).not.toContain(NOT_CHARGED);
   });
 
   it("the last self-test is named by what it came to", async () => {

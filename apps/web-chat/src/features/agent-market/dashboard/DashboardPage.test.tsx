@@ -126,8 +126,9 @@ describe("DashboardPage", () => {
       "ผ่านโดยไม่ต้องถาม67%6 จาก 9 รอบที่สำเร็จ",
       "รอคำตอบอยู่1นานสุด 2 ชั่วโมง 1 นาที",
       "ข้อยกเว้นรอตัดสิน13นานสุด 2 วัน 7 ชั่วโมง",
-      "เครดิตต่อเอกสาร1.83ใช้ไป 54 จากงบ 500",
     ]);
+    // AM11b: no tile of credits — what the agent spends is on the admin's Spend page
+    expect(tiles.map((el) => el.textContent).join(" ")).not.toMatch(/เครดิต|credit/i);
     expect(await screen.findByText("ตรวจค่าใช้จ่าย · รุ่น 1.0.0", { exact: false })).toBeTruthy();
     const time = screen.getByTestId("am-dash-time");
     expect(time.textContent).toContain("ทำงาน1 นาที 35 วินาที6 นาที 40 วินาที");

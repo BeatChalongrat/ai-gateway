@@ -56,7 +56,7 @@ export const am3Th = {
   "guide.beforeInstall": "ก่อนติดตั้ง",
   "guide.whoSees": "ใครเห็นเอกสารของคุณ",
   "guide.whoSeesBody": "โมเดลแต่ละตัวเห็นข้อมูลส่วนไหน และทำงานในองค์กรหรือภายนอก",
-  "guide.cost": "ค่าใช้จ่ายและเวลาโดยประมาณ",
+  "guide.cost": "เวลาโดยประมาณ",
   "guide.datasheet": "เอกสารข้อมูลของ agent",
   "guide.installNote": "การติดตั้งยังไม่อ่านไฟล์ของคุณ ระบบจะถามการตั้งค่าไม่กี่ข้อ แล้วทดสอบกับข้อมูลตัวอย่างก่อน ถอนการติดตั้งได้ทุกเมื่อ",
   "guide.disabled": "ผู้ดูแลปิด agent นี้ไว้ชั่วคราว ยังติดตั้งหรือเริ่มงานใหม่ไม่ได้ งานที่เคยทำไว้ยังอยู่ครบ",
@@ -76,13 +76,10 @@ export const am3Th = {
   "trust.role.questions": "อ่านข้อความที่คุณพิมพ์ถามหรือพิมพ์ตอบ",
 
   // cost
-  "cost.sample": "ตัวอย่างจริง: {credits} เครดิต (≈ {baht} บาท) ใช้เวลา {time}",
-  "cost.sampleNoTime": "ตัวอย่างจริง: {credits} เครดิต (≈ {baht} บาท)",
-  "cost.org": "ในองค์กรของเรา (30 วัน, {runs} รอบ): ปกติ {credits} เครดิต (≈ {baht} บาท) ต่อรอบ ใช้เวลาราว {time}",
-  "cost.perDocument": "เฉลี่ยต่อเอกสาร: {credits} เครดิต (≈ {baht} บาท)",
+  "cost.sample": "ตัวอย่างจริงใช้เวลา {time}",
+  "cost.org": "ในองค์กรของเรา (30 วัน, {runs} รอบ): ปกติใช้เวลาราว {time} ต่อรอบ",
   "cost.typical": "ใช้เวลาราว {time} ต่อรอบ",
-  "cost.unknown": "ยังไม่มีตัวเลขค่าใช้จ่าย — จะเห็นหลังรอบแรก",
-  "cost.note": "ตัดจากงบเครดิต Agent Market ที่ผู้ดูแลกำหนดให้คุณแต่ละเดือน ไม่หักเครดิตที่ใช้แชท",
+  "cost.unknown": "ยังไม่ทราบว่าใช้เวลาเท่าไร — จะเห็นหลังรอบแรก",
 
   // data sheet
   "ds.kicker": "เอกสารข้อมูลของ agent",
@@ -160,8 +157,8 @@ export const am3Th = {
   "budget.whichUser": "ของคุณ",
   "budget.whichDepartment": "ของแผนก{name}",
   "budget.whichInstall": "ของ agent ตัวนี้",
-  "budget.low": "งบเครดิต{which}เดือนนี้เหลือน้อย (เหลือ {left} เครดิต) — ถ้าจะใช้มาก ขอเพิ่มได้จาก {who}",
-  "budget.out": "งบเครดิต{which}เดือนนี้ใช้หมดแล้ว รอบใหม่จะรอไว้ก่อน — ขอเพิ่มได้จาก {who} ไฟล์และงานที่ทำไว้ยังอยู่ครบ แชทปกติใช้ได้ตามเดิม",
+  "budget.low": "งบ{which}เดือนนี้เหลือน้อย — ถ้าจะใช้มาก ขอเพิ่มได้จาก {who}",
+  "budget.out": "งบ{which}เดือนนี้ใช้หมดแล้ว รอบใหม่จะรอไว้ก่อน — ขอเพิ่มได้จาก {who} ไฟล์และงานที่ทำไว้ยังอยู่ครบ แชทปกติใช้ได้ตามเดิม",
   "budget.contactFallback": "ผู้ดูแล Agent Market ขององค์กร",
   "budget.resume": "ลองต่อ",
   "budget.resumed": "ทำต่อจากจุดเดิมแล้ว",
@@ -289,7 +286,7 @@ export const am3En = {
   "guide.beforeInstall": "Before you install",
   "guide.whoSees": "Who sees your documents",
   "guide.whoSeesBody": "Which part of the data each model sees, and whether it runs inside the organisation or outside.",
-  "guide.cost": "Estimated cost and time",
+  "guide.cost": "Estimated time",
   "guide.datasheet": "Agent data sheet",
   "guide.installNote": "Installing does not read your files. The system asks a few setup questions, then tests with sample data first. You can uninstall at any time.",
   "guide.disabled": "An admin has switched this agent off for now. It cannot be installed and new work cannot be started. Work already done is all still here.",
@@ -309,13 +306,10 @@ export const am3En = {
   "trust.role.questions": "Reads what you type as a question or an answer",
 
   // cost
-  "cost.sample": "Real sample: {credits} credits (≈ THB {baht}), took {time}",
-  "cost.sampleNoTime": "Real sample: {credits} credits (≈ THB {baht})",
-  "cost.org": "In our organisation (30 days, {runs} runs): typically {credits} credits (≈ THB {baht}) a run, taking about {time}",
-  "cost.perDocument": "Average per document: {credits} credits (≈ THB {baht})",
+  "cost.sample": "The real sample took {time}",
+  "cost.org": "In our organisation (30 days, {runs} runs): a run typically takes about {time}",
   "cost.typical": "A run takes about {time}",
-  "cost.unknown": "No cost figures yet — they appear after the first run",
-  "cost.note": "Charged to the Agent Market credit budget your admin sets for you each month. Your chat credits are not touched.",
+  "cost.unknown": "Not known yet how long a run takes — it shows after the first run",
 
   // data sheet
   "ds.kicker": "Agent data sheet",
@@ -394,8 +388,8 @@ export const am3En = {
   "budget.whichUser": "Your",
   "budget.whichDepartment": "The {name} department's",
   "budget.whichInstall": "This agent's",
-  "budget.low": "{which} credit budget is running low this month ({left} credits left) — if you need more, ask {who} for an increase.",
-  "budget.out": "{which} credit budget for this month is used up, so new runs will wait — ask {who} for an increase. Your files and finished work are all still here, and ordinary chat works as usual.",
+  "budget.low": "{which} budget is running low this month — if you need more, ask {who} for an increase.",
+  "budget.out": "{which} budget for this month is used up, so new runs will wait — ask {who} for an increase. Your files and finished work are all still here, and ordinary chat works as usual.",
   "budget.contactFallback": "your organisation's Agent Market admin",
   "budget.resume": "Continue",
   "budget.resumed": "Continued from where it stopped.",

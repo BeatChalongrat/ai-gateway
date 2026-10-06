@@ -65,7 +65,9 @@ describe("AM2 screens with the server's own payloads", () => {
     const models = await screen.findByTestId("am-dash-models");
     expect(models.textContent).toContain("qwen3.8-27b-fp8");
     expect(models.textContent).toContain("ในองค์กร");
-    expect(screen.getAllByTestId("am-dash-tile").length).toBe(5);
+    // AM11b: four tiles — what the agent spends is the admin's to read, not a tile on a person's dashboard
+    expect(screen.getAllByTestId("am-dash-tile").length).toBe(4);
+    expect(screen.getByTestId("am-dash-kpis").textContent).not.toMatch(/เครดิต|credit/i);
     const keys = screen.getAllByTestId("am-dash-bar").map((b) => b.getAttribute("data-key"));
     expect(keys).toEqual(expect.arrayContaining(["e2_low_confidence", "e2_duplicate", "scan", "digital", "high"]));
   });

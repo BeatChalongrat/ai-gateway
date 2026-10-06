@@ -195,7 +195,7 @@ type OutputsPayload struct {
 	// which of its fields are sent, and how).
 	Summary  map[string]any `json:"summary,omitempty"`
 	Model    *OutputsModel  `json:"model,omitempty"`
-	Credits  float64        `json:"credits"`
+	Credits  float64        `json:"credits,omitempty"` // AM11b: no longer written; cards from before carry it and no client shows it
 	Rendered bool           `json:"rerender,omitempty"`
 	// Review (AM3): these files carry a reviewer's sign-off on their face.
 	Review *OutputsReview `json:"review,omitempty"`

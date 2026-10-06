@@ -233,9 +233,15 @@ func TestAM3BudgetsNameWhoToAskAndParkedRunsGoOn(t *testing.T) {
 		t.Fatalf("the person's month is used up, ask the organisation's contact: %+v %v", st, err)
 	}
 	note := BudgetNotice(st).String()
-	for _, want := range []string{"งบเครดิตของคุณ", "1,200", "1,000", "ฝ่ายไอที", "it@example.test", "ลองต่อ", "ยังอยู่ครบ"} {
+	for _, want := range []string{"งบของคุณ", "ฝ่ายไอที", "it@example.test", "ลองต่อ", "ยังอยู่ครบ"} {
 		if !strings.Contains(note, want) {
 			t.Fatalf("notice lacks %q: %s", want, note)
+		}
+	}
+	// AM11b: whose budget and whom to ask — never how many credits were used or allowed
+	for _, not := range []string{"เครดิต", "1,200", "1,000"} {
+		if strings.Contains(note, not) {
+			t.Fatalf("the notice names %q: %s", not, note)
 		}
 	}
 	// a run waiting for budget: "ลองต่อ" says who to ask while it is still out

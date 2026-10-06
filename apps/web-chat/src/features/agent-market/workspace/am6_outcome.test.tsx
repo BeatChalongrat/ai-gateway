@@ -148,16 +148,18 @@ afterEach(() => {
 describe("AM6 — a round that finished with its gate open is a result", () => {
   const message = item("c", "agent_text", { run_id: RUN, tone: "open", text: completionText, completion }, 3);
 
-  it("is a calm card headed by the server's title, then what, next, files, charged", () => {
+  it("is a calm card headed by the server's title, then what, next, files — and nothing of what it was charged", () => {
     inWorkspace(<ThreadItems items={[message]} />);
     const card = screen.getByTestId("am-round-open");
     expect(within(card).getByRole("heading").textContent).toBe(OPEN_TITLE);
     expect(within(card).getByTestId("am-open-what").textContent).toBe(completion.what);
     expect(within(card).getByTestId("am-open-next").textContent).toBe(completion.next);
     expect(within(card).getByTestId("am-open-files").textContent).toBe(completion.files);
-    expect(within(card).getByTestId("am-open-charged").textContent).toBe(completion.charged);
+    // AM11b: nothing of what the round was charged, though the stored card still carries the line
+    expect(within(card).queryByTestId("am-open-charged")).toBeNull();
+    expect(card.textContent).not.toContain(completion.charged);
     // said once: the parts are not repeated as one paragraph
-    expect(card.textContent!.split(completion.charged).length).toBe(2);
+    expect(card.textContent!.split(completion.files).length).toBe(2);
     expect(card.textContent!.split(OPEN_TITLE).length).toBe(2);
     expect(card.textContent).not.toContain("not_tied");
   });
@@ -188,7 +190,8 @@ describe("AM6 — a round that finished with its gate open is a result", () => {
     inWorkspace(<ThreadItems items={[item("f", "agent_text", { run_id: RUN, tone: "error", text: crashed.what, failure: crashed }, 3)]} />);
     const card = screen.getByTestId("am-failed-round");
     expect(within(card).getByRole("alert")).toBeTruthy();
-    expect(within(card).getByTestId("am-failed-charged").textContent).toBe("รอบนี้ไม่คิดเครดิต เพราะยังไม่ได้ส่งงานให้");
+    expect(within(card).queryByTestId("am-failed-charged")).toBeNull();
+    expect(card.textContent).not.toMatch(/เครดิต/);
     expect(within(card).getByTestId("am-failed-retry").textContent).toContain(RETRY);
     expect(screen.queryByTestId("am-round-open")).toBeNull();
   });

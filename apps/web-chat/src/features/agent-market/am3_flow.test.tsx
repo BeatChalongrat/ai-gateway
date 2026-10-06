@@ -172,14 +172,17 @@ describe("budgets", () => {
     handler = () => json({ budget: { ...base, user_spent: 950 }, remaining: 50 });
     const low = render(<BudgetBanner installId="i-1" />);
     expect((await screen.findByTestId("am-budget-banner")).getAttribute("data-state")).toBe("low");
-    expect(screen.getByTestId("am-budget-banner").textContent).toContain("เหลือ 50 เครดิต");
+    // AM11b: it says the budget is low and whom to ask — not how many credits are left
+    expect(screen.getByTestId("am-budget-banner").textContent).toContain("งบของคุณเดือนนี้เหลือน้อย");
+    expect(screen.getByTestId("am-budget-banner").textContent).not.toMatch(/เครดิต|\d/);
     low.unmount();
 
     handler = () => json({ budget: { ...base, department: "บัญชี", department_limit: 5000, department_spent: 5200, exhausted: "department", contact: { name: "หัวหน้าบัญชี", email: "" } }, remaining: -200 });
     render(<BudgetBanner installId="i-1" />);
     const out = await screen.findByTestId("am-budget-banner");
     expect(out.getAttribute("data-state")).toBe("out");
-    expect(out.textContent).toContain("งบเครดิตของแผนกบัญชีเดือนนี้ใช้หมดแล้ว");
+    expect(out.textContent).toContain("งบของแผนกบัญชีเดือนนี้ใช้หมดแล้ว");
+    expect(out.textContent).not.toMatch(/เครดิต|\d/);
     expect(out.textContent).toContain("หัวหน้าบัญชี");
     expect(out.textContent).toContain("ยังอยู่ครบ");
   });

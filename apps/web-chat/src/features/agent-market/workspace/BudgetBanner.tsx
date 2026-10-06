@@ -10,7 +10,6 @@ import { Wallet } from "lucide-react";
 
 import { amApi } from "../api";
 import { useAmT, type AmT } from "../i18n";
-import { formatCredits } from "../format";
 import type { BudgetState, Contact } from "../types";
 import { cls } from "../ui";
 
@@ -59,7 +58,7 @@ export function BudgetBanner({ installId, refreshKey }: { installId: string; ref
   const which = out ? b.exhausted : tight!.which;
   const text = out
     ? t("budget.out", { which: budgetWhich(which, b, t), who: contactLabel(b.contact, t) })
-    : t("budget.low", { which: budgetWhich(which, b, t), left: formatCredits(Math.max(0, tight!.left)), who: contactLabel(b.contact, t) });
+    : t("budget.low", { which: budgetWhich(which, b, t), who: contactLabel(b.contact, t) });
   return (
     <div
       role={out ? "alert" : "status"}

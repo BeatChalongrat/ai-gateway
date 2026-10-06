@@ -10,10 +10,9 @@ import { Building2, Cloud } from "lucide-react";
 
 import { amApi } from "../api";
 import { useAmT, type AmKey } from "../i18n";
-import { creditsToBaht, formatBaht, formatCredits, formatDuration } from "../format";
-import type { CatalogSample, Datasheet, DatasheetModel, Manifest, Pricing, SampleSummary, AgentStats } from "../types";
+import { formatDuration } from "../format";
+import type { CatalogSample, Datasheet, DatasheetModel, Manifest, SampleSummary, AgentStats } from "../types";
 import { cls } from "../ui";
-import { DEFAULT_PRICING } from "../useAgentMarket";
 
 const SCOPE_KEYS: Record<string, AmKey> = { generic: "scope.generic", "org-specific": "scope.org" };
 const JURISDICTION_KEYS: Record<string, AmKey> = { TH: "jurisdiction.TH" };
@@ -126,57 +125,28 @@ function secondsText(t: ReturnType<typeof useAmT>, s: number | null | undefined)
   return formatDuration(Math.round(s * 1000), t);
 }
 
-/** What a run costs and how long it takes: the real sample run, then this organisation's own median. */
-export function CostLines({
-  manifest,
-  sample,
-  stats,
-  pricing,
-}: {
-  manifest: Manifest;
-  sample?: SampleSummary | null;
-  stats?: AgentStats | null;
-  pricing?: Pricing | null;
-}) {
+/** How long a run takes: the real sample run, then this organisation's own median.
+ *  AM11b: the time, and only the time — a person using an agent sees no credits and no baht; what a run
+ *  costs is on the admin's Spend page. */
+export function TimeLines({ manifest, sample, stats }: { manifest: Manifest; sample?: SampleSummary | null; stats?: AgentStats | null }) {
   const t = useAmT();
-  const p = pricing ?? DEFAULT_PRICING;
   const lines: string[] = [];
-  if (sample && sample.status === "succeeded") {
-    const b = creditsToBaht(sample.credits, p);
-    const time = secondsText(t, sample.seconds);
-    lines.push(
-      time
-        ? t("cost.sample", { credits: formatCredits(sample.credits), baht: formatBaht(b), time })
-        : t("cost.sampleNoTime", { credits: formatCredits(sample.credits), baht: formatBaht(b) }),
-    );
-  }
-  if (stats && stats.runs >= 3 && stats.median_credits !== null) {
-    const time = secondsText(t, stats.median_seconds) ?? "—";
-    lines.push(
-      t("cost.org", {
-        runs: String(stats.runs),
-        credits: formatCredits(stats.median_credits),
-        baht: formatBaht(creditsToBaht(stats.median_credits, p)),
-        time,
-      }),
-    );
-  }
-  if (stats && stats.per_document !== null && stats.documents > 0) {
-    lines.push(t("cost.perDocument", { credits: formatCredits(stats.per_document), baht: formatBaht(creditsToBaht(stats.per_document, p)) }));
-  }
+  const sampleTime = sample && sample.status === "succeeded" ? secondsText(t, sample.seconds) : null;
+  if (sampleTime) lines.push(t("cost.sample", { time: sampleTime }));
+  const orgTime = stats && stats.runs >= 3 ? secondsText(t, stats.median_seconds) : null;
+  if (stats && orgTime) lines.push(t("cost.org", { runs: String(stats.runs), time: orgTime }));
   if (!lines.length && manifest.typical_run_seconds) {
     lines.push(t("cost.typical", { time: secondsText(t, manifest.typical_run_seconds) ?? "—" }));
   }
   if (!lines.length) lines.push(t("cost.unknown"));
   return (
-    <ul className="flex flex-col gap-1" data-testid="am-cost">
+    <ul className="flex flex-col gap-1" data-testid="am-time">
       {lines.map((l) => (
         <li key={l} className="text-sm text-text-primary">
           {l}
         </li>
       ))}
       {manifest.guide?.time_note ? <li className="text-xs text-text-muted">{manifest.guide.time_note}</li> : null}
-      <li className="text-[11px] text-text-muted">{t("cost.note")}</li>
     </ul>
   );
 }

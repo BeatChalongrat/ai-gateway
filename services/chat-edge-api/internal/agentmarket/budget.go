@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"net/http"
 	"strings"
 
@@ -140,22 +139,13 @@ func budgetWhich(l Lang, st BudgetState) string {
 	return T(l, "ของคุณ")
 }
 
-// BudgetNotice is the thread's notice when a run waits for budget.
+// BudgetNotice is the thread's notice when a run waits for budget. AM11b: it
+// says whose budget and who can raise it — never how many credits were used
+// or allowed; those are on the admin's Spend page.
 func BudgetNotice(st BudgetState) PersonText {
-	used, limit := st.UserSpent, st.UserLimit
-	switch st.Exhausted {
-	case BudgetDepartment:
-		used, limit = st.DeptSpent, 0
-		if st.DeptLimit != nil {
-			limit = *st.DeptLimit
-		}
-	case BudgetInstall:
-		used, limit = st.InstallSpent, st.InstallLimit
-	}
-	return Text("หยุดรอไว้ก่อนครับ: งบเครดิต%sเดือนนี้ใช้หมดแล้ว (ใช้ไป %s จาก %s เครดิต) — ขอเพิ่มได้จาก %s "+
+	return Text("หยุดรอไว้ก่อนครับ: งบ%sเดือนนี้ใช้หมดแล้ว — ขอเพิ่มได้จาก %s "+
 		"เมื่อมีงบแล้ว รอบนี้จะทำต่อจากจุดเดิมเอง (หรือกด “ลองต่อ”) ไฟล์และคำตอบที่ให้ไว้ยังอยู่ครบ และแชทปกติยังใช้ได้ตามเดิม",
-		EachNamed(120, func(l Lang) string { return budgetWhich(l, st) }), Credits(math.Round(used)), Credits(math.Round(limit)),
-		ContactFact(st.Contact))
+		EachNamed(120, func(l Lang) string { return budgetWhich(l, st) }), ContactFact(st.Contact))
 }
 
 // groupDigits prints a credit amount with thousands separators.
@@ -215,7 +205,7 @@ func (s *Store) ResumeBudgetParked(ctx context.Context, org string) (int, error)
 			continue
 		}
 		if ok, err := s.Resume(ctx, s.Pool, run.ID); err == nil && ok {
-			_ = s.PostNotice(ctx, run, Text("มีงบเครดิตแล้ว รอบนี้ทำต่อจากจุดเดิมครับ"), "")
+			_ = s.PostNotice(ctx, run, Text("มีงบแล้ว รอบนี้ทำต่อจากจุดเดิมครับ"), "")
 			n++
 		}
 	}

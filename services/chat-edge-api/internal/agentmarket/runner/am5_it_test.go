@@ -222,7 +222,7 @@ func TestARoundThatFailsSaysSoInWordsAndCanBeTriedAgain(t *testing.T) {
 	if f == nil || f["can_retry"] != true {
 		t.Fatalf("what happened, what to try, the files, the charge — and a way forward: %q %v", text, f)
 	}
-	for _, part := range []string{"what", "next", "files", "charged"} {
+	for _, part := range []string{"what", "next", "files"} {
 		if s, _ := f[part].(string); strings.TrimSpace(s) == "" {
 			t.Fatalf("%s is said: %v", part, f)
 		}
