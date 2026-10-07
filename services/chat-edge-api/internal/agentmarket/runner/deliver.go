@@ -186,6 +186,14 @@ func guardFigures(l am.Lang, text string, cv computedView) error {
 		return fmt.Errorf("อ้างตัวเลขที่ไม่มีในตาราง: %s ใช้ได้เฉพาะชื่อในรายการตัวเลขที่อ้างได้", strings.Join(unknown, ", "))
 	}
 	rest := figureRe.ReplaceAllString(text, " ")
+	// AM11b: a brace left over is a figure's name that is not whole. "…ค่าใช้จ่ายในการขายและบริหารที่:abs}" is
+	// what was left of "…ที่สูงกว่างบ {operating_expenses_var_budget_pct:abs}" once the platform's echo guard had
+	// taken out the 44 characters that repeated an example printed in the package's instructions (4 of 27
+	// commentaries on live). The report printed the sentence as it was; it is now no answer, for every
+	// installed version — the model is told, and a second cut ends in the rules' own commentary.
+	if strings.ContainsAny(rest, "{}") {
+		return fmt.Errorf("มีชื่อตัวเลขที่เขียนไม่ครบ (วงเล็บปีกกาไม่ครบคู่) — เขียนชื่อของตัวเลขให้ครบในรูป {ชื่อ} หรือ {ชื่อ:abs} และเขียนประโยคด้วยคำของคุณเอง อย่าคัดลอกประโยคตัวอย่างจากคำสั่ง")
+	}
 	if err := GuardNumbersIn(l, rest, nil, cv.QuotableIDs); err != nil {
 		return fmt.Errorf("%s — อย่าพิมพ์ตัวเลขเอง ให้เขียนชื่อของตัวเลขในวงเล็บปีกกา เช่น {revenue}", err.Error())
 	}

@@ -827,3 +827,21 @@ An install is pinned to its version: only an install of a version whose
 manifest has `instructions` takes them, and only such an agent's greeting
 says so (the package's own labels). An agent that declares nothing makes its
 documents one way and does not claim to listen.
+
+**The echo guard and a package's instructions.** AM12 found the platform's
+prompt-echo guard cutting a JSON shape out of answers; checking the other
+agents found it cutting the report agent's commentary too. A package's
+`AGENT.md` is the system message of its commentary, and the report agent's
+printed, as an example, a sentence a commentary really writes — the words
+"…สูงกว่างบ" followed by a real figure's name. A model that said the same in
+the same words lost those 44 characters: the executive summary then read
+"…ค่าใช้จ่ายในการขายและบริหารที่:abs}" (4 of the 27 commentaries a model wrote
+on live, 1–6 Oct 2026). Two things hold it now: a package's instructions
+print no example sentence with a figure's name in it
+(`backend/tests/test_am11b_instructions_echo.py`, with the guard itself, for
+every package), and a commentary in which a brace is left over once the
+figures' names are taken out is no answer (`runner/deliver.go: guardFigures`)
+— the model is told and asked again, and a second cut ends in the rules' own
+commentary. The second holds for every installed version; the first reaches
+an install when it is upgraded to the version that carries it (report agent
+1.8.0).
