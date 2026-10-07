@@ -372,7 +372,7 @@ async function buy() {
   x.check(openCol !== undefined && t.rows.every((r) => typeof r[openCol] === "number"), "every option's row still says how many points are not known about it",
     t.rows.map((r) => r[openCol]).join(" · "));
   const thread = await threadText(page);
-  x.check(/ทำตามที่ขอแล้ว: เรียงตัวเลือกจากราคาต่ำสุด/.test(thread), "the thread says what was done as asked", (thread.match(/ทำตามที่ขอแล้ว[^\n]*/) || [""])[0].slice(0, 260));
+  x.check(/ทำตามที่ขอแล้ว: เรียงตัวเลือกในไฟล์ Excel จากราคาต่ำสุด — การ์ดให้เลือกในแชทไม่ได้เรียงตามราคา/.test(thread), "the thread says what was done as asked", (thread.match(/ทำตามที่ขอแล้ว[^\n]*/) || [""])[0].slice(0, 260));
   const lines = thread.match(/[^\n]*ทำตามที่ขอไม่ได้เพราะ[^\n]*/g) || [];
   x.check(lines.some((l) => /ไม่ตัดสินว่าตัวเลือกใดดีที่สุด/.test(l)), "“เจ้าไหนดีที่สุด” — refused, with its reason", lines.join(" | ").slice(0, 300) || "(nothing was said)");
   x.check(!lines.some((l) => /งบ|6,000|20 ตัว|ที่วางแขน|สีลม/.test(l)), "nothing of the request itself — the budget, the quantity, the place — was answered with a refusal", `${lines.length} refusal(s)`);

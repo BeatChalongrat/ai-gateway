@@ -108,6 +108,10 @@ describe("the choice card of a run on the web", () => {
     expect(rows[0]!.textContent).toContain("ไม่มี");
     // it says what the order is, and that it is not advice
     expect(screen.getByTestId("am-comparison-order").textContent).toContain("ไม่ใช่การจัดอันดับ");
+    // AM13: … and, where a person decides, that this card is not in the order of price even when they asked
+    // for that order — the Excel file is
+    expect(screen.getByTestId("am-comparison-order").textContent).toContain("การ์ดนี้ไม่เรียงตามราคา");
+    expect(screen.getByTestId("am-comparison-order").textContent).toContain("ไฟล์ Excel ที่ได้จะเรียงตามราคา");
     // the table comes before the choice
     const choice = screen.getAllByTestId("question-option")[0]!;
     expect(table.compareDocumentPosition(choice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

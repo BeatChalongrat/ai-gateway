@@ -901,10 +901,14 @@ every row.
   price only and that the table is not advice.
 - The only cell the ordered workbook has that the default one has not is
   that one sentence (`test_nothing_is_marked_as_best…` compares every cell).
-- **Not ordered: the card a person chooses from in the thread.** It is made
-  before the words are read (the choice comes before the files), and it is
-  still in the computed order — fewest unknown points first. The package's
-  note says so.
+- **Not ordered: the card a person chooses from in the thread** — by
+  decision, not for want of a mechanism. The card is where a person decides
+  and the Excel is where they analyse; a card in the order of price would
+  read as "the cheapest is best". It stays in the computed order — fewest
+  unknown points first — and says so where a person sees it: the card's own
+  line (`cmp.order`) says it is not in the order of price and that the Excel
+  file is when asked; the directive is named "… in the Excel file"; and what
+  the thread says when the files arrive begins with it.
 
 **A request is not a refused request.** Procurement starts from what a
 person types, and the same words are read for what they ask of the

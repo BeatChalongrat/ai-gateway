@@ -238,7 +238,7 @@ func TestProcurementOrdersByPriceWhenAskedAndIsNeverTalkedIntoAVerdict(t *testin
 		t.Fatalf("the gate did not read the order back out of the comparison: %s", q)
 	}
 	thread := e.visibleThread()
-	if !has(thread, "ทำตามที่ขอแล้ว: เรียงตัวเลือกจากราคาต่ำสุด") || !has(thread, "ไม่ได้บอกว่าตัวเลือกใดดีกว่า") {
+	if !has(thread, "ทำตามที่ขอแล้ว: เรียงตัวเลือกในไฟล์ Excel จากราคาต่ำสุด — การ์ดให้เลือกในแชทไม่ได้เรียงตามราคา") || !has(thread, "ไม่ได้บอกว่าตัวเลือกใดดีกว่า") {
 		t.Fatalf("what was done, and that an order is not a verdict:\n%s", strings.Join(thread, "\n"))
 	}
 	if !has(thread, "“เจ้าไหนดีที่สุด” ทำตามที่ขอไม่ได้เพราะagent นี้ไม่ตัดสินว่าตัวเลือกใดดีที่สุด") {

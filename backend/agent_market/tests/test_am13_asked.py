@@ -493,6 +493,12 @@ class AskedOfTheComparison(unittest.TestCase):
         self.assertIn("pick_best", cannot)
         self.assertIn("ไม่ตัดสินว่าตัวเลือกใดดีที่สุด", cannot["pick_best"]["why"])
         self.assertEqual(m["starts_from"], "request")
+        # where a person sees it: the directive's own name says the order is the Excel file's, and what the
+        # thread says when the files arrive begins with the card they chose from not being in that order
+        order = m["instructions"]["can"][0]
+        self.assertIn("ในไฟล์ Excel", order["label"])
+        self.assertTrue(order["note"].startswith("การ์ดให้เลือกในแชทไม่ได้เรียงตามราคา"), order["note"][:80])
+        self.assertTrue(m["en"][order["note"]].startswith("The card you choose from in the chat is not ordered by price"))
 
 
 if __name__ == "__main__":
