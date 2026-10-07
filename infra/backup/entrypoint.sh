@@ -116,7 +116,7 @@ page_failure() {
   local retry="The next automatic try is in $(fmt_age "$(retry_backoff "$attempt")")."
   case "$rc" in
     1) title="Backup failed: no new backup was written"
-       body="Tonight's backup of the databases and uploads did not complete. The previous backup is still there: $prev. $retry Look: docker logs ai-gateway-backup (the step that failed). Run one by hand: docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup now" ;;
+       body="Tonight's backup of the databases and uploads did not complete. The previous backup is still there: $prev. $retry Look: docker logs ai-gateway-backup (the step that failed). Run one by hand: docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup now" ;;
     2) title="Backup failed its restore test"
        body="Tonight's backup was written but could not be restored and counted in the drill, so it cannot be trusted. The newest proven backup is $prev. $retry Look: drill.json in the backup folder and docker logs ai-gateway-backup." ;;
     3) title="Off-site backup copy failed (the local backup is fine)"

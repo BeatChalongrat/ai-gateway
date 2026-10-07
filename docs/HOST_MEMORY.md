@@ -32,30 +32,29 @@ python scripts/ops/live_memory.py check     # exit 1 if any differs
 processes. A container that is restarted (not recreated) loses the written turn until `apply` runs
 again; the gate runs `check` first and applies when needed.
 
-## 2. A gate is one heavy thing at a time
+## 2. Whatever a gate starts goes first
 
-```
-bash scripts/gate.sh preflight          # the guard, free memory, the lock
-bash scripts/gate.sh lanes              # engine · go · backend · web · admin · desktop, test stack stopped
-bash scripts/gate.sh it                 # the integration lane, alone
-bash scripts/gate.sh build <sha>        # the five images; the VM's cache is handed back after
-bash scripts/gate.sh stack <sha>        # test stack + stand-in web + built clients
-bash scripts/gate.sh walk -- <command>  # one walk
-bash scripts/gate.sh smoke <sha>        # flag on, flag off, back on
-bash scripts/gate.sh drill              # removal drill + gitleaks
-bash scripts/gate.sh backup             # live backup with its restore drill
-```
+Nothing a gate starts has a floor or a protected turn:
 
-Each phase takes a lock (a second one is refused), waits for 3 GB free on the host and stops saying so
-if it does not get it, and writes one file and one verdict line. A card sets `GATE_RESULTS`,
-`GATE_BACKEND_TESTS` and `GATE_IT` for what is its own.
+- The test stack's compose file is generated from live's (`scripts/test_stack_gen.py`). The generator
+  keeps each service's ceiling, drops its floor and gives it `oom_score_adj: 500`
+  (`scripts/tests/test_test_stack_gen.py`). Copied as they were, a test database would have been as
+  protected as the live one, in the same VM.
+- A lane, a build and a sandbox are plain containers: turn 0, no floor.
+
+So when the VM runs out the order is: helper containers (1000), the test stack (500), lanes, builds and
+sandboxes (0), then live from −100 down to the databases at −900.
+
+A gate's heavy phases are also run one at a time, each waiting for free memory on the host before it
+starts — the gate script and its phases are described with the product they gate.
 
 ## Traps
 
 - **After a compose file of a running stack is edited, `docker compose run` and `docker compose up`
   recreate every dependency whose settings changed.** A backup started that way recreated the chat
-  database (three seconds down, 7 Oct 2026). The deploy scripts pass `--no-deps`; so does
-  `gate.sh backup`. Never run either without it on live.
+  database (three seconds down, 7 Oct 2026). The deploy scripts pass `--no-deps`, and so does every
+  written instruction for a backup by hand (`docs/ops/backups.md`, the pager's own text). Never run
+  either without it on live.
 - The Windows "free memory" figure moves by gigabytes in a minute as the VM returns cache
   (`autoMemoryReclaim=gradual`). Trust the gate's wait, not one reading.
 - The harness that runs the coding assistant kills background commands when the host is critically

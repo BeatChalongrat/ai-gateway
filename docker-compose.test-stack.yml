@@ -21,9 +21,11 @@
         "timeout": "3s"
       },
       "image": "pgvector/pgvector:pg16",
+      "mem_limit": "2g",
       "networks": {
         "default": null
       },
+      "oom_score_adj": 500,
       "restart": "on-failure",
       "volumes": [
         {
@@ -69,9 +71,11 @@
         "timeout": "3s"
       },
       "image": "redis:7",
+      "mem_limit": "512m",
       "networks": {
         "default": null
       },
+      "oom_score_adj": 500,
       "restart": "on-failure",
       "labels": {
         "sran.test-stack": "true"
@@ -94,9 +98,11 @@
         "timeout": "3s"
       },
       "image": "ai-gateway-mock-provider:latest",
+      "mem_limit": "384m",
       "networks": {
         "default": null
       },
+      "oom_score_adj": 500,
       "restart": "on-failure",
       "ports": [
         "127.0.0.1:19090:9090"
@@ -111,10 +117,6 @@
           "limits": {
             "cpus": "4.0",
             "memory": "7g"
-          },
-          "reservations": {
-            "cpus": "2.0",
-            "memory": "2g"
           }
         }
       },
@@ -138,6 +140,7 @@
       "networks": {
         "default": null
       },
+      "oom_score_adj": 500,
       "restart": "on-failure",
       "labels": {
         "sran.test-stack": "true"
@@ -170,6 +173,7 @@
       "networks": {
         "default": null
       },
+      "oom_score_adj": 500,
       "restart": "on-failure",
       "labels": {
         "sran.test-stack": "true"
@@ -209,6 +213,7 @@
       "networks": {
         "default": null
       },
+      "oom_score_adj": 500,
       "restart": "on-failure",
       "labels": {
         "sran.test-stack": "true"
@@ -240,9 +245,11 @@
         "timeout": "5s"
       },
       "image": "ai-gateway-log-worker:latest",
+      "mem_limit": "512m",
       "networks": {
         "default": null
       },
+      "oom_score_adj": 500,
       "restart": "on-failure",
       "labels": {
         "sran.test-stack": "true"
@@ -385,9 +392,11 @@
         "autoheal.stop.timeout": "200",
         "sran.test-stack": "true"
       },
+      "mem_limit": "3g",
       "networks": {
         "default": null
       },
+      "oom_score_adj": 500,
       "restart": "on-failure",
       "stop_grace_period": "200s",
       "volumes": [
@@ -444,9 +453,11 @@
         "autoheal": "true",
         "sran.test-stack": "true"
       },
+      "mem_limit": "512m",
       "networks": {
         "default": null
       },
+      "oom_score_adj": 500,
       "restart": "on-failure",
       "image": "ai-gateway-gateway:${TS_GATEWAY_TAG:-latest}",
       "ports": [
@@ -476,9 +487,11 @@
         "timeout": "5s"
       },
       "image": "pgvector/pgvector:pg16",
+      "mem_limit": "1g",
       "networks": {
         "default": null
       },
+      "oom_score_adj": 500,
       "restart": "on-failure",
       "volumes": [
         {
@@ -522,9 +535,11 @@
         "timeout": "5s"
       },
       "image": "redis:7-alpine",
+      "mem_limit": "384m",
       "networks": {
         "default": null
       },
+      "oom_score_adj": 500,
       "restart": "on-failure",
       "ports": [
         "127.0.0.1:16380:6379"
@@ -638,9 +653,11 @@
         "autoheal.stop.timeout": "120",
         "sran.test-stack": "true"
       },
+      "mem_limit": "1g",
       "networks": {
         "default": null
       },
+      "oom_score_adj": 500,
       "restart": "on-failure",
       "stop_grace_period": "120s",
       "volumes": [
@@ -695,9 +712,11 @@
         "WEBCHAT_POSTGRES_USER": "chatedge"
       },
       "image": "ai-gateway-backup:latest",
+      "mem_limit": "2g",
       "networks": {
         "default": null
       },
+      "oom_score_adj": 500,
       "restart": "on-failure",
       "volumes": [
         {
@@ -735,6 +754,7 @@
       "networks": {
         "default": null
       },
+      "oom_score_adj": 500,
       "restart": "on-failure",
       "volumes": [
         {

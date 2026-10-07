@@ -99,6 +99,26 @@ class GeneratedTestStackTest(unittest.TestCase):
         for marker in ("${ALERT_", "${RESEND_API_KEY", "${BACKUP_OFFSITE_", "ntfy.sh/"):
             self.assertNotIn(marker, text)
 
+    def test_a_test_container_gives_way_before_anything_live(self):
+        """The live services each declare a floor (``mem_reservation``) and a protected place in the
+        out-of-memory order (``oom_score_adj`` below zero). Copied into the test stack as they are, a
+        test database would be as protected as the live one, and the kernel would have to choose
+        between them. A test container keeps its ceiling, has no floor, and is the first to go."""
+        merged = _merged()
+        merged["services"]["postgres"].update({"mem_limit": "2g", "mem_reservation": "768m", "oom_score_adj": -900})
+        merged["services"]["backend"].update({"mem_limit": "3g", "mem_reservation": "1g", "oom_score_adj": -700})
+        merged["services"]["kb-models"]["deploy"] = {"resources": {"limits": {"memory": "6g"}, "reservations": {"memory": "2g"}}}
+        rc, doc, _ = self._generate(merged)
+        self.assertEqual(rc, 0)
+        for name in gen.SERVICES:
+            svc = doc["services"][name]
+            self.assertEqual(svc.get("oom_score_adj"), gen.GATE_OOM_SCORE_ADJ, name)
+            self.assertNotIn("mem_reservation", svc, name)
+            self.assertNotIn("reservations", (svc.get("deploy") or {}).get("resources") or {}, name)
+        self.assertGreater(gen.GATE_OOM_SCORE_ADJ, 0)
+        self.assertEqual(doc["services"]["postgres"]["mem_limit"], "2g")  # (the ceiling stays)
+        self.assertEqual(doc["services"]["kb-models"]["deploy"]["resources"]["limits"]["memory"], "6g")
+
     def test_every_test_stack_alert_is_labelled_test(self):
         """FIX131 D4: a test-stack page looked exactly like a real one. The
         alert senders run with ALERT_ENVIRONMENT=test ([TEST] in title and

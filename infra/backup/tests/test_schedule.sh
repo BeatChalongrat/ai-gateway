@@ -135,7 +135,7 @@ tick "2026-09-24 09:01"
 tick "2026-09-24 09:02"
 check "down 4 days: exactly one catch-up run" '[ "$(runs)" = 1 ]'
 
-# 4. No double run: another backup (run --rm backup now) holds the lock.
+# 4. No double run: another backup (run --rm --no-deps backup now) holds the lock.
 fresh locked
 seed_success "2026-09-23 03:17"
 mkdir -p "$ROOT/.backup.lock"

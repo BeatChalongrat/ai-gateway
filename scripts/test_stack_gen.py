@@ -145,6 +145,22 @@ LIVE_REFERENCES = ["host.docker.internal", "localhost:8080", "localhost:8081", "
                    "${ALERT_", "${RESEND_API_KEY", "${BACKUP_OFFSITE_", "ntfy.sh/", "${AGENT_MARKET_SMTP_PASSWORD"]
 
 
+# The live services declare a floor and a protected place in the out-of-memory order
+# (docs/HOST_MEMORY.md). Nothing of a test stack may have either: it shares the Docker VM with live, and
+# when that VM runs out a test container is the first to go.
+GATE_OOM_SCORE_ADJ = 500
+
+
+def gives_way(svc: dict) -> dict:
+    """A test container keeps its ceiling, has no floor, and goes first."""
+    svc.pop("mem_reservation", None)
+    resources = (svc.get("deploy") or {}).get("resources")
+    if isinstance(resources, dict):
+        resources.pop("reservations", None)
+    svc["oom_score_adj"] = GATE_OOM_SCORE_ADJ
+    return svc
+
+
 def redirect_env(key: str, value):
     """The test-stack value of an owner-destination variable (see above)."""
     if isinstance(value, str) and value.startswith("${" + key):
@@ -184,6 +200,7 @@ def main() -> int:
         svc.pop("container_name", None)
         svc.pop("build", None)
         svc.pop("profiles", None)
+        gives_way(svc)
         if name in IMAGES:
             svc["image"] = IMAGES[name]
         # ports: loopback only, shifted

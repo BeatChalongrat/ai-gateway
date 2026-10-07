@@ -555,7 +555,7 @@ services:
   # than BACKUP_KEEP_DAYS and notifies (ntfy and/or Resend e-mail — both
   # optional, failure = high priority, success only if
   # BACKUP_NOTIFY_SUCCESS=1). Run one now:
-  #   docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup now
+  #   docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup now
   # /backups defaults to ../ai-gateway-backups/daily — OUTSIDE the repo
   # checkout, so a `git clean`, a re-clone or a worktree removal never eats
   # the backups. Point BACKUP_DIR at another disk on a real deployment.

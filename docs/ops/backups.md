@@ -40,8 +40,13 @@ missed while the container was down was simply skipped. Now
   before that slot. So after a missed window — PC asleep, container stopped,
   a failure — it runs at the first tick after it is back: **once**, not once
   per missed day.
+* **Always `--no-deps` when a backup is run by hand.** After a compose file of the running stack has
+  been edited, `docker compose run` first recreates every dependency whose settings changed — for the
+  backup, the chat database it is about to dump (7 Oct 2026: it did, once; three seconds without a chat
+  database). Every command in this document carries `--no-deps`; a backup with no database to reach
+  fails loudly, which is the right answer.
 * **No double runs.** A lock directory `<BACKUP_DIR>/.backup.lock` (holder,
-  pid, time) is shared by the scheduled loop and `run --rm backup now`
+  pid, time) is shared by the scheduled loop and `run --rm --no-deps backup now`
   (`now` refuses with exit 4 while a backup runs). A lock older than
   `BACKUP_LOCK_STALE_S` (3 h) is a crashed run's and is taken over (logged);
   a restarted container releases its own old lock at start. `mkdir` is used
@@ -60,7 +65,7 @@ missed while the container was down was simply skipped. Now
   decision: retry-wait — attempt 1 for the slot 2026-09-24T03:15:00+0700 failed at 2026-09-24T03:15:30+0700; retry 2 at 2026-09-24T03:25:30+0700 (backoff 10 min)
   decision: skip — another backup is running (a1b2c3d4 pid 17, since 45 s)
   ```
-  `docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup tick`
+  `docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup tick`
   runs one decision by hand (and the backup, if due).
 
 ### The records
@@ -170,7 +175,7 @@ lists the tar. The verdict is `drill.json`:
 
 The scratch databases are dropped in an EXIT trap, so a crashed drill never
 leaves them behind. A drill that fails raises the alert (below) and makes
-`run --rm backup now` exit 2.
+`run --rm --no-deps backup now` exit 2.
 
 ## Off-site copy (FIX130)
 
@@ -286,10 +291,10 @@ maps them to empty `TS_BACKUP_OFFSITE_*` twins.
 3. **Configure and prove.** Add the variables to `.env`, then:
    ```sh
    docker compose -p ai-gateway -f docker-compose.webchat.yml up -d --build backup   # new image + env
-   docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup offsite-check
+   docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup offsite-check
    #   … "repository does not exist yet … restic init", "round trip PASS", "test snapshot removed",
    #   "restic check PASS", "offsite: check PASS"   (exit 0)
-   docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup now
+   docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup now
    #   … summary: OK … drill: pass 14/14 checks; offsite: pass snapshot 1a2b3c4d, 270 MB new of 280 MB, restore 4/4 sha256
    ```
    `offsite-check` failing says why: `wrong repository password`, `the
@@ -366,7 +371,7 @@ BACKUP_OFFSITE_PASSWORD=<long random passphrase — keep a copy OFF this PC>
 ```
 
 then `docker compose -p ai-gateway -f docker-compose.webchat.yml up -d backup`
-and `run --rm backup offsite-check`. No keys, no account. The trade-off: the
+and `run --rm --no-deps backup offsite-check`. No keys, no account. The trade-off: the
 sync client must be signed in and running for the copy to leave the PC, and
 a ransomware that reaches the synced folder reaches the copy (restic's
 encryption keeps it unreadable, not undeletable — keep the bucket option for
@@ -394,9 +399,9 @@ and a copy of it lives off this PC. Switch:
 ```
 # edit .env as in the table, then
 docker compose -p ai-gateway -f docker-compose.webchat.yml up -d backup
-docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup offsite-check
-docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup copy-offsite     # first copy now
-docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup restore-offsite  # prove it
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup offsite-check
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup copy-offsite     # first copy now
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup restore-offsite  # prove it
 ```
 
 The pager's `Off-site backup copy is stale` rule (48 h) covers all three.
@@ -404,8 +409,8 @@ The pager's `Off-site backup copy is stale` rule (48 h) covers all three.
 ### Restore from the off-site copy (FIX133 C)
 
 ```
-docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup restore-offsite            # newest snapshot
-docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup restore-offsite <snapshot> [dir]
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup restore-offsite            # newest snapshot
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup restore-offsite <snapshot> [dir]
 ```
 
 restores the run directory from the OFF-SITE repository (never the local
@@ -419,7 +424,7 @@ backup copy is configured` is an opt-in reminder (`OPS_WATCH_OFFSITE_REMIND=1`).
 ## Run one now
 
 ```sh
-docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup now
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup now
 ```
 
 That is backup + drill + off-site copy + notification, then exit (0 =
@@ -431,12 +436,12 @@ the same records, so a manual run counts for tonight's slot. Sub-commands,
 when you need one piece:
 
 ```sh
-docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup backup            # dump only
-docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup drill /backups/20260923_031500
-docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup offsite /backups/20260923_031500
-docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup offsite-check     # first-time setup / "is it still working?"
-docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup tick              # one scheduler decision (FIX131)
-docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup notify info "test" "hello from the backup service"
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup backup            # dump only
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup drill /backups/20260923_031500
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup offsite /backups/20260923_031500
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup offsite-check     # first-time setup / "is it still working?"
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup tick              # one scheduler decision (FIX131)
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup notify info "test" "hello from the backup service"
 ```
 
 `notify` is a **test fire** (FIX131): always `[TEST]` in title and body, and
@@ -468,7 +473,7 @@ difference here is the target is the live database.
    docker compose -p ai-gateway stop backend gateway admin-ui portal log-worker mcp-gateway
    ```
    (Take one more backup of the current state first if the servers still
-   answer: `run --rm backup backup`. It costs a minute and keeps the option
+   answer: `run --rm --no-deps backup backup`. It costs a minute and keeps the option
    to change your mind.)
 
 3. **Restore the gateway database** (server `postgres`, db `ai_gateway`).
@@ -507,7 +512,7 @@ difference here is the target is the live database.
    ```sh
    docker compose -p ai-gateway up -d
    docker compose -p ai-gateway -f docker-compose.webchat.yml up -d
-   docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup now   # a fresh backup + drill of the restored state
+   docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup now   # a fresh backup + drill of the restored state
    ```
    Then a real login and a real chat that opens an old conversation with a
    file. Drop `ai_gateway_broken_*` / `sran_ai_broken_*` a week later, not
@@ -542,7 +547,7 @@ Title:   Backup failed: no new backup was written              (priority high, t
 Tonight's backup of the databases and uploads did not complete. The previous backup is still there:
 2026-09-23 03:16 +07 (23 h 59 min old). The next automatic try is in 10 min. Look: docker logs
 ai-gateway-backup (the step that failed). Run one by hand: docker compose -p ai-gateway -f
-docker-compose.webchat.yml run --rm backup now
+docker-compose.webchat.yml run --rm --no-deps backup now
 Details: BACKUP FAILED backup=none sizes: n/a; duration 3s; drill: not run; offsite: not run
 
 Title:   Backup failed its restore test                        (priority high)

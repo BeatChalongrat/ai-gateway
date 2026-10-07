@@ -17,7 +17,7 @@
 # with backoff (BACKUP_RETRY_BASE_S doubling up to BACKUP_RETRY_MAX_S). Two
 # runs never overlap: a lock directory in the backup root (mkdir is atomic on
 # every filesystem, including the Windows bind mount; flock is not reliable
-# there), shared by the scheduled loop and `run --rm backup now`.
+# there), shared by the scheduled loop and `run --rm --no-deps backup now`.
 #
 # Records (written atomically: temp file in the same directory + mv):
 #   $BACKUP_ROOT/last_success.json  the newest backup whose restore drill
@@ -156,7 +156,7 @@ retry_backoff() {
 
 # ---------------------------------------------------------------------------
 # The lock: one backup at a time across the scheduled container and any
-# `run --rm backup now`. A lock older than BACKUP_LOCK_STALE_S (a run takes
+# `run --rm --no-deps backup now`. A lock older than BACKUP_LOCK_STALE_S (a run takes
 # minutes) is a crashed run's and is taken over, with a log line.
 # ---------------------------------------------------------------------------
 LOCK_HELD=0

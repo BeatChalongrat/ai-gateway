@@ -55,7 +55,18 @@ def test_no_backup_newer_than_26_hours_pages():
     [f] = watch.classify_backup(_success(30), None, now=NOW, max_age_h=26)
     assert f.incident == "backup" and f.severity == "warning"
     assert f.title == "Backups: no fresh backup for 30 h 0 min"
-    assert "20260924_031500" in f.message and "run --rm backup now" in f.message
+    assert "20260924_031500" in f.message and "run --rm --no-deps backup now" in f.message
+
+
+def test_the_hand_command_for_a_backup_never_recreates_what_the_backup_depends_on():
+    """`docker compose run` recreates every dependency whose compose settings changed since it was
+    started. The pager's own instruction was `run --rm backup now`: on 2026-10-07, after an edit to the
+    chat database's service, that command recreated the chat database before dumping it."""
+    from app.services import alert_catalog
+
+    assert " --no-deps " in alert_catalog._BACKUP_RUN
+    [f] = watch.classify_backup(_success(30), None, now=NOW, max_age_h=26)
+    assert "run --rm backup" not in f.message
 
 
 def test_no_backup_at_all_pages():

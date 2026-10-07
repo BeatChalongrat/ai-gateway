@@ -290,7 +290,7 @@ to `TS_ALERT_TEST_NTFY_URL` or nowhere. A test fire on the live system:
 
 ```sh
 docker compose -p ai-gateway exec -T ops-watch python -m app.ops.fire_test_alert "checking the pager"
-docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup notify info "test" "hello"
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup notify info "test" "hello"
 ```
 
 Both are always `[TEST]` and go only to `ALERT_TEST_NTFY_URL` (nothing is

@@ -218,7 +218,7 @@ def memory_text(pct: float, avail_gib: float, total_gib: float, limit: float) ->
 # Backups (from infra/backup's last_success.json / last_failure.json)
 # ---------------------------------------------------------------------------
 
-_BACKUP_RUN = "docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup now"
+_BACKUP_RUN = "docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup now"
 
 
 def backup_stale_text(age_s: float | None, newest: str, max_age_h: float) -> tuple[str, str, str]:
