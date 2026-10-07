@@ -48,7 +48,8 @@ case "${1:-status}" in
   up)
     TAG="${2:?tag}"
     docker tag "$SANDBOX_FROM" "$SANDBOX_TAG"
-    docker run --rm --privileged alpine:3.20 sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches; free -m | head -2'
+    # (no sync: one in this VM never returned, and its container could not be removed)
+    timeout 90 docker run --rm --privileged alpine:3.20 sh -c 'echo 3 > /proc/sys/vm/drop_caches; free -m | head -2' || echo "cache drop skipped"
     export TS_CHAT_EDGE_TAG="$TAG"
     ts up -d --no-deps --wait --wait-timeout 300 postgres redis postgres-webchat redis-webchat | tail -4
     ts up -d --no-deps --wait --wait-timeout 600 mock-provider ner-service rate-limiter log-worker dlp-sidecar backend gateway backup | tail -8

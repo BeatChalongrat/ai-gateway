@@ -78,8 +78,15 @@ stack_stop() {
   [ -n "$t" ] && docker stop $t > /dev/null 2>&1
   say "test stack stopped ($(test_containers | wc -l | tr -d ' ') still up)"
 }
-cache_back() { # hand the VM's page cache back to Windows (no sync: a sync container once hung for good)
-  timeout 90 docker run --rm --privileged --oom-score-adj 1000 alpine:3 sh -c 'echo 1 > /proc/sys/vm/drop_caches' > /dev/null 2>&1 || true
+cache_back() { # hand the VM's free memory back to Windows
+  # The VM gives a page back only when it is part of a free block of 2 MB, and with live running in it the
+  # VM is never idle enough for WSL's own reclaim. So: drop the page cache, then have the kernel compact
+  # what is free into such blocks (7 Oct 2026: 5.5 GB free inside the VM, 1.1 GB free on the host; one
+  # compaction gave the host 1.4 GB in twenty seconds, a second and a third nothing more).
+  # No sync: a sync in this VM once never returned, and its container could not be removed.
+  timeout 120 docker run --rm --privileged --network none --oom-score-adj 1000 alpine:3 \
+    sh -c 'echo 1 > /proc/sys/vm/drop_caches; echo 1 > /proc/sys/vm/compact_memory' > /dev/null 2>&1 || true
+  sleep 20 # (the pages reach Windows a few seconds after)
 }
 one() { # one <name> <timeout s> <command…> → a file and a verdict line
   local name="$1" t="$2"; shift 2
