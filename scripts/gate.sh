@@ -146,8 +146,9 @@ case "$phase" in
   stack)
     sha="${1:?the commit whose images the test stack runs}"
     lock stack; room; guard; rc=0
-    one stack_up 1200 env AM7_NO_NER=1 TS_BACKEND_TAG="${TS_BACKEND_TAG:-2fa9bb8}" AM_FETCHER_TAG="$sha" bash scripts/probes/AM7/test_stack.sh up "$sha" || rc=1
-    one stack_web 600 bash scripts/probes/AM12/test_stack.sh web "$sha" || rc=1
+    one stack_up 1200 env AM7_NO_NER=1 TS_BACKEND_TAG="${TS_BACKEND_TAG:-2fa9bb8}" AM_FETCHER_TAG="${AM_FETCHER_TAG:-$sha}" bash scripts/probes/AM7/test_stack.sh up "$sha" || rc=1
+    # (the stand-in sites run on the fetcher's image: the card's own when it built one, else the one named)
+    one stack_web 600 bash scripts/probes/AM12/test_stack.sh web "${AM_FETCHER_TAG:-$sha}" || rc=1
     one clients_build 1500 bash scripts/probes/AM10/test_clients.sh build "$sha" || rc=1
     one clients_up 600 bash scripts/probes/AM10/test_clients.sh up "$sha" || rc=1
     cache_back; exit $rc

@@ -32,7 +32,7 @@ const PKG = path.join(L.ROOT, "backend", "agent_market", "packages");
 const AGENT = {
   bank: { slug: "sran.bank-reconciliation", dir: "bank_reconciliation", card: { th: "กระทบยอด", en: "Bank Reconciliation" } },
   register: { slug: "sran.invoice-processing", dir: "invoice_processing", card: { th: "ทะเบียนเอกสารซื้อ", en: "Invoice Processing" } },
-  po: { slug: "sran.invoice-po-matching", dir: "po_matching", card: { th: "ใบกำกับภาษีกับ PO", en: "Purchase Order Matching" } },
+  po: { slug: "sran.invoice-po-matching", dir: "po_matching", card: { th: "ใบสั่งซื้อ", en: "Purchase Order" } },
   buy: { slug: "sran.procurement", dir: "procurement", card: { th: "จัดซื้อ", en: "Procurement" } },
 };
 const THREAD = '[data-testid="am-thread"]';
@@ -138,10 +138,13 @@ async function nextVersion(x, runId, after, name) {
   const file = await W.download(x, d, "xlsx", name);
   return { d, book: file ? sheets(file) : null, file };
 }
-async function greeting(x, installId) {
+async function greeting(x, installId, which) {
   const manifest = ((await api(x.page, `/installs/${installId}`)).body || {}).manifest || {};
   const lang = await x.page.evaluate(() => document.documentElement.lang);
-  const can = ((manifest.instructions || {}).can || []).map((d) => (lang === "en" ? (manifest.en || {})[d.label] : d.label) || d.label);
+  // what the package itself says can be asked, in the screen's language (its own agent.json: the Thai label, and
+  // the English its "en" map gives for that label)
+  const own = JSON.parse(fs.readFileSync(path.join(PKG, AGENT[which].dir, "agent.json"), "utf8"));
+  const can = ((own.instructions || {}).can || []).map((d) => (lang === "en" ? (own.en || {})[d.label] : d.label) || d.label);
   const line = await x.words(x.page.locator('[data-testid="am-greeting-asks"]').first()).catch(() => "");
   x.check(can.length > 0 && can.every((c) => line.includes(c)), `the greeting says what can be asked of this agent's workbook (${lang})`, `v${manifest.version}: ${line.slice(0, 260)}`);
   return manifest;
@@ -167,7 +170,7 @@ async function bank(lang = "th") {
   await setLanguage(x, lang);
   const installId = await ownInstall(x, "bank");
   await workspace(x, installId);
-  const manifest = await greeting(x, installId);
+  const manifest = await greeting(x, installId, "bank");
   await x.shot("01-greeting");
   const first = lang === "en" ? "Reconcile September, order the items from the largest amount" : "กระทบยอดเดือนกันยายน เรียงจากยอดมาก";
   const { runId } = await W.sendFiles(x, installId, sampleOf("bank"), `${TAG} ${first}`, "02");
@@ -220,7 +223,7 @@ async function register() {
   await setLanguage(x, "th");
   const installId = await ownInstall(x, "register");
   await workspace(x, installId);
-  const manifest = await greeting(x, installId);
+  const manifest = await greeting(x, installId, "register");
   await x.shot("01-greeting");
   const { runId } = await W.sendFiles(x, installId, sampleOf("register"), `${TAG} ทำทะเบียนเอกสารซื้อเดือนกันยายน เรียงตามผู้ขาย`, "02");
   const end = await W.finish(x, runId, "02");
@@ -259,7 +262,7 @@ async function po() {
   await setLanguage(x, "th");
   const installId = await ownInstall(x, "po");
   await workspace(x, installId);
-  const manifest = await greeting(x, installId);
+  const manifest = await greeting(x, installId, "po");
   await x.shot("01-greeting");
   const { runId } = await W.sendFiles(x, installId, sampleOf("po"), `${TAG} ตรวจใบแจ้งหนี้กับใบสั่งซื้อเดือนกันยายน เรียงจากรายการที่ต่างมากที่สุด`, "02");
   const end = await W.finish(x, runId, "02");
@@ -293,13 +296,18 @@ async function buy() {
   await setLanguage(x, "th");
   const installId = await ownInstall(x, "buy");
   await workspace(x, installId);
-  const manifest = await greeting(x, installId);
+  const manifest = await greeting(x, installId, "buy");
   // the model for this install, chosen as a person chooses it in the model menu. CLAUDE.md: a run of several
   // model steps is not judged on the self-hosted reasoning model; nothing else is changed.
   const model = process.env.AM12_MODEL || "deepseek-v4-flash";
   const chosen = await api(page, `/installs/${installId}/model`, { method: "PUT", body: JSON.stringify({ choice: model }) });
   x.check(chosen.status === 200, `the install's model is set to ${model}, in the model menu's own way`, `${chosen.status}`);
-  const text = "ขอซื้อเก้าอี้สำนักงาน 20 ตัว มีที่วางแขน ส่งที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ งบไม่เกิน 6,000 บาทต่อตัว เรียงจากถูกสุด แล้วบอกด้วยว่าเจ้าไหนดีที่สุด";
+  // The delivery address is last, as in AM12's own requests. With a street address BEFORE the rest, the gateway's
+  // privacy layer masks from the address to the end of the line (detector thai_address: “ส่งที่… กรุงเทพฯ ขอให้เรียง
+  // จากถูกสุด” became one <<ADDRESS_1>>, 62 characters — request_logs.dlp_findings_json on the test stack,
+  // 7 Oct 2026), so no model is shown what follows it. That is the platform's, in every chat; it is reported,
+  // not walked round: scripts/probes/AM13/asked_prompt_probe.py --texts shows it.
+  const text = "ขอซื้อเก้าอี้สำนักงาน 20 ตัว มีที่วางแขน งบไม่เกิน 6,000 บาทต่อตัว เรียงจากถูกสุด แล้วบอกด้วยว่าเจ้าไหนดีที่สุด ส่งที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ";
   const runsOf = async () => ((await api(page, `/installs/${installId}/runs`)).body?.runs || []).filter((r) => r.kind === "run");
   const start = page.locator('[data-testid="am-round-start"]');
   if (await start.count()) await x.click(start.last(), "เริ่มรอบใหม่");
