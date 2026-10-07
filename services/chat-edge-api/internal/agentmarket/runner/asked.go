@@ -62,7 +62,19 @@ func (rc *runCtx) asked(ctx context.Context, text string, request bool) (am.Aske
 		func(ctx context.Context) (any, float64, string, string, error) {
 			system, user := am.AskedPrompt(spec, text, request)
 			// (the model is shown the person's words and the package's list — nothing of the round's data)
-			ans, c, _ := rc.askJSONWith(ctx, models, system, user, false)
+			ans, c, refused := rc.askJSONWith(ctx, models, system, user, false)
+			cost, tries := c.CostUSD, 1
+			if ans == nil && !refused {
+				// The in-house model sometimes returns nothing for a question it answers the next time
+				// (its thinking takes the whole answer). A person is not told to type their words again
+				// for that: the same question is put once more, and only a second silence is "unread".
+				// (Not when the gateway's guardrail refused it: the same question would be refused again.)
+				again, c2, _ := rc.askJSONWith(ctx, models, system, user, false)
+				cost, tries = cost+c2.CostUSD, 2
+				if again != nil {
+					ans, c = again, c2
+				}
+			}
 			out := am.Asked{Text: text, Apply: []string{}, Unread: true}
 			if ans != nil {
 				out = am.ReadAsked(spec, text, ans)
@@ -71,7 +83,10 @@ func (rc *runCtx) asked(ctx context.Context, text string, request bool) (am.Aske
 				out = out.OfARequest()
 			}
 			out.Model = c.Model
-			return out, c.CostUSD * rc.r.CreditsPerUSD, "", c.Model, nil
+			if tries > 1 {
+				out.Tries = tries
+			}
+			return out, cost * rc.r.CreditsPerUSD, "", c.Model, nil
 		})
 	if err != nil {
 		return am.Asked{}, err

@@ -92,6 +92,8 @@ type Asked struct {
 	Unread bool `json:"unread,omitempty"`
 	// Instead: what was asked together with another directive of its group, and gave way to it.
 	Instead []AskedInstead `json:"instead,omitempty"`
+	// Tries: how many times a model was asked, when more than once (the first answer was no answer).
+	Tries int `json:"tries,omitempty"`
 }
 
 // AskedInstead: one directive that was asked and is not applied, because Kept — of the same group — was

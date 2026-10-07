@@ -258,3 +258,62 @@ func TestProcurementOrdersByPriceWhenAskedAndIsNeverTalkedIntoAVerdict(t *testin
 		t.Fatalf("an order changed a figure: %v", tot)
 	}
 }
+
+// AM13b — on live the in-house model gave no answer in time for "เรียงจากยอดมาก" once and read the same words
+// the next time; the person had to type them again. A reading that comes back as no answer is now asked
+// once more before anyone is told. A second silence is still said, plainly: the words were not read.
+func TestWordsThatCameBackUnreadAreReadOnceMoreBeforeAPersonIsTold(t *testing.T) {
+	e := newIT(t)
+	if e == nil {
+		return
+	}
+	e.setupBankInstall()
+	ctx := context.Background()
+	run := e.bankRun("kbank_sep.xlsx", "ledger_sep.xlsx")
+	if _, err := e.store.Pool.Exec(ctx, `UPDATE agent_market.agent_runs SET message = $2 WHERE id = $1`, run.ID,
+		"กระทบยอดเดือนกันยายน เรียงตามวันที่"); err != nil {
+		t.Fatal(err)
+	}
+	e.askedSilent.Store(1) // the first reading: no answer in time
+	r := e.runner("r1")
+	got := e.drive(r, run.ID, 6*time.Minute, terminal)
+	if got.Status != am.RunSucceeded {
+		t.Fatalf("the round: %s %s", got.Status, got.StatusReason)
+	}
+	var asked am.Asked
+	for _, s := range e.steps(run.ID) {
+		if s.Name == "instructions" {
+			_ = json.Unmarshal(s.Output, &asked)
+		}
+	}
+	if asked.Unread || strings.Join(asked.Apply, " ") != "sort_by_date" || asked.Tries != 2 {
+		t.Fatalf("one silence, then an answer — the words are read, on the second try: %+v", asked)
+	}
+	if n := e.askedCalls.Load(); n != 2 {
+		t.Fatalf("the question was put %d times; once more after a silence is twice", n)
+	}
+	thread := e.visibleThread()
+	if !has(thread, "ทำตามที่ขอแล้ว: เรียงรายการกระทบยอดตามวันที่") || has(thread, "อ่านข้อความที่พิมพ์มาไม่สำเร็จ") {
+		t.Fatalf("the person is told what was done, and is not told to type it again:\n%s", strings.Join(thread, "\n"))
+	}
+	arts, _ := e.store.RunArtifacts(ctx, run.ID)
+	if len(arts) != 1 || !strings.Contains(string(arts[0].Validation), "เรียงจากวันที่เก่าที่สุดขึ้นก่อน") {
+		t.Fatalf("the file is in the order asked: %+v", arts)
+	}
+
+	// two silences in a row: now the person is told, and nothing is made
+	e.askedSilent.Store(2)
+	job := e.say(got, "เรียงจากยอดมาก แทน")
+	if j := e.drive(r, job.ID, 3*time.Minute, terminal); j.Status != am.RunSucceeded {
+		t.Fatalf("the reply: %s %s", j.Status, j.StatusReason)
+	}
+	if n := e.askedCalls.Load(); n != 4 {
+		t.Fatalf("after two more silences the question had been put %d times in all, want 4 — once more, not for ever", n)
+	}
+	if thread = e.visibleThread(); !has(thread, "อ่านข้อความที่พิมพ์มาไม่สำเร็จ") {
+		t.Fatalf("a second silence is said:\n%s", strings.Join(thread, "\n"))
+	}
+	if jobs := e.renderJobs(run.ID); len(jobs) != 0 {
+		t.Fatalf("words nobody read made a file: %d render jobs", len(jobs))
+	}
+}

@@ -54,6 +54,10 @@ type itEnv struct {
 	install am.Install
 	// AM11: when set, the stand-in model maps a form by its labels (am11_form_it_test.go)
 	formLabels map[string]string
+	// AM13b: how many of the next readings of a person's words come back as no answer at all, and how
+	// many readings were asked for (am13_asked_it_test.go)
+	askedSilent atomic.Int32
+	askedCalls  atomic.Int32
 }
 
 func newIT(t *testing.T) *itEnv {
@@ -109,6 +113,15 @@ func (e *itEnv) fakeModel(w http.ResponseWriter, r *http.Request) {
 	if strings.Contains(string(body), "ข้อความของผู้ใช้:") {
 		// AM11b: a person's words read into the package's directives (am11b_asked_it_test.go)
 		content = e.askedAnswer(body)
+		e.askedCalls.Add(1)
+		if e.askedSilent.Load() > 0 {
+			// AM13b: no answer in time — what the in-house model did on live (7 Oct 2026: 31 s, then
+			// nothing; the gateway logged no request). The model client does not ask the same model
+			// again after a failure of this kind; it goes to the next model, and here there is none.
+			e.askedSilent.Add(-1)
+			http.Error(w, `{"error":{"code":"upstream_timeout","message":"the model did not answer in time"}}`, http.StatusGatewayTimeout)
+			return
+		}
 	}
 	if strings.Contains(string(body), "จับคู่ช่องในแบบฟอร์ม") {
 		// AM8: a model's proposal for a customer's form — a formula cell and a slot that does not exist
