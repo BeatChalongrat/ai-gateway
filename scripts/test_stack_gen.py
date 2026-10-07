@@ -254,7 +254,7 @@ def main() -> int:
         out_services[name] = svc
 
     for name, extra in EXTRA_SERVICES.items():
-        out_services[name] = {**extra, "restart": "on-failure", "labels": {"sran.test-stack": "true"}}
+        out_services[name] = gives_way({**extra, "restart": "on-failure", "labels": {"sran.test-stack": "true"}})
 
     volumes = {"ts_postgres_data": {}, "ts_pgdata_webchat": {}, "ts_chat_edge_uploads": {}, "ts_backups": {},
                "ts_backend_uploads": {}}

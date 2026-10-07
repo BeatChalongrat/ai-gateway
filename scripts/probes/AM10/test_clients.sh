@@ -42,10 +42,10 @@ case "${1:-}" in
     ;;
   up)
     docker rm -f sran-test-am10-web sran-test-am10-admin >/dev/null 2>&1 || true
-    docker run -d --name sran-test-am10-web --network "$NET" -p 127.0.0.1:13002:3002 \
+    docker run -d --name sran-test-am10-web --memory 768m --oom-score-adj 500 --network "$NET" -p 127.0.0.1:13002:3002 \
       -e PORT=3002 -e AGENT_MARKET_ENABLED=true "$WEB_IMG" >/dev/null
     KEY="$(dotenv CHAT_EDGE_ADMIN_API_KEY)"
-    docker run -d --name sran-test-am10-admin --network "$NET" -p 127.0.0.1:13000:3000 \
+    docker run -d --name sran-test-am10-admin --memory 768m --oom-score-adj 500 --network "$NET" -p 127.0.0.1:13000:3000 \
       -e PORT=3000 -e HOSTNAME=0.0.0.0 -e NEXT_PUBLIC_API_BASE_URL=http://localhost:18081 \
       -e GATEWAY_API_URL=http://backend:8080 -e CHAT_EDGE_API_URL=http://chat-edge-api:4000/api/v1 \
       -e CHAT_EDGE_ADMIN_API_KEY="${KEY:-dev-chat-edge-admin-key-change-in-prod}" "$ADMIN_IMG" >/dev/null

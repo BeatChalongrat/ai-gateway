@@ -57,7 +57,7 @@ case "${1:-check}" in
       --entrypoint node "ai-gateway-web-fetcher:$TAG" -e "console.log(require('/opt/web-fetcher/test/sites/server.js').HOSTS.join(' '))")
     ALIASES=()
     for h in $HOSTS; do ALIASES+=(--network-alias "$h"); done
-    MSYS_NO_PATHCONV=1 docker run -d --name "$SITES" --restart unless-stopped --label sran.test-stack=true --memory 128m \
+    MSYS_NO_PATHCONV=1 docker run -d --name "$SITES" --restart unless-stopped --label sran.test-stack=true --memory 128m --oom-score-adj 500 \
       --network "$NET" --ip "$ADDR" "${ALIASES[@]}" --user 0 \
       -v "$(native "$ROOT")/services/web-fetcher/test:/opt/web-fetcher/test:ro" \
       --entrypoint node "ai-gateway-web-fetcher:$TAG" /opt/web-fetcher/test/sites/server.js 80 >/dev/null

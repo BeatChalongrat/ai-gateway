@@ -10,3 +10,13 @@ networks:
   web:
     external: true
     name: sran-test-web
+
+# AM11b: on live these three keep a protected place in the out-of-memory order (docs/HOST_MEMORY.md).
+# The test project shares the Docker VM with live, so here they are the first to go.
+services:
+  agent-runner:
+    oom_score_adj: 500
+  doc-converter:
+    oom_score_adj: 500
+  web-fetcher:
+    oom_score_adj: 500

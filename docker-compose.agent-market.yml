@@ -43,6 +43,8 @@ services:
     network_mode: none
 
   agent-runner:
+    # memory guard (scripts/ops/live_memory.py): its turn when the Docker VM runs out
+    oom_score_adj: -500
     profiles: ["agent-market"]
     image: ai-gateway-agent-runner:${AM_RUNNER_TAG:-latest}
     container_name: ${AM_CONTAINER_NAME:-sran-agent-runner}
@@ -123,6 +125,8 @@ services:
     stop_grace_period: 20s
 
   doc-converter:
+    # memory guard (scripts/ops/live_memory.py): its turn when the Docker VM runs out
+    oom_score_adj: -300
     # LibreOffice (+ poppler, Thai fonts) turning a finished .docx/.xlsx/.pptx
     # into a PDF and recalculating an .xlsx (services/doc-converter). One
     # conversion at a time, a fresh profile each, a wall-clock limit that kills
@@ -156,6 +160,8 @@ services:
     stop_grace_period: 10s
 
   web-fetcher:
+    # memory guard (scripts/ops/live_memory.py): its turn when the Docker VM runs out
+    oom_score_adj: -300
     # AM12: opens ONE public web page per request in a headless browser with
     # a fresh profile, and answers with what a person would have seen on it
     # (text, a picture, hashes, the fetch's own log) or with a refusal and its

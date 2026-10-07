@@ -332,3 +332,44 @@ its JSON shape among the rules loses pieces of every faithful answer
 is replaced by an internal network of stand-in sites on a public address
 range (`scripts/probes/AM12/test_stack.sh`), so every refusal and every page
 is the fetcher's real code against a web that is a fixture.
+
+## The gate, one heavy thing at a time (AM11b)
+
+The host is a 32 GB laptop that also runs live (`docs/HOST_MEMORY.md`). On 7 Oct 2026 a gate's lanes,
+test stack, image builds and desktop build ran as each came to mind; the host went to 1.1 GB free five
+times and the integration lane was cut twice with no verdict. Run alone, that lane takes 41 minutes and
+passes. A gate's heavy phases are now started through one script and nothing beside it:
+
+```
+bash scripts/gate.sh preflight          # live's memory guard, free memory, the lock
+bash scripts/gate.sh lanes              # engine · go · backend · web · admin · desktop, test stack stopped
+bash scripts/gate.sh it                 # the integration lane, alone, each chunk's verdict as it ends
+bash scripts/gate.sh build <sha>        # the five images; the VM's cache is handed back after
+bash scripts/gate.sh stack <sha>        # test stack + stand-in web + built clients
+bash scripts/gate.sh stack-stop         # stop the test stack (nothing is removed)
+bash scripts/gate.sh walk -- <command>  # one walk
+bash scripts/gate.sh smoke <sha>        # flag on, flag off, back on
+bash scripts/gate.sh drill              # removal drill + gitleaks on the unpushed commits
+bash scripts/gate.sh backup             # a live backup with its restore drill (--no-deps)
+```
+
+Every phase:
+
+- takes a lock, and a second phase is refused while one holds it (exit 3, saying who holds it);
+- stops the test stack first when it does not need it (lanes, the integration lane, builds);
+- waits for 3,000 MB free on the host (`GATE_MIN_FREE_MB`), handing the VM's cache back once, and
+  after ten minutes (`GATE_WAIT_S`) stops saying how much the host had — having started nothing (exit 4);
+- checks live's memory settings against compose and puts them right in place if a container was
+  restarted since (`scripts/ops/live_memory.py`);
+- writes one file under `GATE_RESULTS` and prints one verdict line.
+
+A card sets `GATE_RESULTS`, `GATE_BACKEND_TESTS` (the backend lane's files) and `GATE_IT` (its own
+integration lane, run after the two standing chunks). `scripts/tests/test_am11b_gate.py` holds the
+lock and the stop, without Docker.
+
+What the gate starts gives way to live: the test stack's services have no floor and turn 500 (the
+generator), the test project's runner, converter and fetcher are put at 500 by
+`scripts/probes/AM12/test-web.yml`, the built test clients and stand-in sites are started with
+`--oom-score-adj 500` and a ceiling. On live the runner keeps −500, the converter and the fetcher −300:
+after the databases, the front door and the applications
+(`backend/tests/test_am11b_memory_guard.py`).
