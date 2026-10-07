@@ -390,6 +390,47 @@ async function buy() {
   await done(x, "buy", { installId, runId: run.id, manifest_version: manifest.version, figures, refusals: lines });
 }
 
+// ── again: what a person does when the thread says their words were not read — type them again ───────
+// (the walk's own install of the register agent and its last round; "เรียงจากยอดมาก" unless other words are given)
+async function again(text = "เรียงจากยอดมาก") {
+  const x = await W.session("web", "again");
+  const { page } = x;
+  await home(page);
+  await setLanguage(x, "th");
+  const installId = state.am13_register;
+  if (!installId) throw new Error("no register install of this walk (run the register phase first)");
+  await workspace(x, installId);
+  const runs = ((await api(page, `/installs/${installId}/runs`)).body?.runs || []).filter((r) => r.kind === "run");
+  const runId = runs.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0]?.id;
+  const d0 = await detailOf(page, runId);
+  const v0 = versionOf(d0);
+  const t0 = await threadText(page);
+  await sayAfter(x, text);
+  const out = await waitFor(async () => {
+    const d = await detailOf(page, runId);
+    if (versionOf(d) > v0) return { made: true };
+    const t = (await threadText(page)).slice(t0.length);
+    const line = (t.match(/[^\n]*(?:ทำตามที่ขอไม่ได้เพราะ|อ่านข้อความที่พิมพ์มาไม่สำเร็จ)[^\n]*/) || [null])[0];
+    return line ? { said: line } : null;
+  }, 420000, 2500);
+  x.check(!!out && out.made, `“${text}” typed again — a new version of the workbook is made`, out ? (out.made ? `v${v0} → v${v0 + 1}` : `the thread said: ${out.said.slice(0, 200)}`) : "nothing happened in 7 minutes");
+  if (out && out.made) {
+    await L.wait(2500);
+    const d = await detailOf(page, runId);
+    const file = await W.download(x, d, "xlsx", `register_v${versionOf(d)}.xlsx`);
+    const book = file ? sheets(file) : {};
+    const t = tableOf(book["ทะเบียน"], ["ลำดับ", "วันที่", "ผู้ขาย"]);
+    const totals = t.rows.map((r) => Number(r[t.col("ยอดรวม (บาท)")]));
+    x.check(totals.length >= 3 && runsDown(totals) && totals[0] > totals[totals.length - 1], "… and it runs from the largest total in baht (read from the .xlsx)", totals.join(" ≥ "));
+    const thread = await threadText(page);
+    x.check(/ทำตามที่ขอแล้ว: เรียงทะเบียนจากยอดรวมมากที่สุด/.test(thread.slice(t0.length)), "the thread says the order was done");
+    const step = ((await api(page, `/installs/${installId}/runs`)).body?.runs || []).filter((r) => r.kind === "reply").length;
+    x.mark(`reply jobs on this install: ${step}`);
+  }
+  await x.shot("01-again");
+  await done(x, "again", { installId, runId, text, outcome: out });
+}
+
 async function cleanup() {
   const s = await W.openWeb(process.env.AM6_EMAIL || L.TS_USER.email);
   await s.page.goto(`${WEB()}/chat`, { waitUntil: "load" });
@@ -410,7 +451,8 @@ const phase = process.argv[2];
   else if (phase === "register") await register();
   else if (phase === "po") await po();
   else if (phase === "buy") await buy();
+  else if (phase === "again") await again(process.argv[3]);
   else if (phase === "cleanup") await cleanup();
-  else throw new Error("bank | register | po | buy | english | cleanup");
+  else throw new Error("bank | register | po | buy | english | again [words] | cleanup");
 })().catch((e) => { console.error(e); process.exit(1); });
 void EDGE;
