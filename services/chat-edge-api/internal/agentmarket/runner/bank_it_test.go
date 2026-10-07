@@ -158,12 +158,27 @@ func TestAReconciliationThatTiesSucceeds(t *testing.T) {
 	if g == nil || g.Status != "succeeded" || g.Kind != "check" {
 		t.Fatalf("the gate is a step of the run: %+v", g)
 	}
-	// no step of the round asked a model anything (the runner itself lists the
-	// gateway's models when it registers; that is not this round)
+	// no step of the round showed a model anything of the round (the runner itself lists the gateway's
+	// models when it registers; that is not this round). AM13: since the agent takes an order for its
+	// items, one step does ask a model something — "instructions" — and what that step is given is the
+	// words the person typed and nothing else: no file, no figure, no name of a file.
 	for _, s := range e.steps(run.ID) {
+		if s.Name == "instructions" {
+			var in map[string]json.RawMessage
+			_ = json.Unmarshal(s.Input, &in)
+			var text string
+			_ = json.Unmarshal(in["text"], &text)
+			if len(in) != 2 || in["models"] == nil || text != "[AM5] กระทบยอดธนาคาร" {
+				t.Fatalf("the model that reads a person's words was given more than the words: %s", s.Input)
+			}
+			continue
+		}
 		if s.Kind == "ai" || s.ModelID != "" {
 			t.Fatalf("step %s used a model", s.Name)
 		}
+	}
+	if got.ModelUsed != nil {
+		t.Fatalf("the run names a model as having seen its data: %v", *got.ModelUsed)
 	}
 	readable(t, "the thread", e.visibleThread())
 
