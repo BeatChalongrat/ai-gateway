@@ -95,6 +95,7 @@ EXTRA_SERVICES = {
         "image": "axllent/mailpit:v1.27",
         "environment": {"MP_MAX_MESSAGES": "500", "MP_SMTP_DISABLE_RDNS": "true"},
         "ports": ["127.0.0.1:18025:8025", "127.0.0.1:11025:1025"],
+        "mem_limit": "256m",  # AM11b: nothing a gate starts is without a ceiling
     },
 }
 

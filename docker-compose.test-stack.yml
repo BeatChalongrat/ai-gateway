@@ -778,6 +778,7 @@
         "127.0.0.1:18025:8025",
         "127.0.0.1:11025:1025"
       ],
+      "mem_limit": "256m",
       "restart": "on-failure",
       "labels": {
         "sran.test-stack": "true"

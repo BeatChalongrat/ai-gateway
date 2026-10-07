@@ -218,6 +218,7 @@ class AgentMarketMailSinkTest(unittest.TestCase):
         # AM11b: like every service of the test stack, it gives way before anything live
         self.assertEqual(sink.get("oom_score_adj"), gen.GATE_OOM_SCORE_ADJ)
         self.assertNotIn("mem_reservation", sink)
+        self.assertEqual(sink.get("mem_limit"), "256m")
 
     def test_the_relay_password_is_never_the_owners(self):
         env = self._doc()["services"]["chat-edge-api"]["environment"]
