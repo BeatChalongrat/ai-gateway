@@ -115,7 +115,10 @@ async function round() {
   // where a run starts: the time, and only the time (or nothing)
   const est = (await x.words(page.locator('[data-testid="am-estimate"]').first()).catch(() => "")) || "";
   x.check(est === "" || /^ราว \d+ (วินาที|นาที)$/.test(est), "the line where a run starts is the time and nothing else (or is not there)", est || "(no line)");
-  x.check((await page.locator('header [data-testid="credit-badge"], [data-testid="credit-badge"]').count()) === 0 && !/เครดิต/.test(await page.evaluate(() => document.body.innerText)), "no credits anywhere in the agent's room — the chat's pill included");
+  // (the ledger's own word — "เดบิตเครดิตสมดุล" in a finished round's progress — is the work, not a price)
+  const priced = (await moneyOn(page)).filter((h) => CREDITS.test(h.match) && !ACCOUNTING.test(h.says));
+  x.check((await page.locator('[data-testid="credit-badge"]').count()) === 0 && priced.length === 0, "no credits anywhere in the agent's room — the chat's pill included",
+    priced.map((h) => `${h.where}: ${h.says}`).join(" | ") || "no pill · no mention");
   await x.shot("01-empty-workspace");
   const { runId } = await W.sendFiles(x, installId, W.FIN, `${TAG} รายงานผลประกอบการเดือนกันยายน 2569`, "02");
   const end = await W.finish(x, runId, "02");
@@ -485,12 +488,14 @@ async function asked() {
   x.check(after === before, "… and no file was made for it", `${before} → ${after} files`);
   await x.shot("05-refused");
 
-  // the run page: the step that read the words, by name
+  // the run page: the step that read the words, by name, with the model that read them — and the gate's own line
   await page.goto(`${WEB()}/chat/agents/runs/${runId}`, { waitUntil: "load" });
-  await page.waitForSelector('[data-testid="am-run-step"]', { timeout: 60000 }).catch(() => null);
-  await L.wait(1200);
-  const steps = await page.locator('[data-testid="am-run-step"]').allInnerTexts();
-  x.check(steps.some((s) => s.includes("อ่านคำขอที่พิมพ์มา")), "the run page names the step that read the words", steps.map((s) => s.split("\n")[0]).join(" → ").slice(0, 300));
+  await page.getByText("ระบบทำอะไรไปบ้าง").first().waitFor({ state: "visible", timeout: 60000 }).catch(() => null);
+  await L.wait(1500);
+  const runPage = await page.evaluate(() => document.body.innerText);
+  const stepLine = (runPage.match(/อ่านคำขอที่พิมพ์มา[^a-zA-Z]*([A-Za-z0-9.\-]+)?/) || [""])[0].replace(/\s+/g, " ");
+  x.check(/อ่านคำขอที่พิมพ์มา/.test(runPage), "the run page names the step that read the words", stepLine);
+  x.check(/เอกสารเป็นไปตามที่ขอ \(อ่านจากไฟล์\)/.test(runPage), "… and the gate's check that the file is as asked is on the page with the others", (runPage.match(/เอกสารเป็นไปตามที่ขอ[^\n]*/) || [""])[0].slice(0, 200));
   await x.shot("06-run-page", { fullPage: true });
   const model = ((await api(page, `/runs/${runId}`)).body?.steps || []).find((s) => s.name === "instructions");
   x.mark(`the words were read by: ${(model && (model.model_id || (model.output || {}).model)) || "?"}`);
@@ -504,7 +509,7 @@ async function asked() {
 // openpyxl inside the sandbox image), one refused with its reason, and the run still says no model saw
 // its data: the model that read the person's words saw only the words.
 const EXPENSE = "sran.expense-audit";
-const EXPENSE_CARD = { th: "ตรวจค่าใช้จ่าย", en: "Expense Audit" };
+const EXPENSE_CARD = { th: "ตรวจการเบิกค่าใช้จ่าย", en: "Expense Audit" };
 const EXP_DIR = path.join(L.ROOT, "backend", "agent_market", "fixtures", "expense");
 const expenseFiles = () => [
   ...["claims_2569-10.xlsx", "policy_kb.docx"].map((n) => ({ name: n, src: path.join(EXP_DIR, n) })),
