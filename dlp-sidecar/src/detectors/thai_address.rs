@@ -74,8 +74,26 @@ const NOT_AFTER_THAI: &str = r"(?<![\u{0E01}-\u{0E3A}\u{0E40}-\u{0E4E}])";
 const STREET_WORDS: &[&str] = &["ซอย", "ซ.", "ถนน", "ถ.", "หมู่บ้าน", "หมู่", "ตำบล", "ต.", "แขวง", "เขต"];
 const BODY: &str = r"([^\n]{3,200}?\d{5}(?=[\s,]|$)|[^\n]{3,200}?(?=\n|$|\s{3,}))";
 
+// Sara am, one spelling (mirrors thai_address.py). The sidecar NFKC-normalises its input (main.rs), which
+// splits ``ำ`` (U+0E33) into nikhahit + sara aa (U+0E4D U+0E32); the word lists are written the way people
+// type. So ``ตำบล`` / ``อำเภอ`` / ``ลำปาง`` in the lists never matched the text a chat is scanned as. Both
+// spellings are one word here: the regexes take either, and a token is put back into the typed spelling
+// before it is compared or measured.
+const AM: &str = "\u{0E33}";
+const AM_SPLIT: &str = "\u{0E4D}\u{0E32}";
+
+/// ``tok`` as a person types it: a split sara am put back together.
+fn typed(tok: &str) -> String {
+    tok.replace(AM_SPLIT, AM)
+}
+
 fn alt(words: &[&str]) -> String {
-    words.iter().map(|w| fancy_regex::escape(w).into_owned()).collect::<Vec<_>>().join("|")
+    let either = format!("(?:{}|{})", AM, AM_SPLIT);
+    words
+        .iter()
+        .map(|w| fancy_regex::escape(w).into_owned().replace(AM, &either))
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 static ADDRESS_RE: Lazy<Regex> = Lazy::new(|| {
@@ -120,12 +138,22 @@ const MAX_BARE_RUN: usize = 2;
 // a clause word inside it ends the address (glued clauses are one token).
 const SHORT_PREFIX_MAX_TOKEN: usize = 5;
 const BARE_MAX_CHARS: usize = 12;
+// The address is the match — never "the rest of the line" (mirrors _LEAD_WINDOW in thai_address.py).
+// Until 2026-10-08 a walk that kept nothing returned the end of the body, and it kept nothing whenever the
+// first token after the keyword was a place's own name longer than 12 characters — ``สำนักงานใหญ่`` is 13
+// once NFKC has split its sara am — so ``ส่งที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ขอให้เรียงจากถูกสุด`` was
+// masked to its last word and no model was shown the request. A token before the first address part is
+// the place's name and is kept whatever its length, while it begins inside the gate's own reach (the house
+// number that qualified the match is within 30 characters of the keyword); and there is no fallback.
+const LEAD_WINDOW: usize = 30;
 
 fn is_postcode(tok: &str) -> bool {
     tok.len() == 5 && tok.bytes().all(|b| b.is_ascii_digit())
 }
 
 fn is_component_token(tok: &str, next_tok: Option<&str>) -> bool {
+    let tok = typed(tok);
+    let tok = tok.as_str();
     if tok.chars().any(|c| c.is_ascii_digit() || ('๐'..='๙').contains(&c)) {
         return true;
     }
@@ -139,6 +167,7 @@ fn is_component_token(tok: &str, next_tok: Option<&str>) -> bool {
 }
 
 fn starts_clause(tok: &str) -> bool {
+    let tok = typed(tok);
     let tok_len = tok.chars().count();
     CLAUSE_STARTS.iter().any(|w| {
         tok.starts_with(w) && !(w.chars().count() <= 2 && tok_len > SHORT_PREFIX_MAX_TOKEN)
@@ -146,6 +175,7 @@ fn starts_clause(tok: &str) -> bool {
 }
 
 fn bare_token_ends(tok: &str) -> bool {
+    let tok = typed(tok);
     tok.chars().count() > BARE_MAX_CHARS || CLAUSE_INSIDE.iter().any(|w| tok.contains(w))
 }
 
@@ -176,20 +206,19 @@ fn trim_address_end(text: &str, body_start: usize, body_end: usize) -> usize {
         if seen_component && starts_clause(tok) {
             break;
         }
-        if bare_token_ends(tok) {
-            break;
-        }
-        bare_run += 1;
-        if bare_run > MAX_BARE_RUN {
-            break;
+        let lead = !seen_component && body[..s].chars().count() <= LEAD_WINDOW;
+        if !lead {
+            if bare_token_ends(tok) {
+                break;
+            }
+            bare_run += 1;
+            if bare_run > MAX_BARE_RUN {
+                break;
+            }
         }
         end = tok_end;
     }
-    if end > body_start {
-        end
-    } else {
-        body_end
-    }
+    end
 }
 
 pub struct ThaiAddressDetector;
@@ -305,5 +334,65 @@ mod end_trim_tests {
     fn a_postcode_still_ends_the_body() {
         assert_eq!(spans("ที่อยู่ 9 หมู่ 3 ต.บางพลี อ.บางพลี จ.สมุทรปราการ 10540 ส่งด่วนนะ"),
                    vec!["ที่อยู่ 9 หมู่ 3 ต.บางพลี อ.บางพลี จ.สมุทรปราการ 10540"]);
+    }
+}
+
+#[cfg(test)]
+mod tail_tests {
+    //! 2026-10-08 — the address is the match, never the rest of the line. The same sentences the Python
+    //! tests pin (backend/tests/test_dlp_detectors/test_thai_address_tail.py), each in both spellings of
+    //! sara am: as typed, and as the sidecar's NFKC pass hands it to this detector.
+    use super::ThaiAddressDetector;
+    use crate::detectors::base::Detector;
+
+    fn spans(text: &str) -> Vec<String> {
+        ThaiAddressDetector.detect(text).into_iter().map(|m| m.matched_text).collect()
+    }
+
+    fn as_scanned(text: &str) -> String {
+        text.replace("\u{0E33}", "\u{0E4D}\u{0E32}")
+    }
+
+    fn both(text: &str, masked: &str) {
+        assert_eq!(spans(text), vec![masked.to_string()], "as typed: {text}");
+        assert_eq!(spans(&as_scanned(text)), vec![as_scanned(masked)], "as scanned: {text}");
+    }
+
+    #[test]
+    fn what_a_person_types_after_an_address_is_not_part_of_it() {
+        let address = "ส่งที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ";
+        both(&format!("ขอซื้อเก้าอี้สำนักงาน 20 ตัว มีที่วางแขน {address} ขอให้เรียงจากถูกสุด"), address);
+        both(
+            &format!("ขอซื้อเก้าอี้สำนักงาน 20 ตัว {address} งบไม่เกิน 6,000 บาทต่อตัว เรียงจากถูกสุด แล้วบอกด้วยว่าเจ้าไหนดีที่สุด"),
+            address,
+        );
+        both(address, address);
+    }
+
+    #[test]
+    fn a_long_word_before_the_house_number_is_the_places_name() {
+        both(
+            "ที่อยู่สำหรับจัดส่งสินค้า 99/1 หมู่ 2 ตำบลบางพลีใหญ่ สมุทรปราการ ช่วยตรวจว่าส่งได้ไหม",
+            "ที่อยู่สำหรับจัดส่งสินค้า 99/1 หมู่ 2 ตำบลบางพลีใหญ่ สมุทรปราการ",
+        );
+        both(
+            "ส่งที่อาคารสาทรธานี ชั้น 12 ถนนสาทรเหนือ กรุงเทพฯ ภายในวันศุกร์ ขอใบเสนอราคาด้วย",
+            "ส่งที่อาคารสาทรธานี ชั้น 12 ถนนสาทรเหนือ กรุงเทพฯ",
+        );
+    }
+
+    #[test]
+    fn tambon_and_amphoe_are_address_parts_in_the_spelling_a_scan_sees() {
+        // before: with the sara am split, ตําบล / อําเภอ matched nothing in the lists
+        both(
+            "ส่งที่ 12 ตำบลบางรัก อำเภอเมือง ลำปาง ขอบคุณครับ",
+            "ส่งที่ 12 ตำบลบางรัก อำเภอเมือง ลำปาง",
+        );
+    }
+
+    #[test]
+    fn a_walk_that_keeps_nothing_is_not_an_address_to_the_end_of_the_line() {
+        let text = format!("ที่อยู่{}เรื่องที่เขาพูดถึงกันเมื่อวานนี้ในที่ประชุมใหญ่ของบริษัท", " ".repeat(40));
+        assert!(spans(&text).is_empty());
     }
 }

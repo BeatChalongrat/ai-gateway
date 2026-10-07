@@ -457,6 +457,24 @@ SPECS = [
                 "ส่งที่ 100 ถนน B จังหวัด นนทบุรี 11000 ขอบคุณ",
                 True,
             ),
+            # 2026-10-08 — the address is the match, never the rest of the line: what a person
+            # types after an address is not part of it. Each sentence as typed and as a scan sees
+            # it (the NFKC pass splits sara am: ำ → ํ + า), because the two spellings used to end
+            # the address in different places.
+            Case("tail_request_after_address",
+                 "ขอซื้อเก้าอี้สำนักงาน 20 ตัว มีที่วางแขน ส่งที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ขอให้เรียงจากถูกสุด", True),
+            Case("tail_request_after_address_as_scanned",
+                 "ขอซื้อเก้าอี้สํานักงาน 20 ตัว มีที่วางแขน ส่งที่สํานักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ขอให้เรียงจากถูกสุด", True),
+            Case("tail_budget_and_requests_after_address",
+                 "ส่งที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ งบไม่เกิน 6,000 บาทต่อตัว เรียงจากถูกสุด แล้วบอกด้วยว่าเจ้าไหนดีที่สุด", True),
+            Case("tail_long_word_before_house_number",
+                 "ที่อยู่สำหรับจัดส่งสินค้า 99/1 หมู่ 2 ตำบลบางพลีใหญ่ สมุทรปราการ ช่วยตรวจว่าส่งได้ไหม", True),
+            Case("tail_long_word_before_house_number_as_scanned",
+                 "ที่อยู่สําหรับจัดส่งสินค้า 99/1 หมู่ 2 ตําบลบางพลีใหญ่ สมุทรปราการ ช่วยตรวจว่าส่งได้ไหม", True),
+            Case("tail_tambon_amphoe_as_typed", "ส่งที่ 12 ตำบลบางรัก อำเภอเมือง ลำปาง ขอบคุณครับ", True),
+            Case("tail_tambon_amphoe_as_scanned", "ส่งที่ 12 ตําบลบางรัก อําเภอเมือง ลําปาง ขอบคุณครับ", True),
+            Case("tail_nothing_kept_is_no_address",
+                 "ที่อยู่                                        เรื่องที่เขาพูดถึงกันเมื่อวานนี้ในที่ประชุมใหญ่ของบริษัท", False),
             # FIX23 — keyword words used as ordinary prose (no house
             # number / digit within 30 chars) must NOT be an address.
             # The first case is the exact recall turn that echoed.

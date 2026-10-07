@@ -91,7 +91,27 @@ _HIGH_KW = (
 # address that carries a component or postcode.
 _AMBIG_KW = r"(?:เลขที่|ที่อยู่|อยู่ที่|ส่งที่)"
 _DIGIT_NEAR = r"(?=[^\n\d]{0,30}\d)"
-_COMPONENT_ALT = "|".join(re.escape(w) for w in _GATE_COMPONENTS)
+# Sara am, one spelling. The scan's NFKC pass (and the sidecar's) splits ``ำ`` (U+0E33) into nikhahit +
+# sara aa (U+0E4D U+0E32) before any detector sees the text; the word lists are written the way people
+# type. So ``ตำบล`` / ``อำเภอ`` / ``ลำปาง`` in the lists never matched ``ตําบล`` / ``อําเภอ`` / ``ลําปาง`` in the
+# text a chat is actually scanned as: an address that had only those for its parts did not pass the gate,
+# and the end-trim stopped in front of them. The detector called directly, on text as typed, matched —
+# which is why the fixtures did not show it. Both spellings are one word here: the regexes take either,
+# and a token is put back into the typed spelling before it is compared or measured.
+_AM = "\u0e33"
+_AM_SPLIT = "\u0e4d\u0e32"
+
+
+def _typed(tok: str) -> str:
+    """``tok`` as a person types it: a split sara am put back together."""
+    return tok.replace(_AM_SPLIT, _AM)
+
+
+def _alt(words) -> str:
+    return "|".join(re.escape(w).replace(_AM, f"(?:{_AM}|{_AM_SPLIT})") for w in words)
+
+
+_COMPONENT_ALT = _alt(_GATE_COMPONENTS)
 # A gate component must START a token: ``ต่อชั้น`` / ``ริมถนน`` glued after a
 # Thai letter is prose, ``ชั้น 5`` / ``ถนนสุขุมวิท`` after a space or a
 # number is an address part. (``ราคาอยู่ที่ 1200 ต่อชั้น 2 ชิ้น`` fired the
@@ -117,7 +137,7 @@ _HOUSE_NO_THEN_COMPONENT = (
 # The FIRST part must be street-level (ซอย/ถนน/หมู่/ตำบล/แขวง/เขต): rooms,
 # floors and buildings after a bare ``ที่`` are meeting places —
 # ``ประชุมที่ห้อง 402 ชั้น 5`` is in the FIX38 prose corpus as must-not-fire.
-_STREET_ALT = "|".join(re.escape(w) for w in ("ซอย", "ซ.", "ถนน", "ถ.", "หมู่บ้าน", "หมู่", "ตำบล", "ต.", "แขวง", "เขต"))
+_STREET_ALT = _alt(("ซอย", "ซ.", "ถนน", "ถ.", "หมู่บ้าน", "หมู่", "ตำบล", "ต.", "แขวง", "เขต"))
 _COMPONENT_NUMBER_COMPONENT = (
     rf"(?=\s*(?:{_STREET_ALT})\S{{0,25}}\s+\d[\d/\-]*(?:[\s,]+|$)"
     rf"[^\n]{{0,120}}?(?:{_COMPONENT_ALT}|\d{{5}}(?=[\s,]|$)))"
@@ -175,9 +195,32 @@ _POSTCODE_RE = re.compile(r"^\d{5}$")
 _BARE_MAX_CHARS = 12
 _CLAUSE_INSIDE = tuple(w for w in _CLAUSE_WORDS if len(w) >= 3)
 _MAX_BARE_RUN = 2
+# The address is the match — never "the rest of the line".
+#
+# Until 2026-10-08 the walk below ended with ``return end if end > body_start
+# else body_end``: when it kept nothing, the whole lazy body — everything to the
+# end of the line — was the address. And it kept nothing whenever the FIRST
+# token after the keyword was a place's own name longer than 12 characters:
+#
+#   ส่งที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ขอให้เรียงจากถูกสุด
+#
+# ``สำนักงานใหญ่`` is 12 characters as typed and 13 once the scan's NFKC pass
+# has split its sara am in two, so through the registry (the path every chat
+# takes) the request typed after the address was masked with it: 62 characters
+# as one <<ADDRESS_1>>, and no model was shown what the person asked. A direct
+# call to the detector, on the text as typed, did not show it.
+#
+# So: a token BEFORE the first address part is the place's name, and is kept
+# whatever its length, as long as it begins inside the gate's own reach (the
+# house number that qualified the match is within 30 characters of the
+# keyword). The limits on bare tokens are for what follows the parts, where a
+# glued clause is one long token. And there is no fallback to the end of the
+# line: a walk that keeps nothing has found no address.
+_LEAD_WINDOW = 30
 
 
 def _is_component_token(tok: str, next_tok: str | None = None) -> bool:
+    tok = _typed(tok)
     if any(ch.isdigit() for ch in tok):
         return True
     if tok.startswith(_COMPONENT_STARTS):
@@ -189,6 +232,7 @@ def _is_component_token(tok: str, next_tok: str | None = None) -> bool:
 
 
 def _starts_clause(tok: str) -> bool:
+    tok = _typed(tok)
     for w in _CLAUSE_STARTS:
         if tok.startswith(w):
             if len(w) <= 2 and len(tok) > _SHORT_PREFIX_MAX_TOKEN:
@@ -206,7 +250,7 @@ def trim_address_end(text: str, body_start: int, body_end: int) -> int:
     bare_run = 0
     seen_component = False
     for i, mt in enumerate(toks):
-        tok = mt.group()
+        tok = _typed(mt.group())
         nxt = toks[i + 1].group() if i + 1 < len(toks) else None
         tok_end = body_start + mt.end()
         if _is_component_token(tok, nxt):
@@ -216,13 +260,15 @@ def trim_address_end(text: str, body_start: int, body_end: int) -> int:
             continue
         if seen_component and _starts_clause(tok):
             break
-        if len(tok) > _BARE_MAX_CHARS or any(w in tok for w in _CLAUSE_INSIDE):
-            break
-        bare_run += 1
-        if bare_run > _MAX_BARE_RUN:
-            break
+        lead = not seen_component and mt.start() <= _LEAD_WINDOW
+        if not lead:
+            if len(tok) > _BARE_MAX_CHARS or any(w in tok for w in _CLAUSE_INSIDE):
+                break
+            bare_run += 1
+            if bare_run > _MAX_BARE_RUN:
+                break
         end = tok_end
-    return end if end > body_start else body_end
+    return end
 
 
 class ThaiAddressDetector(BaseDetector):

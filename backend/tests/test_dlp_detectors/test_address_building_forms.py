@@ -32,8 +32,14 @@ def test_the_gate_and_the_trim_read_the_same_component_list():
     # The gate regex is BUILT from the component list; the trim list is the
     # component list plus the locality-only words. Neither is typed by hand
     # any more, so they cannot drift apart again.
+    # (2026-10-08: the gate takes a word in either spelling of its sara am — as typed, and as the scan's
+    # NFKC pass leaves it — so "built from the list" is asked of the regex itself, not of its source text.)
+    import re
+
+    gate = re.compile(TA._COMPONENT_ALT)
     for w in TA._GATE_COMPONENTS:
-        assert w in TA._COMPONENT_ALT.replace("\\", "")
+        assert gate.fullmatch(w), w
+        assert gate.fullmatch(w.replace("ำ", "ํา")), f"{w}: the spelling a scan sees"
         assert w in TA._COMPONENT_STARTS
     for w in ("ตึก", "อาคาร", "ห้อง", "ชั้น", "คอนโด", "หมู่บ้าน", "อพาร์ทเม้นท์", "หอพัก", "นิคม"):
         assert w in TA._GATE_COMPONENTS, f"{w} must be in the gate (it was only in the trim before FIX46)"

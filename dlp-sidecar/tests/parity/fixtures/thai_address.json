@@ -148,6 +148,97 @@
       ]
     },
     {
+      "id": "tail_request_after_address",
+      "input": "ขอซื้อเก้าอี้สำนักงาน 20 ตัว มีที่วางแขน ส่งที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ขอให้เรียงจากถูกสุด",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 41,
+          "end": 83
+        }
+      ]
+    },
+    {
+      "id": "tail_request_after_address_as_scanned",
+      "input": "ขอซื้อเก้าอี้สํานักงาน 20 ตัว มีที่วางแขน ส่งที่สํานักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ขอให้เรียงจากถูกสุด",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 42,
+          "end": 85
+        }
+      ]
+    },
+    {
+      "id": "tail_budget_and_requests_after_address",
+      "input": "ส่งที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ งบไม่เกิน 6,000 บาทต่อตัว เรียงจากถูกสุด แล้วบอกด้วยว่าเจ้าไหนดีที่สุด",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 42
+        }
+      ]
+    },
+    {
+      "id": "tail_long_word_before_house_number",
+      "input": "ที่อยู่สำหรับจัดส่งสินค้า 99/1 หมู่ 2 ตำบลบางพลีใหญ่ สมุทรปราการ ช่วยตรวจว่าส่งได้ไหม",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 64
+        }
+      ]
+    },
+    {
+      "id": "tail_long_word_before_house_number_as_scanned",
+      "input": "ที่อยู่สําหรับจัดส่งสินค้า 99/1 หมู่ 2 ตําบลบางพลีใหญ่ สมุทรปราการ ช่วยตรวจว่าส่งได้ไหม",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 66
+        }
+      ]
+    },
+    {
+      "id": "tail_tambon_amphoe_as_typed",
+      "input": "ส่งที่ 12 ตำบลบางรัก อำเภอเมือง ลำปาง ขอบคุณครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 37
+        }
+      ]
+    },
+    {
+      "id": "tail_tambon_amphoe_as_scanned",
+      "input": "ส่งที่ 12 ตําบลบางรัก อําเภอเมือง ลําปาง ขอบคุณครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 40
+        }
+      ]
+    },
+    {
+      "id": "tail_nothing_kept_is_no_address",
+      "input": "ที่อยู่                                        เรื่องที่เขาพูดถึงกันเมื่อวานนี้ในที่ประชุมใหญ่ของบริษัท",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
       "id": "fix23_recall_question_prose",
       "input": "เลขที่ให้จำเมื่อกี้คืออะไร",
       "should_match": false,
