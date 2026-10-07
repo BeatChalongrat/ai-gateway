@@ -25,6 +25,11 @@
 
 services:
   chat-edge-api:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 1g
+    mem_reservation: 128m
+    oom_score_adj: -700
     build:
       context: ./services/chat-edge-api
       dockerfile: Dockerfile
@@ -327,6 +332,8 @@ services:
   # (AVX512-BF16), 6 threads; a batch of 16 passages embeds in 13–22 s, a
   # question in ~0.2 s. docs/ops/knowledge-base.md.
   kb-models:
+    # memory guard (scripts/ops/live_memory.py): its turn when the Docker VM runs out
+    oom_score_adj: -500
     build:
       context: ./services/kb-models
       args:
@@ -351,6 +358,11 @@ services:
     # period for a first load).
 
   postgres-webchat:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 1g
+    mem_reservation: 384m
+    oom_score_adj: -900
     # pgvector/pgvector:pg16 ships Postgres 16 with the pgvector
     # extension preinstalled — required by migration 010. Drop-in
     # replacement for postgres:16-alpine; the existing data volume
@@ -387,6 +399,11 @@ services:
       retries: 5
 
   redis-webchat:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 384m
+    mem_reservation: 64m
+    oom_score_adj: -900
     image: redis:7-alpine
     container_name: ai-gateway-redis-webchat
     restart: unless-stopped
@@ -467,6 +484,11 @@ services:
   # rendering + parity). Changing WEB_CHAT_API_URL requires a REBUILD of this
   # image, not just a restart.
   web-chat:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 768m
+    mem_reservation: 128m
+    oom_score_adj: -600
     build:
       context: ./apps/web-chat
       dockerfile: Dockerfile
@@ -538,6 +560,11 @@ services:
   # checkout, so a `git clean`, a re-clone or a worktree removal never eats
   # the backups. Point BACKUP_DIR at another disk on a real deployment.
   backup:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 2g
+    mem_reservation: 64m
+    oom_score_adj: -300
     build:
       context: ./infra/backup
       args:

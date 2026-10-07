@@ -1,5 +1,10 @@
 services:
   postgres:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 2g
+    mem_reservation: 768m
+    oom_score_adj: -900
     # pgvector build of PG16 (R11 B1): chat-edge-api's KB embeddings need the
     # vector extension. Data-directory compatible with the previous postgres:16.
     image: pgvector/pgvector:pg16
@@ -67,6 +72,11 @@ services:
     restart: unless-stopped
 
   redis:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 512m
+    mem_reservation: 128m
+    oom_score_adj: -900
     image: redis:7
     # Cap memory + LRU eviction so an unbounded key set can't OOM the box.
     # The image default is maxmemory=0 (unlimited) / noeviction, under which
@@ -95,6 +105,11 @@ services:
     restart: unless-stopped
 
   mock-provider:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 384m
+    mem_reservation: 128m
+    oom_score_adj: -100
     build:
       context: ./mock
       # FIX126 O6: every service build here takes REVISION/CREATED and
@@ -152,6 +167,8 @@ services:
   # 2.1-2.3 s for five minutes and 5.8 s at minute 9, against 10.0 s with
   # 2 workers. 4 workers measured 4.74 GiB, so the cap goes to 7g.
   ner-service:
+    # memory guard (scripts/ops/live_memory.py): its turn when the Docker VM runs out
+    oom_score_adj: -500
     build:
       context: ./backend
       dockerfile: ner_service/Dockerfile
@@ -207,6 +224,8 @@ services:
   # the gRPC call. Safe to flip DLP_ENGINE=rust (see DLP_BENCHMARK.md;
   # rollback = python). Re-verify with backend/tests/dlp_parity_runner.py.
   dlp-sidecar:
+    # memory guard (scripts/ops/live_memory.py): its turn when the Docker VM runs out
+    oom_score_adj: -600
     build:
       context: ./dlp-sidecar
       args:
@@ -238,6 +257,8 @@ services:
   # shared Redis. Gated by RATE_LIMITER_ENGINE=rust on the backend;
   # default (python) leaves this service idle.
   rate-limiter:
+    # memory guard (scripts/ops/live_memory.py): its turn when the Docker VM runs out
+    oom_score_adj: -700
     build:
       context: ./rate-limiter
       args:
@@ -280,6 +301,11 @@ services:
   # touches this service. Sidecar is a small distroless image
   # (~30MB) so leaving it running idle has negligible cost.
   log-worker:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 512m
+    mem_reservation: 64m
+    oom_score_adj: -500
     build:
       context: ./log-worker
       args:
@@ -320,6 +346,11 @@ services:
   # backend:8080 unchanged — Python stays authoritative for routing,
   # DLP, full auth, dispatch, and logging. See services/gateway/README.md.
   gateway:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 512m
+    mem_reservation: 128m
+    oom_score_adj: -800
     build:
       context: ./services/gateway
       args:
@@ -377,6 +408,11 @@ services:
   # It needs the docker socket = host control; it is NOT part of the test
   # stack (scripts/test_stack_gen.py refuses socket mounts).
   autoheal:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 128m
+    mem_reservation: 32m
+    oom_score_adj: -400
     image: willfarrell/autoheal:1.2.0
     restart: unless-stopped
     environment:
@@ -401,6 +437,11 @@ services:
   # / ALERT_WEBHOOK_URL), once per OPS_WATCH_COOLDOWN, plus a "recovered"
   # note. Same image as the backend; not part of the test stack (socket).
   ops-watch:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 256m
+    mem_reservation: 96m
+    oom_score_adj: -400
     image: ai-gateway-backend:latest
     restart: unless-stopped
     command: ["python", "-m", "app.ops.watch"]
@@ -596,6 +637,11 @@ services:
   # reached through :3200's JWT-verified per-user proxy — the old shared,
   # unauthenticated children on :3201/:3202 are gone.
   mcp-gateway:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 512m
+    mem_reservation: 96m
+    oom_score_adj: -500
     build:
       context: ./services/mcp-gateway
       args:
@@ -644,6 +690,11 @@ services:
     profiles: ["desktop"]
 
   backend:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 3g
+    mem_reservation: 1g
+    oom_score_adj: -700
     build:
       context: ./backend
       args:
@@ -972,6 +1023,11 @@ services:
       autoheal.stop.timeout: "200"
 
   admin-ui:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 512m
+    mem_reservation: 128m
+    oom_score_adj: -400
     build:
       context: ./admin-ui
       args:
@@ -1000,6 +1056,11 @@ services:
     restart: unless-stopped
 
   portal:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 512m
+    mem_reservation: 128m
+    oom_score_adj: -400
     build:
       context: ./portal
       args:
@@ -1057,6 +1118,11 @@ services:
   # (/metrics), and Redis (via redis-exporter). Host port 9091 — 9090 is
   # already taken by mock-provider.
   prometheus:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 768m
+    mem_reservation: 160m
+    oom_score_adj: -200
     image: prom/prometheus:v2.53.0
     volumes:
       - ./infra/prometheus:/etc/prometheus:ro
@@ -1072,6 +1138,11 @@ services:
     restart: unless-stopped
 
   grafana:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 512m
+    mem_reservation: 128m
+    oom_score_adj: -200
     image: grafana/grafana:11.1.0
     volumes:
       - grafana_data:/var/lib/grafana
@@ -1087,6 +1158,11 @@ services:
     restart: unless-stopped
 
   redis-exporter:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 128m
+    mem_reservation: 32m
+    oom_score_adj: -200
     image: oliver006/redis_exporter:v1.61.0
     environment:
       REDIS_ADDR: redis://redis:6379
@@ -1180,6 +1256,11 @@ services:
   # loopback debug door at port + 20000. The certificate and key are the
   # machine's own (infra/caddy/certs, gitignored; docs/ops/tls.md).
   edge:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 256m
+    mem_reservation: 96m
+    oom_score_adj: -800
     image: caddy:2-alpine
     volumes:
       - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro

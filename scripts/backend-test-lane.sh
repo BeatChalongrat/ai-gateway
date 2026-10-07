@@ -29,6 +29,7 @@ docker run --rm --network none -e APP_ENV=test -e PYTHONDONTWRITEBYTECODE=1 -w /
   -v "$ROOT/SranDesktop/src:/SranDesktop/src:ro" -v "$ROOT/apps/desktop/src:/apps/desktop/src:ro" \
   -v "$ROOT/docker-compose.yml:/docker-compose.yml:ro" \
   -v "$ROOT/docker-compose.prod.yml:/docker-compose.prod.yml:ro" \
+  -v "$ROOT/docker-compose.webchat.yml:/docker-compose.webchat.yml:ro" \
   -v "$ROOT/infra:/infra:ro" \
   -v "$ROOT/dlp-sidecar/tests/parity/fixtures:/work/dlp-sidecar/tests/parity/fixtures:ro" \
   "$IMG" python -c "import os,sys,pytest; rc=pytest.main(sys.argv[1:]); sys.stdout.flush(); os._exit(int(rc))" "$@"
