@@ -1,7 +1,7 @@
 {
   "schema_version": "agent.market.v1",
   "id": "sran.procurement",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "จัดซื้อ: เทียบราคาและร่างใบขอซื้อ",
   "name_en": "Procurement: Price Comparison and Purchase Request Draft",
   "short_name": "จัดซื้อ",
@@ -224,6 +224,15 @@
     ]
   },
   "cannot": "agent ตัวนี้ไม่สั่งซื้อ ไม่ขอใบเสนอราคา ไม่ส่งอีเมล และไม่ส่งหรืออนุมัติใบขอซื้อ ไม่เข้าหน้าที่ต้องเข้าสู่ระบบ ไม่ผ่านการยืนยันว่าเป็นคนหรือระบบกันบอต ราคาที่หาไม่พบในหน้าที่บันทึกไว้จะไม่ถูกใช้ ภาษีมูลค่าเพิ่ม ค่าขนส่ง ระยะเวลาส่ง เลขประจำตัวผู้เสียภาษี และการเป็นผู้ขายขององค์กรจะไม่ถูกเดา ชื่อร้านในตลาดออนไลน์ไม่ถือเป็นชื่อนิติบุคคลของผู้ขาย",
+  "instructions": {
+    "can": [
+      {"id": "sort_by_price", "label": "เรียงตัวเลือกจากราคาต่ำสุด", "asks": "เรียงจากถูกสุด · เรียงตามราคา · เอาราคาต่ำสุดขึ้นก่อน", "note": "ตารางเปรียบเทียบในไฟล์ Excel เรียงจากราคาต่ำสุดขึ้นไป ตัวเลือกที่ไม่ทราบราคาอยู่ท้ายตาราง ลำดับนี้เรียงตามราคาเท่านั้น ไม่ได้บอกว่าตัวเลือกใดดีกว่า จุดที่ยังไม่ทราบของทุกตัวเลือกยังอยู่ครบในแถวของมัน และเลขของตัวเลือกไม่เปลี่ยน การ์ดให้เลือกในแชทยังเรียงแบบเดิม คือจุดที่ยังไม่ทราบน้อยที่สุดก่อน", "unless": "ราคาของตัวเลือกในรอบนี้มีมากกว่าหนึ่งสกุลเงิน จึงเรียงเทียบกันไม่ได้ ตารางยังเรียงแบบเดิม"}
+    ],
+    "cannot": [
+      {"id": "pick_best", "label": "บอกว่าตัวเลือกใดดีที่สุดหรือควรซื้อรายใด", "why": "agent นี้ไม่ตัดสินว่าตัวเลือกใดดีที่สุดและไม่แนะนำว่าควรซื้อรายใด ตารางเป็นรายการให้คนเลือก"},
+      {"id": "hide_unknown", "label": "ตัดตัวเลือกที่ข้อมูลไม่ครบออก", "why": "ทุกตัวเลือกที่หาพบต้องอยู่ในตารางพร้อมจุดที่ยังไม่ทราบของมัน แหล่งที่ไม่ได้ใช้อยู่ในชีตของมันพร้อมเหตุผล"}
+    ]
+  },
   "limits": {
     "max_file_mb": 20,
     "max_files": 5
@@ -485,6 +494,8 @@
     "face.pages": "จำนวนหน้าที่เปิด",
     "face.order": "การเรียงตัวเลือก",
     "face.order.value": "จุดที่ยังไม่ทราบน้อยที่สุดก่อน แล้วยอดรวมที่คำนวณได้ต่ำสุด",
+    "face.order.price_total": "ยอดรวมภาษีต่ำสุดก่อน ตามที่ขอ ตัวเลือกที่ไม่ทราบราคาอยู่ท้ายตาราง ลำดับนี้เรียงตามราคาเท่านั้น ไม่ได้บอกว่าตัวเลือกใดดีกว่า จุดที่ยังไม่ทราบของแต่ละตัวเลือกอยู่ในแถวของมัน",
+    "face.order.price_shown": "ราคาต่อหน่วยที่หน้าเว็บแสดงต่ำสุดก่อน ตามที่ขอ บางตัวเลือกยังไม่ทราบว่าราคารวมภาษีแล้วหรือไม่ จึงเทียบด้วยราคาที่แสดง ดูคอลัมน์ภาษีของแต่ละแถว ตัวเลือกที่ไม่ทราบราคาอยู่ท้ายตาราง ลำดับนี้เรียงตามราคาเท่านั้น ไม่ได้บอกว่าตัวเลือกใดดีกว่า จุดที่ยังไม่ทราบของแต่ละตัวเลือกอยู่ในแถวของมัน",
     "face.chosen": "ตัวเลือกของ “{item}”",
     "face.not_advice": "ตารางนี้เป็นรายการให้คนเลือก ไม่ใช่คำแนะนำว่าควรซื้อรายใด ทุกค่ามาจากหน้าเว็บที่บันทึกไว้ในเวลาที่ระบุ ค่าที่หาไม่พบในหน้าที่บันทึกไว้เขียนว่า “ไม่ทราบ” ราคาบนหน้าเว็บยังไม่ใช่ใบเสนอราคา",
     "doc.candidates.title": "ตัวเลือก",
@@ -506,6 +517,13 @@
     "check.gaps_printed.ok": "เปิดไฟล์อ่านกลับ พบหัวข้อ “ช่องที่ยังกรอกไม่ได้” และรายการครบ {n} ช่อง พร้อมเหตุผล",
     "check.gaps_printed.missing": "แบบฟอร์มที่กรอกแล้วไม่ได้ระบุช่องต่อไปนี้: {list}",
     "check.figures.label": "ตัวเลขของทุกตัวเลือกตรงกับที่คำนวณ (อ่านจากไฟล์ที่ทำเสร็จ)",
+    "check.asked.label": "ตารางเป็นไปตามที่ขอ (อ่านจากไฟล์ที่ทำเสร็จ)",
+    "check.asked.ok": "ตัวเลือก {n} แถวเรียงจากราคาต่ำสุด จุดที่ยังไม่ทราบของทุกตัวเลือกอยู่ครบ และหน้าสรุปบอกว่าเรียงตามราคาเท่านั้น",
+    "check.asked.rows": "ตารางในไฟล์มี {file} แถว ควรมี {computed} แถว",
+    "check.asked.order": "ขอให้เรียงจากราคาต่ำสุด แต่ตัวเลือกของ “{item}” ในไฟล์ไม่ได้เรียงตามนั้น",
+    "check.asked.open": "ตัวเลือกที่ {no}: จำนวนจุดที่ยังไม่ทราบในไฟล์ไม่ตรงกับที่คำนวณ",
+    "check.asked.points": "ชีตสิ่งที่ต้องถามมี {file} แถว ควรมี {computed} แถว",
+    "check.asked.face": "หน้าสรุปไม่ได้บอกว่าตารางเรียงตามราคา หรือไม่ได้บอกว่าตารางไม่ใช่คำแนะนำ",
     "check.figures.ok": "เปิดไฟล์อ่านกลับ {n} ค่า ตรงกับที่คำนวณทุกค่า ค่าที่ไม่ทราบเขียนว่าไม่ทราบ",
     "check.figures.no_sheet": "ไม่พบชีต “{sheet}” ในไฟล์",
     "check.figures.heads": "หัวตารางของชีตตัวเลือกไม่ตรงกับที่กำหนด",
@@ -559,6 +577,23 @@
     "pr.footer": "ร่างโดย agent ผู้ช่วยจัดซื้อ agent ไม่ได้ส่ง ไม่ได้อนุมัติ และไม่ได้สั่งซื้อ"
   },
   "en": {
+    "เรียงจากถูกสุด · เรียงตามราคา · เอาราคาต่ำสุดขึ้นก่อน": "order from the cheapest · order by price · the lowest price first",
+    "เรียงตัวเลือกจากราคาต่ำสุด": "Options ordered from the lowest price",
+    "ตารางเปรียบเทียบในไฟล์ Excel เรียงจากราคาต่ำสุดขึ้นไป ตัวเลือกที่ไม่ทราบราคาอยู่ท้ายตาราง ลำดับนี้เรียงตามราคาเท่านั้น ไม่ได้บอกว่าตัวเลือกใดดีกว่า จุดที่ยังไม่ทราบของทุกตัวเลือกยังอยู่ครบในแถวของมัน และเลขของตัวเลือกไม่เปลี่ยน การ์ดให้เลือกในแชทยังเรียงแบบเดิม คือจุดที่ยังไม่ทราบน้อยที่สุดก่อน": "The comparison in the Excel file runs from the lowest price up; options whose price is not known are at the end. The order is by price only and does not say that any option is better. What is not known about each option is still in its row, and no option's number changes. The card you choose from in the chat is ordered as before: fewest unknown points first.",
+    "ราคาของตัวเลือกในรอบนี้มีมากกว่าหนึ่งสกุลเงิน จึงเรียงเทียบกันไม่ได้ ตารางยังเรียงแบบเดิม": "this run's options are priced in more than one currency, so they cannot be put in order of price; the table is ordered as before",
+    "บอกว่าตัวเลือกใดดีที่สุดหรือควรซื้อรายใด": "Saying which option is best, or which to buy",
+    "agent นี้ไม่ตัดสินว่าตัวเลือกใดดีที่สุดและไม่แนะนำว่าควรซื้อรายใด ตารางเป็นรายการให้คนเลือก": "this agent does not judge which option is best and does not recommend one to buy; the table is a list for a person to choose from",
+    "ตัดตัวเลือกที่ข้อมูลไม่ครบออก": "Leaving out the options with something missing",
+    "ทุกตัวเลือกที่หาพบต้องอยู่ในตารางพร้อมจุดที่ยังไม่ทราบของมัน แหล่งที่ไม่ได้ใช้อยู่ในชีตของมันพร้อมเหตุผล": "every option found has to be in the table with what is not known about it; the sources that were not used are on their own sheet, each with its reason",
+    "ยอดรวมภาษีต่ำสุดก่อน ตามที่ขอ ตัวเลือกที่ไม่ทราบราคาอยู่ท้ายตาราง ลำดับนี้เรียงตามราคาเท่านั้น ไม่ได้บอกว่าตัวเลือกใดดีกว่า จุดที่ยังไม่ทราบของแต่ละตัวเลือกอยู่ในแถวของมัน": "Lowest total including tax first, as asked. Options whose price is not known are at the end. The order is by price only and does not say that any option is better. What is not known about each option is in its row.",
+    "ราคาต่อหน่วยที่หน้าเว็บแสดงต่ำสุดก่อน ตามที่ขอ บางตัวเลือกยังไม่ทราบว่าราคารวมภาษีแล้วหรือไม่ จึงเทียบด้วยราคาที่แสดง ดูคอลัมน์ภาษีของแต่ละแถว ตัวเลือกที่ไม่ทราบราคาอยู่ท้ายตาราง ลำดับนี้เรียงตามราคาเท่านั้น ไม่ได้บอกว่าตัวเลือกใดดีกว่า จุดที่ยังไม่ทราบของแต่ละตัวเลือกอยู่ในแถวของมัน": "Lowest unit price as the page shows it first, as asked. For some options it is not known whether the price includes tax, so the price shown is what is compared; see each row's tax column. Options whose price is not known are at the end. The order is by price only and does not say that any option is better. What is not known about each option is in its row.",
+    "ตารางเป็นไปตามที่ขอ (อ่านจากไฟล์ที่ทำเสร็จ)": "The table is as asked (read from the finished file)",
+    "ตัวเลือก {n} แถวเรียงจากราคาต่ำสุด จุดที่ยังไม่ทราบของทุกตัวเลือกอยู่ครบ และหน้าสรุปบอกว่าเรียงตามราคาเท่านั้น": "{n} option rows run from the lowest price, every option still shows what is not known about it, and the summary says the order is by price only",
+    "ตารางในไฟล์มี {file} แถว ควรมี {computed} แถว": "the table in the file has {file} rows; it should have {computed}",
+    "ขอให้เรียงจากราคาต่ำสุด แต่ตัวเลือกของ “{item}” ในไฟล์ไม่ได้เรียงตามนั้น": "the lowest price first was asked for, but the options for “{item}” in the file are not in that order",
+    "ตัวเลือกที่ {no}: จำนวนจุดที่ยังไม่ทราบในไฟล์ไม่ตรงกับที่คำนวณ": "option {no}: the number of points not known in the file is not the computed one",
+    "ชีตสิ่งที่ต้องถามมี {file} แถว ควรมี {computed} แถว": "the sheet of what to ask has {file} rows; it should have {computed}",
+    "หน้าสรุปไม่ได้บอกว่าตารางเรียงตามราคา หรือไม่ได้บอกว่าตารางไม่ใช่คำแนะนำ": "the summary does not say the table is ordered by price, or does not say the table is not advice",
     "(รหัสตอบกลับ {status})": "(response code {status})",
     "(และอีก {n} จุด)": "(and {n} more)",
     "agent ค้นหา เลือกหน้าที่จะเปิด และบันทึกแต่ละหน้าไว้เป็นหลักฐาน ทุกค่าที่อยู่ในตารางต้องหาพบอีกครั้งในหน้าที่บันทึกไว้": "The agent searches, chooses which pages to open and saves each page as evidence. Every value in the table must be found again on the saved page.",

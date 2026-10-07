@@ -44,6 +44,10 @@ EVID = ["no", "source", "address", "price_shown", "price_block", "price_found", 
 EVID_W = [5, 22, 44, 16, 9, 14, 52, 26]
 
 
+# AM13: how the table of options is ordered when a person asked for the price — by which price, said on the face
+PRICE_ORDER = {"total": "face.order.price_total", "shown": "face.order.price_shown"}
+
+
 def _num(v):
     return None if v in (None, "") else float(Decimal(str(v)))
 
@@ -118,7 +122,7 @@ class ComparisonWorkbook:
                 [self.w("face.opened"), len(c.get("sources") or [])],
                 [self.w("face.searches"), wording.used(self.lang, rnd, "searches")],
                 [self.w("face.pages"), wording.used(self.lang, rnd, "pages")],
-                [self.w("face.order"), self.w("face.order.value")]]
+                [self.w("face.order"), self.w(self.order_key())]]
         for it in c["items"]:
             pick = (c.get("picks") or {}).get(it["key"])
             if pick:
@@ -132,6 +136,14 @@ class ComparisonWorkbook:
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
             ws.row_dimensions[r].height = 30
             r += 1
+
+    def order_key(self) -> str:
+        """How the table of options is ordered, in the package's words: as computed (the fewest unknown
+        points first), or by price when a person asked for that (AM13) — by which price, said."""
+        order = self.c.get("shown_order") or {}
+        if order.get("by") == "price" and order.get("basis") in PRICE_ORDER:
+            return PRICE_ORDER[order["basis"]]
+        return "face.order.value"
 
     def _rows(self):
         """One row per candidate, per table (main, terms, evidence), in the order the candidates are shown."""

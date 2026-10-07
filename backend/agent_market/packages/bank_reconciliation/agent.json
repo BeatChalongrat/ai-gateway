@@ -1,7 +1,7 @@
 {
   "schema_version": "agent.market.v1",
   "id": "sran.bank-reconciliation",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "name": "กระทบยอดเงินฝากธนาคาร",
   "name_en": "Bank Reconciliation",
   "short_name": "กระทบยอดธนาคาร",
@@ -109,9 +109,29 @@
   },
   "cannot": "agent ตัวนี้ไม่บันทึกเข้าระบบบัญชี ไม่โอนเงิน และไม่ตั้งเวลาทำงานเอง รายการปรับปรุงเป็นร่าง และคู่ที่ไม่ตรงกันทุกตัวต้องมีคนยืนยัน และไม่ส่งอีเมลเอง (คนส่งผ่านระบบได้เมื่อผู้ดูแลตั้งค่าไว้) ใช้แบบฟอร์มของบริษัทคุณแทนสมุดงานของ agent ไม่ได้ ผลเป็นสมุดงาน Excel ของ agent เท่านั้น",
   "photo_notice": "",
+  "instructions": {
+    "can": [
+      {"id": "sort_by_amount", "group": "order", "label": "เรียงรายการกระทบยอดจากจำนวนเงินมากที่สุด", "asks": "เรียงรายการค้างจากยอดมาก · เรียงตามจำนวนเงิน · เอารายการยอดใหญ่ขึ้นก่อน", "note": "ชีตรายการกระทบยอดกับชีตหลักฐานของมัน เรียงจากรายการที่จำนวนเงินมากที่สุดลงไป งบกระทบยอด ยอดหลังปรับปรุงทั้งสองฝั่ง ร่างรายการปรับปรุง และรายการค้างยกไปไม่เปลี่ยน เปลี่ยนแค่ลำดับ และทุกรายการยังบอกไฟล์ แผ่น และแถวที่อ่าน"},
+      {"id": "sort_by_date", "group": "order", "label": "เรียงรายการกระทบยอดตามวันที่", "asks": "เรียงตามวันที่ · เอารายการเก่าสุดขึ้นก่อน · เรียงตามอายุรายการ", "note": "ชีตรายการกระทบยอดกับชีตหลักฐานของมัน เรียงจากรายการที่วันที่เก่าที่สุดขึ้นก่อน งบกระทบยอด ยอดหลังปรับปรุงทั้งสองฝั่ง ร่างรายการปรับปรุง และรายการค้างยกไปไม่เปลี่ยน เปลี่ยนแค่ลำดับ และทุกรายการยังบอกไฟล์ แผ่น และแถวที่อ่าน"}
+    ],
+    "cannot": [
+      {"id": "drop_small", "label": "ตัดรายการยอดเล็กออก", "why": "รายการกระทบยอดทุกรายการต้องอยู่ครบ ไม่เช่นนั้นยอดหลังปรับปรุงสองฝั่งจะไม่ลงตัวตามที่งบแสดง"},
+      {"id": "post", "label": "บันทึกรายการปรับปรุงเข้าบัญชี", "why": "agent นี้ไม่บันทึกเข้าระบบบัญชี รายการปรับปรุงเป็นร่างให้คนตรวจและบันทึกเอง"}
+    ]
+  },
   "limits": {"max_file_mb": 20, "max_files": 12},
   "self_test": "self-test.json",
   "en": {
+    "เรียงรายการค้างจากยอดมาก · เรียงตามจำนวนเงิน · เอารายการยอดใหญ่ขึ้นก่อน": "order the outstanding items from the largest · order by amount · the big items first",
+    "เรียงตามวันที่ · เอารายการเก่าสุดขึ้นก่อน · เรียงตามอายุรายการ": "order by date · the oldest items first · order by the age of the items",
+    "เรียงรายการกระทบยอดจากจำนวนเงินมากที่สุด": "Reconciling items ordered from the largest amount",
+    "ชีตรายการกระทบยอดกับชีตหลักฐานของมัน เรียงจากรายการที่จำนวนเงินมากที่สุดลงไป งบกระทบยอด ยอดหลังปรับปรุงทั้งสองฝั่ง ร่างรายการปรับปรุง และรายการค้างยกไปไม่เปลี่ยน เปลี่ยนแค่ลำดับ และทุกรายการยังบอกไฟล์ แผ่น และแถวที่อ่าน": "The reconciling items sheet and its evidence sheet run from the largest amount down. The statement, both adjusted balances, the draft journal entries and the list carried to next month do not change, only the order, and every item still names the file, sheet and row it was read from.",
+    "เรียงรายการกระทบยอดตามวันที่": "Reconciling items ordered by date",
+    "ชีตรายการกระทบยอดกับชีตหลักฐานของมัน เรียงจากรายการที่วันที่เก่าที่สุดขึ้นก่อน งบกระทบยอด ยอดหลังปรับปรุงทั้งสองฝั่ง ร่างรายการปรับปรุง และรายการค้างยกไปไม่เปลี่ยน เปลี่ยนแค่ลำดับ และทุกรายการยังบอกไฟล์ แผ่น และแถวที่อ่าน": "The reconciling items sheet and its evidence sheet run from the oldest date. The statement, both adjusted balances, the draft journal entries and the list carried to next month do not change, only the order, and every item still names the file, sheet and row it was read from.",
+    "ตัดรายการยอดเล็กออก": "Leaving out the small items",
+    "รายการกระทบยอดทุกรายการต้องอยู่ครบ ไม่เช่นนั้นยอดหลังปรับปรุงสองฝั่งจะไม่ลงตัวตามที่งบแสดง": "every reconciling item has to be there, or the two adjusted balances would not tie as the statement shows",
+    "บันทึกรายการปรับปรุงเข้าบัญชี": "Posting the adjusting entries to the books",
+    "agent นี้ไม่บันทึกเข้าระบบบัญชี รายการปรับปรุงเป็นร่างให้คนตรวจและบันทึกเอง": "this agent posts nothing to the accounting system; the adjusting entries are drafts for a person to review and post",
     "PDF ที่ธนาคารออกให้ (คัดลอกตัวหนังสือในไฟล์ได้) ครบทุกหน้า agent อ่านตารางจากตำแหน่งของตัวหนังสือ และบอกหน้าและบรรทัดของทุกรายการ": "A PDF issued by the bank (one whose text can be copied), with every page. The agent reads the table from the position of the text, and gives the page and the line of every item.",
     "PDF ที่เป็นภาพสแกน หรือรูปถ่ายของรายการเดินบัญชี agent ไม่อ่านตัวเลขจากภาพ และจะบอกว่าไม่ได้ใช้ไฟล์นั้น": "A scanned PDF, or a photo of the bank statement. The agent does not read figures from images, and will say that it did not use that file.",
     "agent จับคู่เองเฉพาะรายการที่ตรงกันทุกตัว เช่น เลขที่เช็คและยอดเงินตรงกัน หรือวันที่และยอดเงินตรงกันและมีรายการเดียว": "The agent matches automatically only the items that agree exactly, for example the cheque number and the amount agree, or the date and the amount agree and there is only one such item.",

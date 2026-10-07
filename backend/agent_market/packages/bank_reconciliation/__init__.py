@@ -76,6 +76,65 @@ def summarize(computed: dict) -> dict:
     return _rec.summarize(computed)
 
 
+# AM13 — what a person asked of the working paper (agent.json "instructions"). An order for the reconciling
+# items, applied here at render time and nowhere else: the items sheet and its evidence sheet are made from the
+# one list, so they stay row for row. The statement, the two adjusted balances, the journal drafts and the
+# list carried to next month are made from what was computed and do not move.
+DIRECTIVES = ("sort_by_amount", "sort_by_date")
+
+
+def _as_asked(computed: dict, req: dict) -> tuple[dict, list[str]]:
+    """The computed table as the working paper is to show it, and the directives applied."""
+    from ...deliverables import asked
+
+    order = asked.one_order(req, DIRECTIVES)
+    if order is None:
+        return computed, []
+    if order == "sort_by_amount":
+        def size(i):
+            v = asked.number(i.get("amount"))
+            return None if v is None else abs(v)
+
+        items = asked.largest_first(computed["items"], size)
+    else:
+        # oldest first; an item with no date after them (stable: the file's order within a day)
+        items = sorted(computed["items"], key=lambda i: (0, str(i["date"])) if i.get("date") else (1, ""))
+    return dict(computed, items=items), [order]
+
+
+def _date_read(text) -> tuple | None:
+    """A date as the working paper prints it (“5 ก.ย. 2569”), read back."""
+    from ...engine.thai import BE_OFFSET, MONTHS_TH_ABBR
+
+    bits = str(text or "").split()
+    try:
+        return (int(bits[2]) - BE_OFFSET, MONTHS_TH_ABBR.index(bits[1]) + 1, int(bits[0])) if len(bits) == 3 else None
+    except ValueError:
+        return None
+
+
+def _asked_check(path: str, view: dict, applied: list[str]) -> dict:
+    """What was asked, read back out of the finished workbook: the amounts, or the dates, on the items
+    sheet from top to bottom, by what is in its own cells."""
+    from openpyxl import load_workbook
+
+    from ...deliverables import asked
+    from ...deliverables.reread import table
+    from .scripts.workbook import H_ITEMS, S_ITEMS, parts
+
+    rows = table(parts(load_workbook(path), S_ITEMS), H_ITEMS)
+    same = len(rows) == len(view["items"])
+    if applied == ["sort_by_amount"]:
+        sizes = [abs(asked.number(r[6])) if isinstance(r[6], (int, float)) and not isinstance(r[6], bool) else None for r in rows]
+        if not same or not asked.runs_down(sizes):
+            return asked.check(False, f"ขอให้เรียงรายการกระทบยอดจากจำนวนเงินมากที่สุด แต่ชีต “{S_ITEMS}” ในไฟล์ไม่ได้เรียงตามนั้น")
+        return asked.check(True, f"รายการกระทบยอด {len(rows)} แถวเรียงจากจำนวนเงินมากที่สุดลงไป", len(rows))
+    dates = [_date_read(r[H_ITEMS.index("วันที่")]) for r in rows]
+    if not same or not asked.runs_up(dates):
+        return asked.check(False, f"ขอให้เรียงรายการกระทบยอดตามวันที่ แต่ชีต “{S_ITEMS}” ในไฟล์ไม่ได้เรียงตามนั้น")
+    return asked.check(True, f"รายการกระทบยอด {len(rows)} แถวเรียงจากวันที่เก่าที่สุดขึ้นก่อน", len(rows))
+
+
 def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     import hashlib
 
@@ -83,14 +142,17 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     from ...deliverables.theme import resolve
     from .scripts.workbook import BankWorkbook, check
 
+    view, applied = _as_asked(computed, req)
     theme = resolve(req.get("theme"))
     names = req.get("names") or {}
     artifacts, all_ok = [], True
     for fmt in [f for f in wanted_formats(req, ["xlsx"]) if f == "xlsx"]:
         name = os.path.basename(names.get(fmt) or "bank_reconciliation.xlsx")
         path = os.path.join(out_dir, name)
-        meta = BankWorkbook(computed, theme, req.get("run")).write(path)
-        checks = check(path, computed, req.get("run"))
+        meta = BankWorkbook(view, theme, req.get("run")).write(path)
+        checks = check(path, view, req.get("run"))
+        if applied:
+            checks.append(_asked_check(path, view, applied))
         ok = all(c["ok"] for c in checks)
         all_ok &= ok
         with open(path, "rb") as f:
@@ -98,4 +160,5 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
         artifacts.append({"name": name, "format": fmt, "kind": "table", "size": os.path.getsize(path), "sha256": sha,
                           "quality": {"passed": ok, "checks": checks}, "meta": meta, "chart_bindings": [],
                           "citations": len(computed["citations"])})
-    return {"passed": all_ok, "artifacts": artifacts, "theme": {"id": theme["id"], "version": theme.get("version", 1)}}
+    return {"passed": all_ok, "artifacts": artifacts, "theme": {"id": theme["id"], "version": theme.get("version", 1)},
+            "asked": {"applied": applied, "refused": []}}

@@ -110,6 +110,46 @@ def summarize(computed: dict) -> dict:
     return _match.summarize(computed)
 
 
+# AM13 — what a person asked of the working paper (agent.json "instructions"; the runner sends the id a model
+# read out of the person's words as req["instructions"]["apply"]). Applied here, at render time, and nowhere
+# else: the order of the lines, once, at the one list the line sheet and its two companions are all made from —
+# so the three stay row for row. The same lines, the same figures, the same statuses.
+DIRECTIVES = ("sort_by_variance",)
+VARIANCE = "ส่วนต่างราคารวม"
+
+
+def _as_asked(computed: dict, req: dict) -> tuple[dict, list[str]]:
+    """The computed table as the working paper is to show it, and the directives applied."""
+    from ...deliverables import asked
+
+    order = asked.one_order(req, DIRECTIVES)
+    if order is None:
+        return computed, []
+
+    def size(x):
+        v = asked.number((x.get("price_variance") or {}).get("extended"))
+        return None if v is None else abs(v)
+
+    return dict(computed, lines=asked.largest_first(computed["lines"], size)), [order]
+
+
+def _asked_check(path: str, view: dict, applied: list[str]) -> dict:
+    """What was asked, read back out of the finished workbook: the price differences on the line sheet,
+    top to bottom, by the numbers in its own cells."""
+    from openpyxl import load_workbook
+
+    from ...deliverables import asked
+    from ...deliverables.reread import table
+    from .scripts.workbook import H_LINES, S_LINES, parts
+
+    rows = table(parts(load_workbook(path), S_LINES), H_LINES)
+    col = H_LINES.index(VARIANCE)
+    sizes = [abs(asked.number(r[col])) if isinstance(r[col], (int, float)) and not isinstance(r[col], bool) else None for r in rows]
+    if len(rows) != len(view["lines"]) or not asked.runs_down(sizes):
+        return asked.check(False, f"ขอให้เรียงบรรทัดจาก{VARIANCE}มากที่สุด แต่ชีต “{S_LINES}” ในไฟล์ไม่ได้เรียงตามนั้น")
+    return asked.check(True, f"บรรทัด {len(rows)} แถวเรียงจาก{VARIANCE}มากที่สุดลงไป บรรทัดที่ไม่มีส่วนต่างอยู่ถัดไปตามลำดับในไฟล์", len(rows))
+
+
 def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     import hashlib
 
@@ -117,14 +157,17 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     from ...deliverables.theme import resolve
     from .scripts.workbook import MatchWorkbook, check
 
+    view, applied = _as_asked(computed, req)
     theme = resolve(req.get("theme"))
     names = req.get("names") or {}
     artifacts, all_ok = [], True
     for fmt in [f for f in wanted_formats(req, ["xlsx"]) if f == "xlsx"]:
         name = os.path.basename(names.get(fmt) or "po_matching.xlsx")
         path = os.path.join(out_dir, name)
-        meta = MatchWorkbook(computed, theme, req.get("run")).write(path)
-        checks = check(path, computed, req.get("run"))
+        meta = MatchWorkbook(view, theme, req.get("run")).write(path)
+        checks = check(path, view, req.get("run"))
+        if applied:
+            checks.append(_asked_check(path, view, applied))
         ok = all(c["ok"] for c in checks)
         all_ok &= ok
         with open(path, "rb") as f:
@@ -132,4 +175,5 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
         artifacts.append({"name": name, "format": fmt, "kind": "table", "size": os.path.getsize(path), "sha256": sha,
                           "quality": {"passed": ok, "checks": checks}, "meta": meta, "chart_bindings": [],
                           "citations": len(computed["citations"])})
-    return {"passed": all_ok, "artifacts": artifacts, "theme": {"id": theme["id"], "version": theme.get("version", 1)}}
+    return {"passed": all_ok, "artifacts": artifacts, "theme": {"id": theme["id"], "version": theme.get("version", 1)},
+            "asked": {"applied": applied, "refused": []}}

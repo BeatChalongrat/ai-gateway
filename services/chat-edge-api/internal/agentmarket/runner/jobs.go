@@ -337,7 +337,7 @@ func (r *Runner) replyToAsked(ctx context.Context, rc *runCtx, job am.Run, paren
 	if !rc.pkg.Manifest.TakesInstructions() || parent == nil || parent.Status != am.RunSucceeded {
 		return false, nil
 	}
-	asked, err := rc.asked(ctx, text)
+	asked, err := rc.asked(ctx, text, false)
 	if err != nil {
 		return false, err
 	}
@@ -356,7 +356,7 @@ func (r *Runner) replyToAsked(ctx context.Context, rc *runCtx, job am.Run, paren
 		return false, nil
 	}
 	params, _ := json.Marshal(map[string]any{"formats": formats, "why": "instruction",
-		"instructions": union(r.Store.InstructionsInForce(ctx, parent.ID), asked.Apply), "asked": asked})
+		"instructions": rc.pkg.Manifest.Instructions.Merge(r.Store.InstructionsInForce(ctx, parent.ID), asked.Apply), "asked": asked})
 	pid := parent.ID
 	if _, _, err := r.Store.CreateRun(ctx, r.Store.Pool, am.Run{InstallID: parent.InstallID, ParentRunID: &pid,
 		TenantID: parent.TenantID, UserID: parent.UserID, Kind: am.KindRender, Params: params,

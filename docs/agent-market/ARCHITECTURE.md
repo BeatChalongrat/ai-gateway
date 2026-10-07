@@ -845,3 +845,79 @@ figures' names are taken out is no answer (`runner/deliver.go: guardFigures`)
 commentary. The second holds for every installed version; the first reaches
 an install when it is upgraded to the version that carries it (report agent
 1.8.0).
+
+## An order for the table, on every agent (AM13)
+
+AM11b made two agents do what they are asked. AM13 is the other four, and it
+is one thing only: **the order of a table's rows.** No agent drops a row,
+adds a subtotal, or says which row is best because it was asked to.
+
+| Agent | What can be asked | What it is asked and does not do (with the reason) |
+|---|---|---|
+| Invoice ↔ PO matching 1.5.0 | lines from the largest price difference | only the lines that failed · approve payment |
+| Bank reconciliation 1.6.0 | items from the largest amount · items by date | leave out small items · post the entries |
+| Invoice processing 1.8.0 | register by seller · by document date · from the largest total | a sheet per seller · only the documents with a problem |
+| Procurement 1.1.0 | options from the lowest price | say which option is best · leave out options with something unknown |
+
+**Applied once, at the one list.** Each package's `_as_asked(computed, req)`
+returns the computed table with that one list in the order asked
+(`deliverables/asked.py`: largest first, smallest first, by name — all
+stable, so rows of one size keep the order of the person's file; a row with
+no value goes last). The writer and the gate are both handed that view, so
+a wide table's companion sheets — evidence, criteria — are made from the
+same rows and stay row for row. Everything else is made from `computed` as
+before: the statement of a reconciliation and the list carried to next
+month, the totals of a register, a comparison's request draft.
+
+**Read back from the file.** A round that was asked something has one more
+check, `xlsx.asked`: the finished workbook is opened and the order is read
+from its own cells — the amounts, the dates as the paper prints them, the
+sellers' names. A file left in the old order fails the round
+(`test_am13_asked.py` is those refusal cases).
+
+**A table has one order (the platform's rule).** Directives of one table's
+order carry `"group": "order"` in the manifest. `ReadAsked` applies one of a
+group — the first the package lists — and records the others in
+`Asked.Instead`; the thread says of each “… ทำตามที่ขอไม่ได้เพราะขอ “…”
+มาด้วย และทำได้ทีละอย่าง”. Asked for another order in a later message,
+`InstructionSpec.Merge` drops what was in force in that group and puts the
+new one in: a renderer is never handed two. A later message's thread speaks
+only of what that message asked (an order that was replaced is not reported
+as refused).
+
+**Procurement: an order, never a verdict.** The owner's rule: sorting by
+price is allowed, printing a "best" verdict is not, and the caveats stay on
+every row.
+
+- Like is compared with like. When every priced option states its tax, the
+  order is by the total with tax; otherwise by the unit price each page
+  shows, and the workbook's face says which and points at each row's tax
+  column. Options with no price are last. Prices in two currencies are not
+  put in order at all: the directive is refused with that reason
+  (`unless`) and the table stays as it was.
+- An option keeps its number (the person chooses by it), its count of
+  points not known, and its rows on the sheet of what to ask the seller.
+  `xlsx.asked` reads all three back, and that the face says the order is by
+  price only and that the table is not advice.
+- The only cell the ordered workbook has that the default one has not is
+  that one sentence (`test_nothing_is_marked_as_best…` compares every cell).
+- **Not ordered: the card a person chooses from in the thread.** It is made
+  before the words are read (the choice comes before the files), and it is
+  still in the computed order — fewest unknown points first. The package's
+  note says so.
+
+**A request is not a refused request.** Procurement starts from what a
+person types, and the same words are read for what they ask of the
+documents. "งบไม่เกิน 5,000" is the request; a model that answers it as
+`other` is not believed: for the round's own message of an agent that
+starts from a request, `Asked.OfARequest` drops every `other` before the
+step is stored, so nothing of the request is ever answered with "cannot be
+done as asked". The model is also told, in the user turn (the system
+message is the same for every agent and holds no JSON). What the package
+lists as not possible — a verdict — is still said, with its reason.
+
+**What it costs.** For these four agents a round that has words with it now
+makes one more model call (the reading: about 950 tokens). The three that
+show no model their documents send those words — and only the words — to a
+model inside the organisation, and their data sheets now say so. A round
+with no words, or with only thanks, makes none.

@@ -190,6 +190,87 @@ def summarize(computed: dict) -> dict:
     return out
 
 
+# AM13 — what a person asked of the comparison (agent.json "instructions"): the options from the lowest price.
+# An order, and nothing that weighs one option against another: the table still marks none as best, every
+# option keeps its number and its row of what is not known about it, and the face of the workbook says the
+# order is by price only. Prices in two currencies are not compared: the table then stays as it was and the
+# directive is refused with the reason.
+DIRECTIVES = ("sort_by_price",)
+
+
+def _priced(c: dict) -> bool:
+    return bool(c.get("price")) and bool(c.get("currency"))
+
+
+def _as_asked(computed: dict, req: dict) -> tuple[dict, list[str], list[str]]:
+    """The computed table as the comparison is to show it, the directives applied, and those this
+    round's data could not take."""
+    from ...deliverables import asked
+
+    if asked.one_order(req, DIRECTIVES) is None:
+        return computed, [], []
+    items = computed.get("items") or []
+    for it in items:
+        if len({c["currency"] for c in it["candidates"] if _priced(c)}) > 1:
+            return computed, [], ["sort_by_price"]
+    every = [c for it in items for c in it["candidates"] if _priced(c)]
+    # like with like: the total with tax when every priced option states its tax; otherwise the price as
+    # the page shows it, and the face says which
+    basis = "total" if every and all(c.get("total") for c in every) else "shown"
+
+    def figure(c):
+        if not _priced(c):
+            return None
+        return asked.number(c.get("total")) if basis == "total" else asked.number(c["price"].get("amount"))
+
+    out = [dict(it, candidates=asked.smallest_first(it["candidates"], figure)) for it in items]
+    return dict(computed, items=out, shown_order={"by": "price", "basis": basis}), ["sort_by_price"], []
+
+
+def _asked_check(path: str, view: dict) -> dict:
+    """What was asked, read back out of the finished workbook: each item's options run from the lowest
+    price by the numbers in its own cells; every option still shows how many points are not known about
+    it, and each of those points is on the sheet of what to ask; the face says how the table is ordered."""
+    from openpyxl import load_workbook
+
+    from ...deliverables import asked
+    from .scripts.workbook import MAIN, PRICE_ORDER, TOP
+
+    lang = view.get("lang") or "th"
+    w = lambda key, **kw: t(lang, key, **kw)  # noqa: E731
+    wb = load_workbook(path)
+    basis = view["shown_order"]["basis"]
+    col = {k: i for i, k in enumerate(MAIN)}
+    listed = lambda name: [r for r in wb[name].iter_rows(min_row=TOP + 1, values_only=True) if r and r[0] not in (None, "")] \
+        if name in wb.sheetnames else []  # noqa: E731
+    rows = listed(w("sheet.candidates"))
+    want = [(it, c) for it in view["items"] for c in it["candidates"]]
+    bad = []
+    if len(rows) != len(want):
+        bad.append(w("check.asked.rows", file=str(len(rows)), computed=str(len(want))))
+    at = 0
+    cell = col["total"] if basis == "total" else col["unit_price"]
+    for it in view["items"]:
+        mine = rows[at: at + len(it["candidates"])]
+        at += len(it["candidates"])
+        figures = [asked.number(r[cell]) if isinstance(r[cell], (int, float)) and not isinstance(r[cell], bool) else None for r in mine]
+        if not asked.runs_up(figures):
+            bad.append(w("check.asked.order", item=it["name"]))
+    for (it, c), r in zip(want, rows):
+        if r[col["open"]] != len(c["open"]):
+            bad.append(w("check.asked.open", no=str(r[col["no"]])))
+    points = sum(len(c["open"]) + len(c.get("not_found") or []) for _, c in want)
+    asks = listed(w("sheet.ask"))
+    if len(asks) != points:
+        bad.append(w("check.asked.points", file=str(len(asks)), computed=str(points)))
+    face = {c for row in wb[w("sheet.summary")].iter_rows(values_only=True) for c in row if isinstance(c, str)}
+    if w(PRICE_ORDER[basis]) not in face or w("face.not_advice") not in face:
+        bad.append(w("check.asked.face"))
+    out = asked.check(not bad, "; ".join(bad[:4]) if bad else w("check.asked.ok", n=str(len(rows))), len(rows))
+    out["label"] = w("check.asked.label")
+    return out
+
+
 def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     import hashlib
 
@@ -200,6 +281,7 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     from .scripts.workbook import ComparisonWorkbook
     from .scripts.workbook import check as check_workbook
 
+    view, applied, refused = _as_asked(computed, req)
     theme = resolve(req.get("theme"))
     names = req.get("names") or {}
     run = req.get("run") or {}
@@ -218,15 +300,19 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
 
     if "xlsx" in wanted:
         path = os.path.join(out_dir, os.path.basename(names.get("xlsx") or "comparison.xlsx"))
-        meta = ComparisonWorkbook(computed, theme, run).write(path)
-        done(path, "xlsx", "table", check_workbook(path, computed, run), meta)
+        meta = ComparisonWorkbook(view, theme, run).write(path)
+        checks = check_workbook(path, view, run)
+        if applied:
+            checks.append(_asked_check(path, view))
+        done(path, "xlsx", "table", checks, meta)
     # the request as a plain document — unless the organisation's own form is being filled this round, or
     # nothing was chosen (then there is no request to draft, and the comparison says so)
     if "docx" in wanted and request.get("lines") and not req.get("template"):
         path = os.path.join(out_dir, os.path.basename(names.get("docx") or "purchase_request.docx"))
         meta = RequestDraft(computed, theme, run).write(path, in_dir if os.path.isdir(in_dir) else None)
         done(path, "docx", "request", check_draft(path, computed), meta)
-    return {"passed": all_ok, "artifacts": artifacts, "theme": {"id": theme["id"], "version": theme.get("version", 1)}}
+    return {"passed": all_ok, "artifacts": artifacts, "theme": {"id": theme["id"], "version": theme.get("version", 1)},
+            "asked": {"applied": applied, "refused": refused}}
 
 
 def template_values(computed: dict, req: dict | None = None) -> dict:

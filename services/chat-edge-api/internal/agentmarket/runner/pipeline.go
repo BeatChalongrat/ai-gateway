@@ -194,7 +194,7 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 	}
 	// AM11b: what the person typed with the files, read into what the package says can be asked of its
 	// documents. It changes how they are made, never a figure: the table is computed already.
-	asked, err := rc.asked(ctx, rc.run.Message)
+	asked, err := rc.asked(ctx, rc.run.Message, rc.pkg.Manifest.FromRequest())
 	if err != nil {
 		return rc.stepFailed("instructions", err)
 	}

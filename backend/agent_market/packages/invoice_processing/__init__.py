@@ -123,6 +123,56 @@ def template_values(computed: dict) -> dict:
                        "total": m(d["thb_total"]), "amount": m(d["thb_total"])} for d in rows]}
 
 
+# AM13 — what a person asked of the register (agent.json "instructions"). An order for its rows, applied here
+# at render time and nowhere else: the register and its evidence sheet are made from the one list of recorded
+# documents, so they stay row for row. Every value of every row is the computed one, and the totals do not move.
+# The register stays one table: a sheet per seller would need a subtotal for each, which is arithmetic.
+DIRECTIVES = ("sort_by_seller", "sort_by_date", "sort_by_amount")
+
+
+def _as_asked(computed: dict, req: dict) -> tuple[dict, list[str]]:
+    """The computed table as the register is to show it, and the directives applied."""
+    from ...deliverables import asked
+
+    order = asked.one_order(req, DIRECTIVES)
+    if order is None:
+        return computed, []
+    docs = computed["documents"]
+    if order == "sort_by_seller":
+        docs = asked.by_name(docs, lambda d: d.get("seller_name"))
+    elif order == "sort_by_date":
+        docs = sorted(docs, key=lambda d: (0, str(d["document_date"])) if d.get("document_date") else (1, ""))
+    else:
+        docs = asked.largest_first(docs, lambda d: asked.number(d.get("thb_total")))
+    return dict(computed, documents=docs), [order]
+
+
+def _asked_check(path: str, view: dict, applied: list[str]) -> dict:
+    """What was asked, read back out of the finished workbook: the sellers, the dates or the totals of
+    the register from top to bottom, by what is in its own cells."""
+    from openpyxl import load_workbook
+
+    from ...deliverables import asked
+    from ...deliverables.reread import table
+    from .scripts.workbook import H_REGISTER, S_REGISTER, parts
+
+    rows = table(parts(load_workbook(path), S_REGISTER), H_REGISTER)
+    same = len(rows) == len([d for d in view["documents"] if d["status"] == "included"])
+    col = {h: i for i, h in enumerate(H_REGISTER)}
+    if applied == ["sort_by_seller"]:
+        ok, what, said = asked.names_run_up([r[col["ผู้ขาย"]] for r in rows]), "ตามผู้ขาย", "เรียงตามชื่อผู้ขาย"
+    elif applied == ["sort_by_date"]:
+        ok = asked.runs_up([str(r[col["วันที่"]]) if r[col["วันที่"]] not in (None, "") else None for r in rows])
+        what, said = "ตามวันที่เอกสาร", "เรียงจากวันที่เอกสารเก่าที่สุดขึ้นก่อน"
+    else:
+        c = col["ยอดรวม (บาท)"]
+        ok = asked.runs_down([asked.number(r[c]) if isinstance(r[c], (int, float)) and not isinstance(r[c], bool) else None for r in rows])
+        what, said = "จากยอดรวมมากที่สุด", "เรียงจากยอดรวมเป็นบาทมากที่สุดลงไป"
+    if not same or not ok:
+        return asked.check(False, f"ขอให้เรียงทะเบียน{what} แต่ชีต “{S_REGISTER}” ในไฟล์ไม่ได้เรียงตามนั้น")
+    return asked.check(True, f"ทะเบียน {len(rows)} แถว{said}", len(rows))
+
+
 def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     import hashlib
 
@@ -130,14 +180,17 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     from ...deliverables.theme import resolve
     from .scripts.workbook import InvoiceWorkbook, check
 
+    view, applied = _as_asked(computed, req)
     theme = resolve(req.get("theme"))
     names = req.get("names") or {}
     artifacts, all_ok = [], True
     for fmt in [f for f in wanted_formats(req, ["xlsx"]) if f == "xlsx"]:
         name = os.path.basename(names.get(fmt) or "register.xlsx")
         path = os.path.join(out_dir, name)
-        meta = InvoiceWorkbook(computed, theme, req.get("run")).write(path)
-        checks = check(path, computed, req.get("run"))
+        meta = InvoiceWorkbook(view, theme, req.get("run")).write(path)
+        checks = check(path, view, req.get("run"))
+        if applied:
+            checks.append(_asked_check(path, view, applied))
         ok = all(c["ok"] for c in checks)
         all_ok &= ok
         with open(path, "rb") as f:
@@ -145,4 +198,5 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
         artifacts.append({"name": name, "format": fmt, "kind": "table", "size": os.path.getsize(path), "sha256": sha,
                           "quality": {"passed": ok, "checks": checks}, "meta": meta, "chart_bindings": [],
                           "citations": len(computed["provenance"])})
-    return {"passed": all_ok, "artifacts": artifacts, "theme": {"id": theme["id"], "version": theme.get("version", 1)}}
+    return {"passed": all_ok, "artifacts": artifacts, "theme": {"id": theme["id"], "version": theme.get("version", 1)},
+            "asked": {"applied": applied, "refused": []}}

@@ -1,7 +1,7 @@
 {
   "schema_version": "agent.market.v1",
   "id": "sran.invoice-processing",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "name": "อ่านใบกำกับภาษี / ใบเสร็จ ทำทะเบียนซื้อ",
   "name_en": "Invoice Processing",
   "short_name": "ทะเบียนเอกสารซื้อ",
@@ -83,6 +83,17 @@
   },
   "cannot": "agent ตัวนี้ไม่บันทึกเข้าระบบบัญชี ไม่อนุมัติหรือโอนเงิน และไม่ตั้งเวลาทำงานเอง และไม่ส่งอีเมลเอง (คนส่งผ่านระบบได้เมื่อผู้ดูแลตั้งค่าไว้)",
   "photo_notice": "รูปถ่ายใบเสร็จอ่านได้เท่าที่ภาพชัด: อ่านเฉพาะผู้ขาย วันที่ ยอดรวม VAT และเลขผู้เสียภาษี และจะถามกลับทุกครั้งที่ไม่มั่นใจ ถ้ามี PDF หรือสแกนให้ส่งแบบนั้นแทน",
+  "instructions": {
+    "can": [
+      {"id": "sort_by_seller", "group": "order", "label": "เรียงทะเบียนตามผู้ขาย", "asks": "เรียงตามผู้ขาย · จัดกลุ่มตามร้าน · เอาเอกสารของผู้ขายรายเดียวกันไว้ติดกัน", "note": "ชีตทะเบียนกับชีตหลักฐานของมัน เรียงตามชื่อผู้ขาย เอกสารของผู้ขายรายเดียวกันอยู่ติดกันตามลำดับที่ส่งมา ตัวเลขและค่าทุกช่องไม่เปลี่ยน เปลี่ยนแค่ลำดับ ทะเบียนยังเป็นชุดเดียว ไม่มียอดรวมย่อยรายผู้ขาย"},
+      {"id": "sort_by_date", "group": "order", "label": "เรียงทะเบียนตามวันที่เอกสาร", "asks": "เรียงตามวันที่ · เอาเอกสารเก่าสุดขึ้นก่อน", "note": "ชีตทะเบียนกับชีตหลักฐานของมัน เรียงจากวันที่เอกสารเก่าที่สุดขึ้นก่อน ตัวเลขและค่าทุกช่องไม่เปลี่ยน เปลี่ยนแค่ลำดับ"},
+      {"id": "sort_by_amount", "group": "order", "label": "เรียงทะเบียนจากยอดรวมมากที่สุด", "asks": "เรียงจากยอดมาก · เรียงตามยอดรวม · เอาใบยอดใหญ่ขึ้นก่อน", "note": "ชีตทะเบียนกับชีตหลักฐานของมัน เรียงจากยอดรวมเป็นบาทมากที่สุดลงไป ตัวเลขและค่าทุกช่องไม่เปลี่ยน เปลี่ยนแค่ลำดับ"}
+    ],
+    "cannot": [
+      {"id": "split_by_seller", "label": "แยกชีตตามผู้ขาย", "why": "สมุดงานมีทะเบียนชุดเดียว การแยกชีตตามผู้ขายต้องมียอดรวมย่อยของแต่ละราย ซึ่ง agent นี้ยังไม่ทำ — ขอให้เรียงตามผู้ขายแทนได้"},
+      {"id": "only_exceptions", "label": "เอาเฉพาะเอกสารที่มีปัญหา", "why": "เอกสารที่บันทึกทุกฉบับต้องอยู่ในทะเบียนครบ เอกสารที่มีข้อสังเกตอยู่ในชีตข้อยกเว้นของสมุดงานแล้ว"}
+    ]
+  },
   "limits": {"max_file_mb": 20, "max_files": 30},
   "self_test": "self-test.json",
   "templates": {
@@ -104,6 +115,19 @@
     }
   },
   "en": {
+    "เรียงตามผู้ขาย · จัดกลุ่มตามร้าน · เอาเอกสารของผู้ขายรายเดียวกันไว้ติดกัน": "order by seller · group by shop · keep one seller's documents together",
+    "เรียงตามวันที่ · เอาเอกสารเก่าสุดขึ้นก่อน": "order by date · the oldest documents first",
+    "เรียงจากยอดมาก · เรียงตามยอดรวม · เอาใบยอดใหญ่ขึ้นก่อน": "order from the largest total · order by total · the big invoices first",
+    "เรียงทะเบียนตามผู้ขาย": "Register ordered by seller",
+    "ชีตทะเบียนกับชีตหลักฐานของมัน เรียงตามชื่อผู้ขาย เอกสารของผู้ขายรายเดียวกันอยู่ติดกันตามลำดับที่ส่งมา ตัวเลขและค่าทุกช่องไม่เปลี่ยน เปลี่ยนแค่ลำดับ ทะเบียนยังเป็นชุดเดียว ไม่มียอดรวมย่อยรายผู้ขาย": "The register and its evidence sheet run by seller name; one seller's documents sit together, in the order they were sent. No figure and no value changes, only the order. The register is still one table: there is no subtotal for each seller.",
+    "เรียงทะเบียนตามวันที่เอกสาร": "Register ordered by document date",
+    "ชีตทะเบียนกับชีตหลักฐานของมัน เรียงจากวันที่เอกสารเก่าที่สุดขึ้นก่อน ตัวเลขและค่าทุกช่องไม่เปลี่ยน เปลี่ยนแค่ลำดับ": "The register and its evidence sheet run from the oldest document date. No figure and no value changes, only the order.",
+    "เรียงทะเบียนจากยอดรวมมากที่สุด": "Register ordered from the largest total",
+    "ชีตทะเบียนกับชีตหลักฐานของมัน เรียงจากยอดรวมเป็นบาทมากที่สุดลงไป ตัวเลขและค่าทุกช่องไม่เปลี่ยน เปลี่ยนแค่ลำดับ": "The register and its evidence sheet run from the largest total in baht down. No figure and no value changes, only the order.",
+    "แยกชีตตามผู้ขาย": "A sheet for each seller",
+    "สมุดงานมีทะเบียนชุดเดียว การแยกชีตตามผู้ขายต้องมียอดรวมย่อยของแต่ละราย ซึ่ง agent นี้ยังไม่ทำ — ขอให้เรียงตามผู้ขายแทนได้": "the workbook has one register; a sheet for each seller would need a subtotal for each, which this agent does not make yet — ask for the register ordered by seller instead",
+    "เอาเฉพาะเอกสารที่มีปัญหา": "Only the documents with a problem",
+    "เอกสารที่บันทึกทุกฉบับต้องอยู่ในทะเบียนครบ เอกสารที่มีข้อสังเกตอยู่ในชีตข้อยกเว้นของสมุดงานแล้ว": "every recorded document has to be in the register; the ones with something to note are already on the workbook's exceptions sheet",
     "PDF ดิจิทัลหรือ e-Tax ราว 10 วินาทีต่อฉบับ สแกนหรือรูปถ่ายราว 1 นาทีต่อฉบับ (อ่านตัวอักษรจากภาพและให้โมเดลในองค์กรอ่านซ้ำ)": "A digital PDF or e-Tax file takes about 10 seconds per document. A scan or photo takes about 1 minute per document (the text is read from the image and re-read by a model inside the organisation).",
     "PDF ดิจิทัลหรือสแกน 200–300 DPI · XML ของ e-Tax · รูปถ่ายอ่านได้เท่าที่ภาพชัด": "Digital PDF or scan at 200–300 DPI · e-Tax XML · photos are read only as far as the image is clear",
     "PDF ที่ได้จากระบบของผู้ขาย (คัดลอกตัวหนังสือในไฟล์ได้) หรือไฟล์ XML ของ e-Tax อ่านได้แม่นที่สุด และไม่ต้องใช้โมเดลเลย": "A PDF from the seller's system (one whose text can be copied), or an e-Tax XML file. These read most accurately and need no model at all.",

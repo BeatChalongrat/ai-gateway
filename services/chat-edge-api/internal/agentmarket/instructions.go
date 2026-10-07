@@ -49,6 +49,10 @@ type Directive struct {
 	Unless string `json:"unless,omitempty"`
 	// Why (cannot): the reason.
 	Why string `json:"why,omitempty"`
+	// Group (can): directives of one group cannot hold together — two orders of the same table. The
+	// documents are made with one of a group at a time: the one asked last (Merge), and of two asked in
+	// the same words, the first the package lists (ReadAsked says so of the other).
+	Group string `json:"group,omitempty"`
 }
 
 // TakesInstructions: the agent's package declares something a person can ask of its documents.
@@ -86,6 +90,15 @@ type Asked struct {
 	Model  string        `json:"model,omitempty"`
 	// Unread: no model answered — the words were read by nothing.
 	Unread bool `json:"unread,omitempty"`
+	// Instead: what was asked together with another directive of its group, and gave way to it.
+	Instead []AskedInstead `json:"instead,omitempty"`
+}
+
+// AskedInstead: one directive that was asked and is not applied, because Kept — of the same group — was
+// asked in the same words.
+type AskedInstead struct {
+	ID   string `json:"id"`
+	Kept string `json:"kept"`
 }
 
 // AskedCannot: one request that cannot be done — the id of the reason, and the
@@ -96,7 +109,24 @@ type AskedCannot struct {
 }
 
 // Nothing: the words asked nothing of the documents (and were read).
-func (a Asked) Nothing() bool { return len(a.Apply) == 0 && len(a.Cannot) == 0 && !a.Unread }
+func (a Asked) Nothing() bool {
+	return len(a.Apply) == 0 && len(a.Cannot) == 0 && len(a.Instead) == 0 && !a.Unread
+}
+
+// OfARequest is a as it stands for an agent whose round starts from the words themselves (AM12): what
+// the words ask that is in neither of the package's lists is the request — the thing to find, how many,
+// within what — and the agent reads that itself. It is not a request about the documents that was
+// refused, so it is not kept as one. What the package lists as not possible is still said.
+func (a Asked) OfARequest() Asked {
+	var kept []AskedCannot
+	for _, c := range a.Cannot {
+		if c.ID != AskedOther {
+			kept = append(kept, c)
+		}
+	}
+	a.Cannot = kept
+	return a
+}
 
 // askedSystem is the system message of the question. It holds no JSON: the
 // platform's echo guard takes out of an answer whatever repeats the system
@@ -117,8 +147,16 @@ const askedSystem = `คุณอ่านข้อความที่ผู�
 
 // AskedPrompt is the question a model is asked about a person's words: the
 // system message and the user turn (the two lists, the words, the shape).
-func AskedPrompt(spec InstructionSpec, text string) (system, user string) {
+//
+// request: the words are also what the agent is asked to find (an agent that starts from a request).
+// The model is told so in the user turn, and whatever it still answers as "other" is dropped by
+// Asked.OfARequest — the telling is a help, not the guard.
+func AskedPrompt(spec InstructionSpec, text string, request ...bool) (system, user string) {
 	var b strings.Builder
+	if len(request) > 0 && request[0] {
+		b.WriteString("agent ตัวนี้เริ่มงานจากข้อความนี้เอง: สิ่งที่ผู้ใช้ต้องการให้หา จำนวน งบประมาณ คุณสมบัติ ยี่ห้อ สถานที่ และกำหนดส่ง " +
+			"เป็นเรื่องของการค้นหา ไม่ใช่คำขอเกี่ยวกับเอกสาร ไม่ต้องใส่ทั้งใน apply และ cannot\n\n")
+	}
 	b.WriteString("ทำได้:\n")
 	for _, d := range spec.Can {
 		b.WriteString("- " + d.ID + ": " + d.Label)
@@ -164,10 +202,19 @@ func ReadAsked(spec InstructionSpec, text string, raw json.RawMessage) Asked {
 	for _, id := range ans.Apply {
 		picked[strings.TrimSpace(id)] = true
 	}
+	held := map[string]string{} // group → the directive of it that is applied
 	for _, d := range spec.Can {
-		if picked[d.ID] {
-			out.Apply = append(out.Apply, d.ID)
+		if !picked[d.ID] {
+			continue
 		}
+		if kept, taken := held[d.Group]; d.Group != "" && taken {
+			out.Instead = append(out.Instead, AskedInstead{ID: d.ID, Kept: kept})
+			continue
+		}
+		if d.Group != "" {
+			held[d.Group] = d.ID
+		}
+		out.Apply = append(out.Apply, d.ID)
 	}
 	known := map[string]bool{AskedOther: true}
 	for _, d := range spec.Cannot {
@@ -207,6 +254,53 @@ func (spec InstructionSpec) can(id string) (Directive, bool) {
 		}
 	}
 	return Directive{}, false
+}
+
+// Merge is what a round's documents are made with after more is asked of them: what was in force,
+// less whatever shares a group with something asked now (a table that was by amount and is now asked by
+// date is by date), then what is asked now.
+func (spec InstructionSpec) Merge(inForce, asked []string) []string {
+	taken := map[string]bool{}
+	for _, id := range asked {
+		if d, ok := spec.can(id); ok && d.Group != "" {
+			taken[d.Group] = true
+		}
+	}
+	out := []string{}
+	add := func(id string) {
+		for _, x := range out {
+			if x == id {
+				return
+			}
+		}
+		out = append(out, id)
+	}
+	for _, id := range inForce {
+		if d, ok := spec.can(id); ok && d.Group != "" && taken[d.Group] {
+			continue
+		}
+		add(id)
+	}
+	for _, id := range asked {
+		add(id)
+	}
+	return out
+}
+
+// AskedOneAtATime says, for each directive that gave way to another of its group asked in the same
+// words, that it was not done and which one was.
+func AskedOneAtATime(spec InstructionSpec, instead []AskedInstead) []PersonText {
+	var out []PersonText
+	for _, x := range instead {
+		d, ok := spec.can(x.ID)
+		k, ok2 := spec.can(x.Kept)
+		if !ok || !ok2 {
+			continue
+		}
+		out = append(out, Text("“%s” ทำตามที่ขอไม่ได้เพราะขอ “%s” มาด้วย และทำได้ทีละอย่าง เอกสารรอบนี้ทำตามอย่างหลัง ขออีกอย่างได้ในข้อความถัดไป",
+			Words(LabelFromPackage(d.Label, NoText)), Words(LabelFromPackage(k.Label, NoText))))
+	}
+	return out
 }
 
 // AskedDone says what was done as asked: each directive by its label and what

@@ -43,7 +43,10 @@ func specHash(spec am.InstructionSpec) string {
 // asked reads text into the package's directives. Nothing is asked of a
 // model — and nothing is a step — when the package declares none, when there
 // are no words, or when the words are only thanks.
-func (rc *runCtx) asked(ctx context.Context, text string) (am.Asked, error) {
+//
+// request: text is the round's own message of an agent that starts from a request — the words are also
+// what it is asked to find, and what is in neither of the package's lists is that, not a refusal.
+func (rc *runCtx) asked(ctx context.Context, text string, request bool) (am.Asked, error) {
 	text = strings.TrimSpace(text)
 	m := rc.pkg.Manifest
 	if !m.TakesInstructions() || text == "" || am.SocialOnly(text) || rc.run.Kind == am.KindSelfTest {
@@ -52,14 +55,20 @@ func (rc *runCtx) asked(ctx context.Context, text string) (am.Asked, error) {
 	spec := *m.Instructions
 	models := rc.textModels()
 	key := am.StepKey(rc.run.ID, "instructions", text, specHash(spec), strings.Join(models, "|"))
+	if request {
+		key = am.StepKey(rc.run.ID, "instructions", text, specHash(spec), strings.Join(models, "|"), "request")
+	}
 	raw, err := rc.step(ctx, "instructions", "ai", key, map[string]any{"text": text, "models": models}, true,
 		func(ctx context.Context) (any, float64, string, string, error) {
-			system, user := am.AskedPrompt(spec, text)
+			system, user := am.AskedPrompt(spec, text, request)
 			// (the model is shown the person's words and the package's list — nothing of the round's data)
 			ans, c, _ := rc.askJSONWith(ctx, models, system, user, false)
 			out := am.Asked{Text: text, Apply: []string{}, Unread: true}
 			if ans != nil {
 				out = am.ReadAsked(spec, text, ans)
+			}
+			if request {
+				out = out.OfARequest()
 			}
 			out.Model = c.Model
 			return out, c.CostUSD * rc.r.CreditsPerUSD, "", c.Model, nil
@@ -87,7 +96,14 @@ func (rc *runCtx) sayAsked(ctx context.Context, run am.Run, asked am.Asked, done
 		lines = append(lines, am.AskedUnread())
 	}
 	var applied []string
-	refused := append([]string{}, done.Refused...)
+	// (what the renderer could not take is said of what these words asked — a directive in force from
+	// an earlier message was spoken of then)
+	var refused []string
+	for _, id := range done.Refused {
+		if contains(asked.Apply, id) {
+			refused = append(refused, id)
+		}
+	}
 	for _, id := range asked.Apply {
 		switch {
 		case contains(done.Applied, id):
@@ -99,19 +115,9 @@ func (rc *runCtx) sayAsked(ctx context.Context, run am.Run, asked am.Asked, done
 	if said := am.AskedDone(spec, applied); !said.EmptyIn(am.Thai) {
 		lines = append(lines, said)
 	}
+	lines = append(lines, am.AskedOneAtATime(spec, asked.Instead)...)
 	lines = append(lines, am.AskedNotDone(spec, refused, asked.Cannot)...)
 	for _, line := range lines {
 		_ = rc.r.Store.PostText(ctx, run, line)
 	}
-}
-
-// union is a then b, each id once.
-func union(a, b []string) []string {
-	out := append([]string{}, a...)
-	for _, x := range b {
-		if !contains(out, x) {
-			out = append(out, x)
-		}
-	}
-	return out
 }

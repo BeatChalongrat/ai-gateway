@@ -113,6 +113,9 @@ func (s *standIn) handle(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(system, "อ่านข้อความที่พนักงานคนหนึ่งพิมพ์มาเพื่อขอซื้อของ"):
 			content, which = s.brief, "brief"
+		case strings.Contains(system, "มีคำขอเกี่ยวกับรูปแบบหรือเนื้อหาของเอกสาร"):
+			// AM13: the person's words, read into what the package says can be asked of its documents
+			content, which = (&itEnv{}).askedAnswer(body), "asked"
 		case strings.Contains(system, "จับคู่ช่องในแบบฟอร์ม"):
 			// the organisation's form: what a careful reader of its labels proposes (am12_form_it_test.go)
 			content, which = formMappingByLabel(body), "mapping"
@@ -468,7 +471,7 @@ func TestAProcurementRoundAsksSearchesOpensChecksAndDraftsFromTheChoice(t *testi
 	web.mu.Lock()
 	asked := 0
 	for i, body := range web.bodies {
-		if web.prompts[i] == "mapping" || web.prompts[i] == "other" {
+		if web.prompts[i] == "mapping" || web.prompts[i] == "other" || web.prompts[i] == "asked" {
 			continue
 		}
 		var req struct {

@@ -73,6 +73,28 @@ func (e *itEnv) askedAnswer(body []byte) string {
 	if w := word("เฉพาะ"); w != "" {
 		cannot = append(cannot, map[string]string{"id": "only_exceptions", "words": w})
 	}
+	// AM13: the orders of the other four agents, in an order that is not their package's
+	if strings.Contains(typed, "ตามวันที่") {
+		apply = append(apply, "sort_by_date")
+	}
+	if strings.Contains(typed, "ยอดมาก") {
+		apply = append(apply, "sort_by_amount")
+	}
+	if strings.Contains(typed, "ตามผู้ขาย") {
+		apply = append(apply, "sort_by_seller")
+	}
+	if strings.Contains(typed, "ถูกสุด") {
+		apply = append(apply, "sort_by_price")
+	}
+	if w := word("รายการเล็ก"); w != "" {
+		cannot = append(cannot, map[string]string{"id": "drop_small", "words": w})
+	}
+	if w := word("ดีที่สุด"); w != "" {
+		cannot = append(cannot, map[string]string{"id": "pick_best", "words": w})
+	}
+	if w := word("งบไม่เกิน"); w != "" { // (a model that takes a request's budget for a request about the document)
+		cannot = append(cannot, map[string]string{"id": "other", "words": w})
+	}
 	b, _ := json.Marshal(map[string]any{"apply": apply, "cannot": cannot})
 	return string(b)
 }
