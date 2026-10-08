@@ -40,28 +40,31 @@ from ....engine import e3
 from ....engine.e2 import thai_text as T
 from ....engine.e3 import cards as E3C
 from ....engine.e3.rows import Row, name_key, ref_key, similarity
+from ..words import W
 from . import book as B
 from . import parties as P
 from .settings import Tolerances
 
 ZERO = Decimal("0.00")
-NAMES_INV = {"left": "ใบสั่งซื้อ", "right": "ใบแจ้งหนี้"}
-NAMES_GR = {"left": "ใบสั่งซื้อ", "right": "ใบรับของ"}
-NAMES_DUP = {"left": "ใบแจ้งหนี้ที่ส่งมาก่อน", "right": "ใบแจ้งหนี้ฉบับนี้"}
-LABEL = {
-    "po_line": "เลขที่ PO และบรรทัดของ PO ตรงกัน",
-    "po_item": "เลขที่ PO และรหัสสินค้าตรงกัน",
-    "po_description": "เลขที่ PO และชื่อรายการตรงกัน",
-    "po_only_line": "PO มีรายการเดียว",
-    "po_price": "PO เดียวกัน ราคาต่อหน่วยอยู่ในช่วงที่ตั้งไว้",
-    "supplier_item": "ผู้ขายเดียวกัน รหัสสินค้าตรงกัน (เอกสารไม่ระบุ PO)",
-    "po_similar": "PO เดียวกัน ชื่อรายการคล้ายกัน",
-    "supplier_similar": "ผู้ขายเดียวกัน ชื่อรายการคล้ายกัน (เอกสารไม่ระบุ PO)",
-    "same_number": "ผู้ขายและเลขที่ใบแจ้งหนี้ตรงกัน",
-    "same_amount_date": "ผู้ขายและยอดรวมตรงกัน วันที่อยู่ในช่วงที่ตั้งไว้",
-    "similar_number": "ผู้ขายเดียวกัน เลขที่คล้ายกัน ยอดรวมตรงกัน",
-    "same_number_other_total": "ผู้ขายและเลขที่ตรงกัน แต่ยอดรวมไม่ตรงกัน",
-}
+# the two sides of a link and the name of each pass: keys of the manifest's sentences, each said in the
+# language of the run when it is read (engine/words.py) — a pass is named when it is made, in a run
+NAMES_INV = W.table({"left": "name.po", "right": "name.invoice"})
+NAMES_GR = W.table({"left": "name.po", "right": "name.gr"})
+NAMES_DUP = W.table({"left": "name.invoice_earlier", "right": "name.invoice_this"})
+LABEL = W.table({
+    "po_line": "pass.po_line",
+    "po_item": "pass.po_item",
+    "po_description": "pass.po_description",
+    "po_only_line": "pass.po_only_line",
+    "po_price": "pass.po_price",
+    "supplier_item": "pass.supplier_item",
+    "po_similar": "pass.po_similar",
+    "supplier_similar": "pass.supplier_similar",
+    "same_number": "pass.same_number",
+    "same_amount_date": "pass.same_amount_date",
+    "similar_number": "pass.similar_number",
+    "same_number_other_total": "pass.same_number_other_total",
+})
 
 
 def desc_key(text) -> str:
@@ -78,7 +81,7 @@ def _money(v) -> Decimal:
 
 def po_row(pl: B.PoLine) -> Row:
     amount = pl.amount if pl.amount is not None else pl.limit
-    ref = " · ".join(x for x in (pl.po, f"บรรทัด {pl.line_no}" if pl.line_no else "", pl.item_code) if x)
+    ref = " · ".join(x for x in (pl.po, W("po.line", line_no=pl.line_no) if pl.line_no else "", pl.item_code) if x)
     return Row(id=pl.id, side="left", amount=_money(amount), date=pl.date, ref=ref, name=pl.description,
                source=pl.source.out() if pl.source else {})
 

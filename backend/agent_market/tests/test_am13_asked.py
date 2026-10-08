@@ -172,7 +172,7 @@ class AskedOfThePOMatching(unittest.TestCase):
 
     def test_its_manifest_declares_what_its_renderer_applies(self):
         m = _manifest_says(self, "po_matching", self.PM.DIRECTIVES, grouped=False)
-        self.assertEqual(m["version"], "1.5.0")
+        self.assertEqual(m["version"], "1.6.0")
 
 
 class AskedOfTheBankReconciliation(unittest.TestCase):

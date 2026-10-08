@@ -24,18 +24,31 @@ from ....engine.e2.schema import FIELD_KINDS
 from ....engine.e3 import cards as E3C
 from ....engine.e3.match import MATCH, SEPARATE, UNDECIDED
 from ....engine.findings import Finding, finding
+from ....engine import words
 from ....engine.thai import fmt_money
+from ..words import W
 from . import book as B
 from . import inputs as I
 from . import links as L
 from . import parties as P
 from . import settings as S
 
-KIND_OPTIONS = {"po": ("ใบสั่งซื้อ (PO)", "po", "รายการที่ตกลงซื้อ: สินค้า จำนวน และราคาต่อหน่วย"),
-                "gr": ("ใบรับของ (GR)", "gr", "รายการที่รับเข้าจริง และวันที่รับ"),
-                "invoice": ("ใบแจ้งหนี้หรือใบกำกับภาษี", "invoice", "รายการที่ผู้ขายเรียกเก็บ"),
-                "unused": ("ไม่ใช้แผ่นงานนี้", "unused", "ตั้งไว้ก่อน ไม่นำมาตรวจในรอบนี้")}
-COLUMNS = ["เอกสาร", "วันที่", "รายการ", "จำนวน", "หน่วย", "ราคาต่อหน่วย", "จำนวนเงิน", "ไฟล์", "แถว"]
+# what a sheet may be, and the headings of a card's table of lines: keys of the manifest's sentences, each said
+# in the language of the run when a card is made (engine/words.py)
+KIND_OPTIONS = {"po": ("kind.po", "po", "card.kind.po.d"),
+                "gr": ("kind.gr", "gr", "card.kind.gr.d"),
+                "invoice": ("card.kind.invoice", "invoice", "card.kind.invoice.d"),
+                "unused": ("card.kind.unused", "unused", "card.kind.unused.d")}
+COLUMNS = ("col.document", "col.date", "col.item", "col.qty", "col.unit", "col.unit_price", "col.amount", "col.file", "col.row")
+
+
+def kind_option(k: str) -> tuple:
+    label, value, description = KIND_OPTIONS[k]
+    return words.cap(W(label)), value, W(description)
+
+
+def columns() -> list:
+    return [W(k) for k in COLUMNS]
 
 
 def kind_card(u, t: dict) -> Finding:
@@ -43,9 +56,9 @@ def kind_card(u, t: dict) -> Finding:
     heads = list(t["columns"])
     rows = [[str(r.get(f) or "") for f in heads[:6]] for r in t["rows"][:4]]
     return finding(
-        "pomatch_kind", "blocking", "preflight", "เอกสารชนิดใด",
-        f"แผ่นงาน “{E3C.safe(t['sheet'])}” ในไฟล์ {E3C.safe(u.name)} มีหัวคอลัมน์ที่เป็นได้มากกว่าหนึ่งชนิดเอกสาร แผ่นงานนี้คืออะไร",
-        [KIND_OPTIONS[k] for k in could] + [KIND_OPTIONS["unused"]], "unused", subject=f"{u.key}.{t['sheet_index']}",
+        "pomatch_kind", "blocking", "preflight", W("card.kind.header"),
+        W("card.kind.question", sheet=E3C.safe(t["sheet"]), name=E3C.safe(u.name)),
+        [kind_option(k) for k in could] + [kind_option("unused")], "unused", subject=f"{u.key}.{t['sheet_index']}",
         leaves_out=True, rememberable=False,
         evidence={"file": u.name, "sheet": t["sheet"], "columns": heads[:6], "rows": rows},
         facts={"file": u.name, "sheet": t["sheet"], "could_be": could})
@@ -54,39 +67,39 @@ def kind_card(u, t: dict) -> Finding:
 def missing_card(rv) -> Finding | None:
     want = []
     if not rv.po:
-        want.append({"role": "po", "label": "ใบสั่งซื้อ (PO) แบบมีรายการรายบรรทัด",
-                     "why": "สิ่งที่ตกลงซื้อ จำนวน และราคาต่อหน่วยของทุกบรรทัดมาจากไฟล์นี้", "required": True,
+        want.append({"role": "po", "label": W("need.po"),
+                     "why": W("need.po.why"), "required": True,
                      "accept": [".xlsx", ".csv"]})
     if not rv.invoices and not any(d.status == "pending" for d in rv.docs):
-        want.append({"role": "invoice", "label": "ใบกำกับภาษีหรือใบแจ้งหนี้จากผู้ขาย",
-                     "why": "สิ่งที่ผู้ขายเรียกเก็บมาจากไฟล์นี้ ส่งเป็น PDF ไฟล์ e-Tax หรือตาราง Excel ก็ได้", "required": True,
+        want.append({"role": "invoice", "label": W("need.invoice"),
+                     "why": W("need.invoice.why"), "required": True,
                      "accept": [".pdf", ".xml", ".xlsx", ".csv"]})
     if not want:
         return None
-    got = [[u.name, I.KIND_TH.get(k, k)] for u, _t, k in rv.tables] + [[d.upload.name, "ใบแจ้งหนี้ (เอกสาร)"] for d in rv.docs] + \
-          [[u.name, "ไม่ได้ใช้"] for u, _why, _d in rv.others]
-    names = " และ".join(w["label"] for w in want)
-    return finding("missing_file", "blocking", "preflight", "ขาดไฟล์",
-                   f"ยังไม่มี{names} ผมต้องมีทั้งใบสั่งซื้อและใบแจ้งหนี้ก่อนจึงจะตรวจได้ ใบรับของส่งมาด้วยได้ถ้ามี",
-                   [("รอก่อน จะอัปโหลดให้", "wait", "ผมจะรอไฟล์ แล้วทำต่อจากจุดนี้"), ("ยกเลิกรอบนี้", "cancel", "ปิดรอบนี้ไว้ก่อน")],
+    got = [[u.name, I.KIND_TH.get(k, k)] for u, _t, k in rv.tables] + [[d.upload.name, W("used.invoice_doc")] for d in rv.docs] + \
+          [[u.name, words.cap(W("used.none"))] for u, _why, _d in rv.others]
+    names = words.and_(w["label"] for w in want)
+    return finding("missing_file", "blocking", "preflight", W("card.missing.header"),
+                   W("card.missing.question", names=names),
+                   [(W("opt.wait"), "wait", W("opt.wait.d")), (W("opt.cancel"), "cancel", W("opt.cancel.d"))],
                    "wait", kind="request_files", subject="+".join(w["role"] for w in want), request=want,
                    facts={"missing": [w["role"] for w in want]},
-                   evidence={"columns": ["ไฟล์ที่ได้รับ", "ใช้เป็น"], "rows": got or [["ยังไม่มีไฟล์", ""]]})
+                   evidence={"columns": [W("col.received"), W("col.used_as")], "rows": got or [[W("used.no_file"), ""]]})
 
 
 def practice_card(rv) -> Finding:
     if rv.gr_files:
-        seen = f"รอบนี้มีไฟล์ใบรับของ {rv.gr_files} ไฟล์ จึงน่าจะออก"
+        seen = W("card.practice.seen.yes", gr_files=rv.gr_files)
     else:
-        seen = "รอบนี้ไม่มีไฟล์ใบรับของ จึงน่าจะไม่ออก"
+        seen = W("card.practice.seen.no")
     return finding(
-        "ap_gr_practice", "blocking", "preflight", "ใบรับของ",
-        f"บริษัทของคุณออกใบรับของ (GR) เมื่อรับสินค้าหรือไม่ ({seen}) คำตอบนี้ถามครั้งเดียวและแก้ได้ในหน้าตั้งค่า agent",
-        [(S.GR_PRACTICE_VALUE_TH[S.GR_YES], S.GR_YES, "สินค้าที่ถูกเรียกเก็บโดยยังไม่มีใบรับของ เป็นข้อยกเว้นที่ต้องติดตาม"),
-         (S.GR_PRACTICE_VALUE_TH[S.GR_NO], S.GR_NO, "ไม่มีใบรับของเป็นเรื่องปกติ ตรวจ 2 ทาง และไม่ถามเรื่องนี้อีก")],
+        "ap_gr_practice", "blocking", "preflight", W("card.practice.header"),
+        W("card.practice.question", seen=seen),
+        [(S.GR_PRACTICE_VALUE_TH[S.GR_YES], S.GR_YES, W("card.practice.yes.d")),
+         (S.GR_PRACTICE_VALUE_TH[S.GR_NO], S.GR_NO, W("card.practice.no.d"))],
         rv.gr_guess, recommended=rv.gr_guess, rememberable=True,
-        evidence={"columns": ["ไฟล์ที่ได้รับ", "ใช้เป็น"],
-                  "rows": [[u.name, I.KIND_TH.get(k, k)] for u, _t, k in rv.tables] or [["ไม่มีไฟล์ตาราง", ""]]},
+        evidence={"columns": [W("col.received"), W("col.used_as")],
+                  "rows": [[u.name, I.KIND_TH.get(k, k)] for u, _t, k in rv.tables] or [[W("used.no_table"), ""]]},
         facts={"gr_files": rv.gr_files, "guess": rv.gr_guess})
 
 
@@ -96,15 +109,15 @@ def invalid_cards(u, out: dict, dec) -> list:
     label = E2C._doc_label(out)
     for name, (key, why) in sorted(dec.invalid.items()):
         if name == "fx_rate":
-            what, kind, hint = "อัตราแลกเปลี่ยน", "rate", "พิมพ์อัตราเป็นบาทต่อ 1 หน่วย เช่น 36.25"
-            opts = [E2C.exclude(), ("ยังไม่ทราบอัตรา", "reupload", "ตัดออกไว้ก่อน ส่งใหม่เมื่อทราบอัตรา")]
+            what, kind, hint = W("field.fx_rate"), "rate", W("hint.fx")
+            opts = [E2C.exclude(), (W("opt.no_rate"), "reupload", W("opt.no_rate.d"))]
         else:
-            what = E2C.FIELD_TH.get(name, "ค่าในเอกสาร")
+            what = E2C.FIELD_TH.get(name, W("field.value"))
             kind = E2C.INPUT_KIND.get(FIELD_KINDS.get(name, "text"), "text")
             hint = E2C.INPUT_HINT.get(kind, E2C.INPUT_HINT["text"])
-            opts = [("ไม่มีในเอกสาร", "absent", "เอกสารไม่ได้พิมพ์ค่านี้"), E2C.exclude()]
-        fs.append(finding("e2_typed_invalid", "blocking", "preflight", "พิมพ์ใหม่",
-                          f"{label}: ค่า{what}ที่พิมพ์มาใช้ไม่ได้ ({why}) ช่วยพิมพ์ใหม่อีกครั้ง", opts, "exclude",
+            opts = [(W("opt.absent"), "absent", W("opt.absent.d")), E2C.exclude()]
+        fs.append(finding("e2_typed_invalid", "blocking", "preflight", W("card.retype.header"),
+                          W("card.retype.question", label=label, what=what, why=why), opts, "exclude",
                           subject=f"{u.key}:{name}", input={"kind": kind, "hint": hint}, leaves_out=True,
                           evidence={"document": u.name, "answered_by": key}, facts={"field": name}))
     return fs
@@ -133,25 +146,25 @@ def _unit(u) -> str:
     c = U.canonical(u)
     if not c:
         return ""
-    return c if c in U.UNITS else f"“{E3C.safe(u)}”"
+    return U.said(u) if c in U.UNITS else f"“{E3C.safe(u)}”"
 
 
 def _line_words(l) -> str:
-    bits = [f"“{E3C.safe(l.description)[:60]}”" if l.description else "", f"รหัส “{E3C.safe(l.item_code)}”" if l.item_code else ""]
+    bits = [f"“{E3C.safe(l.description)[:60]}”" if l.description else "", W("line.code", item_code=E3C.safe(l.item_code)) if l.item_code else ""]
     if l.qty is not None:
         bits.append(f"{B.qty_text(l.qty)} {_unit(l.unit)}".strip())
     if getattr(l, "unit_price", None) is not None:
-        bits.append(f"ราคาต่อหน่วย {fmt_money(l.unit_price)} บาท")
-    return " ".join(b for b in bits if b)
+        bits.append(W("line.unit_price", unit_price=fmt_money(l.unit_price)))
+    return words.clauses(*bits)
 
 
 def _why(c: dict) -> str:
     pct = int((Decimal(c["similarity"] or "0") * 100).to_integral_value()) if c.get("similarity") else None
     return {
-        "po_price": "เอกสารระบุ PO เดียวกัน และราคาต่อหน่วยอยู่ในช่วงที่ตั้งไว้ แต่ไม่ได้ระบุบรรทัดหรือรหัสสินค้าของ PO",
-        "supplier_item": "เอกสารไม่ได้ระบุเลขที่ PO แต่ผู้ขายและรหัสสินค้าตรงกัน",
-        "po_similar": f"เอกสารระบุ PO เดียวกัน และชื่อรายการคล้ายกัน {pct}%",
-        "supplier_similar": f"เอกสารไม่ได้ระบุเลขที่ PO แต่เป็นผู้ขายเดียวกันและชื่อรายการคล้ายกัน {pct}%",
+        "po_price": W("why.po_price"),
+        "supplier_item": W("why.supplier_item"),
+        "po_similar": W("why.po_similar", pct=pct),
+        "supplier_similar": W("why.supplier_similar", pct=pct),
     }.get(c["pass"], c.get("pass_label") or "")
 
 
@@ -161,37 +174,44 @@ def link_card(c: dict, rv, doc_label: str, doc_date, lines: dict, names: dict) -
     if pl is None or not right:
         return None
     l = right[0]
-    other = f" (มีบรรทัดอื่นของ PO ที่อาจเป็นคู่ได้อีก {len(c['alternatives'])} บรรทัด)" if c.get("alternatives") else ""
+    if c.get("alternatives"):
+        question = W("card.link.question_others", right=names["right"], doc_label=doc_label, line=_line_words(l), left=names["left"],
+                     label=pl.label, po_line=_line_words(pl), why=_why(c), n=len(c["alternatives"]))
+    else:
+        question = W("card.link.question", right=names["right"], doc_label=doc_label, line=_line_words(l), left=names["left"],
+                     label=pl.label, po_line=_line_words(pl), why=_why(c))
     return finding(
-        E3C.CODE_PAIR, "blocking", "preflight", "จับคู่กับ PO",
-        f"{names['right']} {doc_label}: {_line_words(l)} กับ{names['left']} {pl.label}: {_line_words(pl)} — {_why(c)}{other} "
-        f"เป็นรายการเดียวกันหรือไม่",
-        [("เป็นรายการเดียวกัน", MATCH, "ตรวจบรรทัดนี้กับบรรทัดนี้ของ PO และบันทึกว่าคุณเป็นผู้ยืนยัน"),
-         ("คนละรายการ", SEPARATE, "ไม่จับคู่ บรรทัดนี้จะถูกนับว่าไม่อยู่ใน PO"),
-         ("ยังไม่แน่ใจ", UNDECIDED, "เก็บไว้ให้คนตัดสิน เอกสารนี้จะยังไม่ผ่าน")],
+        E3C.CODE_PAIR, "blocking", "preflight", W("card.link.header"), words.cap(question),
+        [(W("opt.same"), MATCH, W("opt.same.d")),
+         (W("opt.separate"), SEPARATE, W("opt.separate.d")),
+         (W("opt.undecided"), UNDECIDED, W("opt.undecided.d"))],
         UNDECIDED, subject=c["pair"], rememberable=False,
-        evidence={"columns": COLUMNS, "rows": [_po_row(pl)] + [_doc_row(f"{names['right']} {doc_label}", doc_date, x) for x in right]},
+        evidence={"columns": columns(),
+                  "rows": [_po_row(pl)] + [_doc_row(words.cap(f"{names['right']} {doc_label}"), doc_date, x) for x in right]},
         facts={"pass": c["pass"], "tier": c["tier"], "similarity": c.get("similarity")})
 
 
 def duplicate_card(c: dict, inv: B.Invoice) -> Finding:
     e = c["left"][0]
-    why = {"same_amount_date": "ผู้ขายและยอดรวมตรงกัน วันที่ใกล้กัน แต่เลขที่ต่างกัน",
-           "similar_number": "ผู้ขายและยอดรวมตรงกัน เลขที่คล้ายกัน",
-           "same_number_other_total": "ผู้ขายและเลขที่ตรงกัน แต่ยอดรวมไม่ตรงกัน"}.get(c["pass"], c.get("pass_label") or "")
-    total = "" if inv.total is None else f" ยอดรวม {fmt_money(inv.total)} บาท"
+    why = {"same_amount_date": W("dup.same_amount_date"),
+           "similar_number": W("dup.similar_number"),
+           "same_number_other_total": W("dup.same_number_other_total")}.get(c["pass"], c.get("pass_label") or "")
+    if inv.total is None:
+        question = W("card.dup.question", label=inv.label, number=E3C.safe(e.get("ref")), date=E3C.date_th(e.get("date")),
+                     amount=E3C.money(e["amount"]), why=why)
+    else:
+        question = W("card.dup.question_total", label=inv.label, total=fmt_money(inv.total), number=E3C.safe(e.get("ref")),
+                     date=E3C.date_th(e.get("date")), amount=E3C.money(e["amount"]), why=why)
     return finding(
-        E3C.CODE_PAIR, "blocking", "preflight", "ใบแจ้งหนี้ซ้ำ",
-        f"ใบแจ้งหนี้{inv.label}{total} กับใบแจ้งหนี้เลขที่ {E3C.safe(e.get('ref'))} ลงวันที่ {E3C.date_th(e.get('date'))} "
-        f"ยอดรวม {E3C.money(e['amount'])} บาท ที่ส่งมาก่อนหน้านี้ — {why} เป็นใบแจ้งหนี้ฉบับเดียวกันหรือไม่",
-        [("ฉบับเดียวกัน (ซ้ำ)", MATCH, "ฉบับนี้ติดเงื่อนไขใบแจ้งหนี้ซ้ำ และไม่นับยอดสะสมอีก"),
-         ("คนละฉบับ", SEPARATE, "ตรวจฉบับนี้ตามปกติ"),
-         ("ยังไม่แน่ใจ", UNDECIDED, "เก็บไว้ให้คนตัดสิน ฉบับนี้จะยังไม่ผ่าน")],
+        E3C.CODE_PAIR, "blocking", "preflight", W("card.dup.header"), question,
+        [(W("opt.dup.same"), MATCH, W("opt.dup.same.d")),
+         (W("opt.dup.separate"), SEPARATE, W("opt.dup.separate.d")),
+         (W("opt.undecided"), UNDECIDED, W("opt.dup.undecided.d"))],
         UNDECIDED, subject=c["pair"], rememberable=False,
-        evidence={"columns": ["ใบแจ้งหนี้", "วันที่", "เลขที่", "ยอดรวม", "ไฟล์"],
-                  "rows": [["ส่งมาก่อน", E3C.date_th(e.get("date")), E3C.safe(e.get("ref")), f"{Decimal(e['amount']):,.2f}",
+        evidence={"columns": [words.cap(W("name.invoice")), W("col.date"), W("col.number"), W("col.total"), W("col.file")],
+                  "rows": [[W("dup.row.earlier"), E3C.date_th(e.get("date")), E3C.safe(e.get("ref")), f"{Decimal(e['amount']):,.2f}",
                             E3C.safe(e.get("file"))],
-                           ["ฉบับนี้", E3C.date_th(inv.date.isoformat() if inv.date else None), E3C.safe(inv.number),
+                           [W("dup.row.this"), E3C.date_th(inv.date.isoformat() if inv.date else None), E3C.safe(inv.number),
                             "" if inv.total is None else f"{inv.total:,.2f}", E3C.safe(inv.name)]]},
         facts={"pass": c["pass"], "tier": c["tier"], "similarity": c.get("similarity")})
 
@@ -199,32 +219,33 @@ def duplicate_card(c: dict, inv: B.Invoice) -> Finding:
 def supplier_card(inv: B.Invoice, po_key: str, s: dict) -> Finding:
     a, b = inv.supplier, s["po_supplier"]
     return finding(
-        "pomatch_supplier", "blocking", "preflight", "ผู้ขาย",
-        f"ใบแจ้งหนี้{inv.label} ส่วน PO {E3C.safe(s['po'])} สั่งซื้อจาก “{E3C.safe(b['name'])}” — "
-        f"{s['how_label']} เป็นผู้ขายรายเดียวกันหรือไม่",
-        [("ผู้ขายรายเดียวกัน", P.SAME, "ตรวจต่อ และบันทึกว่าคุณเป็นผู้ยืนยัน"),
-         ("คนละราย", P.DIFFERENT, "ใบแจ้งหนี้นี้ติดเงื่อนไขผู้ขายไม่ตรง"),
-         ("ยังไม่แน่ใจ", P.UNSURE, "เก็บไว้ให้คนตัดสิน ใบแจ้งหนี้นี้จะยังไม่ผ่าน")],
+        "pomatch_supplier", "blocking", "preflight", W("card.supplier.header"),
+        W("card.supplier.question", label=inv.label, po=E3C.safe(s["po"]), name=E3C.safe(b["name"]), how_label=s["how_label"]),
+        [(W("opt.supplier.same"), P.SAME, W("opt.supplier.same.d")),
+         (W("opt.supplier.different"), P.DIFFERENT, W("opt.supplier.different.d")),
+         (W("opt.undecided"), P.UNSURE, W("opt.supplier.unsure.d"))],
         P.UNSURE, subject=f"{inv.key}:{po_key}", rememberable=False,
-        evidence={"columns": ["เอกสาร", "ชื่อผู้ขาย", "เลขประจำตัวผู้เสียภาษี"],
-                  "rows": [["ใบแจ้งหนี้", E3C.safe(a.name), a.tax_id or "ไม่ระบุ"], ["ใบสั่งซื้อ", E3C.safe(b["name"]), b["tax_id"] or "ไม่ระบุ"]]},
+        evidence={"columns": [W("col.document"), words.cap(W("col.supplier_name")), W("col.tax_id")],
+                  "rows": [[words.cap(W("name.invoice")), E3C.safe(a.name), a.tax_id or W("word.not_stated")],
+                           [words.cap(W("name.po")), E3C.safe(b["name"]), b["tax_id"] or W("word.not_stated")]]},
         facts={"how": s["how"]})
 
 
 def unit_card(frm: str, pl: B.PoLine, key: str) -> Finding:
     from . import units as U
 
-    a, b = U.canonical(frm), U.canonical(pl.unit)
-    item = f" ของ {E3C.safe(pl.description)[:50]}" if pl.description else ""
+    a, b = U.said(frm), U.said(pl.unit)
+    if pl.description:
+        question = W("card.unit.question_item", b=b, a=a, item=E3C.safe(pl.description)[:50])
+    else:
+        question = W("card.unit.question", b=b, a=a)
     return finding(
-        "pomatch_unit", "blocking", "preflight", "หน่วยนับ",
-        f"PO สั่งเป็น “{b}” แต่ใบแจ้งหนี้เรียกเก็บเป็น “{a}”{item} — 1 {b} เท่ากับกี่ {a} (ตั้งการแปลงหน่วยไว้ในหน้าตั้งค่า agent ได้ "
-        f"จะไม่ต้องถามอีก)",
-        [("ยังไม่ทราบ ให้คนตรวจ", "unknown", "บรรทัดนี้จะรอคนตัดสิน ไม่เทียบปริมาณและราคา"),
-         ("เป็นหน่วยเดียวกัน", "same", f"1 {b} เท่ากับ 1 {a}")],
+        "pomatch_unit", "blocking", "preflight", W("card.unit.header"), question,
+        [(W("opt.unit.unknown"), "unknown", W("opt.unit.unknown.d")),
+         (W("opt.unit.same"), "same", W("opt.unit.same.d", b=b, a=a))],
         "unknown", subject=key[len("pomatch_unit:"):], rememberable=False,
-        input={"kind": "text", "hint": f"พิมพ์จำนวน {a} ต่อ 1 {b} เช่น 12 หรือพิมพ์เต็ม เช่น 1 {b} = 12 {a}"},
-        evidence={"columns": COLUMNS, "rows": [_po_row(pl)]}, facts={"from": a, "to": b})
+        input={"kind": "text", "hint": W("hint.unit", a=a, b=b)},
+        evidence={"columns": columns(), "rows": [_po_row(pl)]}, facts={"from": U.canonical(frm), "to": U.canonical(pl.unit)})
 
 
 def findings(rv) -> list:

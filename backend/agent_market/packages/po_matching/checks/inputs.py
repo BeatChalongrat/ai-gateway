@@ -28,8 +28,10 @@ import re
 from dataclasses import dataclass
 
 from ....engine import cells as C
+from ....engine import words as _words
 from ....engine.e2 import thai_text as T
 from ....engine.tabular import col_letter, read_workbook, sha256_file
+from ..words import W
 from . import units as U
 
 FORMAT = "am.pomatch.v1"
@@ -37,7 +39,7 @@ SHEET_EXT = (".xlsx", ".xlsm", ".csv", ".txt")
 DOC_EXT = (".pdf", ".xml", ".jpg", ".jpeg", ".png")
 HEADER_SCAN = 40
 KINDS = ("po", "gr", "invoice")
-KIND_TH = {"po": "ใบสั่งซื้อ (PO)", "gr": "ใบรับของ (GR)", "invoice": "ใบกำกับภาษีหรือใบแจ้งหนี้", "unused": "ไม่ใช้"}
+KIND_TH = W.table({"po": "kind.po", "gr": "kind.gr", "invoice": "kind.invoice", "unused": "kind.unused"}, then=_words.cap)
 
 # ── headers ──────────────────────────────────────────────────────────────
 # A header cell (C.h: no spaces or punctuation, lower case) → the field it holds. The words that
@@ -202,6 +204,13 @@ def load(d: dict) -> Upload:
     return Upload(kind=d["kind"], key=d["key"], name=d["name"], sha256=d["sha256"], data=d["data"])
 
 
+def said(say) -> str:
+    """Why a file was not read, in the language of the run. A parse keeps the sentence's key: what it wrote is
+    read again by every later step, whatever language that step speaks. (A parse made before AM14 kept the
+    words themselves, and those are given as they are.)"""
+    return W(say) if say in W.strings else (say or "")
+
+
 def parse(path: str, name: str, mapping: dict | None = None) -> Upload:
     ext = os.path.splitext(name)[1].lower()
     if ext in DOC_EXT:
@@ -210,10 +219,10 @@ def parse(path: str, name: str, mapping: dict | None = None) -> Upload:
     key = "d" + sha[:10]
     if ext not in SHEET_EXT:
         return Upload("other", key, name, sha, {"reason": "unsupported_type", "detail": ext,
-                                                "say": "อ่านได้เฉพาะไฟล์ Excel หรือ CSV ของใบสั่งซื้อและใบรับของ และ PDF หรือ e-Tax ของใบแจ้งหนี้"})
+                                                "say": "unused.type"})
     wb = read_workbook(path, name)
     if wb.error:
-        return Upload("other", key, name, sha, {"reason": "unreadable", "detail": wb.error, "say": "เปิดไฟล์นี้ไม่ได้"})
+        return Upload("other", key, name, sha, {"reason": "unreadable", "detail": wb.error, "say": "unused.cannot_open"})
     own = (mapping or {}).get("po_matching") or {}
     tables = []
     for i, sheet in enumerate(wb.sheets):
@@ -223,7 +232,7 @@ def parse(path: str, name: str, mapping: dict | None = None) -> Upload:
     if not tables:
         return Upload("other", key, name, sha, {
             "reason": "unrecognised_sheet",
-            "say": "ไม่พบหัวคอลัมน์ของใบสั่งซื้อ ใบรับของ หรือใบแจ้งหนี้ (เลขที่เอกสาร รายการ และจำนวนหรือจำนวนเงิน)"})
+            "say": "unused.no_headings"})
     return Upload("tables", key, name, sha, {"tables": tables})
 
 

@@ -29,7 +29,9 @@ from openpyxl.utils import get_column_letter
 
 from ....deliverables import workpaper
 from ....deliverables.reread import Tally, sheets, table
+from ....engine import words
 from ....engine.e3 import cards as E3C
+from ..words import W
 from .match import CONFIRMED_TH, DEPTH_SHORT, DEPTH_TH, PASS, REASON_TH, STATUS_TH, THREE, TWO
 
 MONEY = '#,##0.00;[Red](#,##0.00);"-"'
@@ -490,7 +492,7 @@ def check(path: str, computed: dict, run: dict | None = None) -> list:
 
     wb = load_workbook(path)
     t, s = computed["totals"], computed["summary"]
-    out = [ck("xlsx.sheets", set(SHEETS) <= set(wb.sheetnames), ", ".join(wb.sheetnames), "ชีตครบ")]
+    out = [ck("xlsx.sheets", set(SHEETS) <= set(wb.sheetnames), ", ".join(wb.sheetnames), W("check.sheets"))]
     face = _labelled(wb[S_SUMMARY])
     a3 = str(wb[S_SUMMARY]["A3"].value or "")
     h = Tally()
@@ -498,72 +500,73 @@ def check(path: str, computed: dict, run: dict | None = None) -> list:
         got = str(face.get(label) or "")
         h.n += 1
         if want and not got.startswith(want):
-            h.bad.append(f"{label}: ในไฟล์ “{got[:40]}” ควรเป็น {want}")
+            h.bad.append(W("check.header.differs", label=label, got=got[:40], want=want))
         elif not want and (got != MISSING or "หัวกระดาษทำการยังไม่ครบ" not in a3):
-            h.bad.append(f"{label}: ไม่มีค่าจริง แต่ในไฟล์เขียนว่า “{got}” และไม่ได้บอกว่าเป็นร่าง")
+            h.bad.append(W("check.header.no_value", label=label, got=got))
     for k in (L_PERIOD, L_PRACTICE, L_DEPTH, L_APPROVAL):
         h.n += 1
         if not face.get(k):
-            h.bad.append(f"{k}: ว่าง")
-    out.append(h.result("xlsx.header", "หน้าสรุประบุนิติบุคคลและผู้จัดทำจริง (หรือบอกว่าเป็นร่าง) งวด ใบรับของ วิธีตรวจ และการอนุมัติจ่าย",
-                        "หัวกระดาษทำการ"))
+            h.bad.append(W("check.header.empty", k=k))
+    out.append(h.result("xlsx.header", W("check.header"),
+                        W("noun.header")))
     depth = str(face.get(L_DEPTH) or "")
     says = f"ตรวจ 3 ทาง {t['three_way']} บรรทัด" in depth and f"ตรวจ 2 ทาง {t['two_way']} บรรทัด" in depth
     warned = any(r and r[0] == TWO_WAY_WARNING for r in wb[S_SUMMARY].iter_rows(min_row=1, max_col=1, values_only=True))
     out.append(ck("xlsx.depth_on_face", says and warned == (t["two_way"] > 0), depth,
-                  "หน้าสรุปบอกจำนวนบรรทัดที่ตรวจ 3 ทางและ 2 ทาง และเตือนเมื่อมีบรรทัดที่ตรวจ 2 ทาง"))
+                  W("check.depth_on_face")))
     ok = (_same(face.get(L_THREE), t["three_way"]) and _same(face.get(L_TWO), t["two_way"]) and _same(face.get(L_INVOICES), t["invoices"])
           and _same(face.get(L_ACCRUED), t["received_not_billed"]) and _same(face.get(L_PREPAID), t["billed_not_received"]))
     for x in s["by_status"]:
         ok = ok and _same(face.get(x["label"]), x["count"])
-    out.append(ck("xlsx.summary", ok, f"{face.get(L_INVOICES)} ฉบับ", "ตัวเลขในหน้าสรุปตรงกับที่คำนวณ"))
+    out.append(ck("xlsx.summary", ok, W("check.n_invoices", n=face.get(L_INVOICES)), W("check.summary")))
     inv = table(parts(wb, S_INVOICES), H_INVOICES)
     invoices = computed["invoices"]
     ok = len(inv) == len(invoices) and all(r[11] == i["status_label"] and r[13] == i["depth_text"] and
                                            (i["status"] == PASS or r[12]) and (i["total"] is None or _same(r[10], i["total"]))
                                            for r, i in zip(inv, invoices))
-    out.append(ck("xlsx.invoices", ok, f"{len(inv)} แถว / {len(invoices)} ฉบับ", "ทุกใบแจ้งหนี้มีสถานะ วิธีตรวจ และเหตุผลเมื่อไม่ผ่าน"))
+    out.append(ck("xlsx.invoices", ok, W("check.invoices.detail", n=len(inv), want=len(invoices)), W("check.invoices")))
     ln = table(parts(wb, S_LINES), H_LINES)
     lines = computed["lines"]
     same = len(ln) == len(lines)
     depth_ok = same and all(r[8] == (x["depth_label"] if x["unplanned"] is None else "ค่าใช้จ่ายที่ไม่ได้สั่งซื้อ") and r[9]
                             for r, x in zip(ln, lines))
-    out.append(ck("xlsx.line_depth", depth_ok, f"{len(ln)} แถว / {len(lines)} บรรทัด", "ทุกบรรทัดบอกว่าตรวจ 3 ทางหรือ 2 ทาง และเพราะอะไร"))
+    out.append(ck("xlsx.line_depth", depth_ok, W("check.lines.detail", n=len(ln), want=len(lines)), W("check.line_depth")))
     linked = same and all((x["po_line"] is None) or (r[10] and r[14]) for r, x in zip(ln, lines))
-    out.append(ck("xlsx.line_links", linked, "", "ทุกบรรทัดที่จับคู่แล้วชี้ไปที่บรรทัดของ PO พร้อมไฟล์ แผ่น และแถว"))
+    out.append(ck("xlsx.line_links", linked, "", W("check.line_links")))
     three = same and all(r[15] for r, x in zip(ln, lines) if x["depth"] == THREE and x["unplanned"] is None)
     two = same and all(not r[15] for r, x in zip(ln, lines) if x["depth"] == TWO)
-    out.append(ck("xlsx.line_receipts", three and two, "", "บรรทัดที่ตรวจ 3 ทางชี้ไปที่ใบรับของ บรรทัดที่ตรวจ 2 ทางไม่มีใบรับของ"))
+    out.append(ck("xlsx.line_receipts", three and two, "", W("check.line_receipts")))
     tol = same and all(r[25] for r, x in zip(ln, lines) if x["tolerances"])
-    out.append(ck("xlsx.tolerances", tol, "", "ทุกบรรทัดบันทึกค่าที่ยอมรับได้ที่ใช้"))
+    out.append(ck("xlsx.tolerances", tol, "", W("check.tolerances")))
     nums = same and all((x["amount"] is None or _same(r[7], x["amount"])) and (x["quantity"] is None or _same(r[4], x["quantity"]))
                         for r, x in zip(ln, lines))
-    out.append(ck("xlsx.line_numbers", nums, "", "จำนวนและจำนวนเงินของทุกบรรทัดเป็นตัวเลขและตรงกับที่อ่านได้"))
+    out.append(ck("xlsx.line_numbers", nums, "", W("check.line_numbers")))
     po = table(parts(wb, S_PO), H_PO)
     ok = len(po) == len(computed["po_lines"]) and all(_same(r[10], p["billed"]) and (p["received"] is None or _same(r[9], p["received"]))
                                                       and bool(r[13]) == p["over_billed"] for r, p in zip(po, computed["po_lines"]))
-    out.append(ck("xlsx.cumulative", ok, f"{len(po)} บรรทัดของ PO", "ยอดสะสมของทุกบรรทัดของ PO ตรงกับที่คำนวณ และบอกบรรทัดที่เรียกเก็บเกิน"))
+    out.append(ck("xlsx.cumulative", ok, W("check.n_po_lines", n=len(po)), W("check.cumulative")))
     ex = _rows(wb[S_EXC])
     run_ex = computed["run_exceptions"]
     ok = len(ex) == len(run_ex) and all(e["reason_code"] in REASON_TH and r[1] == e["reason"] and r[4] for r, e in zip(ex, run_ex))
-    out.append(ck("xlsx.exceptions", ok, f"{len(ex)} รายการ", "ข้อยกเว้นครบ และทุกข้อมีทางเลือกให้คนตัดสิน"))
+    out.append(ck("xlsx.exceptions", ok, W("check.n_items", n=len(ex)), W("check.exceptions")))
     lk = table(parts(wb, S_LINKS), H_LINKS)
     links = computed["match"]["links"]
     ok = len(lk) == len(links) and all(r[4] and r[5] and (m["state"] != "linked" or r[6]) for r, m in zip(lk, links))
     ok = ok and all(m["confirmed"] == "person" for m in links if m["state"] == "linked" and m["tier"] != "exact")
-    out.append(ck("xlsx.links", ok, f"{len(lk)} คู่", "ทุกคู่บอกวิธีจับคู่ ขั้น และผู้ยืนยัน ขั้นที่ไม่ตรงกันทุกตัวมีคนยืนยัน"))
+    out.append(ck("xlsx.links", ok, W("check.n_pairs", n=len(lk)), W("check.links")))
     approved = any("อนุมัติแล้ว" in str(c) or "จ่ายแล้ว" in str(c) for ws in wb.worksheets for r in ws.iter_rows(values_only=True) for c in r if c)
-    out.append(ck("xlsx.no_approval", not approved and face.get(L_APPROVAL) == APPROVAL, "", "ไม่มีใบแจ้งหนี้ใดถูกระบุว่าอนุมัติหรือจ่ายแล้ว"))
+    out.append(ck("xlsx.no_approval", not approved and face.get(L_APPROVAL) == APPROVAL, "", W("check.no_approval")))
     left = computed["not_included"]
     n = len(_rows(wb[S_LEFT])) if S_LEFT in wb.sheetnames else 0
-    out.append(ck("xlsx.not_included", n == len(left), f"{n} ไฟล์", "ไฟล์ที่ไม่ได้ใช้อยู่ในรายการเอกสารที่ยังไม่ได้รวม"))
+    out.append(ck("xlsx.not_included", n == len(left), W("check.n_files", n=n), W("check.not_included")))
     f = Tally()
     for r, i in zip(inv, invoices):
-        for col, head, key in ((8, "ยอดก่อนภาษี", "subtotal"), (9, "ภาษีมูลค่าเพิ่ม", "vat_amount"), (10, "ยอดรวม", "total")):
-            f.number(f"ใบแจ้งหนี้ {i['number']} {head}", r[col], i[key])
+        for col, where, key in ((8, "where.invoice.subtotal", "subtotal"), (9, "where.invoice.vat", "vat_amount"),
+                                (10, "where.invoice.total", "total")):
+            f.number(W(where, number=i["number"]), r[col], i[key])
     for r, x in zip(ln, lines):
-        for col, head, key in ((4, "จำนวน", "quantity"), (6, "ราคาต่อหน่วย", "unit_price"), (7, "จำนวนเงิน", "amount")):
-            f.number(f"บรรทัด {r[0]} ({r[1]}) {head}", r[col], x[key])
-    out.append(f.result("xlsx.figures", "ยอดของทุกใบแจ้งหนี้และตัวเลขของทุกบรรทัด (อ่านจากไฟล์) ตรงกับที่คำนวณ", "ตัวเลข"))
-    out.extend(workpaper.checks(path))
+        for col, where, key in ((4, "where.line.qty", "quantity"), (6, "where.line.unit_price", "unit_price"), (7, "where.line.amount", "amount")):
+            f.number(W(where, no=r[0], invoice=r[1]), r[col], x[key])
+    out.append(f.result("xlsx.figures", W("check.figures"), W("noun.figures")))
+    out.extend(workpaper.checks(path, words.lang()))
     return out

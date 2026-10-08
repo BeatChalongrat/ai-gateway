@@ -67,10 +67,11 @@ def _answer(wanted: dict, f: dict):
 
 def run_files(paths: list, *, defaults: dict | None = None, answers: dict | None = None, message: str = "",
               today: str = "2026-10-02", preparer: str = "ผู้จัดทำ ตัวอย่าง", answered_by: str | None = "สมหญิง ผู้ตรวจ",
-              history: list | None = None, keep: str | None = None) -> dict:
+              history: list | None = None, keep: str | None = None, lang: str | None = None) -> dict:
     """paths: [(path on disk, the name the person gave the file)]. ``history``: what earlier rounds
-    recorded. ``answered_by``: the name of the person who answers the cards."""
-    job = Job()
+    recorded. ``answered_by``: the name of the person who answers the cards. ``lang``: the run's language, when
+    it is not Thai (AM14)."""
+    job = Job(lang)
     try:
         parsed, files = [], {}
         for i, (src, name) in enumerate(paths):
@@ -151,18 +152,20 @@ def history_after(history: list, res: dict) -> list:
     return list(res["computed"]["index_entries"]) + list(history)
 
 
-def run_case(case: dict, *, keep: str | None = None) -> dict:
+def run_case(case: dict, lang: str | None = None, *, keep: str | None = None) -> dict:
+    """``lang``: the run's language, when it is not Thai — of every round of the case (AM14)."""
     cases = load_cases()
     base = cases["defaults"]
     history: list = []
     earlier = []
     for r in case.get("rounds") or []:
         res = run_files([(os.path.join(FIX, n), n) for n in r["files"]], defaults={**base, **(case.get("defaults") or {})},
-                        answers=r.get("answers"), today=cases["today"], history=history)
+                        answers=r.get("answers"), today=cases["today"], history=history, lang=lang)
         earlier.append(res)
         history = history_after(history, res)
     res = run_files([(os.path.join(FIX, n), n) for n in case["files"]], defaults={**base, **(case.get("defaults") or {})},
-                    answers=case.get("answers"), message=case.get("message") or "", today=cases["today"], history=history, keep=keep)
+                    answers=case.get("answers"), message=case.get("message") or "", today=cases["today"], history=history, keep=keep,
+                    lang=lang)
     res["id"] = case["id"]
     res["earlier"] = earlier
     return res

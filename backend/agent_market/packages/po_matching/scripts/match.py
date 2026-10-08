@@ -52,6 +52,7 @@ import hashlib
 from decimal import Decimal
 
 from ....engine import thai as TH
+from ....engine import words
 from ....engine.e3 import cards as E3C
 from ....engine.e3.rows import ref_key
 from ..checks import book as B
@@ -60,6 +61,7 @@ from ..checks import parties as P
 from ..checks import settings as S
 from ..checks import units as U
 from ..checks.review import COUNTED, Review, is_duplicate, review, unit_factor
+from ..words import W
 
 SCHEMA = "ap.match.v1"
 SCRIPT = "packages/po_matching/scripts/match.py"
@@ -67,85 +69,88 @@ ZERO = Decimal("0")
 HUNDRED = Decimal("100")
 PASS, BLOCKED, PERSON = "pass", "blocked", "person"
 THREE, TWO, NONE = "three_way", "two_way", "none"
-STATUS_TH = {PASS: "ผ่าน · พร้อมเสนออนุมัติ", BLOCKED: "ติดเงื่อนไข", PERSON: "ต้องให้คนตัดสิน"}
-DEPTH_TH = {THREE: "ตรวจ 3 ทาง (PO · ใบรับของ · ใบแจ้งหนี้)", TWO: "ตรวจ 2 ทาง (PO · ใบแจ้งหนี้)", NONE: "ยังไม่ได้ตรวจกับ PO"}
-DEPTH_SHORT = {THREE: "3 ทาง", TWO: "2 ทาง", NONE: "ไม่ได้ตรวจ"}
-DEPTH_WHY = {
-    "gr": "มีใบรับของของบรรทัดนี้",
-    "confirmed": "มีการยืนยันรับของในระบบ",
-    "service": "เป็นบริการ ไม่มีใบรับของ",
-    "no_practice": "บริษัทไม่ออกใบรับของ",
-    "not_yet": "ยังไม่มีใบรับของ จึงตรวจได้เพียง 2 ทาง",
-    "blanket": "ใบสั่งซื้อแบบวงเงิน ไม่มีใบรับของ",
-    "unlinked": "บรรทัดนี้ยังไม่ได้จับคู่กับบรรทัดของ PO",
-}
-# reason code → (what a person reads, the outcome it gives)
+# What a person reads of a status, a depth, a reason and a choice: keys of the manifest's sentences, each said in
+# the language of the run when it is read (engine/words.py).
+STATUS_TH = W.table({PASS: "status.pass", BLOCKED: "status.blocked", PERSON: "status.person"})
+DEPTH_TH = W.table({THREE: "depth.three", TWO: "depth.two", NONE: "depth.none"})
+DEPTH_SHORT = W.table({THREE: "depth.short.three", TWO: "depth.short.two", NONE: "depth.short.none"})
+DEPTH_WHY = W.table({
+    "gr": "depth.why.gr",
+    "confirmed": "depth.why.confirmed",
+    "service": "depth.why.service",
+    "no_practice": "depth.why.no_practice",
+    "not_yet": "depth.why.not_yet",
+    "blanket": "depth.why.blanket",
+    "unlinked": "depth.why.unlinked",
+})
+# reason code → (the key of what a person reads, the outcome it gives)
 REASONS = {
-    "price_above_po": ("ราคาสูงกว่า PO", BLOCKED),
-    "qty_over_received": ("ปริมาณเกินที่รับจริง", BLOCKED),
-    "qty_over_po": ("ปริมาณเกินที่สั่งซื้อ", BLOCKED),
-    "no_goods_receipt": ("ยังไม่มีใบรับของ", BLOCKED),
-    "item_not_on_po": ("สินค้าไม่อยู่ใน PO", BLOCKED),
-    "po_not_found": ("ไม่พบ PO ที่อ้างถึง", BLOCKED),
-    "po_closed": ("PO ปิดแล้ว", BLOCKED),
-    "duplicate_invoice": ("ใบแจ้งหนี้ซ้ำ", BLOCKED),
-    "supplier_mismatch": ("ผู้ขายไม่ตรง", BLOCKED),
-    "currency_mismatch": ("สกุลเงินไม่ตรง", BLOCKED),
-    "vat_mismatch": ("ภาษีคำนวณไม่ตรง", BLOCKED),
-    "tax_invoice_incomplete": ("ใบกำกับภาษีไม่ครบองค์ประกอบ", BLOCKED),
-    "unplanned_cost": ("ค่าใช้จ่ายที่ไม่ได้สั่งซื้อ", BLOCKED),
-    "line_amount_mismatch": ("ยอดบรรทัดไม่เท่ากับจำนวนคูณราคา", BLOCKED),
-    "total_mismatch": ("ยอดรวมไม่เท่ากับผลรวมรายการ", BLOCKED),
-    "date_outside_po": ("วันที่ใบแจ้งหนี้อยู่นอกช่วงของ PO", BLOCKED),
-    "blanket_limit_exceeded": ("เกินวงเงินของ PO", BLOCKED),
-    "credit_over_invoice": ("ใบลดหนี้เกินยอดของใบแจ้งหนี้เดิม", BLOCKED),
-    "buyer_mismatch": ("ไม่ได้ออกในนามบริษัท", BLOCKED),
-    "link_unconfirmed": ("การจับคู่กับ PO ยังไม่มีคนยืนยัน", PERSON),
-    "duplicate_unconfirmed": ("อาจเป็นใบแจ้งหนี้ซ้ำ ยังไม่มีคนยืนยัน", PERSON),
-    "supplier_unsure": ("ยังบอกไม่ได้ว่าเป็นผู้ขายรายเดียวกัน", PERSON),
-    "unit_unknown": ("หน่วยนับไม่ตรงกันและไม่มีอัตราแปลง", PERSON),
-    "no_line_detail": ("เอกสารไม่มีรายละเอียดรายบรรทัด", PERSON),
-    "note_without_invoice": ("ไม่พบใบแจ้งหนี้ที่ใบลดหนี้หรือใบเพิ่มหนี้อ้างถึง", PERSON),
-    "cannot_test": ("บรรทัดไม่ระบุจำนวนหรือจำนวนเงิน", PERSON),
+    "price_above_po": ("reason.price_above_po", BLOCKED),
+    "qty_over_received": ("reason.qty_over_received", BLOCKED),
+    "qty_over_po": ("reason.qty_over_po", BLOCKED),
+    "no_goods_receipt": ("reason.no_goods_receipt", BLOCKED),
+    "item_not_on_po": ("reason.item_not_on_po", BLOCKED),
+    "po_not_found": ("reason.po_not_found", BLOCKED),
+    "po_closed": ("reason.po_closed", BLOCKED),
+    "duplicate_invoice": ("reason.duplicate_invoice", BLOCKED),
+    "supplier_mismatch": ("reason.supplier_mismatch", BLOCKED),
+    "currency_mismatch": ("reason.currency_mismatch", BLOCKED),
+    "vat_mismatch": ("reason.vat_mismatch", BLOCKED),
+    "tax_invoice_incomplete": ("reason.tax_invoice_incomplete", BLOCKED),
+    "unplanned_cost": ("reason.unplanned_cost", BLOCKED),
+    "line_amount_mismatch": ("reason.line_amount_mismatch", BLOCKED),
+    "total_mismatch": ("reason.total_mismatch", BLOCKED),
+    "date_outside_po": ("reason.date_outside_po", BLOCKED),
+    "blanket_limit_exceeded": ("reason.blanket_limit_exceeded", BLOCKED),
+    "credit_over_invoice": ("reason.note_over_invoice", BLOCKED),
+    "buyer_mismatch": ("reason.buyer_mismatch", BLOCKED),
+    "link_unconfirmed": ("reason.link_unconfirmed", PERSON),
+    "duplicate_unconfirmed": ("reason.duplicate_unconfirmed", PERSON),
+    "supplier_unsure": ("reason.supplier_unsure", PERSON),
+    "unit_unknown": ("reason.unit_unknown", PERSON),
+    "no_line_detail": ("reason.no_line_detail", PERSON),
+    "note_without_invoice": ("reason.note_without_invoice", PERSON),
+    "cannot_test": ("reason.cannot_test", PERSON),
 }
-REASON_TH = {k: v[0] for k, v in REASONS.items()}
+REASON_TH = W.table({k: v[0] for k, v in REASONS.items()}, then=words.cap)
 REASON_ORDER = list(REASONS)
+# reason code → [(the key of an answer, its value)]
 CHOICES = {
-    "price_above_po": [("ยอมรับราคาตามใบแจ้งหนี้", "accept"), ("ขอใบลดหนี้จากผู้ขาย", "credit_note"), ("ส่งให้จัดซื้อตรวจ", "purchasing")],
-    "qty_over_received": [("รอใบรับของส่วนที่เหลือ", "wait"), ("ขอใบลดหนี้จากผู้ขาย", "credit_note"), ("ตรวจนับของใหม่", "recount")],
-    "qty_over_po": [("แก้ไข PO เพิ่มปริมาณ", "amend_po"), ("ขอใบลดหนี้จากผู้ขาย", "credit_note"), ("ส่งให้จัดซื้อตรวจ", "purchasing")],
-    "no_goods_receipt": [("รอใบรับของ", "wait"), ("เป็นบริการ ไม่มีใบรับของ", "service"), ("ยืนยันรับของในระบบ", "confirm")],
-    "item_not_on_po": [("ส่งให้จัดซื้อตรวจ", "purchasing"), ("แก้ไข PO เพิ่มรายการ", "amend_po"), ("ปฏิเสธรายการนี้", "reject")],
-    "po_not_found": [("ส่ง PO ที่ขาดมาแล้วตรวจใหม่", "send_po"), ("ส่งให้จัดซื้อตรวจ", "purchasing")],
-    "po_closed": [("เปิด PO อีกครั้ง", "reopen"), ("ส่งให้จัดซื้อตรวจ", "purchasing"), ("ปฏิเสธใบแจ้งหนี้", "reject")],
-    "duplicate_invoice": [("ซ้ำจริง ไม่จ่ายซ้ำ", "duplicate"), ("ไม่ซ้ำ เป็นคนละฉบับ", "distinct")],
-    "supplier_mismatch": [("ส่งให้จัดซื้อตรวจ", "purchasing"), ("ปฏิเสธใบแจ้งหนี้", "reject")],
-    "currency_mismatch": [("ส่งให้จัดซื้อตรวจ", "purchasing"), ("ขอใบแจ้งหนี้ใหม่", "reissue")],
-    "vat_mismatch": [("ขอใบกำกับภาษีที่แก้ไขแล้ว", "reissue"), ("ยอมรับตามเอกสาร", "accept")],
-    "tax_invoice_incomplete": [("ขอใบกำกับภาษีที่ครบองค์ประกอบ", "reissue"), ("จ่ายโดยไม่ขอคืนภาษีซื้อ", "no_claim")],
-    "unplanned_cost": [("ยอมรับค่าใช้จ่ายนี้", "accept"), ("ส่งให้จัดซื้อตรวจ", "purchasing"), ("ปฏิเสธค่าใช้จ่ายนี้", "reject")],
-    "line_amount_mismatch": [("ขอใบแจ้งหนี้ที่แก้ไขแล้ว", "reissue"), ("ยอมรับตามเอกสาร", "accept")],
-    "total_mismatch": [("ขอใบแจ้งหนี้ที่แก้ไขแล้ว", "reissue"), ("ยอมรับตามเอกสาร", "accept")],
-    "date_outside_po": [("ยอมรับ", "accept"), ("ส่งให้จัดซื้อตรวจ", "purchasing")],
-    "blanket_limit_exceeded": [("เพิ่มวงเงินของ PO", "amend_po"), ("ส่งให้จัดซื้อตรวจ", "purchasing")],
-    "credit_over_invoice": [("ขอใบลดหนี้ที่แก้ไขแล้ว", "reissue"), ("ส่งให้คนตรวจ", "review")],
-    "buyer_mismatch": [("ขอใบกำกับภาษีในนามบริษัท", "reissue"), ("ปฏิเสธใบแจ้งหนี้", "reject")],
-    "link_unconfirmed": [("เป็นรายการเดียวกัน", "match"), ("คนละรายการ", "separate")],
-    "duplicate_unconfirmed": [("ฉบับเดียวกัน (ซ้ำ)", "duplicate"), ("คนละฉบับ", "distinct")],
-    "supplier_unsure": [("ผู้ขายรายเดียวกัน", "same"), ("คนละราย", "different")],
-    "unit_unknown": [("ตั้งการแปลงหน่วยแล้วตรวจใหม่", "set_conversion"), ("ส่งให้คนตรวจ", "review")],
-    "no_line_detail": [("ส่งเอกสารที่มีรายการรายบรรทัด", "send_detail"), ("ส่งให้คนตรวจ", "review")],
-    "note_without_invoice": [("ส่งใบแจ้งหนี้เดิมมาแล้วตรวจใหม่", "send_invoice"), ("ส่งให้คนตรวจ", "review")],
-    "cannot_test": [("ส่งเอกสารที่ระบุจำนวนและราคา", "send_detail"), ("ส่งให้คนตรวจ", "review")],
+    "price_above_po": [("choice.accept_price", "accept"), ("choice.credit_note", "credit_note"), ("choice.purchasing", "purchasing")],
+    "qty_over_received": [("choice.wait_rest", "wait"), ("choice.credit_note", "credit_note"), ("choice.recount", "recount")],
+    "qty_over_po": [("choice.amend_qty", "amend_po"), ("choice.credit_note", "credit_note"), ("choice.purchasing", "purchasing")],
+    "no_goods_receipt": [("choice.wait", "wait"), ("choice.service", "service"), ("choice.confirm_receipt", "confirm")],
+    "item_not_on_po": [("choice.purchasing", "purchasing"), ("choice.amend_item", "amend_po"), ("choice.reject_item", "reject")],
+    "po_not_found": [("choice.send_po", "send_po"), ("choice.purchasing", "purchasing")],
+    "po_closed": [("choice.reopen", "reopen"), ("choice.purchasing", "purchasing"), ("choice.reject_invoice", "reject")],
+    "duplicate_invoice": [("choice.duplicate", "duplicate"), ("choice.distinct", "distinct")],
+    "supplier_mismatch": [("choice.purchasing", "purchasing"), ("choice.reject_invoice", "reject")],
+    "currency_mismatch": [("choice.purchasing", "purchasing"), ("choice.new_invoice", "reissue")],
+    "vat_mismatch": [("choice.corrected_tax_invoice", "reissue"), ("choice.accept_as_shown", "accept")],
+    "tax_invoice_incomplete": [("choice.complete_tax_invoice", "reissue"), ("choice.no_claim", "no_claim")],
+    "unplanned_cost": [("choice.accept_cost", "accept"), ("choice.purchasing", "purchasing"), ("choice.reject_cost", "reject")],
+    "line_amount_mismatch": [("choice.corrected_invoice", "reissue"), ("choice.accept_as_shown", "accept")],
+    "total_mismatch": [("choice.corrected_invoice", "reissue"), ("choice.accept_as_shown", "accept")],
+    "date_outside_po": [("choice.accept", "accept"), ("choice.purchasing", "purchasing")],
+    "blanket_limit_exceeded": [("choice.raise_limit", "amend_po"), ("choice.purchasing", "purchasing")],
+    "credit_over_invoice": [("choice.corrected_credit_note", "reissue"), ("choice.review", "review")],
+    "buyer_mismatch": [("choice.company_tax_invoice", "reissue"), ("choice.reject_invoice", "reject")],
+    "link_unconfirmed": [("opt.same", "match"), ("opt.separate", "separate")],
+    "duplicate_unconfirmed": [("opt.dup.same", "duplicate"), ("opt.dup.separate", "distinct")],
+    "supplier_unsure": [("opt.supplier.same", "same"), ("opt.supplier.different", "different")],
+    "unit_unknown": [("choice.set_conversion", "set_conversion"), ("choice.review", "review")],
+    "no_line_detail": [("choice.send_detail", "send_detail"), ("choice.review", "review")],
+    "note_without_invoice": [("choice.send_invoice", "send_invoice"), ("choice.review", "review")],
+    "cannot_test": [("choice.send_qty_price", "send_detail"), ("choice.review", "review")],
 }
-ELEMENT_TH = {"seller_name": "ชื่อผู้ขาย", "seller_tax_id": "เลขประจำตัวผู้เสียภาษีของผู้ขาย", "seller_branch": "สาขาของผู้ขาย",
-              "document_number": "เลขที่เอกสาร", "document_date": "วันที่เอกสาร", "buyer_name": "ชื่อผู้ซื้อ",
-              "buyer_tax_id": "เลขประจำตัวผู้เสียภาษีของผู้ซื้อ", "vat_amount": "จำนวนภาษีมูลค่าเพิ่มที่แยกจากมูลค่าสินค้า",
-              "lines": "ชื่อ ชนิด ปริมาณ และมูลค่าของสินค้าหรือบริการ", "tax_id_check": "เลขประจำตัวผู้เสียภาษีของผู้ขายที่ถูกต้อง"}
-DOC_TYPE_TH = {"full_tax_invoice": "ใบกำกับภาษีเต็มรูป", "abbreviated_tax_invoice": "ใบกำกับภาษีอย่างย่อ", "receipt": "ใบเสร็จรับเงิน",
-               "invoice": "ใบแจ้งหนี้", "credit_note": "ใบลดหนี้", "debit_note": "ใบเพิ่มหนี้", "": "ไม่ระบุชนิดเอกสาร",
-               "unknown": "ไม่ระบุชนิดเอกสาร"}
-CONFIRMED_TH = {"rule": "กฎ (ตรงกันทุกตัว)", "person": "คนยืนยัน"}
+ELEMENT_TH = W.table({"seller_name": "element.seller_name", "seller_tax_id": "element.seller_tax_id", "seller_branch": "element.seller_branch",
+              "document_number": "element.document_number", "document_date": "element.document_date", "buyer_name": "element.buyer_name",
+              "buyer_tax_id": "element.buyer_tax_id", "vat_amount": "element.vat_amount",
+              "lines": "element.lines", "tax_id_check": "element.tax_id_check"})
+DOC_TYPE_TH = W.table({"full_tax_invoice": "doctype.full_tax_invoice", "abbreviated_tax_invoice": "doctype.abbreviated_tax_invoice", "receipt": "doctype.receipt",
+               "invoice": "name.invoice", "credit_note": "doctype.credit_note", "debit_note": "doctype.debit_note", "": "doctype.unknown",
+               "unknown": "doctype.unknown"}, then=words.cap)
+CONFIRMED_TH = W.table({"rule": "confirmed.rule", "person": "confirmed.person"})
 
 
 def f2(v) -> str | None:
@@ -257,7 +262,7 @@ def _line(rv: Review, cum: Cumulative, inv: B.Invoice, l: B.InvLine, counts: boo
         if waiting is not None:
             pl = rv.po_by_id(waiting["left"][0]["id"])
             reasons.append("link_unconfirmed")
-            notes.append(f"เสนอให้จับคู่กับ {pl.label if pl else ''} ({waiting['pass_label']}) ยังไม่มีคนยืนยัน")
+            notes.append(W("note.proposed", po=pl.label if pl else "", pass_label=waiting["pass_label"]))
             out["proposed"] = {"po_line": pl.out() if pl else None, "pass": waiting["pass"], "pass_label": waiting["pass_label"],
                                "tier": waiting["tier"], "pair": waiting["pair"], "decision": waiting.get("decision")}
         else:
@@ -280,20 +285,19 @@ def _line(rv: Review, cum: Cumulative, inv: B.Invoice, l: B.InvLine, counts: boo
                         "confirmed": lk["confirmed"], "confirmed_by": lk.get("confirmed_by") or g.confirmed_by}
                        for g, q, lk in cum.received.get(pl.id, [])]
     if cum.unconverted.get(pl.id):
-        notes.append(f"ใบรับของ {len(cum.unconverted[pl.id])} รายการของบรรทัดนี้ใช้หน่วยที่แปลงไม่ได้ จึงยังไม่นับเป็นของที่รับแล้ว")
+        notes.append(W("note.unconverted", n=len(cum.unconverted[pl.id])))
     # the PO itself
     if pl.status == B.CLOSED:
         reasons.append("po_closed")
         open_qty = cum.received_qty(pl.id) - cum.billed_qty(pl.id)
         if pl.qty is not None and cum.received_qty(pl.id) < pl.qty and open_qty > ZERO:
-            notes.append(f"PO ปิดก่อนรับของครบ (สั่ง {B.qty_text(pl.qty)} รับแล้ว {B.qty_text(cum.received_qty(pl.id))}) "
-                         f"ของที่รับแล้วแต่ยังไม่ถูกเรียกเก็บมี {B.qty_text(open_qty)} {pl.unit}")
-        checks.append(_check("po_open", False, "PO ยังเปิดอยู่", expected="เปิดอยู่", actual=pl.status_raw or "ปิดแล้ว"))
+            notes.append(W("note.closed_early", qty=B.qty_text(pl.qty), received=B.qty_text(cum.received_qty(pl.id)), open_qty=B.qty_text(open_qty), unit=pl.unit))
+        checks.append(_check("po_open", False, W("test.po_open"), expected=W("postatus.open"), actual=pl.status_raw or W("postatus.closed")))
     if inv.currency and pl.currency and inv.currency != pl.currency:
         reasons.append("currency_mismatch")
-        checks.append(_check("currency", False, "สกุลเงินตรงกับ PO", expected=pl.currency, actual=inv.currency))
+        checks.append(_check("currency", False, W("test.currency"), expected=pl.currency, actual=inv.currency))
     else:
-        checks.append(_check("currency", True, "สกุลเงินตรงกับ PO", expected=pl.currency, actual=inv.currency or pl.currency))
+        checks.append(_check("currency", True, W("test.currency"), expected=pl.currency, actual=inv.currency or pl.currency))
     if inv.date is not None:
         first = pl.valid_from if pl.kind == B.BLANKET and pl.valid_from else pl.date
         last = pl.valid_to if pl.kind == B.BLANKET else None
@@ -306,8 +310,8 @@ def _line(rv: Review, cum: Cumulative, inv: B.Invoice, l: B.InvLine, counts: boo
             used["date_window_days"] = tol.days
             span = E3C.date_th(first.isoformat()) if first else ""
             if last is not None:
-                span += f" ถึง {E3C.date_th(last.isoformat())}"
-            checks.append(_check("date", ok, "วันที่ใบแจ้งหนี้อยู่ในช่วงของ PO", expected=span, actual=E3C.date_th(inv.date.isoformat()),
+                span += " " + W("span.to", last=E3C.date_th(last.isoformat()))
+            checks.append(_check("date", ok, W("test.date"), expected=span, actual=E3C.date_th(inv.date.isoformat()),
                                  tolerance={"date_window_days": tol.days}))
             if not ok:
                 reasons.append("date_outside_po")
@@ -316,7 +320,7 @@ def _line(rv: Review, cum: Cumulative, inv: B.Invoice, l: B.InvLine, counts: boo
         calc = B.q2(l.qty * l.unit_price)
         ok = abs(calc - l.amount) <= tol.small
         used["small_difference"] = f2(tol.small)
-        checks.append(_check("line_amount", ok, "จำนวน × ราคาต่อหน่วย = จำนวนเงิน", expected=f2(calc), actual=f2(l.amount),
+        checks.append(_check("line_amount", ok, W("test.line_amount"), expected=f2(calc), actual=f2(l.amount),
                              tolerance={"small_difference": f2(tol.small)}))
         if not ok:
             reasons.append("line_amount_mismatch")
@@ -325,15 +329,15 @@ def _line(rv: Review, cum: Cumulative, inv: B.Invoice, l: B.InvLine, counts: boo
     if l.unit and pl.unit:
         factor, how = unit_factor(rv, l.unit, pl)
     elif not l.unit and pl.unit:
-        notes.append(f"ใบแจ้งหนี้ไม่ระบุหน่วยนับ ใช้หน่วยของ PO ({pl.unit})")
+        notes.append(W("note.unit_from_po", unit=pl.unit))
     out["unit_conversion"] = {"from": U.canonical(l.unit) if l.unit else "", "to": U.canonical(pl.unit) if pl.unit else "",
                               "factor": None if factor is None else str(factor.normalize()), "source": how}
     if factor is None:
         reasons.append("unit_unknown")
-        checks.append(_check("unit", False, "หน่วยนับแปลงเป็นหน่วยของ PO ได้", expected=pl.unit, actual=l.unit))
+        checks.append(_check("unit", False, W("test.unit"), expected=pl.unit, actual=l.unit))
         return _close(out, reasons, notes, checks, used)
     if how in ("universal", "settings"):
-        notes.append(f"แปลงหน่วย 1 {U.canonical(l.unit)} = {B.qty_text(factor)} {U.canonical(pl.unit)}")
+        notes.append(W("note.unit_converted", frm=U.said(l.unit), factor=B.qty_text(factor), to=U.said(pl.unit)))
     amount = (l.amount if l.amount is not None else (B.q2(l.qty * l.unit_price) if l.qty is not None and l.unit_price is not None else None))
     if amount is None and l.qty is None:
         reasons.append("cannot_test")
@@ -352,7 +356,7 @@ def _line(rv: Review, cum: Cumulative, inv: B.Invoice, l: B.InvLine, counts: boo
         out["cumulative"] = {"unit": pl.unit, "ordered": qs(pl.qty), "received": qs(cum.received_qty(pl.id)) if depth == THREE else None,
                              "billed_before": qs(before_q), "this_line": "0", "billed_after": qs(before_q), "not_counted": True,
                              "earlier": []}
-        notes.append("ไม่นับยอดสะสมของบรรทัดนี้อีก เพราะใบแจ้งหนี้นี้ซ้ำกับฉบับที่ส่งมาก่อน")
+        notes.append(W("note.not_counted_again"))
         out["quantity_in_po_unit"] = qs(qty_po)
         return _close(out, reasons, notes, checks, used)
     # price
@@ -363,15 +367,15 @@ def _line(rv: Review, cum: Cumulative, inv: B.Invoice, l: B.InvLine, counts: boo
         ok = var <= ZERO or ext <= tol.small or (pct <= tol.price_pct and ext <= tol.price_abs)
         t = {"price_tolerance_pct": f2(tol.price_pct), "price_tolerance_abs": f2(tol.price_abs), "small_difference": f2(tol.small)}
         used.update(t)
-        checks.append(_check("price", ok, "ราคาต่อหน่วยไม่สูงกว่า PO เกินที่ตั้งไว้", expected=str(pl.unit_price), actual=str(price_po.normalize()
+        checks.append(_check("price", ok, W("test.price"), expected=str(pl.unit_price), actual=str(price_po.normalize()
                              if price_po == price_po.to_integral() else price_po.quantize(Decimal("0.000001")).normalize()),
-                             tolerance=t, detail=f"ต่างกัน {money(var)} บาทต่อหน่วย (ร้อยละ {pct}) รวม {money(ext)} บาท"))
+                             tolerance=t, detail=W("test.price.detail", var=money(var), pct=pct, ext=money(ext))))
         out["price_variance"] = {"per_unit": str(var.quantize(Decimal("0.000001")).normalize()), "pct": f"{pct:.2f}",
                                  "extended": f2(ext)}
         if not ok:
             reasons.append("price_above_po")
         elif var < ZERO:
-            notes.append(f"ราคาต่อหน่วยต่ำกว่า PO {money(-var)} บาท")
+            notes.append(W("note.price_below", var=money(-var)))
     # quantity, cumulatively
     if not by_amount:
         after_q = before_q + sign * qty_po
@@ -387,15 +391,14 @@ def _line(rv: Review, cum: Cumulative, inv: B.Invoice, l: B.InvLine, counts: boo
                 ok = after_q <= allowed
                 t = {"qty_tolerance_pct": f2(tol.qty_pct)}
                 used.update(t)
-                checks.append(_check("qty_received", ok, "ปริมาณที่เรียกเก็บสะสมไม่เกินที่รับจริง", expected=qs(received), actual=qs(after_q),
-                                     tolerance=t, detail=f"เรียกเก็บก่อนหน้า {B.qty_text(before_q)} + บรรทัดนี้ {B.qty_text(qty_po)} = "
-                                                         f"{B.qty_text(after_q)} {pl.unit} · รับจริง {B.qty_text(received)} {pl.unit}"))
+                checks.append(_check("qty_received", ok, W("test.qty_received"), expected=qs(received), actual=qs(after_q),
+                                     tolerance=t, detail=W("test.qty_received.detail", before_q=B.qty_text(before_q), qty_po=B.qty_text(qty_po), after_q=B.qty_text(after_q), unit=pl.unit, received=B.qty_text(received))))
                 if not ok:
                     reasons.append("qty_over_received")
                 ok2 = received <= ordered_max
                 t2 = {"over_delivery_pct": f2(tol.over_pct)}
                 used.update(t2)
-                checks.append(_check("qty_ordered", ok2, "ปริมาณที่รับจริงไม่เกินที่สั่งซื้อ", expected=qs(pl.qty), actual=qs(received),
+                checks.append(_check("qty_ordered", ok2, W("test.received_ordered"), expected=qs(pl.qty), actual=qs(received),
                                      tolerance=t2))
                 if not ok2 and after_q > ordered_max:
                     reasons.append("qty_over_po")
@@ -404,24 +407,23 @@ def _line(rv: Review, cum: Cumulative, inv: B.Invoice, l: B.InvLine, counts: boo
                 ok = after_q <= allowed
                 t = {"qty_tolerance_pct": f2(tol.qty_pct), "over_delivery_pct": f2(tol.over_pct)}
                 used.update(t)
-                checks.append(_check("qty_ordered", ok, "ปริมาณที่เรียกเก็บสะสมไม่เกินที่สั่งซื้อ", expected=qs(pl.qty), actual=qs(after_q),
-                                     tolerance=t, detail=f"เรียกเก็บก่อนหน้า {B.qty_text(before_q)} + บรรทัดนี้ {B.qty_text(qty_po)} = "
-                                                         f"{B.qty_text(after_q)} {pl.unit} · สั่งซื้อ {B.qty_text(pl.qty)} {pl.unit}"))
+                checks.append(_check("qty_ordered", ok, W("test.qty_ordered"), expected=qs(pl.qty), actual=qs(after_q),
+                                     tolerance=t, detail=W("test.qty_ordered.detail", before_q=B.qty_text(before_q), qty_po=B.qty_text(qty_po), after_q=B.qty_text(after_q), unit=pl.unit, qty=B.qty_text(pl.qty))))
                 if not ok:
                     reasons.append("qty_over_po")
     else:
         # no quantity to compare: the amounts, cumulatively
         limit = pl.limit if pl.kind == B.BLANKET and pl.limit is not None else pl.amount
         after_a = before_a + sign * (amount or ZERO)
-        out["cumulative"] = {"unit": "บาท", "ordered": f2(limit), "received": None, "billed_before": f2(before_a),
+        out["cumulative"] = {"unit": W("word.baht"), "ordered": f2(limit), "received": None, "billed_before": f2(before_a),
                              "this_line": f2(sign * (amount or ZERO)), "billed_after": f2(after_a), "by_amount": True,
                              "earlier": [{"invoice": e["invoice"], "date": e["date"], "quantity": f2(e["amount"]), "from": e["from"],
                                           "file": e["file"]} for e in cum.billed.get(pl.id, [])]}
-        notes.append("บรรทัดนี้ไม่มีปริมาณให้เทียบ จึงเทียบจากจำนวนเงินสะสม")
+        notes.append(W("note.by_amount"))
         if limit is not None and sign > 0:
             if pl.kind == B.BLANKET:
                 ok = after_a <= limit + tol.small
-                checks.append(_check("blanket_limit", ok, "ยอดเรียกเก็บสะสมไม่เกินวงเงินของ PO", expected=f2(limit), actual=f2(after_a),
+                checks.append(_check("blanket_limit", ok, W("test.blanket_limit"), expected=f2(limit), actual=f2(after_a),
                                      tolerance={"small_difference": f2(tol.small)}))
                 used["small_difference"] = f2(tol.small)
                 if not ok:
@@ -431,14 +433,14 @@ def _line(rv: Review, cum: Cumulative, inv: B.Invoice, l: B.InvLine, counts: boo
                 ok = over <= tol.small or (over * HUNDRED / limit <= tol.price_pct and over <= tol.price_abs) if limit > 0 else over <= tol.small
                 t = {"price_tolerance_pct": f2(tol.price_pct), "price_tolerance_abs": f2(tol.price_abs), "small_difference": f2(tol.small)}
                 used.update(t)
-                checks.append(_check("amount_ordered", ok, "ยอดเรียกเก็บสะสมไม่เกินมูลค่าของบรรทัดใน PO", expected=f2(limit),
+                checks.append(_check("amount_ordered", ok, W("test.amount_ordered"), expected=f2(limit),
                                      actual=f2(after_a), tolerance=t))
                 if not ok:
                     reasons.append("price_above_po")
     if pl.kind == B.BLANKET and pl.limit is not None and not by_amount and sign > 0:
         after_a = before_a + (amount or ZERO)
         ok = after_a <= pl.limit + tol.small
-        checks.append(_check("blanket_limit", ok, "ยอดเรียกเก็บสะสมไม่เกินวงเงินของ PO", expected=f2(pl.limit), actual=f2(after_a),
+        checks.append(_check("blanket_limit", ok, W("test.blanket_limit"), expected=f2(pl.limit), actual=f2(after_a),
                              tolerance={"small_difference": f2(tol.small)}))
         if not ok:
             reasons.append("blanket_limit_exceeded")
@@ -447,7 +449,7 @@ def _line(rv: Review, cum: Cumulative, inv: B.Invoice, l: B.InvLine, counts: boo
         was = cum.of_invoice(inv.supplier, inv.ref_invoice).get(pl.id)
         if was is not None:
             ok = (qty_po or ZERO) <= was[0] + Decimal("0.000001") and (amount or ZERO) <= was[1] + tol.small
-            checks.append(_check("credit", ok, "ใบลดหนี้ไม่เกินที่ใบแจ้งหนี้เดิมเรียกเก็บ", expected=f"{qs(was[0])} · {f2(was[1])}",
+            checks.append(_check("credit", ok, W("test.credit_note"), expected=f"{qs(was[0])} · {f2(was[1])}",
                                  actual=f"{qs(qty_po or ZERO)} · {f2(amount or ZERO)}", tolerance={"small_difference": f2(tol.small)}))
             if not ok:
                 reasons.append("credit_over_invoice")
@@ -538,24 +540,24 @@ def _invoice(rv: Review, cum: Cumulative, inv: B.Invoice, docs: dict, answered_b
     if not inv.header_only and not linked and not any(x.get("proposed") for x in lines):
         if named and not known:
             reasons.append("po_not_found")
-            notes.append("ใบแจ้งหนี้อ้างถึง PO " + ", ".join(inv.po_numbers or [l.po for l in inv.lines if l.po][:3]) + " ซึ่งไม่อยู่ในไฟล์ใบสั่งซื้อที่ส่งมา")
+            notes.append(W("note.po_named", pos=", ".join(inv.po_numbers or [l.po for l in inv.lines if l.po][:3])))
         elif not named:
             reasons.append("po_not_found")
-            how = {"none": "อ่านเลขที่ PO จากเอกสารนี้ไม่ได้ (เป็นสแกนหรือรูปถ่าย)", "text": "เอกสารไม่ได้ระบุเลขที่ PO",
-                   "xml": "เอกสารไม่ได้ระบุเลขที่ PO", "xml+text": "เอกสารไม่ได้ระบุเลขที่ PO", "table": "ตารางไม่ได้ระบุเลขที่ PO"}
-            notes.append(how.get(inv.refs_read, "เอกสารไม่ได้ระบุเลขที่ PO") + " และไม่พบรายการของผู้ขายรายนี้ในใบสั่งซื้อ")
+            how = {"none": W("note.no_po.image"), "text": W("note.no_po.doc"),
+                   "xml": W("note.no_po.doc"), "xml+text": W("note.no_po.doc"), "table": W("note.no_po.table")}
+            notes.append(how.get(inv.refs_read, W("note.no_po.doc")))
     # the supplier
     suppliers = rv.supplier_of.get(inv.key) or {}
     for k, s in sorted(suppliers.items()):
         ok = s["verdict"] == P.SAME
-        checks.append(_check("supplier", ok, "ผู้ขายตรงกับ PO", expected=s["po_supplier"]["tax_id"] or s["po_supplier"]["name"],
+        checks.append(_check("supplier", ok, W("test.seller"), expected=s["po_supplier"]["tax_id"] or s["po_supplier"]["name"],
                              actual=inv.supplier.tax_id or inv.supplier.name, detail=f"PO {s['po']}: {s['how_label']}"))
         if s["verdict"] == P.DIFFERENT:
             reasons.append("supplier_mismatch")
         elif s["verdict"] == P.UNSURE:
             reasons.append("supplier_unsure")
         elif s["how"] == "name":
-            notes.append(f"ผู้ขายเทียบจากชื่อ (PO {s['po']} หรือใบแจ้งหนี้ไม่มีเลขประจำตัวผู้เสียภาษี)")
+            notes.append(W("note.seller_by_name", po=s["po"]))
     # tax
     base = inv.base
     rates = {x["po_line"]["vat_rate"] for x in linked if x["po_line"].get("vat_rate") is not None}
@@ -565,19 +567,19 @@ def _invoice(rv: Review, cum: Cumulative, inv: B.Invoice, docs: dict, answered_b
         t = {"vat_rate": f2(tol.vat_rate), "small_difference": f2(tol.small)}
         if inv.vat_amount == ZERO:
             ok = not any(Decimal(r) > ZERO for r in rates)
-            detail = "ใบแจ้งหนี้ไม่มีภาษีมูลค่าเพิ่ม" + (" แต่ PO ระบุว่ามี" if not ok else "")
+            detail = W("test.vat.none") if ok else W("test.vat.none_but_po")
         else:
-            detail = f"ฐานภาษี {money(base)} บาท × ร้อยละ {money(tol.vat_rate)} = {money(expected)} บาท เอกสารแสดง {money(inv.vat_amount)} บาท"
+            detail = W("test.vat.detail", base=money(base), vat_rate=money(tol.vat_rate), expected=money(expected), vat_amount=money(inv.vat_amount))
             if ok and rates and all(Decimal(r) == ZERO for r in rates):
-                ok, detail = False, "PO ระบุว่ารายการนี้ไม่มีภาษีมูลค่าเพิ่ม แต่ใบแจ้งหนี้เรียกเก็บภาษี"
-        checks.append(_check("vat", ok, "ภาษีมูลค่าเพิ่มเท่ากับอัตราคูณฐานภาษี", expected=f2(expected), actual=f2(inv.vat_amount),
+                ok, detail = False, W("test.vat.po_exempt")
+        checks.append(_check("vat", ok, W("test.vat"), expected=f2(expected), actual=f2(inv.vat_amount),
                              tolerance=t, detail=detail))
         if not ok:
             reasons.append("vat_mismatch")
     if base is not None and inv.total is not None:
         expected = B.q2(base + (inv.vat_amount or ZERO))
         ok = abs(inv.total - expected) <= tol.small
-        checks.append(_check("total", ok, "ฐานภาษี + ภาษี = ยอดรวม", expected=f2(expected), actual=f2(inv.total),
+        checks.append(_check("total", ok, W("test.total"), expected=f2(expected), actual=f2(inv.total),
                              tolerance={"small_difference": f2(tol.small)}))
         if not ok:
             reasons.append("total_mismatch")
@@ -585,16 +587,16 @@ def _invoice(rv: Review, cum: Cumulative, inv: B.Invoice, docs: dict, answered_b
     missing = _elements(rv, inv, doc)
     if missing:
         reasons.append("tax_invoice_incomplete")
-        notes.append("ขาด: " + " · ".join(ELEMENT_TH[m] for m in missing))
+        notes.append(W("note.missing", what=" · ".join(ELEMENT_TH[m] for m in missing)))
     if rv.settings.company_tax_id and inv.buyer_tax_id and inv.buyer_tax_id != rv.settings.company_tax_id:
         reasons.append("buyer_mismatch")
-        notes.append(f"เอกสารออกในนามเลขประจำตัวผู้เสียภาษี {inv.buyer_tax_id}")
+        notes.append(W("note.buyer_other", buyer_tax_id=inv.buyer_tax_id))
     claim = inv.doc_type == "full_tax_invoice" and not missing and "buyer_mismatch" not in reasons
-    why = "ใบกำกับภาษีเต็มรูป ครบองค์ประกอบ" if claim else (
-        "ใบกำกับภาษีเต็มรูปแต่ไม่ครบองค์ประกอบ" if inv.doc_type == "full_tax_invoice" else
-        f"{DOC_TYPE_TH.get(inv.doc_type, DOC_TYPE_TH[''])} ไม่ใช่ใบกำกับภาษีเต็มรูป จึงใช้ขอคืนภาษีซื้อไม่ได้")
+    why = W("vat.why.claimable") if claim else (
+        W("vat.why.incomplete") if inv.doc_type == "full_tax_invoice" else
+        W("vat.why.not_full", doc_type=DOC_TYPE_TH.get(inv.doc_type, DOC_TYPE_TH[""])))
     if inv.is_note:
-        why = f"{DOC_TYPE_TH[inv.doc_type]}: ปรับภาษีซื้อตามใบกำกับภาษีเดิม"
+        why = W("vat.why.note", doc_type=DOC_TYPE_TH[inv.doc_type])
     # what was billed and never ordered
     unplanned = [x for x in lines if x["unplanned"] is not None]
     total_unplanned = sum((Decimal(x["unplanned"]["amount"]) for x in unplanned), ZERO)
@@ -606,16 +608,16 @@ def _invoice(rv: Review, cum: Cumulative, inv: B.Invoice, docs: dict, answered_b
             discount = B.D(((doc.out.get("fields") or {}).get("discount") or {}).get("normalized")) or ZERO
         gap = inv.subtotal - (sum(amounts, ZERO) - discount)
         if gap > tol.small:
-            footer = {"kind": "footer", "label": "ส่วนต่างท้ายใบแจ้งหนี้ที่ไม่อยู่ในรายการ", "amount": f2(gap)}
+            footer = {"kind": "footer", "label": W("unplanned.footer"), "amount": f2(gap)}
             total_unplanned += gap
         elif gap < -tol.small and "total_mismatch" not in reasons:
             reasons.append("total_mismatch")
-            notes.append(f"ผลรวมรายการ {money(sum(amounts, ZERO))} บาท มากกว่ายอดก่อนภาษีที่เอกสารแสดง {money(inv.subtotal)} บาท")
+            notes.append(W("note.lines_over_subtotal", amounts=money(sum(amounts, ZERO)), subtotal=money(inv.subtotal)))
     if total_unplanned > ZERO:
         if total_unplanned > tol.unplanned:
             reasons.append("unplanned_cost")
         else:
-            notes.append(f"ค่าใช้จ่ายที่ไม่ได้สั่งซื้อ {money(total_unplanned)} บาท อยู่ในวงเงินที่ตั้งไว้ ({money(tol.unplanned)} บาท)")
+            notes.append(W("note.unplanned_within", total_unplanned=money(total_unplanned), unplanned=money(tol.unplanned)))
     for x in lines:
         for r in x["reasons"]:
             if r not in reasons:
@@ -634,18 +636,18 @@ def _invoice(rv: Review, cum: Cumulative, inv: B.Invoice, docs: dict, answered_b
         elif inv.fx_rate is not None:
             thb = inv.sign * B.q2(inv.total * inv.fx_rate)
     if inv.currency != rv.settings.currency:
-        notes.append(f"สกุลเงิน {inv.currency}: " + (f"อัตราแลกเปลี่ยน {inv.fx_rate} จาก{inv.fx_from}" if inv.fx_rate is not None else
-                                                   "ไม่มีอัตราแลกเปลี่ยน จึงไม่รวมในยอดเงินบาทของสรุป"))
+        notes.append(W("note.fx.rate", currency=inv.currency, fx_rate=inv.fx_rate, fx_from=inv.fx_from) if inv.fx_rate is not None else
+                     W("note.fx.none", currency=inv.currency))
     again = rv.resubmitted.get(inv.key)
     if again is not None:
-        notes.append(f"เคยส่งมาแล้วในรอบก่อน (ไฟล์ {again.get('name') or ''}) รอบนั้นยังไม่ผ่าน รอบนี้ตรวจใหม่")
-    depth_text = " · ".join(f"{DEPTH_SHORT[d]} {n} บรรทัด" for d, n in depths.items() if n) or "ไม่มีบรรทัด"
+        notes.append(W("note.presented_again", name=again.get("name") or ""))
+    depth_text = " · ".join(W("depth.count", depth=DEPTH_SHORT[d], n=n) for d, n in depths.items() if n) or W("depth.no_lines")
     out = {**inv.out(), "doc_type_label": DOC_TYPE_TH.get(inv.doc_type, DOC_TYPE_TH[""]), "status": status,
            "status_label": STATUS_TH[status], "reasons": reasons, "reason_labels": [REASON_TH[r] for r in reasons], "notes": notes,
            "checks": checks, "depths": depths, "depth_text": depth_text, "two_way_only": depths[THREE] == 0 and depths[TWO] > 0,
            "duplicate_of": duplicate_of, "corrects": ref, "counted": counts,
            "vat": {"claimable": bool(claim), "why": why, "rate": f2(tol.vat_rate), "missing": missing,
-                   "missing_labels": [ELEMENT_TH[m] for m in missing]},
+                   "missing_labels": [words.cap(ELEMENT_TH[m]) for m in missing]},
            "unplanned": [x["unplanned"] for x in unplanned] + ([footer] if footer else []),
            "unplanned_total": f2(total_unplanned), "value_thb": f2(thb), "presented_before": again is not None,
            "po_named": inv.po_numbers, "po_known": [p for p in inv.po_numbers if ref_key(p) in known],
@@ -678,7 +680,7 @@ def _po_lines(rv: Review, cum: Cumulative) -> tuple[list, dict]:
              "billed_not_received": None if not_received is None else qs(not_received),
              "billed_not_received_amount": None if not_received is None else f2(B.q2(not_received * price)),
              "over_billed": bool(over_po or over_received),
-             "over_billed_why": "เรียกเก็บสะสมเกินที่รับจริง" if over_received else ("เรียกเก็บสะสมเกินที่สั่งซื้อ" if over_po else ""),
+             "over_billed_why": W("over.received") if over_received else (W("over.ordered") if over_po else ""),
              "receipts": [{"gr": g.gr, "date": g.date.isoformat() if g.date else None, "quantity": qs(x), "in_system": g.in_system,
                            "confirmed_by": g.confirmed_by, **(g.source.out() if g.source else {"file": None, "sheet": None, "row": None})}
                           for g, x, _l in got],
@@ -692,8 +694,8 @@ def _po_lines(rv: Review, cum: Cumulative) -> tuple[list, dict]:
     grir = {"received_not_billed": f2(accrued), "billed_not_received": f2(prepaid),
             "lines": [r["id"] for r in rows if r["received"] is not None and (Decimal(r["received_not_billed"]) > 0
                                                                                 or Decimal(r["billed_not_received"]) > 0)],
-            "note": "ตัวเลขสำหรับผู้ทำบัญชีใช้ตั้งค้างรับค้างจ่าย agent ไม่ได้บันทึกรายการใดเข้าระบบบัญชี",
-            "covers": "เฉพาะบรรทัดของ PO ที่มีใบรับของหรือการยืนยันรับของ"}
+            "note": W("grir.note"),
+            "covers": W("grir.covers")}
     return rows, grir
 
 
@@ -707,13 +709,13 @@ def _exceptions(rv: Review, invoices: list, lines: list) -> list:
         severity = "review"
         out.append({"reason_code": code, "reason": REASON_TH[code], "severity": severity, "subject": subject, "source_ref": source,
                     "detail": detail, "proposed_action": action,
-                    "choices": [{"label": l, "value": v} for l, v in CHOICES.get(code, [])]})
+                    "choices": [{"label": W(l), "value": v} for l, v in CHOICES.get(code, [])]})
 
     for inv in invoices:
         src = {"sheet_name": " · ".join(str(x) for x in (inv.get("file"), inv.get("sheet")) if x), "row": inv.get("row"),
                "cell": None, "rows": [{"file": inv.get("file"), "sheet": inv.get("sheet"), "row": inv.get("row"),
                                        "cells": inv.get("cells") or {}}]}
-        label = f"ใบแจ้งหนี้ {inv['number'] or inv['name']} ({E3C.safe(inv['supplier']['name'])[:40]})"
+        label = W("ex.invoice", number=inv["number"] or inv["name"], seller=E3C.safe(inv["supplier"]["name"])[:40])
         mine = by_inv.get(inv["key"], [])
         for code in inv["reasons"]:
             on_lines = [x for x in mine if code in x["reasons"]]
@@ -724,24 +726,24 @@ def _exceptions(rv: Review, invoices: list, lines: list) -> list:
                     rows = [{"file": x.get("file"), "sheet": x.get("sheet"), "row": x.get("row"), "cells": x.get("cells") or {}}]
                     if po:
                         rows.append({"file": po.get("file"), "sheet": po.get("sheet"), "row": po.get("row"), "cells": po.get("cells") or {}})
-                    detail = f"{label} บรรทัด {x['n']} “{E3C.safe(x['description'])[:50]}”"
+                    detail = W("ex.line", label=label, n=x["n"], description=E3C.safe(x["description"])[:50])
                     if chk is not None:
                         detail += f": {chk['detail']}"
                     elif x["notes"]:
                         detail += f": {x['notes'][0]}"
                     add(code, f"{inv['key']}:{x['id']}", {**src, "rows": rows, "row": x.get("row")}, detail,
-                        CHOICES[code][0][0] if CHOICES.get(code) else "ส่งให้คนตรวจ")
+                        W(CHOICES[code][0][0]) if CHOICES.get(code) else W("choice.review"))
             else:
                 chk = next((c for c in inv["checks"] if not c["ok"] and c["detail"]), None)
                 detail = label
                 if code == "duplicate_invoice" and inv["duplicate_of"]:
                     d = inv["duplicate_of"]
-                    detail += f": ตรงกับใบแจ้งหนี้เลขที่ {d['number']} ลงวันที่ {E3C.date_th(d['date'])} ที่ส่งมาก่อน ({d['pass_label']})"
+                    detail += ": " + W("ex.duplicate_of", number=d["number"], date=E3C.date_th(d["date"]), pass_label=d["pass_label"])
                 elif code in ("vat_mismatch", "total_mismatch", "supplier_mismatch", "supplier_unsure") and chk is not None:
                     detail += f": {chk['detail']}"
                 elif inv["notes"]:
                     detail += f": {inv['notes'][0]}"
-                add(code, f"{inv['key']}:{code}", src, detail, CHOICES[code][0][0] if CHOICES.get(code) else "ส่งให้คนตรวจ")
+                add(code, f"{inv['key']}:{code}", src, detail, W(CHOICES[code][0][0]) if CHOICES.get(code) else W("choice.review"))
     return out
 
 
@@ -786,7 +788,7 @@ def _summary(rv: Review, invoices: list, lines: list, grir: dict) -> dict:
         "other_currencies": [{**o, "total": f2(o["total"])} for o in sorted(other.values(), key=lambda o: o["currency"])],
         "currency": rv.settings.currency, "received_not_billed": grir["received_not_billed"],
         "billed_not_received": grir["billed_not_received"],
-        "approval": "ไม่มีใบแจ้งหนี้ใดถูกอนุมัติจ่ายโดย agent ใบที่ผ่านอยู่ในสถานะพร้อมเสนออนุมัติ การอนุมัติและการจ่ายเป็นของคน",
+        "approval": W("summary.approval"),
     }
 
 
@@ -797,40 +799,40 @@ def _not_included(rv: Review) -> list:
             continue
         ex = d.exclusion
         rs = ex.get("restore")
-        out.append({"doc_key": d.upload.key, "name": d.upload.name, "code": ex["code"], "reason": EXCLUDED_TH.get(ex["code"], "ไม่ได้รวมเอกสารนี้"),
+        out.append({"doc_key": d.upload.key, "name": d.upload.name, "code": ex["code"], "reason": EXCLUDED_TH.get(ex["code"], W("excluded.default")),
                     "detail": ex.get("detail") or "", "how": _how(rs), "can_restore": bool(rs and (rs["set"] or rs["drop"])),
                     "restore": rs or {"set": {}, "drop": []}})
     for u, why, detail in rv.others:
         if why == "set_aside":
             key = next((f"pomatch_kind:{u.key}.{t['sheet_index']}" for t in u.data["tables"]
                         if rv.answers.get(f"pomatch_kind:{u.key}.{t['sheet_index']}") == "unused"), None)
-            out.append({"doc_key": u.key, "name": u.name, "code": "set_aside", "reason": "ยังไม่ได้บอกว่าแผ่นงานนี้เป็นเอกสารชนิดใด",
-                        "detail": detail, "how": "นำกลับมารวมได้: ต้องตอบก่อนว่าแผ่นงานนี้คือเอกสารชนิดใด", "can_restore": key is not None,
+            out.append({"doc_key": u.key, "name": u.name, "code": "set_aside", "reason": W("left.set_aside"),
+                        "detail": detail, "how": W("left.set_aside.how"), "can_restore": key is not None,
                         "restore": {"set": {}, "drop": [key] if key else []}})
         else:
             out.append({"doc_key": u.key, "name": u.name, "code": why,
-                        "reason": {"same_file": "เป็นไฟล์เดียวกับไฟล์ที่ส่งมาแล้ว"}.get(why, detail or "ไม่ได้ใช้ไฟล์นี้"),
-                        "detail": detail if why == "same_file" else "agent นี้อ่านใบสั่งซื้อและใบรับของที่เป็น Excel หรือ CSV และใบแจ้งหนี้ที่เป็น PDF ไฟล์ e-Tax หรือตาราง",
-                        "how": "ไม่ต้องนำกลับ: ไฟล์เดียวกันนี้ใช้อยู่แล้ว" if why == "same_file" else "ส่งไฟล์ในรูปแบบที่อ่านได้มาใหม่",
+                        "reason": {"same_file": W("left.same_file")}.get(why, detail or W("left.not_used")),
+                        "detail": detail if why == "same_file" else W("left.other.detail"),
+                        "how": W("left.same_file.how") if why == "same_file" else W("left.other.how"),
                         "can_restore": False, "restore": {"set": {}, "drop": []}})
     return out
 
 
-EXCLUDED_TH = {
-    "missing_required_field": "ขาดค่าที่ต้องมี และยังไม่มีคนยืนยัน", "unconfirmed_value": "มีค่าที่อ่านได้ไม่ชัด และยังไม่มีคนยืนยัน",
-    "sources_disagree": "อ่านได้สองค่าที่ไม่ตรงกัน และยังไม่มีคนเลือก", "check_failed": "ตัวเลขในเอกสารตรวจไม่ผ่าน และยังไม่มีคนตัดสิน",
-    "duplicate": "เป็นเอกสารที่ส่งมาแล้ว", "copy_not_original": "เป็นสำเนา", "unknown_document_type": "ยังไม่ทราบชนิดเอกสาร",
-    "unreadable_page": "ภาพไม่ชัดพอ", "typed_value_invalid": "ค่าที่พิมพ์มาใช้ไม่ได้", "excluded_by_person": "คุณให้ตัดเอกสารนี้ออก",
-    "not_an_invoice": "ไม่ใช่เอกสารที่ผู้ขายเรียกเก็บเงิน",
-}
+EXCLUDED_TH = W.table({
+    "missing_required_field": "excluded.missing_required_field", "unconfirmed_value": "excluded.unconfirmed_value",
+    "sources_disagree": "excluded.sources_disagree", "check_failed": "excluded.check_failed",
+    "duplicate": "excluded.duplicate", "copy_not_original": "excluded.copy_not_original", "unknown_document_type": "excluded.unknown_document_type",
+    "unreadable_page": "excluded.unreadable_page", "typed_value_invalid": "excluded.typed_value_invalid", "excluded_by_person": "excluded.excluded_by_person",
+    "not_an_invoice": "excluded.not_an_invoice",
+})
 
 
 def _how(rs: dict | None) -> str:
     if not rs or not (rs["set"] or rs["drop"]):
-        return "นำกลับมารวมไม่ได้ในรอบนี้: ส่งเอกสารที่ถูกต้องมาใหม่"
+        return W("restore.none")
     if rs["drop"]:
-        return "นำกลับมารวมได้: คำถามของเอกสารนี้จะถูกถามอีกครั้ง"
-    return "นำกลับมารวมได้ในคลิกเดียว: บันทึกตามเอกสาร พร้อมข้อยกเว้นให้ผู้ตรวจดู"
+        return W("restore.ask")
+    return W("restore.record")
 
 
 def _index(rv: Review, invoices: list, lines: list) -> list:
@@ -865,7 +867,7 @@ def _index(rv: Review, invoices: list, lines: list) -> list:
         if pl is None or got is None:
             continue
         sha = hashlib.sha256(f"{akey}|{got.qty}|{rv.today.isoformat()}".encode()).hexdigest()
-        out.append({"doc_key": "receipt:" + hashlib.sha256(akey.encode()).hexdigest()[:16], "name": "ยืนยันรับของในระบบ", "sha256": sha,
+        out.append({"doc_key": "receipt:" + hashlib.sha256(akey.encode()).hexdigest()[:16], "name": W("index.receipt"), "sha256": sha,
                     "seller_tax_id": pl.supplier.tax_id or None, "document_number": pl.po, "document_date": rv.today.isoformat(),
                     "total": None, "detail": {"kind": "receipt", "akey": akey, "po": pl.po, "line_no": pl.line_no,
                                               "quantity": qs(got.qty), "unit": pl.unit, "confirmed_by": got.confirmed_by,
@@ -911,24 +913,20 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
     po_rows, grir = _po_lines(rv, cum)
     run_ex = _exceptions(rv, invoices, lines)
     summary = _summary(rv, invoices, lines, grir)
-    label = TH.period_label_th(period)
+    label = words.period(period)
     tiers, passes = _tiers(rv)
     by = {s["status"]: s for s in summary["by_status"]}
-    head = (f"ตรวจใบแจ้งหนี้กับใบสั่งซื้อ {len(invoices)} ฉบับ: ผ่าน {by[PASS]['count']} · ติดเงื่อนไข {by[BLOCKED]['count']} · "
-            f"ต้องให้คนตัดสิน {by[PERSON]['count']}")
+    head = (W("narr.summary", n=len(invoices), passed=by[PASS]["count"], blocked=by[BLOCKED]["count"], person=by[PERSON]["count"]))
     d3, d2 = summary["by_depth"][0]["lines"], summary["by_depth"][1]["lines"]
-    depth_line = f"ตรวจ 3 ทาง {d3} บรรทัด · ตรวจ 2 ทาง {d2} บรรทัด"
-    if d2 and not d3:
-        depth_line += " (รอบนี้ไม่มีบรรทัดใดที่ตรวจกับใบรับของ)"
-    watch = [f"{r['label']}: {r['invoices']} ฉบับ" for r in summary["by_reason"]][:6]
+    depth_line = W("narr.depth.no_gr", d3=d3, d2=d2) if d2 and not d3 else W("narr.depth", d3=d3, d2=d2)
+    watch = [W("narr.reason", label=r["label"], invoices=r["invoices"]) for r in summary["by_reason"]][:6]
     over = [p for p in po_rows if p["over_billed"]]
     if over:
-        watch.insert(0, f"มี {len(over)} บรรทัดของ PO ที่ถูกเรียกเก็บสะสมเกิน")
+        watch.insert(0, W("narr.over", n=len(over)))
     fallback = {"summary": head, "movements": [depth_line,
-                                               f"ของที่รับแล้วยังไม่ถูกเรียกเก็บ {money(grir['received_not_billed'])} บาท · "
-                                               f"เรียกเก็บแล้วยังไม่ได้รับของ {money(grir['billed_not_received'])} บาท"],
-                "watch": watch, "next_steps": ["ตรวจรายการในชีต “ข้อยกเว้น” แล้วตัดสินทีละรายการ",
-                                               "ใบแจ้งหนี้ที่ผ่านอยู่ในสถานะพร้อมเสนออนุมัติ agent ไม่ได้อนุมัติหรือจ่ายเงิน"]}
+                                               W("narr.grir", received_not_billed=money(grir["received_not_billed"]), billed_not_received=money(grir["billed_not_received"]))],
+                "watch": watch, "next_steps": [W("narr.next.exceptions"),
+                                               W("narr.next.approval")]}
     quotable = {"invoices": str(len(invoices)), "passed": str(by[PASS]["count"]), "blocked": str(by[BLOCKED]["count"]),
                 "person": str(by[PERSON]["count"]), "value_passed": by[PASS]["value"] or "", "value_blocked": by[BLOCKED]["value"] or "",
                 "received_not_billed": grir["received_not_billed"], "billed_not_received": grir["billed_not_received"]}
@@ -937,7 +935,7 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
         "prepared_on": (today or rv.today).isoformat(), "company": rv.settings.company,
         "company_tax_id": rv.settings.company_tax_id, "currency": rv.settings.currency,
         "practice": {"gr": rv.settings.gr_practice, "label": S.GR_PRACTICE_VALUE_TH[rv.settings.gr_practice],
-                     "from": rv.settings.gr_from, "question": S.GR_PRACTICE_TH},
+                     "from": rv.settings.gr_from, "question": W(S.GR_PRACTICE_TH)},
         "invoices": invoices, "lines": lines, "po_lines": po_rows, "grir": grir,
         "unplanned": [{"invoice": i["key"], "invoice_number": i["number"], "supplier": i["supplier"]["name"], **u,
                        "within_limit": Decimal(i["unplanned_total"]) <= rv.settings.tolerances.unplanned}
@@ -946,10 +944,10 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
                    "supplier": i["supplier"]["name"], "date": i["date"], "total": i["total"], "ref_invoice": i["ref_invoice"],
                    "corrects": i["corrects"], "status": i["status"], "status_label": i["status_label"],
                    "reasons": i["reason_labels"]} for i in invoices if i["doc_type"] in B.NOTE_TYPES],
-        "summary": summary, "match": {"tiers": tiers, "passes": passes, "names": L.NAMES_INV,
+        "summary": summary, "match": {"tiers": tiers, "passes": passes, "names": dict(L.NAMES_INV),
                                       "links": _links(rv, answered_by)},
         "receipt_offers": _offers(rv, po_rows, lines),
-        "run_exceptions": run_ex, "reason_codes": REASON_TH, "not_included": _not_included(rv), "assumptions": rv.assumptions,
+        "run_exceptions": run_ex, "reason_codes": dict(REASON_TH), "not_included": _not_included(rv), "assumptions": rv.assumptions,
         "totals": {"invoices": len(invoices), "lines": summary["lines"], "passed": by[PASS]["count"], "blocked": by[BLOCKED]["count"],
                    "person": by[PERSON]["count"], "three_way": d3, "two_way": d2, "unlinked": summary["by_depth"][2]["lines"],
                    "po_lines": len(po_rows), "over_billed": len(over), "run_exceptions": len(run_ex), "review": len(run_ex),
@@ -958,7 +956,7 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
                    "by_rule": sum(t["by_rule"] for t in tiers), "by_person": sum(t["by_person"] for t in tiers),
                    "waiting": sum(t["waiting"] for t in tiers)},
         "files": _files(rv), "settings": {"tolerances": rv.settings.tolerances.to_dict(), "unusable": rv.settings.unusable,
-                                          "conversions": rv.settings.conversions, "labels": S.SETTING_TH},
+                                          "conversions": rv.settings.conversions, "labels": dict(S.SETTING_TH)},
         "index_entries": _index(rv, invoices, lines), "models": [],
         "quotable": quotable, "quotable_ids": [], "fallback_narrative": fallback,
         # the runner's generic view of computed.json
@@ -1000,8 +998,8 @@ def _files(rv: Review) -> list:
 def _tiers(rv: Review) -> tuple[list, list]:
     """Every link of the round by the engine's tier and pass: what a rule accepted, what a person did."""
     tiers = {t: {"tier": t, "label": lab, "groups": 0, "by_rule": 0, "by_person": 0, "waiting": 0}
-             for t, lab in (("exact", "ตรงกันทุกตัว"), ("amount_date", "ราคาหรือยอดอยู่ในช่วงที่ตั้งไว้"),
-                            ("fuzzy", "ชื่อหรือเลขอ้างอิงคล้ายกัน"))}
+             for t, lab in (("exact", W("tier.exact")), ("amount_date", W("tier.amount_date")),
+                            ("fuzzy", W("tier.fuzzy")))}
     passes: dict = {}
     for res in list(rv.links_gr.values()) + list(rv.links_inv.values()) + list(rv.dup.values()):
         for p in res["passes"]:
@@ -1041,16 +1039,20 @@ def _links(rv: Review, answered_by: dict | None) -> list:
 
 def _citations(invoices: list, lines: list, summary: dict) -> list:
     """How each figure of the summary was made: the invoices a count or a value adds up."""
-    def c(cid, label, value, formula, sources):
-        return {"id": cid, "label": label, "value": value, "formula": formula, "sources": sources, "left_out": [], "aliases": [],
+    def c(cid, name, value, formula, sources):
+        # name() says the figure's name in the language being spoken: a question may also ask about a figure by
+        # the words the working paper prints (engine/words.py names)
+        label, aliases = words.names(lambda: (name(), []))
+        return {"id": cid, "label": label, "value": value, "formula": formula, "sources": sources, "left_out": [], "aliases": aliases,
                 "script": SCRIPT}
     out = []
     for n, s in enumerate(summary["by_status"], start=1):
         mine = [i for i in invoices if i["status"] == s["status"]]
-        out.append(c(f"s{n}", f"{s['label']} (ฉบับ)", str(s["count"]), "นับใบแจ้งหนี้ที่มีสถานะนี้",
+        out.append(c(f"s{n}", lambda status=s["status"]: W("cite.count", label=STATUS_TH[status]), str(s["count"]), W("cite.count.formula"),
                      [{"file": i["name"], "sheet": i.get("sheet") or "", "row": i.get("row"), "value": i["number"], "note": i["status_label"]}
                       for i in mine]))
-        out.append(c(f"v{n}", f"มูลค่า{s['label']} ({summary['currency']})", s["value"], "รวมยอดรวมของใบแจ้งหนี้ที่มีสถานะนี้",
+        out.append(c(f"v{n}", lambda status=s["status"]: W("cite.value", label=STATUS_TH[status], currency=summary["currency"]),
+                     s["value"], W("cite.value.formula"),
                      [{"file": i["name"], "sheet": i.get("sheet") or "", "row": i.get("row"), "value": i["value_thb"], "note": i["number"]}
                       for i in mine if i["value_thb"] is not None]))
     return out

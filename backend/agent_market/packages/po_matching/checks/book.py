@@ -25,6 +25,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from ....engine.e3.rows import name_key, ref_key
 from . import inputs as I
 from . import units as U
+from ..words import W
 from .parties import Party
 
 ZERO = Decimal("0")
@@ -33,8 +34,9 @@ GOODS, SERVICE, BLANKET = "goods", "service", "blanket"
 OPEN, CLOSED, CANCELLED = "open", "closed", "cancelled"
 INVOICE_TYPES = ("full_tax_invoice", "abbreviated_tax_invoice", "receipt", "invoice")
 NOTE_TYPES = ("credit_note", "debit_note")
-KIND_TH = {GOODS: "สินค้า", SERVICE: "บริการ", BLANKET: "ใบสั่งซื้อแบบวงเงิน"}
-STATUS_TH = {OPEN: "เปิดอยู่", CLOSED: "ปิดแล้ว", CANCELLED: "ยกเลิก"}
+# (keys of the manifest's sentences, each said in the language of the run when it is read: engine/words.py)
+KIND_TH = W.table({GOODS: "potype.goods", SERVICE: "potype.service", BLANKET: "potype.blanket"})
+STATUS_TH = W.table({OPEN: "postatus.open", CLOSED: "postatus.closed", CANCELLED: "postatus.cancelled"})
 _EXEMPT = ("ยกเว้น", "ยกเว้นภาษี", "ไม่มีvat", "ไม่มีภาษี", "ไม่คิดvat", "exempt", "novat", "nonvat", "zero", "zerorated", "none", "n/a")
 
 
@@ -140,7 +142,7 @@ class PoLine:
 
     @property
     def label(self) -> str:
-        n = f"บรรทัด {self.line_no}" if self.line_no else (f"รหัส {self.item_code}" if self.item_code else "")
+        n = W("po.line", line_no=self.line_no) if self.line_no else (W("po.code", item_code=self.item_code) if self.item_code else "")
         return " ".join(x for x in (f"PO {self.po}", n) if x)
 
     def out(self) -> dict:
@@ -270,7 +272,7 @@ class Invoice:
     @property
     def label(self) -> str:
         who = f"“{self.supplier.name[:40]}”" if self.supplier.name else ""
-        return " ".join(x for x in (f"เลขที่ {self.number}" if self.number else "", f"ของ{who}" if who else "") if x) or self.name
+        return " ".join(x for x in (W("inv.number", number=self.number) if self.number else "", W("inv.of", who=who) if who else "") if x) or self.name
 
     def out(self) -> dict:
         f2 = lambda v: None if v is None else f"{v:.2f}"   # noqa: E731
@@ -324,11 +326,11 @@ def po_lines(upload, table: dict) -> list:
             price = (amount / qty).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
         kind, how = GOODS, ""
         if I.blanket_type(r.get("type")) or (limit is not None and qty is None):
-            kind, how = BLANKET, "คอลัมน์ประเภทหรือวงเงินใน PO"
+            kind, how = BLANKET, W("kind_from.limit")
         elif I.service_type(r.get("type")):
-            kind, how = SERVICE, "คอลัมน์ประเภทใน PO"
+            kind, how = SERVICE, W("kind_from.type")
         elif U.is_service_unit(r.get("unit")):
-            kind, how = SERVICE, f"หน่วยนับ “{r.get('unit')}” เป็นหน่วยของงานหรือเวลา"
+            kind, how = SERVICE, W("kind_from.unit", unit=r.get("unit"))
         out.append(PoLine(
             id=row_id("p", upload.sha256, table["sheet_index"], r["row"]), po=r.get("po_number") or "",
             line_no=r.get("line_no") or "", item_code=r.get("item_code") or "", description=r.get("description") or "",
@@ -390,7 +392,7 @@ def table_invoices(upload, table: dict) -> list:
             sha256=upload.sha256, number=first.get("invoice_number") or "", date=date(one("invoice_date")),
             supplier=Party(one("supplier_name") or "", one("supplier_tax_id") or "", one("supplier_branch") or ""),
             doc_type=dtype, currency=(one("currency") or "").upper(), fx_rate=D(one("fx_rate")),
-            fx_from="คอลัมน์อัตราแลกเปลี่ยนในไฟล์" if one("fx_rate") else "", subtotal=D(one("subtotal")),
+            fx_from=W("fx_from.column") if one("fx_rate") else "", subtotal=D(one("subtotal")),
             vat_amount=D(one("vat_amount")), total=D(one("total")), buyer_tax_id=one("buyer_tax_id") or "", po_numbers=pos,
             refs_read="table", ref_invoice=one("ref_invoice") or "", lines=lines, header_only=not lines,
             source=Source(upload.name, table["sheet"], first["row"], first.get("cells") or {}))
@@ -433,7 +435,7 @@ def document_invoice(upload, out: dict, *, fx_rate: Decimal | None = None) -> In
         date=date(v("document_date")), supplier=Party(" ".join(str(name or "").replace("\x00", "").split()),
                                                        str(v("seller_tax_id") or ""), str(v("seller_branch") or "")),
         doc_type=str((out.get("document_type") or {}).get("normalized") or ""), currency=str(v("currency") or "THB").upper(),
-        fx_rate=rate, fx_from="อัตราที่คุณพิมพ์" if rate is not None else "", subtotal=D(v("subtotal")),
+        fx_rate=rate, fx_from=W("fx_from.typed") if rate is not None else "", subtotal=D(v("subtotal")),
         vat_amount=D(v("vat_amount")), total=D(v("total")), buyer_tax_id=str(v("buyer_tax_id") or ""),
         po_numbers=list(refs.get("po_numbers") or []), refs_read=refs.get("read") or "none",
         ref_invoice=(refs.get("ref_invoices") or [""])[0], lines=lines, header_only=not lines,

@@ -21,37 +21,42 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 
+from ..words import W
+
 PREFIX = "ap_"
 GR_YES, GR_NO = "yes", "no"
 ZERO = Decimal("0")
 
-# setting → (field, kind, least, most, default, label)
+# setting → (field, kind, least, most, default, its name as the manifest declares it: the Thai of the sentence
+# setting.<setting>, which SETTING_TH says in the language of the run)
 SETTINGS = {
     "price_tolerance_pct": ("price_pct", "percent", "0", "50", "2.00",
-                            "ราคาต่อหน่วยสูงกว่า PO ได้ไม่เกิน (ร้อยละ)"),
+                            W.strings["setting.price_tolerance_pct"]),
     "price_tolerance_abs": ("price_abs", "money", "0", "1000000000", "500.00",
-                            "ส่วนต่างราคารวมต่อบรรทัดไม่เกิน (บาท)"),
+                            W.strings["setting.price_tolerance_abs"]),
     "qty_tolerance_pct": ("qty_pct", "percent", "0", "20", "0.00",
-                          "ปริมาณที่เรียกเก็บเกินที่รับจริงได้ไม่เกิน (ร้อยละ)"),
+                          W.strings["setting.qty_tolerance_pct"]),
     "over_delivery_pct": ("over_pct", "percent", "0", "50", "0.00",
-                          "รับของเกินที่สั่งซื้อได้ไม่เกิน (ร้อยละ)"),
+                          W.strings["setting.over_delivery_pct"]),
     "small_difference": ("small", "money", "0", "100", "1.00",
-                         "ผลต่างจากการปัดเศษที่ยอมรับได้ (บาท)"),
+                         W.strings["setting.small_difference"]),
     "date_window_days": ("days", "int", "0", "366", "0",
-                         "ใบแจ้งหนี้ลงวันที่ก่อนวันที่ PO ได้ไม่เกิน (วัน)"),
+                         W.strings["setting.date_window_days"]),
     "duplicate_window_days": ("dup_days", "int", "0", "366", "7",
-                              "ช่วงวันที่ที่ใช้หาใบแจ้งหนี้ที่อาจซ้ำ (วัน)"),
+                              W.strings["setting.duplicate_window_days"]),
     "fuzzy_threshold": ("fuzzy", "ratio", "0.50", "1.00", "0.80",
-                        "ความคล้ายของชื่อสินค้าอย่างน้อย (0.50–1.00)"),
+                        W.strings["setting.fuzzy_threshold"]),
     "vat_rate": ("vat_rate", "percent", "0", "30", "7.00",
-                 "อัตราภาษีมูลค่าเพิ่ม (ร้อยละ)"),
+                 W.strings["setting.vat_rate"]),
     "unplanned_cost_limit": ("unplanned", "money", "0", "1000000000", "0.00",
-                             "ค่าใช้จ่ายที่ไม่ได้สั่งซื้อต่อใบแจ้งหนี้ที่ยอมรับได้ (บาท)"),
+                             W.strings["setting.unplanned_cost_limit"]),
 }
-SETTING_TH = {k: v[5] for k, v in SETTINGS.items()}
-GR_PRACTICE_TH = "บริษัทออกใบรับของหรือไม่"
-GR_PRACTICE_VALUE_TH = {GR_YES: "ออกใบรับของ", GR_NO: "ไม่ออกใบรับของ"}
-UNIT_SETTING_TH = "การแปลงหน่วยนับ"
+# a setting's name and an answer's, each said in the language of the run when it is read (engine/words.py)
+SETTING_TH = W.table({k: f"setting.{k}" for k in SETTINGS})
+GR_PRACTICE_VALUE_TH = W.table({GR_YES: "practice.yes", GR_NO: "practice.no"})
+# … and the names of the two settings that are no tolerance: keys, said where they are used
+GR_PRACTICE_TH = "setting.gr_practice"
+UNIT_SETTING_TH = "setting.unit_conversions"
 
 
 @dataclass(frozen=True)

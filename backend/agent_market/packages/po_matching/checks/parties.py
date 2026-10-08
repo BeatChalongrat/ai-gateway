@@ -17,18 +17,19 @@ from decimal import Decimal
 
 from ....engine.e2 import thai_text as T
 from ....engine.e3.rows import name_key, similarity
+from ..words import W
 
 SAME, DIFFERENT, UNSURE = "same", "different", "unsure"
 NEAR = Decimal("0.85")
-HOW_TH = {
-    "tax_id": "เลขประจำตัวผู้เสียภาษีตรงกัน",
-    "tax_id_differs": "เลขประจำตัวผู้เสียภาษีไม่ตรงกัน",
-    "name": "ชื่อตรงกัน (ไม่มีเลขประจำตัวผู้เสียภาษีให้เทียบ)",
-    "legal_form": "ชื่อตรงกันแต่ประเภทนิติบุคคลต่างกัน",
-    "name_near": "ชื่อคล้ายกัน (ไม่มีเลขประจำตัวผู้เสียภาษีให้เทียบ)",
-    "name_differs": "ชื่อไม่ตรงกัน",
-    "unknown": "เอกสารไม่ระบุผู้ขาย",
-}
+HOW_TH = W.table({
+    "tax_id": "how.tax_id",
+    "tax_id_differs": "how.tax_id_differs",
+    "name": "how.name",
+    "legal_form": "how.legal_form",
+    "name_near": "how.name_near",
+    "name_differs": "how.name_differs",
+    "unknown": "how.unknown",
+})
 
 
 @dataclass(frozen=True)

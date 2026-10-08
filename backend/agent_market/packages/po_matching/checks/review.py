@@ -21,8 +21,11 @@ from decimal import Decimal
 from ....engine.e2 import cards as E2C
 from ....engine.e2 import decisions as E2D
 from ....engine.e2.extract import rejudge
+from ....engine import words
 from ....engine.e3.rows import name_key, ref_key
+from ..words import W
 from . import book as B
+from . import inputs as I
 from . import links as L
 from . import parties as P
 from . import settings as S
@@ -151,11 +154,11 @@ def _files(rv: Review) -> None:
     # by what the file holds, never by the order it was uploaded in or the name it was given
     for u in sorted(rv.uploads, key=lambda u: (u.sha256, u.name)):
         if u.sha256 in seen:
-            rv.others.append((u, "same_file", f"ไฟล์เดียวกับ {seen[u.sha256]} (ไบต์ตรงกันทุกตัว)"))
+            rv.others.append((u, "same_file", W("unused.same_as", name=seen[u.sha256])))
             continue
         seen[u.sha256] = u.name
         if u.kind == "other":
-            rv.others.append((u, u.data.get("reason") or "unsupported_type", u.data.get("say") or ""))
+            rv.others.append((u, u.data.get("reason") or "unsupported_type", I.said(u.data.get("say"))))
         elif u.kind == "tables":
             for t in u.data["tables"]:
                 said = rv.answers.get(f"pomatch_kind:{table_key(u, t)}")
@@ -163,7 +166,7 @@ def _files(rv: Review) -> None:
                 if kind is None:
                     rv.waiting_kind.append((u, t))
                 elif kind == "unused":
-                    rv.others.append((u, "set_aside", f"แผ่นงาน {t['sheet']}"))
+                    rv.others.append((u, "set_aside", W("unused.sheet", sheet=t["sheet"])))
                 else:
                     # a table a person named is read as that kind (its columns were read for each kind it could be)
                     rv.tables.append((u, (t.get("read_as") or {}).get(kind, t), kind))
@@ -200,14 +203,14 @@ def _documents(rv: Review, proposals: dict | None) -> None:
             f = next((x for x in asked if x.key == dec.excluded["key"]), None)
             detail = (f.question if f else "") or ""
             if dec.excluded.get("reupload"):
-                detail = (detail + " · ขอไฟล์ที่ชัดกว่า").strip(" ·")
+                detail = words.cap((detail + " · " + W("unused.clearer")).strip(" ·"))
             rv.docs.append(Doc(u, out, dec, "excluded", {
                 "code": dec.excluded["code"], "detail": detail, "decided_by": "card", "restore": E2D.restore_of(dec)}))
             continue
         if dtype not in ACCEPTED_TYPES and dtype != "unknown":
             rv.docs.append(Doc(u, out, dec, "excluded", {
                 "code": "not_an_invoice", "decided_by": "rule", "restore": None,
-                "detail": "เอกสารนี้ไม่ใช่ใบกำกับภาษี ใบแจ้งหนี้ ใบลดหนี้ หรือใบเพิ่มหนี้ จึงไม่นำมาตรวจกับใบสั่งซื้อ"}))
+                "detail": W("unused.not_an_invoice")}))
             continue
         fs = E2C.findings_for(u.key, out) + K.invalid_cards(u, out, dec)
         rv.docs.append(Doc(u, out, dec, "pending" if fs else "included", findings=fs))
@@ -244,7 +247,7 @@ def _book(rv: Review) -> None:
         qty = B.D(d.get("quantity"))
         if pl is None or qty is None:
             continue
-        rv.confirmed.append((pl, B.GrLine(id=e["id"], gr="ยืนยันในระบบ", date=B.date(str(e.get("document_date") or "")[:10] or None),
+        rv.confirmed.append((pl, B.GrLine(id=e["id"], gr=W("confirmed.gr"), date=B.date(str(e.get("document_date") or "")[:10] or None),
                                            po=pl.po, po_line=pl.line_no, item_code=pl.item_code, description=pl.description,
                                            qty=qty, unit=pl.unit, confirmed_by=str(d.get("confirmed_by") or ""))))
     for k in sorted(rv.answers):
@@ -263,7 +266,7 @@ def _book(rv: Review) -> None:
         if pl is None or qty is None or qty < 0:
             continue
         rid = "c" + hashlib.sha256(k.encode()).hexdigest()[:10]
-        rv.confirmed.append((pl, B.GrLine(id=rid, gr="ยืนยันในระบบ", date=rv.today, po=pl.po, po_line=pl.line_no,
+        rv.confirmed.append((pl, B.GrLine(id=rid, gr=W("confirmed.gr"), date=rv.today, po=pl.po, po_line=pl.line_no,
                                            item_code=pl.item_code, description=pl.description, qty=qty, unit=pl.unit,
                                            confirmed_by="")))
 
@@ -334,8 +337,8 @@ def _link(rv: Review) -> None:
             for r in m["right"]:
                 rv.gr_of.setdefault(pl.id, []).append((gr_by_id[r["id"]], m))
     for pl, g in rv.confirmed:
-        rv.gr_of.setdefault(pl.id, []).append((g, {"pass": "confirmed_in_system", "pass_label": "ยืนยันการรับของในระบบ",
-                                                   "tier": "exact", "tier_label": "ยืนยันในระบบ", "confirmed": "person",
+        rv.gr_of.setdefault(pl.id, []).append((g, {"pass": "confirmed_in_system", "pass_label": W("confirmed.pass"),
+                                                   "tier": "exact", "tier_label": W("confirmed.gr"), "confirmed": "person",
                                                    "confirmed_by": g.confirmed_by, "decision_key": None, "pair": f"{pl.id}~{g.id}"}))
     # duplicates, then the lines: in the order the invoices are dated
     before = list(rv.known)
@@ -431,20 +434,20 @@ def unit_key(frm: str, pl: B.PoLine) -> str:
 def _assumptions(rv: Review) -> list:
     out = []
     for u, why, detail in rv.others:
-        say = {"same_file": "เป็นไฟล์เดียวกับไฟล์ที่ส่งมาแล้ว นับครั้งเดียว", "set_aside": "คุณตอบว่าไม่ใช้แผ่นงานนี้ในรอบนี้",
-               "unrecognised_sheet": "ไม่พบหัวคอลัมน์ของใบสั่งซื้อ ใบรับของ หรือใบแจ้งหนี้",
-               "unsupported_type": "อ่านชนิดไฟล์นี้ไม่ได้", "unreadable": "เปิดไฟล์ไม่ได้"}.get(why, "ไม่ได้ใช้")
-        out.append({"code": "file_not_used", "source": "rule", "text": f"ไม่ได้ใช้ไฟล์ {u.name}: {say}"})
+        say = {"same_file": W("unused.same_file"), "set_aside": W("unused.set_aside"),
+               "unrecognised_sheet": W("unused.unrecognised"),
+               "unsupported_type": W("unused.unsupported"), "unreadable": W("unused.unreadable")}.get(why, W("used.none"))
+        out.append({"code": "file_not_used", "source": "rule", "text": W("assume.file_not_used", name=u.name, say=say)})
     for k in rv.settings.unusable:
-        label = S.SETTING_TH.get(k, S.UNIT_SETTING_TH)
+        label = S.SETTING_TH[k] if k in S.SETTING_TH else W(S.UNIT_SETTING_TH)
         out.append({"code": "setting_not_usable", "source": "rule", "changes_numbers": True,
-                    "text": f"ค่าที่ตั้งไว้สำหรับ “{label}” ใช้ไม่ได้ จึงใช้ค่าตั้งต้นของ agent"})
+                    "text": W("assume.setting", label=label)})
     if rv.practice_known:
-        how = {"settings": "ตามที่ตั้งไว้ใน agent", "answer": "ตามที่คุณตอบ"}.get(rv.settings.gr_from, "")
+        how = {"settings": W("assume.how.settings"), "answer": W("assume.how.answer")}.get(rv.settings.gr_from, "")
         if rv.settings.gr_practice == S.GR_YES:
-            text = f"บริษัทออกใบรับของ ({how}): รายการสินค้าที่เรียกเก็บโดยยังไม่มีใบรับของเป็นข้อยกเว้นที่ต้องติดตาม"
+            text = W("assume.gr_yes", how=how)
         else:
-            text = f"บริษัทไม่ออกใบรับของ ({how}): รายการที่ไม่มีใบรับของตรวจ 2 ทาง และระบุไว้ทุกบรรทัดว่าตรวจ 2 ทาง"
+            text = W("assume.gr_no", how=how)
         out.append({"code": "gr_practice", "source": "answer" if rv.settings.gr_from == "answer" else "rule",
                     "changes_numbers": True, "text": text})
     if not rv.ready:
@@ -453,19 +456,17 @@ def _assumptions(rv: Review) -> list:
     from ....engine.thai import fmt_money
 
     out.append({"code": "tolerance", "source": "rule",
-                "text": f"ราคาต่อหน่วยสูงกว่า PO ได้ไม่เกินร้อยละ {fmt_money(t.price_pct)} และไม่เกิน {fmt_money(t.price_abs)} บาทต่อบรรทัด · "
-                        f"ปริมาณเกินที่รับจริงได้ไม่เกินร้อยละ {fmt_money(t.qty_pct)} · รับของเกินที่สั่งได้ไม่เกินร้อยละ {fmt_money(t.over_pct)} · "
-                        f"ผลต่างจากการปัดเศษไม่เกิน {fmt_money(t.small)} บาท · อัตราภาษีมูลค่าเพิ่มร้อยละ {fmt_money(t.vat_rate)}"})
+                "text": W("assume.tolerance", price_pct=fmt_money(t.price_pct), price_abs=fmt_money(t.price_abs), qty_pct=fmt_money(t.qty_pct), over_pct=fmt_money(t.over_pct), small=fmt_money(t.small), vat_rate=fmt_money(t.vat_rate))})
     carried = sum(1 for _u, tb, _k in rv.tables for r in tb["rows"] if r.get("carried"))
     if carried:
         out.append({"code": "carried_values", "source": "rule",
-                    "text": f"มี {carried} แถวที่ไม่ได้พิมพ์เลขที่เอกสาร ผู้ขาย หรือวันที่ซ้ำ จึงใช้ค่าจากบรรทัดแรกของเอกสารเดียวกัน"})
+                    "text": W("assume.carried", carried=carried)})
     if rv.resubmitted:
         out.append({"code": "presented_again", "source": "rule", "changes_numbers": True,
-                    "text": f"มี {len(rv.resubmitted)} ใบแจ้งหนี้ที่เคยส่งมาแล้วและรอบนั้นยังไม่ผ่าน รอบนี้ตรวจใหม่ และนับยอดสะสมจากรอบนี้แทนรอบเดิม"})
+                    "text": W("assume.presented_again", n=len(rv.resubmitted))})
     if rv.confirmed:
         out.append({"code": "receipts_confirmed", "source": "answer", "changes_numbers": True,
-                    "text": f"มีการยืนยันรับของในระบบ {len(rv.confirmed)} รายการ ใช้เป็นหลักฐานการรับของของบรรทัดนั้น"})
+                    "text": W("assume.receipts_confirmed", n=len(rv.confirmed))})
     return out
 
 

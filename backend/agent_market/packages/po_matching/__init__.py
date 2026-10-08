@@ -23,10 +23,12 @@ import datetime as _dt
 import json
 import os
 
+from ...engine import words as _words   # (this package has a module of its own named words)
 from .checks import inputs as _in
 from .checks import preflight as _pre
 from .checks.inputs import FORMAT, Upload  # noqa: F401
 from .scripts import match as _match
+from .words import W
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 SCAN_TIERS = ("scan", "photo")
@@ -96,8 +98,11 @@ def compute(files, roles, period, *, answers=None, defaults=None, today=None, hi
     """``history``: the install's earlier invoices and receipts confirmed in this system (the
     cumulative figures start from them). ``answered_by``: who answered each card — a link a person
     confirmed names that person."""
-    return _match.compute(files, roles, period, answers=answers, defaults=defaults, today=today, history=history,
-                          proposals=proposals, answered_by=answered_by)
+    def table():
+        return _match.compute(files, roles, period, answers=answers, defaults=defaults, today=today, history=history,
+                              proposals=proposals, answered_by=answered_by)
+
+    return _words.with_document(table(), table)
 
 
 def postcompute(files, roles, period, computed, *, answers=None, defaults=None) -> dict:
@@ -115,6 +120,8 @@ def summarize(computed: dict) -> dict:
 # else: the order of the lines, once, at the one list the line sheet and its two companions are all made from —
 # so the three stay row for row. The same lines, the same figures, the same statuses.
 DIRECTIVES = ("sort_by_variance",)
+# the heading of the column the lines are ordered by — the working paper's own word, and the one the sentences
+# asked.variance.* of the manifest name it by
 VARIANCE = "ส่วนต่างราคารวม"
 
 
@@ -146,8 +153,8 @@ def _asked_check(path: str, view: dict, applied: list[str]) -> dict:
     col = H_LINES.index(VARIANCE)
     sizes = [abs(asked.number(r[col])) if isinstance(r[col], (int, float)) and not isinstance(r[col], bool) else None for r in rows]
     if len(rows) != len(view["lines"]) or not asked.runs_down(sizes):
-        return asked.check(False, f"ขอให้เรียงบรรทัดจาก{VARIANCE}มากที่สุด แต่ชีต “{S_LINES}” ในไฟล์ไม่ได้เรียงตามนั้น")
-    return asked.check(True, f"บรรทัด {len(rows)} แถวเรียงจาก{VARIANCE}มากที่สุดลงไป บรรทัดที่ไม่มีส่วนต่างอยู่ถัดไปตามลำดับในไฟล์", len(rows))
+        return asked.check(False, W("asked.variance.not", sheet=S_LINES))
+    return asked.check(True, W("asked.variance.ok", n=len(rows)), len(rows))
 
 
 def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
@@ -157,14 +164,17 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     from ...deliverables.theme import resolve
     from .scripts.workbook import MatchWorkbook, check
 
-    view, applied = _as_asked(computed, req)
+    # the working paper is written from the table in the documents' language; what the gate then says of
+    # the file is said in the run's
+    view, applied = _as_asked(_words.for_document(computed), req)
     theme = resolve(req.get("theme"))
     names = req.get("names") or {}
     artifacts, all_ok = [], True
     for fmt in [f for f in wanted_formats(req, ["xlsx"]) if f == "xlsx"]:
         name = os.path.basename(names.get(fmt) or "po_matching.xlsx")
         path = os.path.join(out_dir, name)
-        meta = MatchWorkbook(view, theme, req.get("run")).write(path)
+        with _words.speaking(_words.DOCUMENT):
+            meta = MatchWorkbook(view, theme, req.get("run")).write(path)
         checks = check(path, view, req.get("run"))
         if applied:
             checks.append(_asked_check(path, view, applied))

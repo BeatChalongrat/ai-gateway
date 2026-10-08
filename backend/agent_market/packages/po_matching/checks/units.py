@@ -19,6 +19,7 @@ import re
 from decimal import Decimal
 
 from ....engine.e2 import thai_text as T
+from ..words import W
 
 # canonical unit → the ways it is written (spaces, dots and case ignored)
 UNITS = {
@@ -79,12 +80,12 @@ UNPLANNED_WORDS = ("ค่าขนส่ง", "ค่าส่ง", "ค่า�
                    "freight", "shipping", "delivery", "deliverycharge", "transport", "transportation", "carriage", "insurance",
                    "handling", "surcharge", "fuelsurcharge", "packing", "pallet", "customs", "documentation", "expedite")
 UNPLANNED_KIND = (
-    ("freight", "ค่าขนส่ง", ("ค่าขนส่ง", "ค่าส่ง", "ค่าจัดส่ง", "ค่าระวาง", "ค่าบรรทุก", "ค่าบริการจัดส่ง", "ค่าผ่านทาง", "freight", "shipping",
+    ("freight", "unplanned.freight", ("ค่าขนส่ง", "ค่าส่ง", "ค่าจัดส่ง", "ค่าระวาง", "ค่าบรรทุก", "ค่าบริการจัดส่ง", "ค่าผ่านทาง", "freight", "shipping",
                            "delivery", "transport", "carriage")),
-    ("insurance", "ค่าประกันภัย", ("ค่าประกัน", "ค่าเบี้ยประกัน", "insurance")),
-    ("handling", "ค่าดำเนินการและขนถ่าย", ("ค่าดำเนินการ", "ค่ายกของ", "ค่าแรงยก", "ค่าขนถ่าย", "ค่าแพ็ค", "ค่าบรรจุ", "ค่าหีบห่อ", "ค่าพาเลท",
+    ("insurance", "unplanned.insurance", ("ค่าประกัน", "ค่าเบี้ยประกัน", "insurance")),
+    ("handling", "unplanned.handling", ("ค่าดำเนินการ", "ค่ายกของ", "ค่าแรงยก", "ค่าขนถ่าย", "ค่าแพ็ค", "ค่าบรรจุ", "ค่าหีบห่อ", "ค่าพาเลท",
                                          "ค่าพิธีการ", "ค่าเอกสาร", "handling", "packing", "pallet", "customs", "documentation")),
-    ("surcharge", "ค่าธรรมเนียมเพิ่ม", ("ค่าธรรมเนียม", "ค่าน้ำมัน", "ค่าเร่งด่วน", "surcharge", "expedite")),
+    ("surcharge", "unplanned.surcharge", ("ค่าธรรมเนียม", "ค่าน้ำมัน", "ค่าเร่งด่วน", "surcharge", "expedite")),
 )
 _BY_WORD = {}
 for _canon, _ways in UNITS.items():
@@ -102,6 +103,20 @@ def canonical(unit) -> str:
     spaces or dots), so two lines that both say "พาเลท" still agree."""
     k = key(unit)
     return _BY_WORD.get(k, k)
+
+
+# A unit's name on a screen. The names above are the ones the files are read by; on an English screen a unit
+# is said by the Latin way of writing it that is read back as the same unit (agent.json: unit.*). A unit
+# with no Latin way of writing, and one nobody listed, is said as it is.
+_SAID = {W.strings[f"unit.{c}"]: f"unit.{c}" for c in (
+    "pcs", "set", "box", "carton", "pack", "dozen", "ream", "sheet", "roll", "bottle", "can", "bag", "drum", "pair", "g", "kg",
+    "ton", "ml", "litre", "cm", "metre", "sqm", "job", "time", "trip", "hour", "day", "month", "year", "manday", "user")}
+
+
+def said(unit) -> str:
+    """The unit's own name in the language of the run ("PCS." is the canonical name in Thai, "pcs" in English)."""
+    c = canonical(unit)
+    return W(_SAID[c]) if c in _SAID else c
 
 
 def is_service_unit(unit) -> bool:
@@ -131,12 +146,12 @@ def factor(frm, to, item: str = "", conversions: list | None = None) -> tuple[De
 
 
 def unplanned_kind(description, words: tuple = UNPLANNED_WORDS) -> tuple[str, str] | None:
-    """(kind, its Thai name) when the line's words are those of a cost that is billed without being
+    """(kind, its name in the language of the run) when the line's words are those of a cost that is billed without being
     ordered; None otherwise. The install's own words count as a surcharge of their own name."""
     k = key(description)
     if not k or not any(w and w in k for w in words):
         return None
     for kind, label, ws in UNPLANNED_KIND:
         if any(w in k for w in ws):
-            return kind, label
-    return "other", "ค่าใช้จ่ายอื่นที่ไม่ได้สั่งซื้อ"
+            return kind, W(label)
+    return "other", W("unplanned.other")
