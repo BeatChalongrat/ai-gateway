@@ -19,6 +19,7 @@ CHUNKS=(
   '^(TestTheBankReconciliationTakesOneOrderAndALaterOneTakesItsPlace)$'
   '^(TestProcurementOrdersByPriceWhenAskedAndIsNeverTalkedIntoAVerdict)$'
   '^(TestWordsThatCameBackUnreadAreReadOnceMoreBeforeAPersonIsTold)$'
+  '^(TestARoundWhoseDataCannotLeaveIsNotMaskedAndOneThatCanIsMasked)$'
 )
 if [ "${1:-asked}" != "new" ]; then
   CHUNKS+=(

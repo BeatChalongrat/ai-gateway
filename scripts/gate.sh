@@ -33,7 +33,7 @@ cd "$ROOT"
 RESULTS="${GATE_RESULTS:-scripts/probes/gate/results}"
 MIN_FREE="${GATE_MIN_FREE_MB:-3000}"
 WAIT_S="${GATE_WAIT_S:-600}"
-BACKEND_TESTS="${GATE_BACKEND_TESTS:-tests/test_memory_guard_compose.py tests/test_am11b_instructions_echo.py tests/test_am12_prompt_echo.py tests/test_am1b_smoke_bulkhead.py tests/test_am1c_agent_market_pager.py tests/test_am7_admin_audit.py tests/test_am9_admin_accounts.py tests/test_am9_mail_connector.py}"
+BACKEND_TESTS="${GATE_BACKEND_TESTS:-tests/test_memory_guard_compose.py tests/test_am11b_instructions_echo.py tests/test_am12_prompt_echo.py tests/test_am1b_smoke_bulkhead.py tests/test_am1c_agent_market_pager.py tests/test_am7_admin_audit.py tests/test_am9_admin_accounts.py tests/test_am9_mail_connector.py tests/test_dlp_in_house.py tests/test_dlp_in_house_dispatcher.py}"
 LOCK="${GATE_LOCK:-${TMP:-/tmp}/sran-gate.lock}"
 mkdir -p "$RESULTS"
 
