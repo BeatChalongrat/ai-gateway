@@ -28,9 +28,28 @@ import urllib.request
 
 sys.stdout.reconfigure(encoding="utf-8")
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-KEY = io.open(os.path.join(ROOT, "scripts/probes/AM1/results/runner_key.test"), encoding="utf-8").read().strip()
-GATEWAY = os.environ.get("PROBE_GATEWAY", "http://localhost:18080")
-PG = os.environ.get("PROBE_PG", "sran-test-postgres-1")
+# PROBE_TARGET=live: the same legs asked of LIVE's gateway with live's own runner key (read from the env
+# file by name, never printed) — the made-up sentence is the only text sent, and the rows it leaves in the
+# request log are the proof. Nothing is switched: the masked direction is shown by leaving the header off.
+LIVE = os.environ.get("PROBE_TARGET", "test") == "live"
+SSL = None
+if LIVE:
+    import ssl
+
+    KEY = ""
+    with io.open(os.path.join(ROOT, ".env"), encoding="utf-8") as _f:
+        for _line in _f:
+            if _line.startswith("AGENT_RUNNER_GATEWAY_API_KEY="):
+                KEY = _line.split("=", 1)[1].strip().strip('"')
+    if not KEY:
+        sys.exit("the runner's gateway key is not set")
+    GATEWAY = os.environ.get("PROBE_GATEWAY", "https://localhost:8080")
+    PG = os.environ.get("PROBE_PG", "ai-gateway-postgres-1")
+    SSL = ssl.create_default_context(cafile=os.path.join(ROOT, "infra", "caddy", "certs", "rootCA.pem"))
+else:
+    KEY = io.open(os.path.join(ROOT, "scripts/probes/AM1/results/runner_key.test"), encoding="utf-8").read().strip()
+    GATEWAY = os.environ.get("PROBE_GATEWAY", "http://localhost:18080")
+    PG = os.environ.get("PROBE_PG", "sran-test-postgres-1")
 
 EMAIL = "somchai.probe@example.co.th"
 SENTENCE = (f"ส่งใบกำกับภาษีให้คุณสมชาย อีเมล {EMAIL} โทร 081-234-5678 "
@@ -66,7 +85,7 @@ def leg(header: str, model: str, system: str = SYSTEM, sentence: str = SENTENCE,
     req = urllib.request.Request(GATEWAY + "/v1/chat/completions", data=body, headers=headers)
     out = {"leg": f"{header}:{model}"}
     try:
-        with urllib.request.urlopen(req, timeout=240) as r:
+        with urllib.request.urlopen(req, timeout=240, context=SSL) as r:
             j = json.loads(r.read().decode("utf-8"))
             out["says"] = r.headers.get("X-Gateway-Masking") or "(no header)"
             out["provider"] = r.headers.get("X-Gateway-Provider") or j.get("provider")
