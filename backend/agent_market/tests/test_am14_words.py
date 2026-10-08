@@ -257,7 +257,7 @@ def said_to_a_person(res: dict) -> list:
         out += strings_of([[e[k] for k in ("reason", "detail", "proposed_action")] + [x["label"] for x in e["choices"]] for e in c["run_exceptions"]])
         out += strings_of([[e[k] for k in ("reason", "detail", "how")] for e in c["not_included"]])
         out += strings_of([c["fallback_narrative"], [a["text"] for a in c["assumptions"]], c["reason_codes"], c["names"], c["period_label"]])
-        out += [x["formula"] for x in c["citations"]]
+        out += [x[k] for x in c["citations"] for k in ("label", "formula")]
         out += strings_of([[t["label"] for t in c["match"]["tiers"]], [m["pass_label"] for m in c["match"]["groups"]["matched"]]])
         out += strings_of([res["summary"]["gate"], res["summary"]["tiers"], res["summary"]["not_included"]])
         out += strings_of([[k["label"], k["detail"]] for a in res["render"]["artifacts"] for k in a["quality"]["checks"]])
@@ -323,6 +323,20 @@ class ABankRunInEnglish(unittest.TestCase):
         self.assertEqual(card["header"], "Which side?")
         self.assertEqual([o["label"] for o in card["options"]], ["The bank's statement", "The company's ledger", "Do not use this file"])
         self.assertEqual(card["evidence"]["columns"], ["Date", "Description", "Debit", "Credit", "Balance"])
+
+    def test_a_figure_is_asked_about_by_its_english_name_and_by_the_papers_own(self):
+        # "where does the adjusted bank balance come from?" — and a person looking at the Thai paper may
+        # ask by the words it prints
+        en = {c["id"]: c for c in self.en["clean_kbank_layout"]["computed"]["citations"]}
+        th = {c["id"]: c for c in self.th["clean_kbank_layout"]["computed"]["citations"]}
+        self.assertEqual(en["a1"]["label"], "Adjusted bank balance (baht)")
+        self.assertEqual(en["b2"]["label"], "Balance per the company's ledger (baht)")
+        self.assertEqual(en["d1"]["aliases"][:2], ["difference", "differ by"])
+        for cid, c in th.items():
+            self.assertFalse([a for a in c["aliases"] if not THAI.search(a)], cid)          # a Thai run: as it was
+            self.assertEqual(en[cid]["aliases"][-len(c["aliases"]) - 1:], [c["label"]] + c["aliases"], cid)
+            where = lambda x: [(s["file"], s["sheet"], s["row"], s["value"]) for s in x["sources"]]   # noqa: E731
+            self.assertEqual((en[cid]["value"], where(en[cid])), (c["value"], where(c)), cid)
 
     def test_a_run_in_english_is_the_same_run(self):
         # the same questions by key, the same answers, the same figures and the same end

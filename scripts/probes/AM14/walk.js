@@ -57,21 +57,26 @@ async function setLanguage(x, to) {
 const squash = (s) => String(s || "").replace(/\s+/g, " ").trim();
 const thaiIn = (s) => (String(s).match(/[฀-๿][฀-๿\s]*/g) || []).map((t) => t.trim()).filter(Boolean);
 
-/** One install of each agent for this account: the newest it has, or a new one made from this (Thai) screen. */
+/**
+ * One install of each agent for this account, on the version the checkout's manifest has: the newest such
+ * install it has, or a new one made from this (Thai) screen — a second copy when the account's own are on
+ * an older version (a run is made by the version its install is on).
+ */
 async function installs(x, which = AGENTS) {
   const { page } = x;
   const out = {};
+  const versionOf = (id) => L.csql(`select d.version from agent_market.agent_installs i join agent_market.agent_definitions d on d.id = i.definition_id where i.id='${id}'`).trim();
   for (const a of which) {
-    let mine = ((await api(page, "/installs")).body?.installs || []).filter((i) => i.slug === a.slug && i.status !== "removed");
-    if (!mine.length) {
-      const made = await W.installFromMarket(x, a.th.card);
-      state.installs = [...new Set([...(state.installs || []), made.installId])];
+    const mine = ((await api(page, "/installs")).body?.installs || []).filter((i) => i.slug === a.slug && i.status !== "removed")
+      .sort((p, q) => String(q.created_at || "").localeCompare(String(p.created_at || "")));
+    let id = (mine.find((i) => versionOf(i.id) === a.version) || {}).id;
+    if (!id) {
+      id = mine.length ? await W.installAnother(x, a.slug, a.th.card) : (await W.installFromMarket(x, a.th.card)).installId;
+      state.installs = [...new Set([...(state.installs || []), id])];
       save();
-      mine = [{ id: made.installId }];
+      log(`${a.dir}: installed ${id} at ${versionOf(id)} (the account had ${mine.length} at an older version)`);
     }
-    mine.sort((p, q) => String(q.created_at || "").localeCompare(String(p.created_at || "")));
-    const id = mine[0].id;
-    out[a.slug] = { id, kept: L.csql(`select title from agent_market.agent_installs where id='${id}'`).trim() };
+    out[a.slug] = { id, version: versionOf(id), kept: L.csql(`select title from agent_market.agent_installs where id='${id}'`).trim() };
   }
   return out;
 }
@@ -346,8 +351,10 @@ async function run(which, lang = "en", filesDir = "") {
       doc.push(art.name, ...wordsOfFile(file));
     } catch (e) { log(`could not fetch ${art.name}: ${String(e.message).slice(0, 100)}`); }
   }
+  // (a chat's title in the sidebar is what its owner typed: the account's own words, of other chats than this run's)
+  const chatTitles = [...screen, ...runPage].filter((t) => /^NAV( @|$)/.test(t.where)).map((t) => t.text);
   const onScreen = sortThai([...cards.map((c) => ({ ...c, where: `thread (during) · ${c.where}` })), ...screen, ...runPage]
-    .filter((t, i, all) => all.findIndex((u) => u.where === t.where && u.text === t.text) === i), own, doc);
+    .filter((t, i, all) => all.findIndex((u) => u.where === t.where && u.text === t.text) === i), [...own, ...chatTitles], doc);
   const inSent = sortThai(sent, own, doc);
   const report = {
     at: new Date().toISOString(), target: TARGET, agent: which, lang, installId, runId, version: end.detail?.run?.definition_version,

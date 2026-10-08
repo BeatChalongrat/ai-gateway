@@ -115,6 +115,18 @@ def and_(parts) -> str:
     return (f" {word} " if _lang == "en" else f" {word}").join(parts)
 
 
+def names(make) -> tuple:
+    """A figure's name and the other names a question may ask about it by: ``make()`` gives (label, [names])
+    in the language being spoken. In a run that is not in the documents' language a person may still ask
+    by the words its document uses, so those are names of the figure too."""
+    label, others = make()
+    if _lang != DOCUMENT:
+        with speaking(DOCUMENT):
+            doc_label, doc_others = make()
+        others = list(others) + [doc_label] + list(doc_others)
+    return label, others
+
+
 def date(value) -> str:
     """A day as a sentence says it — “5 ก.ย. 2569”, “5 Sep 2026”; "" when there is none."""
     import datetime as _dt

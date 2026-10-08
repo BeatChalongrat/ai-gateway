@@ -470,16 +470,19 @@ def _citations(rv: Review, st: dict, items: list[dict]) -> list[dict]:
         how = {"row": W("cite.row"), "balance_column": W("cite.balance_column"),
                "movement": W("cite.movement"), "typed": W("cite.typed"), "zero": W("cite.zero")}.get(
             b.closing_from, W("cite.unknown"))
-        out.append(c(f"b{n}", f"ยอดคงเหลือตาม{SIDE_TH[side]} (บาท)", s["balance"], how,
+        label, names = words.names(lambda: (W("cite.balance.label", side=SIDE_TH[side]), [W("cite.balance.alias", side=SIDE_TH[side])]))
+        out.append(c(f"b{n}", label, s["balance"], how,
                      [part(cell.get("file"), cell.get("sheet"), cell.get("row"), s["balance"], cell.get("cell") or "")] if cell else [],
-                     [f"ยอดตาม{SIDE_TH[side]}"]))
+                     names))
         mine = [i for i in items if i["side"] == side]
-        out.append(c(f"a{n}", f"ยอดหลังปรับปรุงของ{'ธนาคาร' if side == 'bank' else 'บัญชี'} (บาท)", s["adjusted"],
+        label, names = words.names(lambda: (W(f"cite.adjusted.{side}.label"), [W("cite.adjusted.alias"), W(f"cite.correct.{side}")]))
+        out.append(c(f"a{n}", label, s["adjusted"],
                      W("cite.adjusted"),
                      [part(x["sources"][0].get("file"), x["sources"][0].get("sheet"), x["sources"][0].get("row"), x["effect"],
                            x["type_label"]) for x in mine],
-                     ["ยอดหลังปรับปรุง", f"ยอดที่ถูกต้องของ{'ธนาคาร' if side == 'bank' else 'บัญชี'}"]))
-    out.append(c("d1", "ผลต่าง (บาท)", st["difference"], W("cite.difference"), [], ["ผลต่าง", "ต่างกัน"]))
+                     names))
+    label, names = words.names(lambda: (W("cite.difference.label"), [W("cite.difference.alias"), W("cite.difference.alias2")]))
+    out.append(c("d1", label, st["difference"], W("cite.difference"), [], names))
     return out
 
 

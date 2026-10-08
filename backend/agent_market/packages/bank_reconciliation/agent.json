@@ -362,7 +362,17 @@
     "card.missing.question_unused": "ยังไม่มี{names} {extra} ผมต้องมีทั้งสองฝั่งก่อนจึงจะกระทบยอดได้",
     "card.missing.question": "ยังไม่มี{names} ผมต้องมีทั้งสองฝั่งก่อนจึงจะกระทบยอดได้",
     "card.account.question": "สมุดบัญชีที่ส่งมามีหลายบัญชี บัญชีใดคือบัญชีเงินฝากธนาคาร ที่จะกระทบยอด (ตั้งรหัสบัญชีไว้ในหน้าตั้งค่า agent ได้ จะไม่ต้องถามอีก)",
-    "card.account.question_number": "สมุดบัญชีที่ส่งมามีหลายบัญชี บัญชีใดคือบัญชีเงินฝากธนาคาร เลขที่ {number} ที่จะกระทบยอด (ตั้งรหัสบัญชีไว้ในหน้าตั้งค่า agent ได้ จะไม่ต้องถามอีก)"
+    "card.account.question_number": "สมุดบัญชีที่ส่งมามีหลายบัญชี บัญชีใดคือบัญชีเงินฝากธนาคาร เลขที่ {number} ที่จะกระทบยอด (ตั้งรหัสบัญชีไว้ในหน้าตั้งค่า agent ได้ จะไม่ต้องถามอีก)",
+    "cite.balance.label": "ยอดคงเหลือตาม{side} (บาท)",
+    "cite.balance.alias": "ยอดตาม{side}",
+    "cite.adjusted.alias": "ยอดหลังปรับปรุง",
+    "cite.difference.label": "ผลต่าง (บาท)",
+    "cite.difference.alias": "ผลต่าง",
+    "cite.difference.alias2": "ต่างกัน",
+    "cite.adjusted.bank.label": "ยอดหลังปรับปรุงของธนาคาร (บาท)",
+    "cite.adjusted.book.label": "ยอดหลังปรับปรุงของบัญชี (บาท)",
+    "cite.correct.bank": "ยอดที่ถูกต้องของธนาคาร",
+    "cite.correct.book": "ยอดที่ถูกต้องของบัญชี"
   },
   "en": {
     "เรียงรายการค้างจากยอดมาก · เรียงตามจำนวนเงิน · เอารายการยอดใหญ่ขึ้นก่อน": "order the outstanding items from the largest · order by amount · the big items first",
@@ -658,6 +668,16 @@
     "ยังไม่มี{names} {extra} ผมต้องมีทั้งสองฝั่งก่อนจึงจะกระทบยอดได้": "There is no {names} yet {extra}. I need both sides before I can reconcile.",
     "ยังไม่มี{names} ผมต้องมีทั้งสองฝั่งก่อนจึงจะกระทบยอดได้": "There is no {names} yet. I need both sides before I can reconcile.",
     "สมุดบัญชีที่ส่งมามีหลายบัญชี บัญชีใดคือบัญชีเงินฝากธนาคาร ที่จะกระทบยอด (ตั้งรหัสบัญชีไว้ในหน้าตั้งค่า agent ได้ จะไม่ต้องถามอีก)": "The ledger sent holds several accounts. Which one is the bank account to reconcile? (The account code can be set on the agent's settings page, and this will not be asked again.)",
-    "สมุดบัญชีที่ส่งมามีหลายบัญชี บัญชีใดคือบัญชีเงินฝากธนาคาร เลขที่ {number} ที่จะกระทบยอด (ตั้งรหัสบัญชีไว้ในหน้าตั้งค่า agent ได้ จะไม่ต้องถามอีก)": "The ledger sent holds several accounts. Which one is bank account number {number}, the one to reconcile? (The account code can be set on the agent's settings page, and this will not be asked again.)"
+    "สมุดบัญชีที่ส่งมามีหลายบัญชี บัญชีใดคือบัญชีเงินฝากธนาคาร เลขที่ {number} ที่จะกระทบยอด (ตั้งรหัสบัญชีไว้ในหน้าตั้งค่า agent ได้ จะไม่ต้องถามอีก)": "The ledger sent holds several accounts. Which one is bank account number {number}, the one to reconcile? (The account code can be set on the agent's settings page, and this will not be asked again.)",
+    "ยอดคงเหลือตาม{side} (บาท)": "Balance per {side} (baht)",
+    "ยอดตาม{side}": "balance per {side}",
+    "ยอดหลังปรับปรุง": "adjusted balance",
+    "ผลต่าง (บาท)": "Difference (baht)",
+    "ผลต่าง": "difference",
+    "ต่างกัน": "differ by",
+    "ยอดหลังปรับปรุงของธนาคาร (บาท)": "Adjusted bank balance (baht)",
+    "ยอดหลังปรับปรุงของบัญชี (บาท)": "Adjusted book balance (baht)",
+    "ยอดที่ถูกต้องของธนาคาร": "correct bank balance",
+    "ยอดที่ถูกต้องของบัญชี": "correct book balance"
   }
 }
