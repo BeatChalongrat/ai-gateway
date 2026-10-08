@@ -79,6 +79,27 @@ class EnvSafeTest(unittest.TestCase):
                 self.assert_no_secret(r, f"{verb} {wrong!r}")
                 self.assertNotIn(wrong, r.stderr)
 
+    def test_set_writes_only_a_setting_that_is_not_a_secret_and_leaves_every_other_line(self):
+        env = self.tmp / ".env"
+        before = env.read_bytes()
+        project = "7f45890e-f32e-4ec3-ba62-9fac4530a896"
+        r = self.run_it("set", "DLP_IN_HOUSE_PROJECTS", project)
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "DLP_IN_HOUSE_PROJECTS added"), r.stderr)
+        self.assertEqual(env.read_bytes(), before + f"DLP_IN_HOUSE_PROJECTS={project}".encode() + bytes([13, 10]))
+        self.assertEqual(self.run_it("get", "DLP_IN_HOUSE_PROJECTS").stdout.strip(), project)
+        r = self.run_it("set", "DLP_IN_HOUSE_PROJECTS", "a,b")
+        self.assertEqual(r.stdout.strip(), "DLP_IN_HOUSE_PROJECTS changed")
+        written = before + b"DLP_IN_HOUSE_PROJECTS=a,b" + bytes([13, 10])
+        self.assertEqual(env.read_bytes(), written)
+        self.assert_no_secret(r, "set")
+        # a secret is never written from a command line, and a value with a shell character is refused
+        for name, value, code in (("DLP_AUDIT_KEY", "00" * 32, 3), ("QA_PASSWORD", "x1y2z3-not-a-password", 3),
+                                  ("DLP_IN_HOUSE_PROJECTS", "a b", 2), ("DLP_IN_HOUSE_PROJECTS", "$(id)", 2)):
+            r = self.run_it("set", name, value)
+            self.assertEqual(r.returncode, code, (name, value))
+            self.assertNotIn(value, r.stdout + r.stderr)
+        self.assertEqual(env.read_bytes(), written)
+
     def test_with_no_verb_it_explains_itself_and_prints_nothing_of_the_file(self):
         r = self.run_it()
         self.assertEqual(r.returncode, 2)
