@@ -21,6 +21,7 @@ import tempfile
 import unittest
 from decimal import Decimal as D
 
+from agent_market.engine import words
 from agent_market.engine.findings import FORBIDDEN_WORDS, display_len
 from agent_market.packages import bank_reconciliation as pkg
 from agent_market.packages.bank_reconciliation.checks import classify as C
@@ -301,7 +302,11 @@ class StatementAsPdf(unittest.TestCase):
     def test_a_scan_is_not_read(self):
         u = I.parse(os.path.join(FIX, "statement_sep_scan.pdf"), "statement_sep_scan.pdf", {})
         self.assertEqual((u.kind, u.data["reason"]), ("other", "scanned_pdf"))
-        self.assertIn("ภาพสแกน", u.data["say"])
+        self.assertIn("ภาพสแกน", I.said(u))
+        # AM14: the parsed file keeps the key of the sentence, so a later step says it in the run's language
+        self.assertEqual(u.data["say"], "say.scanned_pdf")
+        with words.speaking("en"):
+            self.assertIn("a scan or a photo", I.said(u))
         _, res = result("pdf_that_is_a_scan_is_not_read_and_says_so")
         left = res["computed"]["not_included"]
         self.assertEqual([(e["name"], e["code"], e["can_restore"]) for e in left], [("statement_sep_scan.pdf", "scanned_pdf", False)])
@@ -466,7 +471,7 @@ class SelfTest(unittest.TestCase):
     def test_the_manifest(self):
         m = S.manifest("bank_reconciliation")
         self.assertEqual((m["id"], m["python_package"], m["narrative"]), ("sran.bank-reconciliation", "bank_reconciliation", "rules"))
-        self.assertEqual((m["version"], m["scope"], m["jurisdiction"]), ("1.6.0", "generic", "TH"))
+        self.assertEqual((m["version"], m["scope"], m["jurisdiction"]), ("1.7.0", "generic", "TH"))
         self.assertIn(".pdf", next(i for i in m["inputs"] if i["role"] == "bank")["accept"])
         self.assertTrue(m["completion_gate"])
         self.assertTrue(m["record_who_answered"])

@@ -23,14 +23,16 @@ from decimal import Decimal
 
 from ....engine import e3
 from ....engine import thai as TH
+from ....engine import words
 from ....engine.e3 import cards as E3C
 from ....engine.e3.match import SETTING_TH, Tolerance, tolerance_from
 from ....engine.e3.rows import Row
+from ..words import W
 from . import classify as C
 from .inputs import Upload
 
 ZERO = Decimal("0.00")
-NAMES = {"left": "สมุดบัญชี", "right": "รายการเดินบัญชี"}
+NAMES = W.table({"left": "names.left", "right": "names.right"})
 # the install's settings are flat, one value each, so that the settings page can show and edit them:
 # match_<the engine's setting>, and the account the statement is headed with
 MATCH_PREFIX = "match_"
@@ -45,7 +47,7 @@ def matching_settings(defaults: dict) -> dict:
 
 def account_settings(defaults: dict) -> dict:
     return {k: " ".join(str(defaults.get(key) or "").split()) for k, key in ACCOUNT_KEYS.items()}
-SIDE_TH = {"bank": "รายการเดินบัญชีของธนาคาร", "book": "สมุดบัญชีของบริษัท"}
+SIDE_TH = W.table({"bank": "side.bank", "book": "side.book"})
 CUTOFF_PASSES = ("ref_amount_date", "ref_amount", "date_amount")
 
 
@@ -438,46 +440,44 @@ def line_of(rv: Review, rid: str) -> Line:
 def _assumptions(rv: Review) -> list[dict]:
     out = []
     for u, why in rv.others:
-        say = {"same_file": "เป็นไฟล์เดียวกับไฟล์ที่ส่งมาแล้ว (ไบต์ตรงกันทุกตัว) นับครั้งเดียว",
-               "set_aside": "คุณตอบว่าไม่ใช้ไฟล์นี้ในรอบนี้",
-               "unrecognised_sheet": "ไม่พบหัวคอลัมน์ของรายการเดินบัญชีหรือสมุดบัญชี",
-               "unsupported_type": "อ่านได้เฉพาะไฟล์ Excel CSV หรือ PDF ที่ธนาคารออกให้", "unreadable": "เปิดไฟล์ไม่ได้",
-               "scanned_pdf": "PDF เป็นภาพสแกนหรือรูปถ่าย ไม่มีตัวอักษรให้อ่าน"}.get(why, "ไม่ได้ใช้")
-        out.append({"code": "file_not_used", "source": "rule", "text": f"ไม่ได้ใช้ไฟล์ {u.name}: {say}"})
+        say = {"same_file": W("unused.same_file"),
+               "set_aside": W("unused.set_aside"),
+               "unrecognised_sheet": W("unused.unrecognised_sheet"),
+               "unsupported_type": W("unused.unsupported_type"), "unreadable": W("unused.unreadable"),
+               "scanned_pdf": W("unused.scanned_pdf")}.get(why, W("used.none"))
+        out.append({"code": "file_not_used", "source": "rule", "text": W("assume.file_not_used", name=u.name, say=say)})
     for k in rv.unusable_settings:
         out.append({"code": "setting_not_usable", "source": "rule", "changes_numbers": True,
-                    "text": f"ค่าที่ตั้งไว้สำหรับ “{SETTING_TH[k]}” ใช้ไม่ได้ จึงใช้ค่าตั้งต้นของ agent"})
+                    "text": W("assume.setting", setting=SETTING_TH[k])})
     if not rv.ready:
         return out
-    label = TH.period_label_th(rv.period)
-    src = {"message": "ตามที่คุณระบุ", "statement": "เป็นเดือนที่รายการเดินบัญชีมีรายการมากที่สุด"}.get(rv.period_source, "")
+    label = words.period(rv.period)
+    src = {"message": W("assume.period.message"), "statement": W("assume.period.statement")}.get(rv.period_source, "")
     out.append({"code": "period", "source": "rule" if rv.period_source != "message" else "answer",
-                "text": f"กระทบยอดงวด {label} ({src}) ตัดยอด ณ วันที่ {E3C.date_th(rv.end)}"})
+                "text": W("assume.period", label=label, src=src, end=E3C.date_th(rv.end))})
     if rv.gl_code and rv.gl_from in ("name", "settings", "answer"):
-        how = {"name": "เป็นบัญชีเดียวในไฟล์ที่ชื่อบอกว่าเป็นบัญชีธนาคาร", "settings": "ตามที่ตั้งไว้ใน agent",
-               "answer": "ตามที่คุณตอบ"}[rv.gl_from]
+        how = {"name": W("assume.gl.name"), "settings": W("assume.gl.settings"),
+               "answer": W("assume.gl.answer")}[rv.gl_from]
         out.append({"code": "gl_account", "source": "rule" if rv.gl_from == "name" else "answer",
-                    "text": f"ใช้รายการของบัญชี {rv.gl_code} จากสมุดบัญชี ({how})", "changes_numbers": True})
+                    "text": W("assume.gl", gl_code=rv.gl_code, how=how), "changes_numbers": True})
     t = rv.tolerance
     out.append({"code": "tolerance", "source": "rule",
-                "text": f"จับคู่เองเฉพาะรายการที่ตรงกันทุกตัว · รายการที่ยอดต่างกันไม่เกิน {TH.fmt_money(t.amount)} บาท "
-                        f"และวันที่ห่างกันไม่เกิน {t.days} วัน เสนอให้คนยืนยัน · ถามเมื่อรายการที่ไม่มีคู่มียอดตั้งแต่ "
-                        f"{TH.fmt_money(t.ask_above)} บาท"})
+                "text": W("assume.tolerance", amount=TH.fmt_money(t.amount), days=t.days, ask_above=TH.fmt_money(t.ask_above))})
     if rv.outside:
         out.append({"code": "cut_off", "source": "rule",
-                    "text": f"มี {len(rv.outside)} รายการที่ลงวันที่นอกงวด {label} ไม่นำมาจับคู่ และแสดงไว้ในชีตรายการข้ามงวด"})
+                    "text": W("assume.cut_off", n=len(rv.outside), label=label)})
     if rv.unread:
         out.append({"code": "rows_without_date", "source": "rule", "changes_numbers": True,
-                    "text": f"มี {len(rv.unread)} แถวที่มีจำนวนเงินแต่อ่านวันที่ไม่ได้ ไม่ได้นำมาใช้ และแสดงไว้ในชีตข้อยกเว้น"})
+                    "text": W("assume.unread", n=len(rv.unread))})
     for side in ("bank", "book"):
         b = rv.balances[side]
         if b.closing_from == "movement":
             out.append({"code": f"{side}_closing_from_movement", "source": "rule", "changes_numbers": True,
-                        "text": f"{SIDE_TH[side]}ไม่มีคอลัมน์ยอดคงเหลือ ยอดสิ้นงวดคำนวณจากยอดยกมาบวกรายการของงวด"})
+                        "text": W("assume.closing_movement", side=SIDE_TH[side])})
         if b.closing_from == "typed":
             out.append({"code": f"{side}_closing_typed", "source": "answer", "changes_numbers": True,
-                        "text": f"ยอดคงเหลือสิ้นงวดตาม{SIDE_TH[side]} {TH.fmt_money(b.closing)} บาท เป็นค่าที่คุณพิมพ์"})
+                        "text": W("assume.closing_typed", side=SIDE_TH[side], closing=TH.fmt_money(b.closing))})
     if not rv.carried_files and rv.answers.get("bankrec_carried") == "proceed_without":
         out.append({"code": "no_carried_items", "source": "answer", "changes_numbers": True,
-                    "text": "ไม่มีรายการค้างยกมาจากเดือนก่อน ผลต่างของยอดยกมาจึงยังไม่มีคำอธิบาย"})
+                    "text": W("assume.no_carried")})
     return out

@@ -150,10 +150,11 @@ def _fill_template(pkg, computed: dict, t: dict, req: dict | None = None) -> dic
 
 
 def run(req: dict) -> dict:
-    from . import dataset
+    from . import dataset, words
 
     op = req.get("op")
     t0 = time.monotonic()
+    words.use(req.get("lang"))  # AM14: the run's language, for every sentence this step says
     if op == "stamp_review":
         # AM3: a reviewer's sign-off on the face of a run's files — a platform op
         # (no package): the runner runs it with its current engine.

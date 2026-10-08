@@ -83,12 +83,14 @@ class Guide(unittest.TestCase):
             for text in _strings(manifest(pkg)):
                 if "เดบิต" in text or "debit" in text.lower() or "บัตรเครดิต" in text or "credit card" in text.lower() or "credit note" in text.lower():
                     continue
+                if text.strip().lower() in ("เครดิต", "credit"):
+                    continue   # AM14: a column's heading on its own (beside "เดบิต"/"Debit") is the accounting word too
                 self.assertIsNone(_re.search("เครดิต|(^|[^a-z])credits?([^a-z]|$)", text, _re.I), f"{pkg}: {text[:120]}")
 
     def test_versions_were_bumped_with_the_guide(self):
         self.assertEqual({p: manifest(p)["version"] for p in PACKAGES},
                          {"financial_report": "1.8.0", "invoice_processing": "1.8.0", "expense_audit": "1.7.0",
-                          "bank_reconciliation": "1.6.0", "po_matching": "1.5.0", "procurement": "1.1.0"})
+                          "bank_reconciliation": "1.7.0", "po_matching": "1.5.0", "procurement": "1.1.0"})
 
     def test_every_package_says_whom_it_is_for_and_whose_law_it_follows(self):
         # AM6 "generic by default": scope and jurisdiction are the manifest's, never assumed

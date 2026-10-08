@@ -19,31 +19,33 @@ import re
 from decimal import Decimal
 
 from ....engine.e2 import thai_text as T
+from ..words import W
 
 ZERO = Decimal("0.00")
 STALE_DAYS = 180       # a Thai cheque is stale six months after its date
 BANK_SIDE, BOOK_SIDE = "bank", "book"
 
+# every type, the key of its name (agent.json) and the balance it adjusts
 TYPES = {
     # adjust the bank's balance
-    "outstanding_cheque": ("เช็คค้างจ่าย", BANK_SIDE),
-    "outstanding_payment": ("รายการจ่ายที่ธนาคารยังไม่ตัดบัญชี", BANK_SIDE),
-    "deposit_in_transit": ("เงินฝากระหว่างทาง", BANK_SIDE),
-    "bank_error": ("ธนาคารบันทึกคลาดเคลื่อน", BANK_SIDE),
+    "outstanding_cheque": ("type.outstanding_cheque", BANK_SIDE),
+    "outstanding_payment": ("type.outstanding_payment", BANK_SIDE),
+    "deposit_in_transit": ("type.deposit_in_transit", BANK_SIDE),
+    "bank_error": ("type.bank_error", BANK_SIDE),
     # adjust the book balance
-    "bank_fee": ("ค่าธรรมเนียมธนาคาร", BOOK_SIDE),
-    "interest": ("ดอกเบี้ยรับ", BOOK_SIDE),
-    "wht_interest": ("ภาษีหัก ณ ที่จ่ายของดอกเบี้ย", BOOK_SIDE),
-    "returned_cheque": ("เช็คคืน", BOOK_SIDE),
-    "direct_debit": ("หักบัญชีอัตโนมัติ", BOOK_SIDE),
-    "unrecorded_receipt": ("เงินเข้าที่ยังไม่ได้บันทึกบัญชี", BOOK_SIDE),
-    "unrecorded_payment": ("เงินออกที่ยังไม่ได้บันทึกบัญชี", BOOK_SIDE),
-    "posting_error": ("บันทึกบัญชีคลาดเคลื่อน", BOOK_SIDE),
-    "book_error": ("บันทึกบัญชีผิด ต้องกลับรายการ", BOOK_SIDE),
+    "bank_fee": ("type.bank_fee", BOOK_SIDE),
+    "interest": ("type.interest", BOOK_SIDE),
+    "wht_interest": ("type.wht_interest", BOOK_SIDE),
+    "returned_cheque": ("type.returned_cheque", BOOK_SIDE),
+    "direct_debit": ("type.direct_debit", BOOK_SIDE),
+    "unrecorded_receipt": ("type.unrecorded_receipt", BOOK_SIDE),
+    "unrecorded_payment": ("type.unrecorded_payment", BOOK_SIDE),
+    "posting_error": ("type.posting_error", BOOK_SIDE),
+    "book_error": ("type.book_error", BOOK_SIDE),
     # not yet either: a person has to say
-    "unclassified": ("ยังไม่ได้จัดประเภท", None),
+    "unclassified": ("type.unclassified", None),
 }
-TYPE_TH = {k: v[0] for k, v in TYPES.items()}
+TYPE_TH = W.table({k: v[0] for k, v in TYPES.items()})   # said in the language of the run, when read
 SIDE_OF = {k: v[1] for k, v in TYPES.items()}
 
 # (type, the sign the statement shows it with, words) — the first that fits; the tax before the interest it is charged on
@@ -132,4 +134,4 @@ def bucket(days: int) -> str:
     return "61+"
 
 
-BUCKET_TH = {"0-30": "ไม่เกิน 30 วัน", "31-60": "31–60 วัน", "61+": "เกิน 60 วัน"}
+BUCKET_TH = W.table({"0-30": "bucket.0_30", "31-60": "bucket.31_60", "61+": "bucket.61"})

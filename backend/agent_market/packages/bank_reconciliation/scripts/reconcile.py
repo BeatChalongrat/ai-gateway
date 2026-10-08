@@ -36,10 +36,13 @@ import datetime as _dt
 from decimal import Decimal
 
 from ....engine import thai as TH
+from ....engine import words
 from ....engine.e3 import cards as E3C
 from ..checks import classify as C
 from ..checks.cards import as_written
+from ..checks.inputs import said
 from ..checks.review import NAMES, SIDE_TH, ZERO, Review, account_settings, line_of, review
+from ..words import W
 
 SCHEMA = "bank.reconciliation.v1"
 SCRIPT = "packages/bank_reconciliation/scripts/reconcile.py"
@@ -50,23 +53,25 @@ ACCOUNTS = {
     "unrecorded_receipt": "บัญชีพักรอตรวจสอบ", "unrecorded_payment": "บัญชีพักรอตรวจสอบ",
     "posting_error": "บัญชีคู่ของรายการที่บันทึกคลาดเคลื่อน (ระบุบัญชี)", "book_error": "บัญชีคู่ของรายการที่บันทึกผิด (ระบุบัญชี)",
 }
-REASON_TH = {
-    "match_unconfirmed": "คู่ที่เสนอยังไม่มีคนยืนยัน", "possible_duplicate": "อาจบันทึกซ้ำ", "unclassified_item": "รายการที่ยังไม่ได้จัดประเภท",
-    "cut_off": "บันทึกข้ามงวด", "stale_cheque": "เช็คค้างนานเกิน 6 เดือน", "aged_item": "รายการค้างนานเกิน 60 วัน",
-    "statement_gap": "ยอดคงเหลือในรายการเดินบัญชีไม่ต่อเนื่อง", "row_without_date": "แถวที่อ่านวันที่ไม่ได้",
-    "posting_error": "บันทึกบัญชีคลาดเคลื่อน", "bank_error": "ธนาคารบันทึกคลาดเคลื่อน", "unusual_wht_rate": "อัตราภาษีหัก ณ ที่จ่ายไม่ใช่อัตราปกติ",
-    "opening_unexplained": "ยอดยกมาต้นงวดยังไม่มีคำอธิบาย", "balance_unknown": "ไม่ทราบยอดคงเหลือ",
-}
+# why a person is shown an exception, and what they may answer: keys of the manifest's sentences, each said in
+# the language of the run when it is read (engine/words.py)
+REASON_TH = W.table({
+    "match_unconfirmed": "reason.match_unconfirmed", "possible_duplicate": "reason.possible_duplicate",
+    "unclassified_item": "reason.unclassified_item", "cut_off": "reason.cut_off", "stale_cheque": "reason.stale_cheque",
+    "aged_item": "reason.aged_item", "statement_gap": "reason.statement_gap", "row_without_date": "reason.row_without_date",
+    "posting_error": "type.posting_error", "bank_error": "type.bank_error", "unusual_wht_rate": "reason.unusual_wht_rate",
+    "opening_unexplained": "reason.opening_unexplained", "balance_unknown": "reason.balance_unknown",
+})
 CHOICES = {
-    "match_unconfirmed": [("เป็นรายการเดียวกัน", "match"), ("คนละรายการ", "separate")],
-    "possible_duplicate": [("บันทึกซ้ำ ต้องกลับรายการ", "duplicate"), ("ไม่ซ้ำ เป็นคนละรายการ", "distinct")],
-    "unclassified_item": [("เป็นรายการกระทบยอด", "accept"), ("ต้องแก้ไขก่อน", "fix")],
-    "cut_off": [("บันทึกถูกงวดแล้ว", "accept"), ("ต้องปรับให้อยู่ในงวดนี้", "adjust")],
-    "stale_cheque": [("ยกเลิกเช็คและกลับรายการ", "cancel"), ("ออกเช็คใหม่ให้ผู้รับ", "reissue"), ("ยังคงค้างไว้", "keep")],
-    "statement_gap": [("ขอรายการเดินบัญชีฉบับเต็มจากธนาคาร", "ask_bank"), ("ตรวจแล้ว ใช้ได้", "accept")],
-    "row_without_date": [("แก้วันที่ในไฟล์แล้วส่งใหม่", "fix"), ("ไม่ใช่รายการ ข้ามได้", "ignore")],
-    "opening_unexplained": [("จะส่งรายการค้างยกมา", "send"), ("ตรวจยอดยกมาแล้ว", "accept")],
-    "balance_unknown": [("จะส่งไฟล์ที่มียอดคงเหลือ", "send")],
+    "match_unconfirmed": [("choice.same", "match"), ("choice.separate", "separate")],
+    "possible_duplicate": [("choice.duplicate", "duplicate"), ("choice.distinct", "distinct")],
+    "unclassified_item": [("choice.accept_item", "accept"), ("choice.fix_first", "fix")],
+    "cut_off": [("choice.right_period", "accept"), ("choice.adjust_period", "adjust")],
+    "stale_cheque": [("choice.cancel_cheque", "cancel"), ("choice.reissue", "reissue"), ("choice.keep", "keep")],
+    "statement_gap": [("choice.ask_bank", "ask_bank"), ("choice.checked", "accept")],
+    "row_without_date": [("do.fix_date", "fix"), ("choice.not_an_item", "ignore")],
+    "opening_unexplained": [("choice.send_carried", "send"), ("choice.opening_checked", "accept")],
+    "balance_unknown": [("choice.send_balance", "send")],
 }
 
 
@@ -107,7 +112,7 @@ def items_of(rv: Review) -> list[dict]:
             out.append(_item(n(), C.BANK_SIDE, kind, ln, ln.amount, by="person", key=key, end=rv.end))
         elif a is not None or abs(ln.amount) >= ask:
             out.append(_item(n(), None, "unclassified", ln, None, by="person" if a is not None else "rule", key=key, end=rv.end,
-                             note=f"น่าจะเป็น{C.TYPE_TH[kind]} แต่ยังไม่มีคนยืนยัน"))
+                             note=W("note.probably", type=C.TYPE_TH[kind])))
         else:
             out.append(_item(n(), C.BANK_SIDE, kind, ln, ln.amount, end=rv.end))
     extra = [line_of(rv, r["id"]) for r in g["extra"]]          # the statement has it, the ledger does not
@@ -127,7 +132,7 @@ def items_of(rv: Review) -> list[dict]:
             out.append(_item(n(), C.BOOK_SIDE, kind, ln, ln.amount, by="person", key=key, end=rv.end))
         elif a is not None or abs(ln.amount) >= ask:
             out.append(_item(n(), None, "unclassified", ln, None, by="person" if a is not None else "rule", key=key, end=rv.end,
-                             note=f"น่าจะเป็น{C.TYPE_TH[kind]} แต่ยังไม่มีคนยืนยัน"))
+                             note=W("note.probably", type=C.TYPE_TH[kind])))
         else:
             out.append(_item(n(), C.BOOK_SIDE, kind, ln, ln.amount, end=rv.end))
     for m in g["matched"]:                                     # a confirmed pair whose amounts differ
@@ -137,7 +142,7 @@ def items_of(rv: Review) -> list[dict]:
         first = line_of(rv, m["right"][0]["id"])
         it = _item(n(), C.BOOK_SIDE, "posting_error", first, diff, by=m["confirmed"], key=m["decision_key"], end=rv.end,
                    sources=[{k: r[k] for k in ("file", "sheet", "row", "cells")} for r in m["left"] + m["right"]],
-                   note=f"ธนาคาร {TH.fmt_money(Decimal(m['right_total']))} บาท · สมุดบัญชี {TH.fmt_money(Decimal(m['left_total']))} บาท")
+                   note=W("note.both_amounts", right_total=TH.fmt_money(Decimal(m["right_total"])), left_total=TH.fmt_money(Decimal(m["left_total"]))))
         it.update(amount=f2(diff), pair=m["pair"])
         out.append(it)
     return out
@@ -176,38 +181,38 @@ def gate_of(rv: Review, st: dict, items: list[dict]) -> dict:
     """Whether the reconciliation ties — and when it does not, how far off, why as far as the files
     show, and what to do next."""
     if st["tied"]:
-        return {"passed": True, "code": "tied", "difference": "0.00", "what": "ลงตัว ยอดหลังปรับปรุงของธนาคารและของบัญชีเท่ากัน",
+        return {"passed": True, "code": "tied", "difference": "0.00", "what": W("gate.tied"),
                 "next": "", "reasons": []}
     reasons, nexts = [], []
     g = rv.match["groups"]
     for side in ("bank", "book"):
         if rv.balances[side].closing is None:
-            reasons.append(f"ไม่ทราบยอดคงเหลือสิ้นงวดตาม{SIDE_TH[side]}")
-            nexts.append(f"ส่ง{SIDE_TH[side]}ที่มียอดคงเหลือหรือยอดยกมา หรือพิมพ์ยอดคงเหลือเมื่อ agent ถาม")
+            reasons.append(W("gate.no_closing", side=SIDE_TH[side]))
+            nexts.append(W("gate.no_closing.next", side=SIDE_TH[side]))
     loose = [i for i in items if i["type"] == "unclassified"]
     if loose:
         total = sum((abs(Decimal(i["amount"])) for i in loose), ZERO)
-        reasons.append(f"มี {len(loose)} รายการที่ไม่มีคู่และยังไม่มีคนบอกว่าเป็นอะไร รวม {TH.fmt_money(total)} บาท")
-        nexts.append("ดูชีต “รายการกระทบยอด” ส่วนที่ยังไม่ได้จัดประเภท แล้วเริ่มรอบใหม่และตอบคำถามของรายการเหล่านั้น")
+        reasons.append(W("gate.loose", n=len(loose), total=TH.fmt_money(total)))
+        nexts.append(W("gate.loose.next"))
     dup = [s for s in g["suspect"] if s["kind"] == "possible_duplicate"]
     if dup:
-        reasons.append(f"มี {len(dup)} รายการที่อาจบันทึกซ้ำ")
-        nexts.append("ตรวจรายการที่อาจบันทึกซ้ำในชีต “ข้อยกเว้น” ถ้าซ้ำจริงให้กลับรายการในสมุดบัญชี แล้วส่งไฟล์ใหม่")
+        reasons.append(W("gate.dup", n=len(dup)))
+        nexts.append(W("gate.dup.next"))
     gap = opening_gap(rv)
     if gap is not None and gap != ZERO:
-        reasons.append(f"ยอดยกมาต้นงวดของสองฝั่งต่างกัน {TH.fmt_money(abs(gap))} บาท หลังหักรายการค้างยกมาที่ส่งมาแล้ว")
-        nexts.append("ส่งรายการค้างยกมาจากเดือนก่อน (ชีต “รายการค้างยกไป” ของงบกระทบยอดเดือนก่อน) มาพร้อมกับไฟล์ทั้งสอง")
+        reasons.append(W("gate.opening", gap=TH.fmt_money(abs(gap))))
+        nexts.append(W("gate.opening.next"))
     if rv.balances["bank"].gaps:
-        reasons.append(f"ยอดคงเหลือในรายการเดินบัญชีไม่ต่อเนื่อง {len(rv.balances['bank'].gaps)} จุด อาจมีรายการขาดหาย")
-        nexts.append("ขอรายการเดินบัญชีฉบับเต็มของงวดนี้จากธนาคาร")
+        reasons.append(W("gate.gaps", n=len(rv.balances["bank"].gaps)))
+        nexts.append(W("gate.gaps.next"))
     if rv.unread:
-        reasons.append(f"มี {len(rv.unread)} แถวที่มีจำนวนเงินแต่อ่านวันที่ไม่ได้ จึงไม่ได้นำมาใช้")
-        nexts.append("แก้วันที่ของแถวเหล่านั้นในไฟล์ แล้วส่งใหม่")
+        reasons.append(W("gate.unread", n=len(rv.unread)))
+        nexts.append(W("gate.unread.next"))
     if not reasons:
-        reasons.append("ไฟล์ที่ส่งมาไม่ได้บอกสาเหตุ: ตรวจว่ารายการเดินบัญชีและสมุดบัญชีเป็นของบัญชีเดียวกันและงวดเดียวกัน")
-        nexts.append("ตรวจยอดยกมาและยอดคงเหลือของทั้งสองไฟล์ แล้วส่งไฟล์ของงวดเดียวกันมาใหม่")
+        reasons.append(W("gate.unknown"))
+        nexts.append(W("gate.unknown.next"))
     diff = st["difference"]
-    what = "ยังไม่ลงตัว" + (f" ต่างกัน {TH.fmt_money(abs(Decimal(diff)))} บาท" if diff is not None else ": " + reasons[0])
+    what = W("gate.not_tied.by", diff=TH.fmt_money(abs(Decimal(diff)))) if diff is not None else W("gate.not_tied.why", reason=reasons[0])
     return {"passed": False, "code": "not_tied", "difference": diff, "what": what, "reasons": reasons,
             "next": nexts[0], "next_steps": nexts}
 
@@ -250,9 +255,9 @@ def journal_of(rv: Review, items: list[dict]) -> list[dict]:
             if withheld > ZERO:
                 parts.append((ACCOUNTS["wht_interest"], withheld, ""))
                 rate = (withheld * 100 / amount).quantize(Decimal("0.01"))
-                note = f"ภาษีหัก ณ ที่จ่าย {TH.fmt_money(rate)}% ของดอกเบี้ย — เก็บหนังสือรับรองการหักภาษีจากธนาคาร"
+                note = W("journal.wht_note", rate=TH.fmt_money(rate))
                 if not any(abs(rate - r) <= Decimal("0.05") for r in C.WHT_RATES):
-                    note += " (อัตรานี้ไม่ใช่ 1% หรือ 15% ตรวจกับธนาคาร)"
+                    note += " " + W("journal.wht_unusual")
             parts.append((ACCOUNTS["interest"], -amount, ""))
             used.update([i["id"]] + [t["id"] for t in tax])
             entry(i["date"], "บันทึกดอกเบี้ยรับจากธนาคาร" + (" และภาษีที่ถูกหัก" if withheld > ZERO else ""), parts,
@@ -282,9 +287,9 @@ def _exceptions(rv: Review, items: list[dict], st: dict, journal: list[dict]) ->
         source = dict(source, sheet_name=" · ".join(str(x) for x in (first.get("file"), first.get("sheet")) if x),
                       row=first.get("row"), cell=cells.get("amount") or cells.get("in") or cells.get("out") or cells.get("debit")
                       or cells.get("credit") or cells.get("balance") or first.get("cell"))
-        out.append({"reason_code": code, "reason": REASON_TH[code], "severity": severity, "subject": subject,
+        out.append({"reason_code": code, "reason": words.cap(REASON_TH[code]), "severity": severity, "subject": subject,
                     "source_ref": source, "detail": detail, "proposed_action": action,
-                    "choices": [{"label": l, "value": v} for l, v in CHOICES.get(code, [])] if severity == "review" else []})
+                    "choices": [{"label": W(l), "value": v} for l, v in CHOICES.get(code, [])] if severity == "review" else []})
 
     def where(rows):
         return {"rows": [{k: r.get(k) for k in ("file", "sheet", "row", "cells", "date", "amount", "ref")} for r in rows]}
@@ -295,57 +300,54 @@ def _exceptions(rv: Review, items: list[dict], st: dict, journal: list[dict]) ->
         if s["kind"] == "possible_duplicate":
             r = rows[0]
             add("possible_duplicate", "review", s["pair"], where(rows),
-                f"{NAMES[r['side']]}: {E3C.line(r)} มีเลขอ้างอิงและยอดเดียวกับรายการที่จับคู่ไปแล้ว",
-                "ตรวจว่าบันทึกซ้ำหรือไม่ ถ้าซ้ำให้กลับรายการ")
+                W("ex.duplicate", side=NAMES[r["side"]], row=E3C.line(r)),
+                W("ex.duplicate.do"))
         else:
             add("match_unconfirmed", "review", s["pair"], where(rows),
-                f"สมุดบัญชี {len(s['left'])} รายการ รวม {TH.fmt_money(abs(Decimal(s['left_total'])))} บาท กับรายการเดินบัญชี "
-                f"{len(s['right'])} รายการ รวม {TH.fmt_money(abs(Decimal(s['right_total'])))} บาท ({s['pass_label']})",
-                "ยืนยันว่าเป็นรายการเดียวกันหรือไม่ ทั้งสองฝั่งยังไม่ถูกนับเป็นรายการกระทบยอด")
+                W("ex.unconfirmed", n=len(s["left"]), left_total=TH.fmt_money(abs(Decimal(s["left_total"]))), n2=len(s["right"]), right_total=TH.fmt_money(abs(Decimal(s["right_total"]))), pass_label=s["pass_label"]),
+                W("ex.unconfirmed.do"))
     for i in items:
         src = {"rows": [dict(s, date=i["date"], amount=i["amount"], ref=i["ref"]) for s in i["sources"]]}
-        line = f"{E3C.date_th(i['date'])} “{E3C.safe(i['description'])[:60]}” {TH.fmt_money(abs(Decimal(i['amount'])))} บาท"
+        line = W("ex.line", date=E3C.date_th(i["date"]), what=E3C.safe(i["description"])[:60], amount=TH.fmt_money(abs(Decimal(i["amount"]))))
         if i["type"] == "unclassified":
             add("unclassified_item", "review", i["row_id"], src, f"{line} · {i['note']}",
-                "บอกว่ารายการนี้คืออะไร งบกระทบยอดจะยังไม่ลงตัวจนกว่าจะจัดประเภท")
+                W("ex.unclassified.do"))
         elif i["type"] == "outstanding_cheque" and i["age_days"] > C.STALE_DAYS:
-            add("stale_cheque", "review", i["row_id"], src, f"{line} ค้างมา {i['age_days']} วัน เช็คมีอายุ 6 เดือน",
-                "ยกเลิกเช็คและกลับรายการ หรือออกเช็คใหม่ให้ผู้รับ")
+            add("stale_cheque", "review", i["row_id"], src, W("ex.stale", line=line, age_days=i["age_days"]),
+                W("ex.stale.do"))
         elif i["type"] in OUTSTANDING and i["age_days"] > 60:
-            add("aged_item", "info", i["row_id"], src, f"{line} ค้างมา {i['age_days']} วัน", "ติดตามกับผู้รับเงินหรือธนาคาร")
+            add("aged_item", "info", i["row_id"], src, W("ex.aged", line=line, age_days=i["age_days"]), W("ex.aged.do"))
         elif i["type"] == "posting_error":
             add("posting_error", "info", i.get("pair") or i["row_id"], src, f"{line} · {i['note']}",
-                "ตรวจร่างรายการปรับปรุงก่อนบันทึก")
+                W("ex.posting.do"))
         elif i["type"] == "bank_error":
-            add("bank_error", "info", i["row_id"], src, line, "แจ้งธนาคารให้แก้รายการ")
+            add("bank_error", "info", i["row_id"], src, line, W("ex.bank_error.do"))
     for p in rv.cutoff_pairs:
         rows = p["left"] + p["right"]
         outside = [r for r in rows if not (rv.start.isoformat() <= (r["date"] or "") <= rv.end.isoformat())]
         o = outside[0] if outside else rows[0]
         add("cut_off", "review", "~".join(r["id"] for r in rows), where(rows),
-            f"{NAMES[o['side']]}: {E3C.line(o)} ลงวันที่นอกงวด แต่ตรงกับรายการของอีกฝั่งที่อยู่ในงวดนี้",
-            "ตรวจว่าควรบันทึกในงวดใด รายการในงวดนี้ยังนับเป็นรายการกระทบยอด")
+            W("ex.cut_off", side=NAMES[o["side"]], row=E3C.line(o)),
+            W("ex.cut_off.do"))
     for gp in rv.balances["bank"].gaps:
         add("statement_gap", "review", f"{gp['file']}:{gp['row']}", {"rows": [{"file": gp["file"], "sheet": gp["sheet"], "row": gp["row"]}]},
-            f"แถว {gp['row']}: ยอดคงเหลือควรเป็น {TH.fmt_money(Decimal(gp['expected']))} บาท แต่ไฟล์แสดง "
-            f"{TH.fmt_money(Decimal(gp['found']))} บาท", "ขอรายการเดินบัญชีฉบับเต็มจากธนาคาร อาจมีรายการขาดหาย")
+            W("ex.gap", row=gp["row"], expected=TH.fmt_money(Decimal(gp["expected"])), found=TH.fmt_money(Decimal(gp["found"]))), W("ex.gap.do"))
     for u in rv.unread:
         add("row_without_date", "review", f"{u['file']}:{u['row']}", {"rows": [{"file": u["file"], "sheet": u["sheet"], "row": u["row"]}]},
-            f"{SIDE_TH[u['side']]} แถว {u['row']}: มีจำนวนเงิน แต่ช่องวันที่เขียนว่า “{E3C.safe(u['text'])}”",
-            "แก้วันที่ในไฟล์แล้วส่งใหม่")
+            W("ex.no_date", side=SIDE_TH[u["side"]], row=u["row"], text=E3C.safe(u["text"])),
+            W("do.fix_date"))
     gap = opening_gap(rv)
     if gap is not None and gap != ZERO:
         add("opening_unexplained", "review", "opening", {"rows": [c for c in (rv.balances["bank"].opening_cell,
                                                                            rv.balances["book"].opening_cell) if c]},
-            f"ยอดยกมาตามธนาคาร {TH.fmt_money(rv.balances['bank'].opening)} บาท ตามบัญชี {TH.fmt_money(rv.balances['book'].opening)} บาท "
-            f"รายการค้างยกมาอธิบายไม่ได้ {TH.fmt_money(abs(gap))} บาท", "ส่งรายการค้างยกมาจากเดือนก่อน")
+            W("ex.opening", bank=TH.fmt_money(rv.balances["bank"].opening), book=TH.fmt_money(rv.balances["book"].opening), gap=TH.fmt_money(abs(gap))), W("ex.opening.do"))
     for side in ("bank", "book"):
         if rv.balances[side].closing is None:
-            add("balance_unknown", "review", side, {"rows": []}, f"ไม่ทราบยอดคงเหลือสิ้นงวดตาม{SIDE_TH[side]}",
-                f"ส่ง{SIDE_TH[side]}ที่มียอดคงเหลือ")
+            add("balance_unknown", "review", side, {"rows": []}, W("gate.no_closing", side=SIDE_TH[side]),
+                W("ex.no_closing.do", side=SIDE_TH[side]))
     for j in journal:
-        if "ไม่ใช่ 1% หรือ 15%" in j["note"]:
-            add("unusual_wht_rate", "info", j["id"], {"rows": []}, j["note"], "ตรวจอัตราภาษีกับธนาคาร")
+        if W("journal.wht_unusual") in j["note"]:
+            add("unusual_wht_rate", "info", j["id"], {"rows": []}, j["note"], W("ex.wht.do"))
     return out
 
 
@@ -354,18 +356,18 @@ def _not_included(rv: Review) -> list[dict]:
     for u, why in rv.others:
         if why == "set_aside":
             key = f"bankrec_side:{u.key}"
-            out.append({"doc_key": u.key, "name": u.name, "code": "set_aside", "reason": "ยังไม่ได้บอกว่าไฟล์นี้เป็นของฝั่งใด",
-                        "detail": "ไฟล์มีคอลัมน์เดบิตและเครดิต แต่ไม่มีอะไรบอกว่าเป็นของธนาคารหรือของบริษัท",
-                        "how": "นำกลับมารวมได้: ต้องตอบก่อนว่าไฟล์นี้เป็นของฝั่งใด", "can_restore": True,
+            out.append({"doc_key": u.key, "name": u.name, "code": "set_aside", "reason": W("left.set_aside"),
+                        "detail": W("left.set_aside.detail"),
+                        "how": W("left.set_aside.how"), "can_restore": True,
                         "restore": {"set": {}, "drop": [key]}})
         elif why == "same_file":
-            out.append({"doc_key": u.key, "name": u.name, "code": "same_file", "reason": "เป็นไฟล์เดียวกับไฟล์ที่ส่งมาแล้ว",
-                        "detail": "ไบต์ตรงกันทุกตัว นับครั้งเดียว", "how": "ไม่ต้องนำกลับ: ไฟล์เดียวกันนี้ใช้อยู่แล้ว",
+            out.append({"doc_key": u.key, "name": u.name, "code": "same_file", "reason": W("left.same_file"),
+                        "detail": W("left.same_file.detail"), "how": W("left.same_file.how"),
                         "can_restore": False, "restore": {"set": {}, "drop": []}})
         else:
-            out.append({"doc_key": u.key, "name": u.name, "code": why, "reason": u.data.get("say") or "ไม่ได้ใช้ไฟล์นี้",
-                        "detail": "agent นี้อ่านรายการเดินบัญชีและสมุดบัญชีที่เป็น Excel CSV หรือ PDF ที่มีตัวอักษรให้อ่าน",
-                        "how": "ส่งไฟล์ที่ธนาคารหรือโปรแกรมบัญชีออกให้เป็น Excel CSV หรือ PDF แทน", "can_restore": False,
+            out.append({"doc_key": u.key, "name": u.name, "code": why, "reason": said(u) or W("left.not_used"),
+                        "detail": W("left.other.detail"),
+                        "how": W("left.other.how"), "can_restore": False,
                         "restore": {"set": {}, "drop": []}})
     return out
 
@@ -403,7 +405,7 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
         buckets.append({"bucket": b, "label": C.BUCKET_TH[b], "count": len(mine),
                         "amount": f2(sum((abs(Decimal(i["amount"])) for i in mine), ZERO))})
     stale = [i["id"] for i in outstanding if i["type"] == "outstanding_cheque" and i["age_days"] > C.STALE_DAYS]
-    label = TH.period_label_th(period)
+    label = words.period(period)
     review_n = sum(1 for e in run_ex if e["severity"] == "review")
     c = rv.match["counts"]
     totals = {"bank_rows": len(rv.bank), "book_rows": len(rv.book), "carried": len(rv.carried), "matched": c["matched"],
@@ -412,14 +414,14 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
               "journal": len(journal), "outside_period": len(rv.outside), "run_exceptions": len(run_ex), "review": review_n,
               "difference": st["difference"], "tied": st["tied"],
               "adjusted_bank": st["bank"]["adjusted"], "adjusted_book": st["book"]["adjusted"]}
-    summary = (f"กระทบยอดบัญชีธนาคารงวด {label}: " + (gate["what"] if not gate["passed"] else
-               f"ลงตัว ยอดหลังปรับปรุง {TH.fmt_money(Decimal(st['bank']['adjusted']))} บาท"))
+    summary = W("say.summary", label=label, what=gate["what"] if not gate["passed"] else
+                W("say.tied", adjusted=TH.fmt_money(Decimal(st["bank"]["adjusted"]))))
     fallback = {"summary": summary,
-                "movements": [f"จับคู่ได้ {c['matched']} คู่ (ตามกฎ {totals['by_rule']} คู่ · คนยืนยัน {totals['by_person']} คู่)",
-                              f"รายการกระทบยอด {len(items)} รายการ · ร่างรายการปรับปรุง {len(journal)} รายการ"],
+                "movements": [W("say.matched", matched=c["matched"], by_rule=totals["by_rule"], by_person=totals["by_person"]),
+                              W("say.items", items=len(items), journal=len(journal))],
                 "watch": [r for r in gate["reasons"]][:4],
                 "next_steps": ([gate["next"]] if gate.get("next") else []) +
-                              (["ตรวจร่างรายการปรับปรุงก่อนบันทึกเข้าระบบบัญชี agent ไม่ได้บันทึกให้"] if journal else [])}
+                              ([W("say.check_journal")] if journal else [])}
     quotable = {"adjusted_bank": st["bank"]["adjusted"] or "", "adjusted_book": st["book"]["adjusted"] or "",
                 "difference": st["difference"] or "", "matched": str(c["matched"]), "items": str(len(items))}
     return {
@@ -428,12 +430,12 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
         "company": str(rv.defaults.get("company") or ""), "account": {**rv.account, "gl_code": rv.gl_code or ""},
         "balances": {s: rv.balances[s].out() for s in ("bank", "book")},
         "opening_gap": None if opening_gap(rv) is None else f2(opening_gap(rv)),
-        "match": as_written(rv, rv.match), "names": NAMES,
+        "match": as_written(rv, rv.match), "names": dict(NAMES),
         "items": items, "statement": st, "gate": gate, "journal": journal,
         "ageing": {"buckets": buckets, "stale": stale, "stale_days": C.STALE_DAYS},
         "carried_in": carried_in, "carried_out": [i["id"] for i in outstanding],
         "cutoff": {"rows": [ln.out() for ln in rv.outside], "pairs": rv.cutoff_pairs},
-        "unread": rv.unread, "run_exceptions": run_ex, "reason_codes": REASON_TH,
+        "unread": rv.unread, "run_exceptions": run_ex, "reason_codes": {k: words.cap(v) for k, v in REASON_TH.items()},
         "not_included": _not_included(rv), "assumptions": rv.assumptions, "totals": totals,
         "files": [{"name": u.name, "sha256": u.sha256, "side": s, "sheet": u.data.get("sheet"), "rows": len(u.data.get("rows") or []),
                    "header_row": u.data.get("header_row"), "columns": u.data.get("columns") or {}}
@@ -465,19 +467,19 @@ def _citations(rv: Review, st: dict, items: list[dict]) -> list[dict]:
     for n, side in enumerate(("bank", "book"), start=1):
         b, s = rv.balances[side], st[side]
         cell = b.closing_cell or {}
-        how = {"row": "อ่านจากแถวยอดยกไปของไฟล์", "balance_column": "อ่านจากคอลัมน์ยอดคงเหลือของรายการสุดท้ายในงวด",
-               "movement": "ยอดยกมาบวกรายการของงวด", "typed": "ค่าที่คุณพิมพ์", "zero": "ยอดยกมาเป็นศูนย์ บวกรายการของงวด"}.get(
-            b.closing_from, "ไม่ทราบ")
+        how = {"row": W("cite.row"), "balance_column": W("cite.balance_column"),
+               "movement": W("cite.movement"), "typed": W("cite.typed"), "zero": W("cite.zero")}.get(
+            b.closing_from, W("cite.unknown"))
         out.append(c(f"b{n}", f"ยอดคงเหลือตาม{SIDE_TH[side]} (บาท)", s["balance"], how,
                      [part(cell.get("file"), cell.get("sheet"), cell.get("row"), s["balance"], cell.get("cell") or "")] if cell else [],
                      [f"ยอดตาม{SIDE_TH[side]}"]))
         mine = [i for i in items if i["side"] == side]
         out.append(c(f"a{n}", f"ยอดหลังปรับปรุงของ{'ธนาคาร' if side == 'bank' else 'บัญชี'} (บาท)", s["adjusted"],
-                     "ยอดคงเหลือ บวกหรือหักรายการกระทบยอดของฝั่งนี้ทุกรายการ",
+                     W("cite.adjusted"),
                      [part(x["sources"][0].get("file"), x["sources"][0].get("sheet"), x["sources"][0].get("row"), x["effect"],
                            x["type_label"]) for x in mine],
                      ["ยอดหลังปรับปรุง", f"ยอดที่ถูกต้องของ{'ธนาคาร' if side == 'bank' else 'บัญชี'}"]))
-    out.append(c("d1", "ผลต่าง (บาท)", st["difference"], "ยอดหลังปรับปรุงของธนาคาร ลบ ยอดหลังปรับปรุงของบัญชี", [], ["ผลต่าง", "ต่างกัน"]))
+    out.append(c("d1", "ผลต่าง (บาท)", st["difference"], W("cite.difference"), [], ["ผลต่าง", "ต่างกัน"]))
     return out
 
 

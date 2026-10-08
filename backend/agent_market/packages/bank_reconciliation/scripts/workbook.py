@@ -28,10 +28,12 @@ from openpyxl.utils import get_column_letter
 
 from ....deliverables import workpaper
 from ....deliverables.reread import Tally, sheets, table
+from ....engine import words
 from ....engine.e3 import cards as E3C
 from ....engine.e3.match import SETTING_TH
 from ..checks import classify as C
 from ..checks.inputs import CARRIED_SHEET
+from ..words import W
 from .reconcile import OUTSTANDING, REASON_TH
 
 MONEY = '#,##0.00;[Red](#,##0.00);"-"'
@@ -508,7 +510,7 @@ def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
 
     wb = load_workbook(path)
     st, gate = computed["statement"], computed["gate"]
-    out = [ck("xlsx.sheets", set(SHEETS) <= set(wb.sheetnames), ", ".join(wb.sheetnames), "ชีตครบ")]
+    out = [ck("xlsx.sheets", set(SHEETS) <= set(wb.sheetnames), ", ".join(wb.sheetnames), W("check.sheets"))]
     face = _labelled(wb[S_STATEMENT])
     a3 = str(wb[S_STATEMENT]["A3"].value or "")
     t = Tally()
@@ -517,44 +519,44 @@ def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
         if label == L_PREPARER:
             t.n += 1
             if want and not got.startswith(want):
-                t.bad.append(f"{label}: ในไฟล์ “{got[:40]}” ควรเป็น {want}")
+                t.bad.append(W("check.header.differs", label=label, got=got[:40], want=want))
             elif not want and (got != MISSING or "หัวกระดาษทำการยังไม่ครบ" not in a3):
-                t.bad.append(f"{label}: ไม่มีชื่อผู้จัดทำ แต่กระดาษทำการไม่ได้บอกว่าเป็นร่าง")
+                t.bad.append(W("check.header.no_preparer", label=label))
         elif want:
             t.text(label, got, want)
         else:
             t.n += 1
             if got != MISSING or "หัวกระดาษทำการยังไม่ครบ" not in a3:
-                t.bad.append(f"{label}: ไม่มีค่าจริง แต่ในไฟล์เขียนว่า “{got}” และไม่ได้บอกว่าเป็นร่าง")
+                t.bad.append(W("check.header.no_value", label=label, got=got))
     for k in ("งวด", "ตัดยอด ณ วันที่", L_REVIEWER):
         t.n += 1
         if not face.get(k):
-            t.bad.append(f"{k}: ว่าง")
-    out.append(t.result("xlsx.header", "หัวงบระบุนิติบุคคล บัญชี งวด และผู้จัดทำจริง (หรือบอกว่าเป็นร่าง)", "หัวกระดาษทำการ"))
+            t.bad.append(W("check.header.empty", k=k))
+    out.append(t.result("xlsx.header", W("check.header"), W("noun.header")))
     ok = (_same(face.get(L_BANK_BAL), st["bank"]["balance"]) and _same(face.get(L_BOOK_BAL), st["book"]["balance"])
           and _same(face.get(L_BANK_ADJ), st["bank"]["adjusted"]) and _same(face.get(L_BOOK_ADJ), st["book"]["adjusted"])
           and _same(face.get(L_DIFF), st["difference"]))
-    out.append(ck("xlsx.statement", ok, f"{face.get(L_BANK_ADJ)} / {face.get(L_BOOK_ADJ)}", "ยอดในงบตรงกับที่คำนวณ"))
+    out.append(ck("xlsx.statement", ok, f"{face.get(L_BANK_ADJ)} / {face.get(L_BOOK_ADJ)}", W("check.statement")))
     verdict = str(face.get(L_VERDICT) or "")
     says = verdict == TIED if gate["passed"] else verdict.startswith(NOT_TIED)
     marked = DRAFT_MARK in a3
-    out.append(ck("xlsx.verdict", says and marked == (not gate["passed"]), verdict, "งบบอกตรงตามจริงว่าลงตัวหรือยังไม่ลงตัว"))
+    out.append(ck("xlsx.verdict", says and marked == (not gate["passed"]), verdict, W("check.verdict")))
     rows = table(parts(wb, S_ITEMS), H_ITEMS)
     items = computed["items"]
     same = len(rows) == len(items) and all(isinstance(r[6], (int, float)) and _same(r[6], i["amount"]) and r[11] for r, i in zip(rows, items))
-    out.append(ck("xlsx.items", same, f"{len(rows)} แถว / {len(items)} รายการ", "รายการกระทบยอดครบ เป็นตัวเลข และมีหลักฐานทุกรายการ"))
-    for side, label in (("bank", "ฝั่งธนาคาร"), ("book", "ฝั่งบัญชี")):
+    out.append(ck("xlsx.items", same, W("check.items.detail", rows=len(rows), items=len(items)), W("check.items")))
+    for side, label in (("bank", W("word.bank_side")), ("book", W("word.book_side"))):
         got = sum((Decimal(str(r[7])) for r, i in zip(rows, items) if i["side"] == side and r[7] is not None), Decimal(0))
         out.append(ck(f"xlsx.adjustments_{side}", same and got.quantize(Decimal("0.01")) == Decimal(st[side]["adjustments"]),
-                      f"{got} / {st[side]['adjustments']}", f"รายการปรับปรุง{label}รวมแล้วเท่ากับในงบ"))
+                      f"{got} / {st[side]['adjustments']}", W("check.adjustments", label=label)))
     pairs = table(parts(wb, S_PAIRS), H_PAIRS)
     matched = computed["match"]["groups"]["matched"]
     ok = len(pairs) == len(matched) and all(r[1] and r[2] and r[4] == who(m["confirmed"], m.get("confirmed_by") or "", CONFIRMED_TH)
                                             for r, m in zip(pairs, matched))
     ok = ok and all(m["confirmed"] == "person" for m in matched if m["tier"] != "exact")
-    out.append(ck("xlsx.pairs", ok, f"{len(pairs)} คู่", "ทุกคู่บอกขั้น วิธีจับคู่ และผู้ยืนยัน ขั้นที่ไม่ตรงกันทุกตัวมีคนยืนยัน"))
+    out.append(ck("xlsx.pairs", ok, W("check.n_pairs", n=len(pairs)), W("check.pairs")))
     sus = table(parts(wb, S_SUSPECT), H_SUSPECT)
-    out.append(ck("xlsx.suspect", len(sus) == len(computed["match"]["groups"]["suspect"]), f"{len(sus)} รายการ", "รายการน่าสงสัยครบ"))
+    out.append(ck("xlsx.suspect", len(sus) == len(computed["match"]["groups"]["suspect"]), W("check.n_items", n=len(sus)), W("check.suspect")))
     jr = table(wb[S_JOURNAL], H_JOURNAL)
     by: dict = {}
     for r in jr:
@@ -563,20 +565,20 @@ def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
         d[1] += Decimal(str(r[6] or 0))
     ok = len(by) == len(computed["journal"]) and all(d[0].quantize(Decimal("0.01")) == d[1].quantize(Decimal("0.01")) and d[0] > 0
                                                       for d in by.values())
-    out.append(ck("xlsx.journal_balances", ok, f"{len(by)} รายการ", "ร่างรายการปรับปรุงทุกรายการ เดบิตเท่ากับเครดิต"))
+    out.append(ck("xlsx.journal_balances", ok, W("check.n_items", n=len(by)), W("check.journal")))
     co = [r for r in wb[S_OUT].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
     out.append(ck("xlsx.carried_out", len(co) == len(computed["carried_out"]) and all(isinstance(r[3], (int, float)) and r[4] for r in co),
-                  f"{len(co)} รายการ", "รายการค้างยกไปครบ พร้อมใช้เป็นรายการค้างยกมาของเดือนหน้า"))
+                  W("check.n_items", n=len(co)), W("check.carried_out")))
     ex = [r for r in wb[S_EXC].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
     run_ex = computed["run_exceptions"]
     ok = len(ex) == len(run_ex) and all(e["reason_code"] in REASON_TH and r[1] == e["reason"] for r, e in zip(ex, run_ex)) and \
         all(r[5] for r, e in zip(ex, run_ex) if e["severity"] == "review")
-    out.append(ck("xlsx.exceptions", ok, f"{len(ex)} รายการ", "ข้อยกเว้นครบ และข้อที่รอคนตัดสินมีทางเลือก"))
+    out.append(ck("xlsx.exceptions", ok, W("check.n_items", n=len(ex)), W("check.exceptions")))
     left = computed["not_included"]
     n = len([r for r in wb[S_LEFT].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]) if S_LEFT in wb.sheetnames else 0
-    out.append(ck("xlsx.not_included", n == len(left), f"{n} ไฟล์", "ไฟล์ที่ไม่ได้ใช้อยู่ในรายการเอกสารที่ยังไม่ได้รวม"))
+    out.append(ck("xlsx.not_included", n == len(left), W("check.n_files", n=n), W("check.not_included")))
     out.append(_figures(wb, computed))
-    out.extend(workpaper.checks(path))
+    out.extend(workpaper.checks(path, words.lang()))
     return out
 
 
@@ -600,10 +602,10 @@ def _figures(wb, computed: dict) -> dict:
             t.number(adj, face.get(adj), st[side]["adjusted"])
     rows = table(parts(wb, S_ITEMS), H_ITEMS)
     for r, i in zip(rows, computed["items"]):
-        t.number(f"รายการกระทบยอด {r[0]} จำนวนเงิน", r[6], i["amount"])
-        t.number(f"รายการกระทบยอด {r[0]} ผลต่อยอด", r[7], i["effect"])
+        t.number(W("where.item.amount", no=r[0]), r[6], i["amount"])
+        t.number(W("where.item.effect", no=r[0]), r[7], i["effect"])
     pairs = table(parts(wb, S_PAIRS), H_PAIRS)
     for r, m in zip(pairs, computed["match"]["groups"]["matched"]):
-        t.number(f"คู่ที่ {r[0]} จำนวนเงิน (บัญชี)", r[8], m["left_total"])
-        t.number(f"คู่ที่ {r[0]} จำนวนเงิน (ธนาคาร)", r[13], m["right_total"])
-    return t.result("xlsx.figures", "ทุกยอดในงบ รายการกระทบยอด และคู่ที่จับได้ (อ่านจากไฟล์) ตรงกับที่คำนวณ", "ยอด")
+        t.number(W("where.pair.book", no=r[0]), r[8], m["left_total"])
+        t.number(W("where.pair.bank", no=r[0]), r[13], m["right_total"])
+    return t.result("xlsx.figures", W("check.figures"), W("noun.figures"))

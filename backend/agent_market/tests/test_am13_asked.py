@@ -270,7 +270,7 @@ class AskedOfTheBankReconciliation(unittest.TestCase):
 
     def test_its_manifest_declares_what_its_renderer_applies(self):
         m = _manifest_says(self, "bank_reconciliation", self.BR.DIRECTIVES, grouped=True)
-        self.assertEqual(m["version"], "1.6.0")
+        self.assertEqual(m["version"], "1.7.0")
 
 
 class AskedOfTheInvoiceRegister(unittest.TestCase):

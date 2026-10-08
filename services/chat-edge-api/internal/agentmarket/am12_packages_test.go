@@ -83,6 +83,29 @@ func engineEnglish(t *testing.T) []string {
 			out = append(out, s)
 		}
 	}
+	// AM14: and the sentences of the shared engine that are kept beside it, by key (engine/words.json: a
+	// matching card, what a file read back showed) — every one of their English, whatever its length
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "backend", "agent_market", "engine", "words.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shared struct {
+		Strings map[string]string `json:"strings"`
+		En      map[string]string `json:"en"`
+	}
+	if err := json.Unmarshal(raw, &shared); err != nil {
+		t.Fatal(err)
+	}
+	if len(shared.Strings) < 60 {
+		t.Fatalf("the shared engine's words were not read: %d", len(shared.Strings))
+	}
+	for key, thai := range shared.Strings {
+		en := shared.En[thai]
+		if en == "" {
+			t.Fatalf("engine/words.json: %s has no English", key)
+		}
+		out = append(out, pyField.ReplaceAllString(en, " "))
+	}
 	return out
 }
 

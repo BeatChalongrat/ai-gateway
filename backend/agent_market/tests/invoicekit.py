@@ -87,7 +87,8 @@ def truth_fields(fid: str) -> dict:
 class Job:
     """/job/in and /job/out for one case, as the runner lays them out."""
 
-    def __init__(self):
+    def __init__(self, lang: str | None = None):
+        self.lang = lang   # AM14: the run's language, as the runner tells every step of a run that is not Thai
         self.base = tempfile.mkdtemp(prefix="am_inv_")
         self.inp, self.out = os.path.join(self.base, "in"), os.path.join(self.base, "out")
         os.makedirs(self.inp)
@@ -95,7 +96,7 @@ class Job:
 
     def run(self, req: dict) -> dict:
         step.JOB_IN, step.JOB_OUT = self.inp, self.out
-        res = step.run(req)
+        res = step.run({**req, "lang": self.lang} if self.lang else req)
         assert res.get("ok"), res
         return res
 

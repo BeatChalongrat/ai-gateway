@@ -11,6 +11,8 @@ from __future__ import annotations
 import re
 from decimal import Decimal, InvalidOperation
 
+from ..engine.words import SHARED as S
+
 CENT = Decimal("0.01")
 
 
@@ -35,7 +37,8 @@ def check(name: str, ok: bool, detail: str = "", label: str = "", values: int | 
 
 
 class Tally:
-    """Values compared, and the ones that differ (said in plain Thai)."""
+    """Values compared, and the ones that differ (said plainly, in the language of the run). ``what`` is
+    the kind of value read back, as the package's own words name it."""
 
     def __init__(self):
         self.n = 0
@@ -48,8 +51,8 @@ class Tally:
     def text(self, where: str, got, want) -> None:
         self.n += 1
         if squash(got) != squash(want):
-            shown = "ว่าง" if squash(got) == "" else str(got).strip()
-            self.bad.append(f"{where}: ในไฟล์ “{shown}” ควรเป็น “{want}”")
+            shown = S("reread.empty") if squash(got) == "" else str(got).strip()
+            self.bad.append(S("reread.text", where=where, got=shown, want=want))
 
     def number(self, where: str, got, want) -> None:
         """A figure: equal to the satang. A figure the computed table has must be in the cell."""
@@ -59,20 +62,20 @@ class Tally:
         if w is None and got in (None, ""):
             return
         if g is None:
-            self.bad.append(f"{where}: ในไฟล์{'ว่าง' if got in (None, '') else ' “' + str(got) + '”'} ควรเป็น {_money(w)}")
+            self.bad.append(S("reread.number.empty", where=where, want=_money(w)) if got in (None, "")
+                            else S("reread.number.words", where=where, got=got, want=_money(w)))
         elif w is None or g != w:
-            self.bad.append(f"{where}: ในไฟล์ {_money(g)} ควรเป็น {'ว่าง' if w is None else _money(w)}")
+            self.bad.append(S("reread.number", where=where, got=_money(g), want=_money(w)))
 
     def result(self, name: str, label: str, what: str) -> dict:
         if self.bad:
-            more = f" (และอีก {len(self.bad) - 4} จุด)" if len(self.bad) > 4 else ""
+            more = " " + S("reread.more", n=len(self.bad) - 4) if len(self.bad) > 4 else ""
             return check(name, False, "; ".join(self.bad[:4]) + more, label, self.n)
-        return check(name, self.n > 0, f"เปิดไฟล์อ่าน{what}กลับ {self.n} ค่า ตรงกับที่คำนวณทุกค่า" if self.n
-                     else f"ไม่พบ{what}ในไฟล์", label, self.n)
+        return check(name, self.n > 0, S("reread.ok", what=what, n=self.n) if self.n else S("reread.none", what=what), label, self.n)
 
 
 def _money(d: Decimal | None) -> str:
-    return "ว่าง" if d is None else f"{d:,.2f}"
+    return S("reread.empty") if d is None else f"{d:,.2f}"
 
 
 def table(ws, heads: list, top: int = 4) -> list[list]:

@@ -319,7 +319,7 @@ class Cards(unittest.TestCase):
         self.assertIn("3,200.00 บาท", f.question)
         self.assertIn("วันที่ห่างกัน 2 วัน", f.question)
         self.assertNotIn("PIN", f.question)                # a word no card may say is masked, the run goes on
-        self.assertEqual(f.evidence["columns"], cards.COLUMNS)
+        self.assertEqual(f.evidence["columns"], cards.columns())
         self.assertEqual([r[0] for r in f.evidence["rows"]], ["สมุดบัญชี", "รายการเดินบัญชี"])
         self.assertEqual(f.evidence["rows"][0][5:], ["สมุดบัญชี.xlsx", 2])
 

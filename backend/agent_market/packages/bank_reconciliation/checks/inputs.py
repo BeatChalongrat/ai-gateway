@@ -38,6 +38,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from ....engine import thai as TH
 from ....engine.e2 import thai_text as T
 from ....engine.tabular import col_letter, read_workbook, sha256_file
+from ..words import W
 
 FORMAT = "am.bankrec.v1"
 SHEET_EXT = (".xlsx", ".xlsm", ".csv", ".txt")
@@ -131,6 +132,13 @@ def load(d: dict) -> Upload:
     return Upload(kind=d["kind"], key=d["key"], name=d["name"], sha256=d["sha256"], data=d["data"])
 
 
+def said(u: Upload) -> str:
+    """Why a file was not used, in the language of the run. A parsed file keeps the key of the sentence, not
+    its words: it is read by every later step of the run."""
+    key = u.data.get("say") or ""
+    return W(key) if key in W.strings else key
+
+
 def parse(path: str, name: str, mapping: dict | None = None) -> Upload:
     ext = os.path.splitext(name)[1].lower()
     sha = sha256_file(path)
@@ -139,10 +147,10 @@ def parse(path: str, name: str, mapping: dict | None = None) -> Upload:
         return _pdf(path, name, sha, key, (mapping or {}).get("bank_reconciliation") or {})
     if ext not in SHEET_EXT:
         return Upload("other", key, name, sha, {"reason": "unsupported_type", "detail": ext,
-                                                "say": "อ่านได้เฉพาะไฟล์ Excel CSV หรือ PDF ที่ธนาคารหรือโปรแกรมบัญชีออกให้"})
+                                                "say": "say.unsupported_type"})
     wb = read_workbook(path, name)
     if wb.error:
-        return Upload("other", key, name, sha, {"reason": "unreadable", "detail": wb.error, "say": "เปิดไฟล์นี้ไม่ได้"})
+        return Upload("other", key, name, sha, {"reason": "unreadable", "detail": wb.error, "say": "say.unreadable"})
     for i, sheet in enumerate(wb.sheets):
         if _h(sheet.name) == _h(CARRIED_SHEET) or any(_h(c) == _h(CARRIED_SHEET) for r in sheet.rows[:6] for c in r):
             got = _carried(sheet, i)
@@ -155,7 +163,7 @@ def parse(path: str, name: str, mapping: dict | None = None) -> Upload:
             best = got
     if best is None:
         return Upload("other", key, name, sha, {"reason": "unrecognised_sheet",
-                                                "say": "ไม่พบหัวคอลัมน์ของรายการเดินบัญชีหรือสมุดบัญชี (วันที่ รายการ และจำนวนเงิน)"})
+                                                "say": "say.unrecognised_sheet"})
     return Upload("table", key, name, sha, best)
 
 
@@ -178,16 +186,15 @@ def _pdf(path: str, name: str, sha: str, key: str, mapping: dict) -> Upload:
     try:
         g = grid.read(path, _known_header)
     except Exception as exc:  # noqa: BLE001 — a PDF that cannot be opened is a file that was not used, with its reason
-        return Upload("other", key, name, sha, {"reason": "unreadable", "detail": type(exc).__name__, "say": "เปิดไฟล์ PDF นี้ไม่ได้"})
+        return Upload("other", key, name, sha, {"reason": "unreadable", "detail": type(exc).__name__, "say": "say.unreadable_pdf"})
     if g is not None and g["scanned"]:
         return Upload("other", key, name, sha, {
             "reason": "scanned_pdf", "detail": f"{len(g['scanned'])}/{g['pages']}",
-            "say": "PDF นี้เป็นภาพสแกนหรือรูปถ่าย ไม่มีตัวอักษรให้อ่าน agent อ่านเฉพาะ PDF ที่ธนาคารออกให้ (คัดลอกตัวหนังสือในไฟล์ได้) "
-                   "หรือไฟล์ Excel และ CSV"})
+            "say": "say.scanned_pdf"})
     got = None if g is None else _table(Sheet("PDF", g["rows"]), 0, mapping, loose=True, where=g["where"])
     if got is None:
         return Upload("other", key, name, sha, {"reason": "unrecognised_sheet",
-                                                "say": "ไม่พบตารางรายการเดินบัญชีในไฟล์ PDF นี้ (วันที่ รายการ และจำนวนเงิน)"})
+                                                "say": "say.no_table_pdf"})
     got["pdf"] = {"pages": g["pages"]}
     return Upload("table", key, name, sha, got)
 
@@ -397,7 +404,7 @@ def _read(sheet, index: int, header_at: int, cols: dict, layout: str, *, loose: 
         if loose:
             first, low = plain(first), plain(low)
         if where is not None:
-            at = f"หน้า {where[i][0]} บรรทัด {where[i][1]}"
+            at = W("where.pdf", page=where[i][0], line=where[i][1])
             cells = {f: at for f, j in cols.items() if j < len(r) and r[j] not in (None, "")}
         else:
             cells = {f: f"{col_letter(j)}{i + 1}" for f, j in cols.items() if j < len(r) and r[j] not in (None, "")}

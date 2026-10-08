@@ -63,10 +63,12 @@ def resolve(key: str, files: dict, roles: dict) -> str:
 
 
 def run_files(paths: list, *, defaults: dict | None = None, answers: dict | None = None, message: str = "",
-              today: str = "2026-11-02", preparer: str = "ผู้จัดทำ ตัวอย่าง", answered_by: str | None = None) -> dict:
+              today: str = "2026-11-02", preparer: str = "ผู้จัดทำ ตัวอย่าง", answered_by: str | None = None,
+              lang: str | None = None) -> dict:
     """paths: [(path on disk, the name the person gave the file)]. ``answered_by``: the name of the
-    person who answers the cards (the runner reads it from each card)."""
-    job = Job()
+    person who answers the cards (the runner reads it from each card). ``lang``: the run's language, when
+    it is not Thai."""
+    job = Job(lang)
     try:
         parsed, files = [], {}
         for i, (src, name) in enumerate(paths):
@@ -133,11 +135,11 @@ def run_files(paths: list, *, defaults: dict | None = None, answers: dict | None
         job.close()
 
 
-def run_case(case: dict) -> dict:
+def run_case(case: dict, lang: str | None = None) -> dict:
     cases = load_cases()
     defaults = {**cases["defaults"], **(case.get("defaults") or {})}
     res = run_files([(os.path.join(FIX, n), n) for n in case["files"]], defaults=defaults, answers=case.get("answers"),
-                    message=case.get("message") or "", today=cases["today"])
+                    message=case.get("message") or "", today=cases["today"], lang=lang)
     res["id"] = case["id"]
     return res
 

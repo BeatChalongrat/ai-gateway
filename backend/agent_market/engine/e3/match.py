@@ -27,11 +27,13 @@ from decimal import Decimal, InvalidOperation
 from itertools import combinations
 from typing import Callable
 
+from ..words import SHARED as S
 from .rows import Row, check_rows, name_key, q2, similarity
 
 SCHEMA = "e3.match.v1"
 TIERS = ("exact", "amount_date", "fuzzy")
-TIER_TH = {"exact": "ตรงกันทุกตัว", "amount_date": "ยอดและวันที่ใกล้กัน", "fuzzy": "ชื่อหรือเลขอ้างอิงคล้ายกัน"}
+# (a table says its words when it is read: in the language of the run — engine/words.py)
+TIER_TH = S.table({"exact": "e3.tier.exact", "amount_date": "e3.tier.amount_date", "fuzzy": "e3.tier.fuzzy"})
 MATCH, SEPARATE, UNDECIDED = "match", "separate", "undecided"
 DECISIONS = (MATCH, SEPARATE, UNDECIDED)
 ZERO = Decimal("0.00")
@@ -71,10 +73,8 @@ SETTINGS = {
     "max_group": ("group", "int", 2, 6),
     "auto_same_day": ("same_day", "bool", None, None),
 }
-SETTING_TH = {"amount_tolerance": "ผลต่างของยอดที่ยอมให้เสนอเป็นคู่ (บาท)", "date_window_days": "วันที่ห่างกันได้ไม่เกิน (วัน)",
-              "fuzzy_threshold": "ความคล้ายของชื่อหรือเลขอ้างอิงอย่างน้อย", "fuzzy_window_days": "วันที่ห่างกันได้เมื่อจับคู่จากชื่อ (วัน)",
-              "ask_above": "ถามเมื่อรายการที่ไม่มีคู่มียอดตั้งแต่ (บาท)", "max_group": "จำนวนรายการมากที่สุดที่รวมยอดเป็นคู่เดียว",
-              "auto_same_day": "จับคู่เองเมื่อวันที่และยอดตรงกันและมีรายการเดียว"}
+SETTING_TH = S.table({k: f"e3.setting.{k}" for k in ("amount_tolerance", "date_window_days", "fuzzy_threshold", "fuzzy_window_days",
+                                                        "ask_above", "max_group", "auto_same_day")})
 
 
 def _setting(kind: str, v, lo, hi):
@@ -181,10 +181,14 @@ class Proposal:
 class Pass:
     id: str
     tier: str
-    label: str
+    label: str                # its name: a key of the shared words (the passes below), or a package's own words
     find: Callable            # (free_left, free_right, tolerance, refused) → (proposals, duplicates)
     auto: bool = False
     batch: bool = False       # its sure proposals may be confirmed by one answer that names each of them
+
+    def said(self) -> str:
+        """The pass's name in the language of the run."""
+        return S(self.label) if self.label in S.strings else self.label
 
     def __post_init__(self):
         if self.tier not in TIERS:
@@ -431,15 +435,15 @@ def _find_day_sum(L, R, tol, refused):
 
 
 DEFAULT_PASSES = (
-    Pass("ref_amount_date", "exact", "เลขอ้างอิง ยอด และวันที่ตรงกัน", _find_key(_key_ref_amount_date), auto=True),
-    Pass("ref_amount", "exact", "เลขอ้างอิงและยอดตรงกัน", _find_key(_key_ref_amount), auto=True),
-    Pass("ref_sum", "exact", "เลขอ้างอิงเดียวกัน ยอดรวมตรงกัน", _find_ref_sum, auto=True),
-    Pass("date_amount", "exact", "วันที่และยอดตรงกัน มีรายการเดียวทั้งสองฝั่ง", _find_same_day, auto=True),
-    Pass("amount_date", "amount_date", "ยอดและวันที่อยู่ในช่วงที่ตั้งไว้", _find_amount_date, batch=True),
-    Pass("group_sum", "amount_date", "หลายรายการรวมกันเท่ากับหนึ่งรายการ", _find_group),
-    Pass("day_sum", "amount_date", "ยอดรวมของวันเดียวกันตรงกัน", _find_day_sum),
-    Pass("ref_only", "fuzzy", "เลขอ้างอิงตรงกัน ยอดไม่ตรงกัน", _find_ref_only),
-    Pass("fuzzy_name", "fuzzy", "ชื่อหรือเลขอ้างอิงคล้ายกัน", _find_fuzzy),
+    Pass("ref_amount_date", "exact", "e3.pass.ref_amount_date", _find_key(_key_ref_amount_date), auto=True),
+    Pass("ref_amount", "exact", "e3.pass.ref_amount", _find_key(_key_ref_amount), auto=True),
+    Pass("ref_sum", "exact", "e3.pass.ref_sum", _find_ref_sum, auto=True),
+    Pass("date_amount", "exact", "e3.pass.date_amount", _find_same_day, auto=True),
+    Pass("amount_date", "amount_date", "e3.pass.amount_date", _find_amount_date, batch=True),
+    Pass("group_sum", "amount_date", "e3.pass.group_sum", _find_group),
+    Pass("day_sum", "amount_date", "e3.pass.day_sum", _find_day_sum),
+    Pass("ref_only", "fuzzy", "e3.pass.ref_only", _find_ref_only),
+    Pass("fuzzy_name", "fuzzy", "e3.tier.fuzzy", _find_fuzzy),
 )
 
 
@@ -451,7 +455,7 @@ def passes_by_id(*ids: str) -> tuple:
 # ── the run ──────────────────────────────────────────────────────────────
 
 def _entry(n: int, prefix: str, p: Pass, pr: Proposal) -> dict:
-    return {"id": f"{prefix}{n:04d}", "pair": pr.pair, "pass": p.id, "pass_label": p.label, "tier": p.tier,
+    return {"id": f"{prefix}{n:04d}", "pair": pr.pair, "pass": p.id, "pass_label": p.said(), "tier": p.tier,
             "tier_label": TIER_TH[p.tier], "shape": pr.shape,
             "left": [r.ref_out() for r in pr.left], "right": [r.ref_out() for r in pr.right],
             "left_total": f"{_total(pr.left):.2f}", "right_total": f"{_total(pr.right):.2f}",
@@ -511,7 +515,7 @@ def run(left: list, right: list, *, passes=None, tolerance: Tolerance | None = N
                 suspect.append(e)
                 n_open += 1
             take(pr)
-        stats.append({"id": p.id, "tier": p.tier, "tier_label": TIER_TH[p.tier], "label": p.label, "auto": p.auto,
+        stats.append({"id": p.id, "tier": p.tier, "tier_label": TIER_TH[p.tier], "label": p.said(), "auto": p.auto,
                       "by_rule": n_rule, "by_person": n_person, "waiting": n_open, "waiting_sure": n_sure})
 
     # a row left over under a key other rows were matched by: the same line written twice?

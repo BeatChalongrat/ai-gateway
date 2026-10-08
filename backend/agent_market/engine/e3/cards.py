@@ -16,12 +16,13 @@ a person to decide. A pair is never matched by default.
 
 from __future__ import annotations
 
-import datetime as _dt
 import re
 from decimal import Decimal
 
+from .. import words
 from ..findings import FORBIDDEN_WORDS, Finding, finding
-from ..thai import BE_OFFSET, MONTHS_TH_ABBR, fmt_money
+from ..thai import fmt_money
+from ..words import SHARED as S
 from .match import DECISIONS, MATCH, SEPARATE, UNDECIDED, ZERO, Tolerance
 
 CODE_PAIR = "e3_candidate"
@@ -33,10 +34,8 @@ KEEP, REVIEW = "keep", "review"
 ALL_MIN = 3     # fewer sure pairs than this are asked one by one
 ALL_MAX = 20    # the most pairs one answer confirms
 SEP = ";"
-HEADER_PAIR = "จับคู่รายการ"       # ≤ 12 display characters
-HEADER_ALL = "ยืนยันหลายคู่"
-HEADER_LONE = "ไม่พบคู่"
-COLUMNS = ["ตาราง", "วันที่", "รายการ", "เลขอ้างอิง", "จำนวนเงิน", "ไฟล์", "แถว"]
+# a card's header is ≤ 12 display characters, in either language (words.json: e3.header.*)
+COLUMNS = ("e3.col.table", "e3.col.date", "e3.col.item", "e3.col.ref", "e3.col.amount", "e3.col.file", "e3.col.row")
 _FORBIDDEN = re.compile("|".join(re.escape(w) for w in FORBIDDEN_WORDS), re.IGNORECASE)
 
 
@@ -46,11 +45,14 @@ def safe(text) -> str:
     return _FORBIDDEN.sub("…", " ".join(str(text or "").split()))
 
 
+def columns() -> list:
+    """The headings of a card's table of rows."""
+    return [S(k) for k in COLUMNS]
+
+
 def date_th(iso) -> str:
-    if not iso:
-        return "ไม่ระบุวันที่"
-    d = _dt.date.fromisoformat(iso) if isinstance(iso, str) else iso
-    return f"{d.day} {MONTHS_TH_ABBR[d.month - 1]} {d.year + BE_OFFSET}"
+    """A day in a sentence, in the language of the run (the name is from before a run could be in English)."""
+    return words.date(iso) or S("e3.no_date")
 
 
 def money(v) -> str:
@@ -60,7 +62,7 @@ def money(v) -> str:
 def line(row: dict) -> str:
     """A row in a sentence: when, what it says, how much."""
     what = safe(row.get("name") or row.get("ref") or "")[:60]
-    return " ".join(x for x in (date_th(row.get("date")), f"“{what}”" if what else "", f"{money(row['amount'])} บาท") if x)
+    return " ".join(x for x in (date_th(row.get("date")), f"“{what}”" if what else "", S("e3.baht", amount=money(row["amount"]))) if x)
 
 
 def table_row(side: str, row: dict) -> list:
@@ -111,36 +113,37 @@ def lone_answers(answers: dict | None) -> dict:
 def _why(c: dict) -> str:
     diff = abs(Decimal(c["difference"]))
     days = c.get("days_apart")
-    amount = "ยอดเท่ากัน" if diff == ZERO else f"ยอดต่างกัน {fmt_money(diff)} บาท"
-    when = "" if days is None else ("วันที่เดียวกัน" if days == 0 else f"วันที่ห่างกัน {days} วัน")
+    amount = S("e3.why.same_amount") if diff == ZERO else S("e3.why.amount_differs", diff=fmt_money(diff))
+    when = "" if days is None else (S("e3.why.same_day") if days == 0 else S("e3.why.days_apart", days=days))
     if c["pass"] == "ref_only":
-        return f"เลขอ้างอิงเดียวกัน แต่{amount}"
+        return S("e3.why.ref_only", amount=amount)
     if c["tier"] == "fuzzy":
         pct = int((Decimal(c["similarity"] or "0") * 100).to_integral_value())
-        return " ".join(x for x in (f"ชื่อหรือเลขอ้างอิงคล้ายกัน {pct}%", amount, when) if x)
-    return " ".join(x for x in (amount, when) if x)
+        return words.clauses(S("e3.why.similar", pct=pct), amount, when)
+    return words.clauses(amount, when)
 
 
 def _evidence(c: dict, names: dict) -> dict:
     rows = [table_row(names["left"], r) for r in c["left"]] + [table_row(names["right"], r) for r in c["right"]]
-    return {"columns": COLUMNS, "rows": rows}
+    return {"columns": columns(), "rows": rows}
 
 
 def pair_card(c: dict, names: dict, moment: str) -> Finding:
     n_l, n_r = len(c["left"]), len(c["right"])
     if (n_l, n_r) == (1, 1):
-        what = f"{names['left']}: {line(c['left'][0])} กับ{names['right']}: {line(c['right'][0])}"
+        what = S("e3.pair.one", left=names["left"], left_row=line(c["left"][0]), right=names["right"], right_row=line(c["right"][0]))
     else:
-        what = (f"{names['left']} {n_l} รายการ รวม {money(c['left_total'])} บาท "
-                f"กับ{names['right']} {n_r} รายการ รวม {money(c['right_total'])} บาท")
-    other = f" (มีรายการอื่นที่อาจเป็นคู่ได้อีก {len(c['alternatives'])} รายการ)" if c.get("alternatives") else ""
+        what = S("e3.pair.many", left=names["left"], n_l=n_l, left_total=money(c["left_total"]),
+                 right=names["right"], n_r=n_r, right_total=money(c["right_total"]))
+    why = _why(c)
     sure = bool(c.get("unique")) and Decimal(c["difference"]) == ZERO and c["tier"] == "amount_date"
     return finding(
-        CODE_PAIR, "blocking", moment, HEADER_PAIR,
-        f"{what} — {_why(c)}{other} เป็นรายการเดียวกันหรือไม่",
-        [("เป็นรายการเดียวกัน", MATCH, "จับคู่ และบันทึกว่าคุณเป็นผู้ยืนยัน"),
-         ("คนละรายการ", SEPARATE, "ไม่จับคู่ แต่ละรายการยังค้างอยู่ตามเดิม"),
-         ("ยังไม่แน่ใจ", UNDECIDED, "เก็บไว้ในกลุ่มน่าสงสัย รอคนตัดสิน")],
+        CODE_PAIR, "blocking", moment, S("e3.header.pair"),
+        S("e3.pair.question_others", what=what, why=why, other=S("e3.pair.others", n=len(c["alternatives"])))
+        if c.get("alternatives") else S("e3.pair.question", what=what, why=why),
+        [(S("e3.opt.match"), MATCH, S("e3.opt.match.d")),
+         (S("e3.opt.separate"), SEPARATE, S("e3.opt.separate.d")),
+         (S("e3.opt.undecided"), UNDECIDED, S("e3.opt.undecided.d"))],
         UNDECIDED, subject=c["pair"], evidence=_evidence(c, names), rememberable=False,
         recommended=MATCH if sure else None,
         facts={"pass": c["pass"], "tier": c["tier"], "shape": c["shape"], "difference": c["difference"],
@@ -155,14 +158,14 @@ def all_card(cs: list, names: dict, moment: str, tol: Tolerance) -> Finding:
                      f"{Decimal(l['amount']):,.2f}"])
     n = len(cs)
     return finding(
-        CODE_ALL, "blocking", moment, HEADER_ALL,
-        f"พบ {n} คู่ที่ยอดเท่ากันทุกสตางค์ วันที่ห่างกันไม่เกิน {tol.days} วัน และแต่ละรายการมีคู่ที่เป็นไปได้คู่เดียว "
-        f"ดูรายการทั้ง {n} คู่ในหลักฐาน แล้วยืนยันในครั้งเดียวได้หรือไม่",
-        [(f"ยืนยันทั้ง {n} คู่", MATCH, "จับคู่ทุกคู่ในรายการนี้ และบันทึกว่าคุณเป็นผู้ยืนยัน"),
-         ("ขอดูทีละคู่", ONE_BY_ONE, "ถามทีละคู่"),
-         ("ยังไม่ยืนยัน", UNDECIDED, "ทุกคู่อยู่ในกลุ่มน่าสงสัย รอคนตัดสิน")],
+        CODE_ALL, "blocking", moment, S("e3.header.all"),
+        S("e3.all.question", n=n, days=tol.days),
+        [(S("e3.all.opt.match", n=n), MATCH, S("e3.all.opt.match.d")),
+         (S("e3.all.opt.one"), ONE_BY_ONE, S("e3.all.opt.one.d")),
+         (S("e3.all.opt.undecided"), UNDECIDED, S("e3.all.opt.undecided.d"))],
         UNDECIDED, subject=SEP.join(c["pair"] for c in cs), rememberable=False,
-        evidence={"columns": [f"วันที่ ({names['left']})", names["left"], f"วันที่ ({names['right']})", names["right"], "จำนวนเงิน"],
+        evidence={"columns": [S("e3.all.col.date", side=names["left"]), names["left"],
+                              S("e3.all.col.date", side=names["right"]), names["right"], S("e3.col.amount")],
                   "rows": rows},
         facts={"pairs": [c["pair"] for c in cs], "pass": cs[0]["pass"]})
 
@@ -173,12 +176,12 @@ def lone_card(row: dict, names: dict, moment: str, *, options=None, default=REVI
     side = names[row["side"]]
     other = names["right" if row["side"] == "left" else "left"]
     return finding(
-        CODE_LONE, "blocking", moment, HEADER_LONE,
-        question or f"{side}: {line(row)} ไม่พบคู่ใน{other} รายการนี้ถูกต้องแล้วหรือไม่",
-        options or [("ถูกต้อง ยังไม่มีคู่", KEEP, f"คงไว้เป็นรายการที่ยังไม่มีคู่ใน{other}"),
-                    ("ควรมีคู่ ขอให้ตรวจ", REVIEW, "ส่งให้คนตรวจในรายการต้องตรวจของรอบนี้")],
+        CODE_LONE, "blocking", moment, S("e3.header.lone"),
+        question or S("e3.lone.question", side=side, row=line(row), other=other),
+        options or [(S("e3.lone.opt.keep"), KEEP, S("e3.lone.opt.keep.d", other=other)),
+                    (S("e3.lone.opt.review"), REVIEW, S("e3.lone.opt.review.d"))],
         default, subject=row["id"], rememberable=False,
-        evidence={"columns": COLUMNS, "rows": [table_row(side, row)]},
+        evidence={"columns": columns(), "rows": [table_row(side, row)]},
         facts={"row": row["id"], "amount": row["amount"]})
 
 

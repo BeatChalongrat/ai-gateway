@@ -14,8 +14,9 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 
+from ..engine.words import SHARED as S
+
 CHECK = "xlsx.asked"
-LABEL = "เอกสารเป็นไปตามที่ขอ (อ่านจากไฟล์)"
 
 
 def ids(req: dict) -> list[str]:
@@ -31,7 +32,7 @@ def one_order(req: dict, orders: tuple[str, ...]) -> str | None:
 
 
 def check(ok: bool, detail: str, values: int = 0) -> dict:
-    out = {"name": CHECK, "ok": bool(ok), "label": LABEL, "detail": detail}
+    out = {"name": CHECK, "ok": bool(ok), "label": S("asked.label"), "detail": detail}
     if ok:
         out["values"] = values
     return out

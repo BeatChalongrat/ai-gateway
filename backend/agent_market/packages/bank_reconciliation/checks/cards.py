@@ -18,76 +18,79 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from ....engine import words
 from ....engine.e3 import cards as E3C
 from ....engine.findings import Finding, finding
 from ....engine.thai import fmt_money
+from ..words import W
 from . import classify as C
 
-SIDE_OPTIONS = [("รายการเดินบัญชีของธนาคาร", "bank", "เดบิตคือเงินออกจากบัญชี เครดิตคือเงินเข้า"),
-                ("สมุดบัญชีของบริษัท", "book", "เดบิตคือเงินเข้าบัญชีธนาคาร เครดิตคือเงินออก"),
-                ("ไม่ใช้ไฟล์นี้", "unused", "ตั้งไฟล์นี้ไว้ก่อน ไม่นำมากระทบยอดในรอบนี้")]
-BANK_ROW = {"book": "บันทึกเพิ่มในสมุดบัญชี", "bank_error": "ธนาคารบันทึกผิด", "review": "ยังไม่ทราบ ให้คนตรวจ"}
-BOOK_ROW = {"timing": "ธนาคารยังไม่ลงรายการ", "book_error": "บันทึกบัญชีผิด", "review": "ยังไม่ทราบ ให้คนตรวจ"}
+BANK_ROW = W.table({"book": "row.bank.book", "bank_error": "row.bank.bank_error", "review": "row.review"})
+BOOK_ROW = W.table({"timing": "row.book.timing", "book_error": "row.book.book_error", "review": "row.review"})
 SPECIFIC = ("bank_fee", "interest", "wht_interest", "returned_cheque", "direct_debit")
+
+
+def side_options() -> list:
+    return [(words.cap(W("side.bank")), "bank", W("card.side.bank.d")),
+            (words.cap(W("side.book")), "book", W("card.side.book.d")),
+            (W("card.side.unused"), "unused", W("card.side.unused.d"))]
 
 
 def side_card(u) -> Finding:
     d = u.data
     rows = [[r["date_raw"], E3C.safe(r["description"])[:60], r["a"] or "", r["b"] or "", r["balance"] or ""] for r in d["rows"][:5]]
     return finding(
-        "bankrec_side", "blocking", "preflight", "ไฟล์ของฝั่งใด",
-        f"ไฟล์ {E3C.safe(u.name)} มีคอลัมน์เดบิตและเครดิต แต่ไม่มีอะไรบอกว่าเป็นของธนาคารหรือของบริษัท "
-        f"(เดบิตของธนาคารคือเงินออก เดบิตของบริษัทคือเงินเข้า) ไฟล์นี้คืออะไร",
-        SIDE_OPTIONS, "unused", subject=u.key, leaves_out=True, rememberable=False,
-        evidence={"file": u.name, "sheet": d["sheet"], "columns": ["วันที่", "รายการ", "เดบิต", "เครดิต", "คงเหลือ"], "rows": rows},
+        "bankrec_side", "blocking", "preflight", W("card.side.header"),
+        W("card.side.question", name=E3C.safe(u.name)),
+        side_options(), "unused", subject=u.key, leaves_out=True, rememberable=False,
+        evidence={"file": u.name, "sheet": d["sheet"], "columns": [W("col.date"), W("col.item"), W("col.dr"), W("col.cr"), W("col.balance")], "rows": rows},
         facts={"file": u.name, "layout": d["layout"]})
 
 
 def missing_card(rv) -> Finding | None:
     want = []
     if not rv.bank_files:
-        want.append({"role": "bank", "label": "รายการเดินบัญชีจากธนาคาร",
-                     "why": "ยอดคงเหลือและรายการฝั่งธนาคารทุกรายการมาจากไฟล์นี้", "required": True,
+        want.append({"role": "bank", "label": W("need.bank"),
+                     "why": W("need.bank.why"), "required": True,
                      "accept": [".xlsx", ".csv", ".pdf"]})
     if not rv.book_files:
-        want.append({"role": "book", "label": "สมุดบัญชีเงินฝากธนาคารของบริษัท (บัญชีแยกประเภทของบัญชีนี้)",
-                     "why": "ยอดคงเหลือและรายการฝั่งบริษัททุกรายการมาจากไฟล์นี้", "required": True, "accept": [".xlsx", ".csv"]})
+        want.append({"role": "book", "label": W("need.book"),
+                     "why": W("need.book.why"), "required": True, "accept": [".xlsx", ".csv"]})
     if not want:
         return None
-    names = " และ".join(w["label"] for w in want)
+    names = words.and_(w["label"] for w in want)
     unused = [u.name for u, why in rv.others if why != "same_file"]
-    extra = f" (ไฟล์ {E3C.safe(', '.join(unused[:3]))} ไม่ได้ใช้: ไม่พบหัวคอลัมน์ของรายการเดินบัญชีหรือสมุดบัญชี)" if unused else ""
-    return finding("missing_file", "blocking", "preflight", "ขาดไฟล์",
-                   f"ยังไม่มี{names}{extra} ผมต้องมีทั้งสองฝั่งก่อนจึงจะกระทบยอดได้",
-                   [("รอก่อน จะอัปโหลดให้", "wait", "ผมจะรอไฟล์ แล้วทำต่อจากจุดนี้"),
-                    ("ยกเลิกรอบนี้", "cancel", "ปิดรอบนี้ไว้ก่อน")], "wait", kind="request_files",
+    return finding("missing_file", "blocking", "preflight", W("card.missing.header"),
+                   W("card.missing.question_unused", names=names, extra=W("card.missing.unused", files=E3C.safe(", ".join(unused[:3]))))
+                   if unused else W("card.missing.question", names=names),
+                   [(W("opt.wait"), "wait", W("opt.wait.d")),
+                    (W("opt.cancel"), "cancel", W("opt.cancel.d"))], "wait", kind="request_files",
                    subject="+".join(w["role"] for w in want), request=want, facts={"missing": [w["role"] for w in want]},
-                   evidence={"columns": ["ไฟล์ที่ได้รับ", "ใช้เป็น"], "rows": _received(rv)})
+                   evidence={"columns": [W("col.received"), W("col.used_as")], "rows": _received(rv)})
 
 
 def _received(rv) -> list:
     from .review import SIDE_TH
 
-    rows = [[u.name, SIDE_TH["bank"]] for u in rv.bank_files] + [[u.name, SIDE_TH["book"]] for u in rv.book_files]
-    rows += [[u.name, "รายการค้างยกมา"] for u in rv.carried_files] + [[u.name, "ไม่ได้ใช้"] for u, _ in rv.others]
-    return rows or [["ยังไม่มีไฟล์", ""]]
+    rows = [[u.name, words.cap(SIDE_TH["bank"])] for u in rv.bank_files] + [[u.name, words.cap(SIDE_TH["book"])] for u in rv.book_files]
+    rows += [[u.name, W("used.carried")] for u in rv.carried_files] + [[u.name, W("used.none")] for u, _ in rv.others]
+    return rows or [[W("used.no_file"), ""]]
 
 
 def _where(cell: dict | None) -> str:
     c = cell or {}
-    return " · ".join(str(x) for x in (c.get("file"), c.get("sheet"), f"แถว {c['row']}" if c.get("row") else "", c.get("cell")) if x)
+    return " · ".join(str(x) for x in (c.get("file"), c.get("sheet"), W("where.row", row=c["row"]) if c.get("row") else "", c.get("cell")) if x)
 
 
 def account_card(rv) -> Finding:
     cands = rv.gl_candidates[:4]
-    options = [(f"{c['code']} {E3C.safe(c['name'])}".strip()[:60], c["code"], f"{c['rows']} รายการในไฟล์") for c in cands]
-    number = f" เลขที่ {rv.account['number']}" if rv.account.get("number") else ""
+    options = [(f"{c['code']} {E3C.safe(c['name'])}".strip()[:60], c["code"], W("card.account.rows", rows=c["rows"])) for c in cands]
     return finding(
-        "bankrec_account", "blocking", "preflight", "บัญชีใด",
-        f"สมุดบัญชีที่ส่งมามีหลายบัญชี บัญชีใดคือบัญชีเงินฝากธนาคาร{number} ที่จะกระทบยอด "
-        f"(ตั้งรหัสบัญชีไว้ในหน้าตั้งค่า agent ได้ จะไม่ต้องถามอีก)",
+        "bankrec_account", "blocking", "preflight", W("card.account.header"),
+        W("card.account.question_number", number=rv.account["number"]) if rv.account.get("number") else W("card.account.question"),
         options, cands[0]["code"], rememberable=False,
-        evidence={"columns": ["รหัสบัญชี", "ชื่อบัญชี", "จำนวนรายการ"], "rows": [[c["code"], c["name"], c["rows"]] for c in cands]},
+        evidence={"columns": [W("col.account_code"), W("col.account_name"), W("col.rows")],
+                  "rows": [[c["code"], c["name"], c["rows"]] for c in cands]},
         facts={"candidates": [c["code"] for c in cands]})
 
 
@@ -96,12 +99,11 @@ def closing_card(side: str, rv) -> Finding:
 
     b = rv.balances[side]
     return finding(
-        "bankrec_closing", "blocking", "preflight", "ยอดคงเหลือ",
-        f"{SIDE_TH[side]}ที่ส่งมาไม่มียอดคงเหลือและไม่มียอดยกมา ยอดคงเหลือ ณ วันที่ {E3C.date_th(rv.end)} ตาม{SIDE_TH[side]}คือเท่าไร "
-        f"(รายการของงวดนี้รวมสุทธิ {fmt_money(b.movement)} บาท)",
-        [("ยังไม่ทราบ ทำเท่าที่มี", "unknown", "งบกระทบยอดจะแสดงว่ายังไม่ลงตัว"),
-         ("ยอดยกมาเป็นศูนย์", "zero", "บัญชีนี้เริ่มใช้ในงวดนี้ ยอดสิ้นงวดคือผลรวมรายการของงวด")],
-        "unknown", subject=side, rememberable=False, input={"kind": "money", "hint": "พิมพ์ยอดคงเหลือ เช่น 1,250,000.00"},
+        "bankrec_closing", "blocking", "preflight", W("card.closing.header"),
+        W("card.closing.question", side=SIDE_TH[side], end=E3C.date_th(rv.end), movement=fmt_money(b.movement)),
+        [(W("card.closing.unknown"), "unknown", W("card.closing.unknown.d")),
+         (W("card.closing.zero"), "zero", W("card.closing.zero.d"))],
+        "unknown", subject=side, rememberable=False, input={"kind": "money", "hint": W("card.closing.hint")},
         evidence={"file": ", ".join(u.name for u in (rv.bank_files if side == "bank" else rv.book_files))},
         facts={"side": side, "movement": f"{b.movement:.2f}"})
 
@@ -109,19 +111,17 @@ def closing_card(side: str, rv) -> Finding:
 def carried_card(rv, gap: Decimal) -> Finding:
     bank, book = rv.balances["bank"], rv.balances["book"]
     return finding(
-        "bankrec_carried", "blocking", "preflight", "รายการยกมา",
-        f"ยอดยกมาต้นงวดตามธนาคาร {fmt_money(bank.opening)} บาท ต่างจากยอดยกมาตามบัญชี {fmt_money(book.opening)} บาท "
-        f"อยู่ {fmt_money(abs(gap))} บาท แต่ยังไม่มีรายการค้างยกมาจากเดือนก่อนมาอธิบาย",
-        [("ไม่มีไฟล์นี้ ทำเท่าที่มี", "proceed_without", "งบกระทบยอดจะแสดงผลต่างของยอดยกมาไว้ และยังไม่ลงตัว"),
-         ("รอก่อน จะอัปโหลดให้", "wait", "ผมจะรอไฟล์ แล้วทำต่อจากจุดนี้")],
+        "bankrec_carried", "blocking", "preflight", W("card.carried.header"),
+        W("card.carried.question", bank=fmt_money(bank.opening), book=fmt_money(book.opening), gap=fmt_money(abs(gap))),
+        [(W("card.carried.without"), "proceed_without", W("card.carried.without.d")),
+         (W("opt.wait"), "wait", W("opt.wait.d"))],
         "wait", kind="request_files", subject="carried",
-        request=[{"role": "carried", "label": "รายการค้างยกมาจากเดือนก่อน",
-                  "why": "เช็คค้างจ่ายและเงินฝากระหว่างทางของเดือนก่อนอธิบายผลต่างของยอดยกมา — ใช้ชีต “รายการค้างยกไป” "
-                         "ในงบกระทบยอดของเดือนก่อนที่ agent นี้ทำได้เลย",
+        request=[{"role": "carried", "label": W("need.carried"),
+                  "why": W("need.carried.why"),
                   "required": False, "accept": [".xlsx", ".csv"]}],
-        evidence={"columns": ["ฝั่ง", "ยอดยกมาต้นงวด", "อ่านจาก"],
-                  "rows": [["ธนาคาร", f"{bank.opening:,.2f}", _where(bank.opening_cell)],
-                           ["บัญชี", f"{book.opening:,.2f}", _where(book.opening_cell)]]},
+        evidence={"columns": [W("col.side"), W("col.opening"), W("col.read_from")],
+                  "rows": [[W("word.bank"), f"{bank.opening:,.2f}", _where(bank.opening_cell)],
+                           [W("word.books"), f"{book.opening:,.2f}", _where(book.opening_cell)]]},
         facts={"opening_bank": f"{bank.opening:.2f}", "opening_book": f"{book.opening:.2f}", "gap": f"{gap:.2f}"})
 
 
@@ -134,19 +134,18 @@ def lone_card(rv):
             guess = C.of_bank_row(ln.text if ln else row.get("name") or "", amount, pdf=bool(ln and ln.pdf))
             return E3C.lone_card(
                 row, names, moment, default="review",
-                question=f"รายการเดินบัญชี: {E3C.line(_shown(rv, row))} ไม่พบในสมุดบัญชี "
-                         f"(ดูจากข้อความ น่าจะเป็น{C.TYPE_TH[guess]}) รายการนี้คืออะไร",
-                options=[(BANK_ROW["book"], "book", f"นับเป็น{C.TYPE_TH[guess]} และร่างรายการปรับปรุงให้ตรวจก่อนบันทึก"),
-                         (BANK_ROW["bank_error"], "bank_error", "ปรับยอดฝั่งธนาคาร แล้วแจ้งธนาคารให้แก้"),
-                         (BANK_ROW["review"], "review", "ยังไม่นับเป็นรายการกระทบยอด งบกระทบยอดจะยังไม่ลงตัว")])
+                question=W("card.lone.bank", row=E3C.line(_shown(rv, row)), type=C.TYPE_TH[guess]),
+                options=[(BANK_ROW["book"], "book", W("row.bank.book.d", type=C.TYPE_TH[guess])),
+                         (BANK_ROW["bank_error"], "bank_error", W("row.bank.bank_error.d")),
+                         (BANK_ROW["review"], "review", W("row.review.d"))])
         ln = _line(rv, row["id"])
         guess = C.of_book_row(ln.cheque if ln else "", amount, ln.carried_kind if ln else None)
         return E3C.lone_card(
             row, names, moment, default="review",
-            question=f"สมุดบัญชี: {E3C.line(_shown(rv, row))} ไม่พบในรายการเดินบัญชีของงวดนี้ รายการนี้คืออะไร",
-            options=[(BOOK_ROW["timing"], "timing", f"นับเป็น{C.TYPE_TH[guess]} ยกไปงวดหน้า"),
-                     (BOOK_ROW["book_error"], "book_error", "ร่างรายการกลับรายการให้ตรวจก่อนบันทึก"),
-                     (BOOK_ROW["review"], "review", "ยังไม่นับเป็นรายการกระทบยอด งบกระทบยอดจะยังไม่ลงตัว")])
+            question=W("card.lone.book", row=E3C.line(_shown(rv, row))),
+            options=[(BOOK_ROW["timing"], "timing", W("row.book.timing.d", type=C.TYPE_TH[guess])),
+                     (BOOK_ROW["book_error"], "book_error", W("row.book.book_error.d")),
+                     (BOOK_ROW["review"], "review", W("row.review.d"))])
     return make
 
 

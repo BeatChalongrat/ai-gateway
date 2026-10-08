@@ -65,17 +65,17 @@ def e2_fixture_defaults() -> dict:
 
 
 def render_sample(package: str, *, out_dir: str | None = None, defaults: dict | None = None,
-                  formats: list[str] | None = None) -> dict:
+                  formats: list[str] | None = None, lang: str | None = None) -> dict:
     st = self_test(package)
     defaults = self_test_defaults(package) if defaults is None else defaults
     formats = formats or st.get("formats") or ["xlsx"]
     files = [(os.path.join(package_dir(package), rel), os.path.basename(rel)) for rel in st["files"]]
     return run_files(package, files, defaults=defaults, formats=formats, message=st.get("message", ""),
-                     out_dir=out_dir)
+                     out_dir=out_dir, lang=lang)
 
 
 def run_files(package: str, files: list[tuple[str, str]], *, defaults: dict, formats: list[str],
-              message: str = "", out_dir: str | None = None, answers: dict | None = None) -> dict:
+              message: str = "", out_dir: str | None = None, answers: dict | None = None, lang: str | None = None) -> dict:
     """The whole package on (path, the name the person gave the file) pairs, in upload order (AM4).
     answers are the ones the person has already given (AM5); a card they do not answer is skipped."""
     out_dir = out_dir or tempfile.mkdtemp(prefix=f"am_sample_{package}_")
@@ -86,7 +86,7 @@ def run_files(package: str, files: list[tuple[str, str]], *, defaults: dict, for
     step.JOB_IN, step.JOB_OUT = inp, out
 
     def run(req):
-        res = step.run(req)
+        res = step.run({**req, "lang": lang} if lang else req)   # AM14: as the runner tells a run that is not Thai
         assert res.get("ok"), res
         return res
 

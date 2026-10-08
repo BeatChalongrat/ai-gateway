@@ -22,10 +22,12 @@ import datetime as _dt
 import json
 import os
 
+from ...engine import words as _words   # (this package has a module of its own named words)
 from .checks import inputs as _in
 from .checks import preflight as _pre
 from .checks.inputs import FORMAT, Upload  # noqa: F401
 from .scripts import reconcile as _rec
+from .words import W
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -63,7 +65,10 @@ def preflight(files: list[Upload], *, message: str = "", defaults: dict | None =
 def compute(files, roles, period, *, answers=None, defaults=None, today=None, answered_by=None) -> dict:
     """``answered_by``: who answered each card ({answer key: {name}}), from the runner — a pair a
     person confirmed names that person."""
-    return _rec.compute(files, roles, period, answers=answers, defaults=defaults, today=today, answered_by=answered_by)
+    def table():
+        return _rec.compute(files, roles, period, answers=answers, defaults=defaults, today=today, answered_by=answered_by)
+
+    return _words.with_document(table(), table)
 
 
 def postcompute(files, roles, period, computed, *, answers=None, defaults=None) -> dict:
@@ -127,12 +132,12 @@ def _asked_check(path: str, view: dict, applied: list[str]) -> dict:
     if applied == ["sort_by_amount"]:
         sizes = [abs(asked.number(r[6])) if isinstance(r[6], (int, float)) and not isinstance(r[6], bool) else None for r in rows]
         if not same or not asked.runs_down(sizes):
-            return asked.check(False, f"ขอให้เรียงรายการกระทบยอดจากจำนวนเงินมากที่สุด แต่ชีต “{S_ITEMS}” ในไฟล์ไม่ได้เรียงตามนั้น")
-        return asked.check(True, f"รายการกระทบยอด {len(rows)} แถวเรียงจากจำนวนเงินมากที่สุดลงไป", len(rows))
+            return asked.check(False, W("asked.amount.not", sheet=S_ITEMS))
+        return asked.check(True, W("asked.amount.ok", n=len(rows)), len(rows))
     dates = [_date_read(r[H_ITEMS.index("วันที่")]) for r in rows]
     if not same or not asked.runs_up(dates):
-        return asked.check(False, f"ขอให้เรียงรายการกระทบยอดตามวันที่ แต่ชีต “{S_ITEMS}” ในไฟล์ไม่ได้เรียงตามนั้น")
-    return asked.check(True, f"รายการกระทบยอด {len(rows)} แถวเรียงจากวันที่เก่าที่สุดขึ้นก่อน", len(rows))
+        return asked.check(False, W("asked.date.not", sheet=S_ITEMS))
+    return asked.check(True, W("asked.date.ok", n=len(rows)), len(rows))
 
 
 def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
@@ -142,14 +147,17 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     from ...deliverables.theme import resolve
     from .scripts.workbook import BankWorkbook, check
 
-    view, applied = _as_asked(computed, req)
+    # the working paper is written from the table in the documents' language; what the gate then says of
+    # the file is said in the run's
+    view, applied = _as_asked(_words.for_document(computed), req)
     theme = resolve(req.get("theme"))
     names = req.get("names") or {}
     artifacts, all_ok = [], True
     for fmt in [f for f in wanted_formats(req, ["xlsx"]) if f == "xlsx"]:
         name = os.path.basename(names.get(fmt) or "bank_reconciliation.xlsx")
         path = os.path.join(out_dir, name)
-        meta = BankWorkbook(view, theme, req.get("run")).write(path)
+        with _words.speaking(_words.DOCUMENT):
+            meta = BankWorkbook(view, theme, req.get("run")).write(path)
         checks = check(path, view, req.get("run"))
         if applied:
             checks.append(_asked_check(path, view, applied))
