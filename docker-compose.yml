@@ -488,6 +488,12 @@ services:
       OPS_WATCH_BACKUP_MAX_AGE_H: ${BACKUP_MAX_AGE_H:-26}
       # FIX131 D5 — replies still "streaming" after N minutes.
       OPS_WATCH_TURN_STUCK_MIN: ${OPS_WATCH_TURN_STUCK_MIN:-15}
+      # The host's power (a laptop): on battery it is said; at this charge (%) or
+      # this many minutes left it pages, while there is still time to plug in.
+      # The reading is power_last.json in the backup folder, written by the host's
+      # task "SRAN power watch" (scripts/ops/power-watch.ps1).
+      OPS_WATCH_POWER_PAGE_PCT: ${OPS_WATCH_POWER_PAGE_PCT:-40}
+      OPS_WATCH_POWER_PAGE_MIN: ${OPS_WATCH_POWER_PAGE_MIN:-60}
       # FIX131 D — the pager's shared incident store: the backend's Redis
       # (db 0), so the backend rules and this watcher page once per incident.
       REDIS_HOST: redis

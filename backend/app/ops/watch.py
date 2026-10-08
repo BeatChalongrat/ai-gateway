@@ -689,6 +689,56 @@ def smoke_findings(cfg: dict) -> list[Finding]:
                           missing_since=cfg.get("_smoke_missing_since"))
 
 
+def classify_power(record: dict | None, *, now: float, max_age_s: float = 600.0, page_pct: float = 40.0,
+                   page_minutes: float = 60.0, debounce_s: float = 120.0) -> list[Finding]:
+    """The host's power. The host is a laptop, and this watcher's container cannot see a battery:
+    scripts/ops/power-watch.ps1 (a task of the host) writes ``power_last.json`` beside the backups once
+    a minute, and this reads it.
+
+    * no reading at all: quiet — the task is not installed on this host;
+    * a reading of a machine with no battery: quiet;
+    * a reading older than ``max_age_s``: "the reading has stopped" (degraded) — the watcher would not
+      see the machine go on battery;
+    * on battery: said (degraded) once it has lasted ``debounce_s``, so that carrying the machine to
+      another socket pages nobody;
+    * on battery with the charge at or under ``page_pct``, or the time left at or under
+      ``page_minutes``: critical, at once — while there is still time to plug in.
+
+    One incident (``power``): the pager says "on battery" once and pages again when it turns critical.
+    When the battery is empty this watcher stops with the machine; there is no page after that one."""
+    if not record:
+        return []
+    epoch = record.get("epoch")
+    age = now - float(epoch) if isinstance(epoch, (int, float)) and not isinstance(epoch, bool) else float("inf")
+    if age > max_age_s:
+        severity, title, body = cat.power_stale_text(age if age != float("inf") else max_age_s, max_age_s)
+        return [Finding(key="power:stale", title=title, message=body, severity=severity, group=cat.GROUP_POWER,
+                        debounce_s=max(debounce_s, 300.0))]
+    if record.get("battery") is False or not record.get("on_battery"):
+        return []
+
+    def number(v) -> float | None:
+        return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 else None
+
+    pct, minutes = number(record.get("charge_pct")), number(record.get("minutes_left"))
+    if (pct is not None and pct <= page_pct) or (minutes is not None and minutes <= page_minutes):
+        severity, title, body = cat.power_low_text(pct, minutes)
+        return [Finding(key="power:low", title=title, message=body, severity=severity, group=cat.GROUP_POWER)]
+    severity, title, body = cat.power_on_battery_text(pct, minutes, page_pct, page_minutes)
+    return [Finding(key="power:on_battery", title=title, message=body, severity=severity, group=cat.GROUP_POWER,
+                    debounce_s=debounce_s)]
+
+
+def power_findings(cfg: dict) -> list[Finding]:
+    """The power rule's I/O: read the reading the host's task wrote, classify."""
+    power_file = cfg.get("power_file")
+    if not power_file:
+        return []
+    return classify_power(_read_json(power_file), now=time.time(), max_age_s=float(cfg.get("power_max_age_s", 600)),
+                          page_pct=float(cfg.get("power_page_pct", 40)), page_minutes=float(cfg.get("power_page_min", 60)),
+                          debounce_s=float(cfg.get("power_debounce_s", 120)))
+
+
 def parse_pg_dsns(spec: str) -> list[tuple[str, str]]:
     """``OPS_WATCH_PG_DSNS`` = ``name=dsn;name=dsn`` (';' — DSNs carry ',')."""
     out: list[tuple[str, str]] = []
@@ -786,6 +836,7 @@ def collect(cfg: dict) -> list[Finding]:
             _log("backup_dir_missing", path=cfg["backup_dir"],
                  note="the backup folder is not mounted — no-fresh-backup alerts are off")
     findings += smoke_findings(cfg)
+    findings += power_findings(cfg)
     return findings
 
 
@@ -858,6 +909,15 @@ def main() -> int:
         "smoke_file": _env("OPS_WATCH_SMOKE_FILE",
                            os.path.join(_env("OPS_WATCH_BACKUP_DIR", ""), "smoke_last.json") if _env("OPS_WATCH_BACKUP_DIR", "") else ""),
         "smoke_max_age_h": float(_env("OPS_WATCH_SMOKE_MAX_AGE_H", "26")),
+        # The host's power, beside the backups too (scripts/ops/power-watch.ps1 writes
+        # <BACKUP_DIR>/power_last.json once a minute); "" = off. On battery it is said after
+        # POWER_DEBOUNCE_S; at POWER_PAGE_PCT % or POWER_PAGE_MIN minutes left it pages.
+        "power_file": _env("OPS_WATCH_POWER_FILE",
+                           os.path.join(_env("OPS_WATCH_BACKUP_DIR", ""), "power_last.json") if _env("OPS_WATCH_BACKUP_DIR", "") else ""),
+        "power_page_pct": float(_env("OPS_WATCH_POWER_PAGE_PCT", "40")),
+        "power_page_min": float(_env("OPS_WATCH_POWER_PAGE_MIN", "60")),
+        "power_max_age_s": float(_env("OPS_WATCH_POWER_MAX_AGE_S", "600")),
+        "power_debounce_s": float(_env("OPS_WATCH_POWER_DEBOUNCE_S", "120")),
         # FIX131 — the pager's knobs (settings: ALERT_*).
         "debounce_s": float(getattr(settings, "alert_debounce_seconds", 90.0)),
         "min_attempts": int(getattr(settings, "alert_page_min_attempts", 3)),

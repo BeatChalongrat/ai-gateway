@@ -231,6 +231,7 @@ grouping, a repeat interval, inhibition during maintenance.
 | `turns:stuck` | ops-watch: assistant replies still `streaming` > 15 min (last 24 h) |
 | `backup` / `backup:offsite` | ops-watch from the backup records (`docs/ops/backups.md`) |
 | `disk:<path>`, `memory` | ops-watch |
+| `power` | ops-watch from the host's power reading: on battery, battery low, or the reading has stopped (below) |
 | `rule:<id>` | any other (operator-defined) rule |
 
 **Severity by impact:**
@@ -331,10 +332,43 @@ The alerts the backend cannot raise about itself, every `OPS_WATCH_INTERVAL`
 | `no successful turn in 5 min` / `N % of turns failed (5 min)` | `chat.messages_masked` assistant rows `completed` / `error` on the chat database (the `chat` DSN) | ≥ 1 turn and 0 completed (pages from 3 attempts); ≥ `OPS_WATCH_TURN_MIN_SAMPLE` (10) turns and more than `OPS_WATCH_TURN_ERROR_PCT` (5) % failed |
 | FIX131: `N replies stuck 'typing' for over 15 min` | assistant rows still `streaming`, created 15 min – 24 h ago (`OPS_WATCH_TURN_STUCK_MIN`, `OPS_WATCH_TURN_STUCK_LOOKBACK_H`) — the orphaned-turn sweep should have closed them | ≥ 1 |
 | FIX131: `no fresh backup` / `backups are failing` / `off-site copy failed` | the backup folder, read-only (`OPS_WATCH_BACKUP_DIR=/backups`): `last_success.json`, `last_failure.json` (`docs/ops/backups.md`) | newest proven backup older than `BACKUP_MAX_AGE_H` (26 h); a failure newer than the last success |
+| `the host is on battery` / `battery at N % — plug the host in now` / `power reading has stopped` | `power_last.json` in the backup folder, written once a minute by the host's task "SRAN power watch" (`scripts/ops/power-watch.ps1`) | on battery for 2 min; charge ≤ `OPS_WATCH_POWER_PAGE_PCT` (40 %) or time left ≤ `OPS_WATCH_POWER_PAGE_MIN` (60 min); reading older than 10 min |
 
 (The titles above are the checks; since FIX131 the page itself is worded for
 users — "Chat is down: backend is unhealthy", "Server disk is 92 % full" —
 see the pager section.)
+
+#### The host's power
+
+The host is a laptop, and the pager stops with the machine: when the battery
+is empty nothing is left to say so. On 9 Oct 2026 it ran from 98 % to 61 % in
+two hours with live on it and no rule looked. The watcher's container cannot
+see a battery (`/sys/class/power_supply` is empty inside the Docker VM), so
+the reading comes from the host:
+
+- `scripts/ops/power-watch.ps1` — a task of the host, "SRAN power watch" —
+  writes what Windows says about the power to `power_last.json` in the backup
+  folder once a minute (whether there is a battery, whether the machine is on
+  it, the charge, the minutes left). Register it once, as the owner:
+  `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\ops\power-register-task.ps1`.
+  It is registered to start on battery and not to be stopped when the charger
+  is pulled — Task Scheduler's defaults are the other way round — and a second
+  trigger starts it again within five minutes if it has died.
+- **On battery** for two minutes: said once, at warning priority ("The host is
+  on battery: 73% left") — carrying the machine to another socket says nothing.
+- **Charge at or under 40 %, or an hour or less left**: a critical page, at
+  once, in the same incident — "Battery at 38% — plug the host in now". The two
+  thresholds are `OPS_WATCH_POWER_PAGE_PCT` and `OPS_WATCH_POWER_PAGE_MIN`.
+- **The reading stopped** (older than ten minutes, for five minutes): a
+  warning — the watcher would not see the machine go on battery. A host where
+  the task was never registered, and a machine with no battery, are quiet.
+- Back on mains power the incident closes with the usual "Recovered" note.
+
+What it cannot do: page after the battery is empty, or while the machine
+sleeps. The daily smoke task had the same two defaults (it would not have
+started at 06:30 on a morning the laptop was left unplugged);
+`scripts/smoke-register-task.ps1` now sets both, and the task has to be
+registered again for that to take effect.
 
 Why the turn rules live here as well as in `alert_rules`: until FIX130 the
 gateway's `request_logs` only recorded requests that reached a provider. On

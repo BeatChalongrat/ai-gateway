@@ -80,6 +80,8 @@ GROUP_QUEUE = "capacity:queue"
 GROUP_SATURATED = "capacity:saturated"
 # FIX134 F — the daily smoke suite (scripts/smoke.sh): red, or not running.
 GROUP_SMOKE = "smoke"
+# The host's power: on battery, battery low, or the reading has stopped.
+GROUP_POWER = "power"
 
 
 def _dur(seconds: float) -> str:
@@ -322,6 +324,52 @@ def smoke_stale_text(age_s: float | None, max_age_h: float, why: str = "") -> tu
         "broken sign-in or page would go unnoticed. The scheduled task \"SRAN smoke daily\" "
         "(06:30, scripts/smoke-daily.ps1) may be off or failing before it writes smoke_last.json. "
         f"Look: schtasks /Query /TN \"SRAN smoke daily\" and smoke_last.log in the backup folder; run: {_SMOKE_RUN}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The host's power (the host is a laptop: scripts/ops/power-watch.ps1 writes
+# <BACKUP_DIR>/power_last.json once a minute; the watcher's container cannot
+# see the battery itself)
+# ---------------------------------------------------------------------------
+
+_POWER_TASK = "the task \"SRAN power watch\" (scripts/ops/power-watch.ps1)"
+
+
+def _time_left(minutes: float | None) -> str:
+    return f", about {minutes:.0f} min at this rate" if minutes is not None and minutes >= 0 else ""
+
+
+def power_on_battery_text(pct: float | None, minutes: float | None, page_pct: float,
+                          page_minutes: float) -> tuple[str, str, str]:
+    """The host runs on its battery and there is still time: said once, not a 3 a.m. page."""
+    charge = f"{pct:.0f}% left" if pct is not None else "charge unknown"
+    return HIGH, f"The host is on battery: {charge}", (
+        f"The machine every service runs on is not on mains power ({charge}{_time_left(minutes)}). "
+        "Everything still works. When the battery is empty the machine stops, and with it the chat, "
+        "the gateway, the backups and this pager — nobody would be told. Plug it in. "
+        f"A second, louder page comes at {page_pct:.0f}% or {page_minutes:.0f} min left, whichever is first."
+    )
+
+
+def power_low_text(pct: float | None, minutes: float | None) -> tuple[str, str, str]:
+    """On battery and past the threshold: plug in while there is still time."""
+    charge = f"{pct:.0f}%" if pct is not None else "low"
+    return CRITICAL, f"Battery at {charge} — plug the host in now", (
+        f"The machine every service runs on is on battery at {charge}{_time_left(minutes)}. "
+        "When it is empty everything stops at once — the chat, the gateway, the backups — and this "
+        "pager stops with it: this is the last warning there can be. Plug the machine in now."
+    )
+
+
+def power_stale_text(age_s: float, max_age_s: float) -> tuple[str, str, str]:
+    """A reading was there and has stopped coming: the watcher can no longer see the host's power."""
+    return HIGH, "Power reading has stopped", (
+        f"The newest reading of the host's power is {_dur(age_s)} old (limit {_dur(max_age_s)}). "
+        "If the machine went on battery now, nobody would be told. "
+        f"{_POWER_TASK[0].upper() + _POWER_TASK[1:]} writes it once a minute and may have stopped. "
+        "Look: schtasks /Query /TN \"SRAN power watch\"; start it again: "
+        "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\ops\\power-register-task.ps1"
     )
 
 
