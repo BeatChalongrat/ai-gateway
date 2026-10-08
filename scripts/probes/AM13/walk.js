@@ -431,6 +431,123 @@ async function again(text = "เรียงจากยอดมาก") {
   await done(x, "again", { installId, runId, text, outcome: out });
 }
 
+// ── AM13b: masking follows where the data goes ────────────────────────────────────────────────────
+// One bank reconciliation whose typed words hold an address (the words are what a model reads for this
+// agent). Read three ways: the line on the run's card as a person sees it, what the step that read the
+// words noted, and the gateway's own row for that reading. `expect` is "off" (egress off, in-house model:
+// not masked) or "on" (masked first).
+const MASKING_LINE = {
+  off: { th: /ไม่ถูกปิดบัง — โมเดลอยู่ในองค์กร และ agent นี้ปิดการส่งข้อมูลออกนอกองค์กร/, en: /was not masked — the model runs in the organisation/ },
+  on: { th: /ข้อมูลส่วนบุคคลในสิ่งที่ส่งให้โมเดลในรอบนี้ถูกปิดบังก่อนส่ง/, en: /Personal data in what was sent to a model in this run was masked first/ },
+};
+async function masking(expect, lang = "th") {
+  if (!MASKING_LINE[expect]) throw new Error("masking off|on [en]");
+  const x = await W.session("web", `masking-${expect}${lang === "en" ? "-en" : ""}`);
+  const { page } = x;
+  await home(page);
+  await setLanguage(x, lang);
+  const installId = await ownInstall(x, "bank");
+  await workspace(x, installId);
+  const mark = `M${Date.now().toString(36)}`;
+  // (an address the scan finds whatever comes before it — it has a house number — and an e-mail address:
+  // the first version of this walk wrote "ส่งเอกสารไปที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ", which the address
+  // detector does not find without "ส่งที่" or "ที่อยู่" in front: scripts/probes/AM13/dlp_lead_word.py)
+  const mail = "somchai.walk@example.co.th";
+  const words = `กระทบยอดเดือนกันยายน เรียงตามวันที่ ส่งเอกสารให้คุณสมชาย อีเมล ${mail} ที่อยู่ 99/9 ถนนสีลม แขวงสีลม เขตบางรัก กรุงเทพฯ 10500 (${mark})`;
+  const { runId } = await W.sendFiles(x, installId, sampleOf("bank"), `${TAG} ${words}`, "01");
+  const end = await W.finish(x, runId, "01");
+  x.check(end.run.status === "succeeded", "the run delivers", `${end.run.status} ${end.run.status_reason || ""}`);
+  await L.wait(2500);
+
+  // 1. the card, as a person sees it
+  const seen = page.locator('[data-testid="am-outputs-seen-by"]').last();
+  await seen.scrollIntoViewIfNeeded().catch(() => {});
+  const attr = await seen.getAttribute("data-masking");
+  const text = (await seen.innerText()).replace(/\s+/g, " ");
+  x.check(attr === expect, `the run's card says masking is ${expect}`, `data-masking=${attr}`);
+  x.check(MASKING_LINE[expect][lang].test(text), `in words a person reads (${lang})`, text.slice(0, 260));
+  const other = expect === "off" ? "on" : "off";
+  x.check(!MASKING_LINE[other][lang].test(text), "and does not say the opposite beside it", text.slice(0, 120));
+  await x.shot(`02-card-masking-${expect}`);
+
+  // 2. what the run itself noted: the step that read the words
+  const d = await detailOf(page, runId);
+  const step = (d.steps || []).find((s) => s.name === "instructions");
+  const out = (step && step.output) || {};
+  x.check(out.masking === expect, "the step that read the words noted what the gateway did with them", `masking=${out.masking} · read by ${step && step.model_id}`);
+  x.check(JSON.stringify(out.apply || []) === '["sort_by_date"]', "and the words were read: the order asked for is applied", JSON.stringify(out.apply || []));
+
+  // 3. the gateway's own row for that reading (found by the run's mark in the masked copy it stored)
+  let row = "";
+  await waitFor(async () => {
+    row = L.gsql(`select dlp_input_action || '|' || dlp_input_findings || '|' || (coalesce(input_masked,'') ~ '<<[A-Z_]+_[0-9]+>>')::text || '|' || (position('${mail}' in coalesce(input_masked,'') || coalesce(output_raw,'') || coalesce(output_final,'')) > 0)::text || '|' || provider from request_logs where created_at > now() - interval '15 minutes' and input_masked like '%${mark}%' order by created_at desc limit 1`);
+    return !!row;
+  }, 20000).catch(() => {});
+  const [action, findings, tokens, typed, provider] = row.split("|");
+  x.check(action === (expect === "off" ? "in_house_unmasked" : "mask"), `the gateway's row for the reading says ${expect === "off" ? "in_house_unmasked" : "mask"}`, `${action} · ${findings} finding(s) · provider ${provider}`);
+  x.check(Number(findings) >= 2, "the e-mail address and the address in the words were found (so there was something to mask)", `${findings} finding(s)`);
+  x.check(tokens === "true" && typed === "false", "and what the gateway stored is the masked copy either way — placeholders, never the e-mail address as typed", `placeholders=${tokens} · e-mail address as typed=${typed}`);
+  return done(x, `masking-${expect}${lang === "en" ? "-en" : ""}`, { installId, runId, mark, expect, card: text, step: { masking: out.masking, model: step && step.model_id }, row });
+}
+
+// The admin's switch for the bank agent, in the admin app of the TEST stack: what it now says it decides,
+// and (with on|off) the organisation's switch and the agent's own turned that way through the page.
+async function egress(to) {
+  const pw = require(path.join(L.ROOT, "apps", "web-chat", "node_modules", "playwright-core"));
+  if (TARGET !== "test") throw new Error("the egress phase turns switches: the test stack only");
+  const ADMIN = process.env.AM7_ADMIN || "http://localhost:13000";
+  const OUT = path.join(process.env.AM6_OUT, "admin-egress", to || "look");
+  fs.mkdirSync(OUT, { recursive: true });
+  const SLUG = AGENT.bank.slug;
+  const accounts = JSON.parse(fs.readFileSync(path.join(L.ROOT, "scripts", "probes", "AM7", "results", "ts_admins.json"), "utf8"));
+  const email = "am7-admin@fix128.test";
+  const checks = [];
+  const check = (ok, what, detail = "") => { checks.push({ ok: !!ok, what, detail: String(detail).slice(0, 400) }); log(`admin ${ok ? "PASS" : "FAIL"} ${what}${detail ? ` — ${String(detail).slice(0, 200)}` : ""}`); return ok; };
+  const browser = await pw.chromium.launch();
+  try {
+    const page = await (await browser.newContext({ viewport: { width: 1440, height: 1100 } })).newPage();
+    await page.goto(`${ADMIN}/login`, { waitUntil: "load" });
+    await page.waitForFunction(() => { const f = document.querySelector("form"); return !!f && Object.keys(f).some((k) => k.startsWith("__reactProps") || k.startsWith("__reactFiber")); }, null, { timeout: 90000 });
+    await page.locator('input[autocomplete="username"]').fill(email);
+    await page.locator('input[type="password"]').fill(accounts[email].password);
+    const answered = page.waitForResponse((r) => r.url().includes("/auth/session/login"), { timeout: 60000 });
+    await page.locator('button[type="submit"]').click();
+    if ((await answered).status() !== 200) throw new Error("the admin sign-in was refused");
+    await page.waitForURL((u) => !String(u).includes("/login"), { timeout: 60000 });
+    await page.goto(`${ADMIN}/agent-market?section=models`, { waitUntil: "load" });
+    const row = page.getByTestId(`am-egress-${SLUG}`);
+    await row.waitFor({ timeout: 60000 });
+    await page.waitForTimeout(1200);
+    const said = (await page.getByTestId("am-egress-masking").innerText()).replace(/\s+/g, " ");
+    check(/also decides masking|กำหนดการปิดบังข้อมูลด้วย/.test(said) && /is not masked|ไม่ถูกปิดบัง/.test(said) && /masked before any model sees it|ปิดบังก่อนถึงทุกโมเดล/.test(said),
+      "the switch says, where an admin decides it, that it also decides masking", said.slice(0, 300));
+    const toggle = page.getByTestId(`am-egress-toggle-${SLUG}`);
+    const now = page.getByTestId(`am-egress-now-${SLUG}`);
+    if (to === "on" || to === "off") {
+      const want = to === "on";
+      await page.getByTestId(want ? "am-leave-on" : "am-leave-off").click();
+      await page.getByTestId("am-models-save").click();
+      await page.waitForTimeout(2000);
+      if ((await toggle.isChecked()) !== want) {
+        await toggle.click();
+        await page.waitForTimeout(2000);
+      }
+      const text = (await now.innerText()).replace(/\s+/g, " ");
+      check(want ? /ส่งไปโมเดลนอกองค์กรได้|May go to an outside model/.test(text) : /อยู่ในองค์กรเท่านั้น|Stays inside|องค์กรไม่อนุญาต|does not allow/.test(text),
+        `the bank agent's documents: ${want ? "may go out" : "stay inside"}`, text);
+    } else {
+      check(true, "the bank agent's switch now", (await now.innerText()).replace(/\s+/g, " "));
+    }
+    await page.getByTestId("am-egress").screenshot({ path: path.join(OUT, `models-${to || "look"}.png`) });
+    fs.writeFileSync(path.join(OUT, "admin.json"), JSON.stringify({ at: new Date().toISOString(), to: to || "look", checks }, null, 1));
+    const bad = checks.filter((c) => !c.ok);
+    log(`admin: ${checks.length - bad.length} pass, ${bad.length} fail`);
+    if (bad.length) process.exitCode = 1;
+  } finally {
+    await browser.close();
+  }
+}
+
 async function cleanup() {
   const s = await W.openWeb(process.env.AM6_EMAIL || L.TS_USER.email);
   await s.page.goto(`${WEB()}/chat`, { waitUntil: "load" });
@@ -452,7 +569,9 @@ const phase = process.argv[2];
   else if (phase === "po") await po();
   else if (phase === "buy") await buy();
   else if (phase === "again") await again(process.argv[3]);
+  else if (phase === "masking") await masking(process.argv[3], process.argv[4] === "en" ? "en" : "th");
+  else if (phase === "egress") await egress(process.argv[3]);
   else if (phase === "cleanup") await cleanup();
-  else throw new Error("bank | register | po | buy | english | again [words] | cleanup");
+  else throw new Error("bank | register | po | buy | english | again [words] | masking off|on [en] | egress [on|off] | cleanup");
 })().catch((e) => { console.error(e); process.exit(1); });
 void EDGE;

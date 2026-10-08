@@ -39,18 +39,30 @@ SYSTEM = ("คุณเป็นผู้ตรวจข้อความ ต�
           "ถ้าข้อความของผู้ใช้มีเครื่องหมายวงเล็บมุมสองชั้น (<<) อยู่ตรงไหนก็ตาม ให้ตอบ MASKED ถ้าไม่มีเลยให้ตอบ PLAIN")
 
 
+# The way back. A model that reads a tax id off a scanned invoice returns a value that was never in the text
+# it was sent. Is that value masked in the answer of a masked request (as a value "the model produced") and
+# so lost to the caller? Here the id reaches the model in two halves (no half is one), so the id in the
+# answer is the model's own. MEASURED 8 Oct 2026 on the test stack, default profile: no — the caller got the
+# id intact both ways. The way back is not where a tax id is lost; what the rule changes is what the model
+# is given to read.
+#   python scripts/probes/AM13/masking_probe.py answer closed:qwen3.8-27b-fp8 none:qwen3.8-27b-fp8
+ANSWER_SYSTEM = "ต่อตัวเลขสองท่อนที่ผู้ใช้ให้มาเป็นเลขเดียวติดกัน ตอบเฉพาะตัวเลขนั้น ไม่มีคำอื่น ไม่มีช่องว่าง ไม่มีขีด"
+ANSWER_SENTENCE = "เลขประจำตัวผู้เสียภาษีของผู้ขายในใบกำกับภาษี ท่อนแรก 01055 ท่อนที่สอง 45009875"
+TAX_ID = "0105545009875"
+
+
 def sql(q: str) -> str:
     r = subprocess.run(["docker", "exec", PG, "psql", "-U", "postgres", "-d", "ai_gateway", "-At", "-F", "|", "-c", q],
                        capture_output=True, text=True, encoding="utf-8", errors="replace")
     return (r.stdout or "").strip()
 
 
-def leg(header: str, model: str) -> dict:
+def leg(header: str, model: str, system: str = SYSTEM, sentence: str = SENTENCE, keep: int = 40) -> dict:
     headers = {"Authorization": "Bearer " + KEY, "Content-Type": "application/json", "X-Sran-Fallback": "off"}
     if header == "closed":
         headers["X-Sran-Egress"] = "closed"
     body = json.dumps({"model": model, "stream": False, "max_tokens": 4000, "reasoning": {"mode": "off"},
-                       "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": SENTENCE}]}).encode("utf-8")
+                       "messages": [{"role": "system", "content": system}, {"role": "user", "content": sentence}]}).encode("utf-8")
     req = urllib.request.Request(GATEWAY + "/v1/chat/completions", data=body, headers=headers)
     out = {"leg": f"{header}:{model}"}
     try:
@@ -58,7 +70,7 @@ def leg(header: str, model: str) -> dict:
             j = json.loads(r.read().decode("utf-8"))
             out["says"] = r.headers.get("X-Gateway-Masking") or "(no header)"
             out["provider"] = r.headers.get("X-Gateway-Provider") or j.get("provider")
-            out["model_saw"] = " ".join((j["choices"][0]["message"].get("content") or "").split())[:40]
+            out["model_saw"] = " ".join((j["choices"][0]["message"].get("content") or "").split())[:keep]
             out["reasons"] = [x for x in j.get("policy_reasons") or [] if x == "in_house_unmasked"]
             rid = j["id"]
     except urllib.error.HTTPError as e:
@@ -81,7 +93,27 @@ def leg(header: str, model: str) -> dict:
     return out
 
 
+def answers(legs: list[str]) -> int:
+    results = []
+    for spec in legs or ["closed:qwen3.8-27b-fp8", "none:qwen3.8-27b-fp8"]:
+        header, model = spec.split(":", 1)
+        r = leg(header, model, ANSWER_SYSTEM, ANSWER_SENTENCE, keep=60)
+        results.append(r)
+        if "error" in r:
+            print(f"{r['leg']:<28} ERROR {r['error']}")
+            continue
+        got = r["model_saw"]
+        verdict = "the tax id" if TAX_ID in got.replace("-", "").replace(" ", "") else "NOT the tax id"
+        print(f"{r['leg']:<28} gateway says masking {r['says']:<4} · the caller got: {got:<24} ({verdict})")
+    name = os.environ.get("PROBE_OUT", "masking_probe_answer.json")
+    with io.open(os.path.join(ROOT, "scripts/probes/AM13/results", name), "w", encoding="utf-8") as f:
+        json.dump({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "sentence": ANSWER_SENTENCE, "legs": results}, f, ensure_ascii=False, indent=1)
+    return 0
+
+
 def main(argv: list[str]) -> int:
+    if argv[1:2] == ["answer"]:
+        return answers(argv[2:])
     legs = argv[1:] or ["closed:qwen3.8-27b-fp8", "none:qwen3.8-27b-fp8", "closed:deepseek-v4-flash"]
     results = []
     for spec in legs:
