@@ -48,4 +48,15 @@ describe("per-agent egress", () => {
     const now = await screen.findByTestId("am-egress-now-sran.financial-report");
     expect(now.textContent).toMatch(/does not allow it|องค์กรไม่อนุญาต/);
   });
+
+  // AM13b: the same switch decides whether an agent's runs are masked — an admin is told where they decide it
+  it("says, at the switch, that it also decides masking: inside = not masked, may go out = masked", async () => {
+    api.egress.mockResolvedValue({ org: false, agents: [row({ org: false, agent: false, agent_default: true })] });
+    wrap(<AgentEgressCard orgVersion="c" />);
+    const said = (await screen.findByTestId("am-egress-masking")).textContent ?? "";
+    expect(said).toMatch(/also decides masking|กำหนดการปิดบังข้อมูลด้วย/);
+    expect(said).toMatch(/is not masked|ไม่ถูกปิดบัง/);
+    expect(said).toMatch(/masked before any model sees it|ปิดบังก่อนถึงทุกโมเดล/);
+    expect(said).toMatch(/card says which of the two was done|การ์ดของแต่ละรอบบอกว่ารอบนั้นทำแบบไหน/);
+  });
 });

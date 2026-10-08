@@ -356,6 +356,12 @@ function LeftOutRow({ runId, doc, superseded }: { runId: string; doc: NotInclude
   );
 }
 
+const MASKING_LINE = {
+  off: "outputs.masking.off",
+  on: "outputs.masking.on",
+  mixed: "outputs.masking.mixed",
+} as const;
+
 /** AM4: the one line that always shows — which model saw the documents (or that none did). */
 export function SeenBy({ outputs }: { outputs: OutputsPayload }) {
   const t = useAmT();
@@ -388,8 +394,11 @@ export function SeenBy({ outputs }: { outputs: OutputsPayload }) {
         : t("outputs.noneInstead", { chosen: m.chosen_model }),
     );
   }
+  // AM13b: which of the two this round used — said only when a model was called, in the gateway's own word
+  const masking = m.masking === "off" || m.masking === "on" || m.masking === "mixed" ? m.masking : null;
+  if (masking) lines.push(t(MASKING_LINE[masking]));
   return (
-    <div className="mt-2 flex flex-col gap-0.5" data-testid="am-outputs-seen-by">
+    <div className="mt-2 flex flex-col gap-0.5" data-testid="am-outputs-seen-by" data-masking={masking ?? undefined}>
       {lines.map((l) => (
         <p key={l} className="text-xs text-text-secondary">
           {l}

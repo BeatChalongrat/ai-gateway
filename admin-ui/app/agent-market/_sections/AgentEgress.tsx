@@ -59,6 +59,10 @@ export default function AgentEgressCard({ orgVersion }: { orgVersion: string }) 
         {t("am.egress.title")}
       </h2>
       <p style={{ ...muted, marginTop: "0.25rem", maxWidth: "52rem", lineHeight: 1.6 }}>{t("am.egress.body")}</p>
+      {/* AM13b: the switch below also decides whether an agent's runs are masked — said where it is decided */}
+      <p style={{ ...muted, marginTop: "0.5rem", maxWidth: "52rem", lineHeight: 1.6 }} data-testid="am-egress-masking">
+        {t("am.egress.masking")}
+      </p>
       <table className="sran-table" style={{ marginTop: "0.8rem", width: "100%" }}>
         <thead>
           <tr>

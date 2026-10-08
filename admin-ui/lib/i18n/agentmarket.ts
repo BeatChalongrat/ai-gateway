@@ -148,6 +148,8 @@ export const en = {
   "am.models.auditLink": "the audit log",
   "am.egress.title": "Each agent, under the organisation's switch",
   "am.egress.body": "The organisation's answer above is the ceiling. Each agent has its own answer under it, which can only be stricter: an agent's documents go to an outside model only when both allow it. An agent that reads accounting data is off until you turn it on here.",
+  // AM13b: the same switch decides masking (backend app/services/dlp/in_house.py; the run's card says what was done)
+  "am.egress.masking": "This switch also decides masking. While an agent's documents stay inside, nothing of a run can leave, so what its in-house model is sent is not masked — an agent that reads tax invoices has to read the tax id and the address. Once an agent may send documents out, personal data is masked before any model sees it, the in-house one included. Each run's card says which of the two was done.",
   "am.egress.agent": "Agent",
   "am.egress.allow": "Allowed for this agent",
   "am.egress.now": "Now",
@@ -517,6 +519,8 @@ export const th: Record<keyof typeof en, string> = {
   "am.models.auditLink": "ประวัติการทำงานของผู้ดูแล",
   "am.egress.title": "แยกตาม agent ภายใต้สวิตช์ขององค์กร",
   "am.egress.body": "คำตอบขององค์กรด้านบนคือเพดาน แต่ละ agent มีคำตอบของตัวเองที่เข้มกว่าได้เท่านั้น เอกสารของ agent จะส่งไปโมเดลนอกองค์กรได้เมื่ออนุญาตทั้งสองชั้น agent ที่อ่านข้อมูลบัญชีปิดไว้จนกว่าคุณจะเปิดที่นี่",
+  // AM13b: the same switch decides masking (backend app/services/dlp/in_house.py; the run's card says what was done)
+  "am.egress.masking": "สวิตช์นี้กำหนดการปิดบังข้อมูลด้วย เมื่อเอกสารของ agent อยู่ในองค์กรเท่านั้น ไม่มีอะไรของรอบนั้นออกไปได้ สิ่งที่ส่งให้โมเดลในองค์กรจึงไม่ถูกปิดบัง — agent ที่อ่านใบกำกับภาษีต้องอ่านเลขประจำตัวผู้เสียภาษีและที่อยู่ได้ เมื่ออนุญาตให้ agent ส่งเอกสารออกนอกองค์กร ข้อมูลส่วนบุคคลจะถูกปิดบังก่อนถึงทุกโมเดล รวมถึงโมเดลในองค์กร การ์ดของแต่ละรอบบอกว่ารอบนั้นทำแบบไหน",
   "am.egress.agent": "ชื่อ agent",
   "am.egress.allow": "อนุญาตสำหรับ agent นี้",
   "am.egress.now": "ตอนนี้",

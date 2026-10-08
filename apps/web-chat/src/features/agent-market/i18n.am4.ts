@@ -75,6 +75,10 @@ export const am4Th = {
   "outputs.noneInstead": "คุณเลือก {chosen} ไว้ แต่รอบนี้ไม่มีโมเดลที่องค์กรอนุญาต จึงอ่านด้วยสคริปต์บนเครื่องขององค์กรเท่านั้น",
   "where.inOrg": "ในองค์กร",
   "where.outside": "นอกองค์กร",
+  // AM13b: masking follows where the data goes — which of the two this round used (what the gateway did)
+  "outputs.masking.off": "สิ่งที่ส่งให้โมเดลในรอบนี้ไม่ถูกปิดบัง — โมเดลอยู่ในองค์กร และ agent นี้ปิดการส่งข้อมูลออกนอกองค์กร",
+  "outputs.masking.on": "ข้อมูลส่วนบุคคลในสิ่งที่ส่งให้โมเดลในรอบนี้ถูกปิดบังก่อนส่ง",
+  "outputs.masking.mixed": "รอบนี้บางขั้นตอนปิดบังข้อมูลส่วนบุคคลก่อนส่งให้โมเดล บางขั้นตอนส่งให้โมเดลในองค์กรโดยไม่ปิดบัง",
 
   // what the agent's model is for (AM6: the menu itself is the chat's; its two lines are in i18n.am6.ts)
   "model.label": "โมเดลที่อ่านเอกสาร",
@@ -187,6 +191,10 @@ export const am4En = {
   "outputs.noneInstead": "You chose {chosen}, but no model the organisation allows was available for this run, so the documents were read only by scripts on the organisation's own machines",
   "where.inOrg": "in the organisation",
   "where.outside": "outside the organisation",
+  // AM13b: masking follows where the data goes — which of the two this round used (what the gateway did)
+  "outputs.masking.off": "What was sent to a model in this run was not masked — the model runs in the organisation and this agent's data may not leave it",
+  "outputs.masking.on": "Personal data in what was sent to a model in this run was masked first",
+  "outputs.masking.mixed": "In this run some steps masked personal data before sending it to a model; others sent it unmasked to a model in the organisation",
 
   // what the agent's model is for (AM6: the menu itself is the chat's; its two lines are in i18n.am6.ts)
   "model.label": "Model that reads the documents",

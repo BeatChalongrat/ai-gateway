@@ -651,6 +651,12 @@ export interface OutputsModel {
   written_by_rules?: boolean;
   /** AM12 (uses "web"): the models that read the request and the saved pages, in the order they answered */
   web?: { model: string; self_hosted?: boolean }[] | null;
+  /**
+   * AM13b: what the gateway did with the text of this round's model calls — "off": sent as typed to an in-house
+   * model (the agent's data may not leave), "on": masked first, "mixed": some of each. Absent: no model was called
+   * (or a card older than this).
+   */
+  masking?: "off" | "on" | "mixed" | string;
 }
 
 /** AM4: one conversation with an installed agent (the first has no id). */
