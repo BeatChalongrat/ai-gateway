@@ -1005,8 +1005,43 @@ class GatewayOrchestrator:
             if (_cache_rc is not None and _cache_rc.mode != "off")
             else None
         )
+        # Masking follows where the data goes (app/services/dlp/in_house.py). Everything above ran on
+        # the masked copy and everything below keeps doing so — the log, the guardrail, moderation.
+        # The one thing that changes for a request its rule lets through: the in-house provider is
+        # handed the messages as they were typed (``_provider_messages``), and the caller gets the
+        # answer as that model wrote it. The cache is neither read nor written for such a request.
+        from app.services.dlp import in_house as _in_house
+
+        _in_house_decision = _in_house.decide(
+            asked=_in_house.asked(),
+            project_id=getattr(auth, "project_id", None),
+            provider=route.provider_name,
+            has_tools=bool(getattr(payload, "tools", None)),
+            stream=bool(payload.stream),
+            calc_active=_calc_active,
+            responses_scanned=bool(
+                settings.dlp_enabled and settings.dlp_scan_responses and profile.scan_responses
+            ),
+        )
+        _in_house_unmasked = bool(settings.dlp_enabled and _in_house_decision.unmasked)
+        _provider_messages = list(payload.messages) if _in_house_unmasked else messages_to_send
+        if _in_house.asked():
+            log.info(
+                "dlp_in_house_decision",
+                unmasked=_in_house_unmasked,
+                reason=_in_house_decision.reason,
+                provider=route.provider_name,
+                model=route.model_name,
+                findings=len(input_enforcement.match_actions),
+            )
+        if _in_house_unmasked:
+            # no other model answers a request whose text was not masked
+            from app.services.gateway import fallback_policy as _in_house_fb
+
+            _in_house_fb.opt_out_request()
+
         cache_hit = None
-        if not payload.stream and not _calc_active:
+        if not payload.stream and not _calc_active and not _in_house_unmasked:
             with record_phase("cache"), REDIS_COMMAND_DURATION.labels(
                 operation="cache_get"
             ).time():
@@ -1262,10 +1297,13 @@ class GatewayOrchestrator:
                     _dispatch = self.provider_dispatcher.dispatch_with_fallback(
                         route=route,
                         payload=payload,
-                        messages=messages_to_send,
+                        # in_house.py: the typed messages for an in-house model that the rule
+                        # let through, the masked copy for everything else
+                        messages=_provider_messages,
                         api_key=provider_api_key,
                         key_resolver=_resolve_fallback_key,
                         invalidate_key=_invalidate_key,
+                        **({"in_house_only": True} if _in_house_unmasked else {}),
                     )
                     if _primary_wait_s is None:
                         (provider_response, used_provider, used_model) = await _dispatch
@@ -1553,6 +1591,17 @@ class GatewayOrchestrator:
                     "model": route.model_name,
                 },
             )
+        # in_house.py — the answer of a request that reached an in-house model unmasked goes back to
+        # the caller as the model wrote it (echo-scrubbed, like any answer). Decided from what
+        # HAPPENED: the turn was not rescued by another provider (a rescue is sent the masked copy
+        # and is restored the usual way below) and the provider that answered is in-house. The
+        # output scan below still runs on ``response_content``, so the log's copy is a masked one.
+        _in_house_answered = bool(
+            _in_house_unmasked
+            and fallback_result is None
+            and _in_house.is_in_house(route.provider_name)
+        )
+        _in_house_answer = response_content if _in_house_answered else None
         # DLP trace snapshot 3/4: provider response BEFORE any output DLP
         # work — captures exactly what the model returned, even if a
         # later mask/restore step rewrites it.
@@ -2188,6 +2237,9 @@ class GatewayOrchestrator:
         )
         if not all_reasons:
             all_reasons = ["No sensitive content detected."]
+        if _in_house_answered:
+            # the findings above were NOT masked for this request: it stayed in the organisation
+            all_reasons.append(_in_house.REASON)
 
         # 10. Audit success + persist request log
         total_ms = int((time.perf_counter() - t_start) * 1000)
@@ -2270,7 +2322,13 @@ class GatewayOrchestrator:
                 original_provider=original_provider,
                 original_model=original_model,
                 dlp_input_findings=len(input_enforcement.match_actions),
-                dlp_input_action=input_enforcement.overall_action.name.lower(),
+                # in_house.py — 'mask' keeps meaning "the provider saw placeholders": a row whose
+                # findings reached an in-house model as typed says so
+                dlp_input_action=(
+                    _in_house.LOG_ACTION
+                    if (_in_house_answered and input_enforcement.requires_transformation)
+                    else input_enforcement.overall_action.name.lower()
+                ),
                 dlp_output_findings=len(response_enforcement.match_actions),
                 dlp_categories=dlp_categories,
                 router_used=router_used,
@@ -2353,6 +2411,8 @@ class GatewayOrchestrator:
             from app.domain.observability import served_model_name as _served_hdr
 
             out_meta["provider_used"] = route.provider_name
+            # what was done with the request's text (in_house.py) — never what was asked for
+            out_meta["masking"] = _in_house.MASKING_OFF if _in_house_answered else _in_house.MASKING_ON
             out_meta["provider_request_id"] = provider_response.provider_request_id
             out_meta["stop_reason"] = provider_response.stop_reason
             # FIX35 Part B — X-Gateway-Model names the model that ran, never
@@ -2435,7 +2495,9 @@ class GatewayOrchestrator:
                         index=0,
                         message=Message(
                             role="assistant",
-                            content=response_content,
+                            # in_house.py — the answer as the in-house model wrote it, when the
+                            # request reached it unmasked; the scanned and restored text otherwise
+                            content=(_in_house_answer if _in_house_answered else response_content),
                             # Function-calling passthrough. None when
                             # the model returned plain text; the route
                             # is decorated with
@@ -2507,6 +2569,8 @@ class GatewayOrchestrator:
             # scope-bound ``<CALC_n>``; caching it would let a different caller
             # (incl. Direct API) replay the calc canonical for the same prompt.
             and not _calc_active
+            # in_house.py — an answer made from unmasked text is never cached
+            and not _in_house_unmasked
         ):
             cache_response = response.model_dump()
             try:

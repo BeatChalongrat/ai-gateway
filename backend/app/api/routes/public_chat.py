@@ -547,6 +547,15 @@ async def chat_completions(
         _fb_opt.opt_out_request()
         logger.info("fallback_request_opt_out", model=payload.model, stream=bool(payload.stream))
 
+    # ``X-Sran-Egress: closed`` — the caller says this request's data may not leave the
+    # organisation. What that is worth is decided in one place (app/services/dlp/in_house.py: a
+    # caller the operator named, an in-house model, no stream); marked here, beside the fallback
+    # opt-out, so the request carries it wherever it goes.
+    from app.services.dlp import in_house as _in_house
+
+    if _in_house.header_says_closed(request.headers.get(_in_house.HEADER)):
+        _in_house.mark_request()
+
     reg = inflight_registry()
     hard_s = float(settings.request_hard_timeout_seconds)
     try:
@@ -793,6 +802,11 @@ async def _chat_completions_impl(
             response.headers["X-Gateway-Model"] = str(out_meta["model_used"])
         if out_meta.get("fallback_used"):
             response.headers["X-Gateway-Fallback"] = "true"
+        # what was done with this request's text, not what the caller asked for (in_house.py)
+        if out_meta.get("masking"):
+            from app.services.dlp.in_house import RESPONSE_HEADER as _MASKING_HEADER
+
+            response.headers[_MASKING_HEADER] = str(out_meta["masking"])
         response.headers["X-Gateway-Attempt"] = str(
             out_meta.get("attempt_number", 1)
         )

@@ -474,6 +474,9 @@ class Settings(BaseSettings):
     dlp_default_profile: str = "default"
     dlp_disabled_detectors: str = ""
     dlp_scan_responses: bool = True
+    # Masking follows where the data goes (app/services/dlp/in_house.py): the project ids, comma
+    # separated, whose ``X-Sran-Egress: closed`` is believed. Empty = no request is ever sent unmasked.
+    dlp_in_house_projects: str = ""
     # Phase 1 — Central DLP Policy Engine rollout flags.
     # ``shadow`` (default True): the V2 engine computes a decision in
     # parallel with the legacy seam and logs any divergence, but the

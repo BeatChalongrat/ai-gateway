@@ -947,6 +947,10 @@ services:
       # on identity-class detectors. Default-on; set to ``false`` in
       # .env to revert to the legacy <rN> shape on every detector.
       DLP_PSEUDONYM_MODE: ${DLP_PSEUDONYM_MODE:-true}
+      # Masking follows where the data goes (app/services/dlp/in_house.py): the project ids,
+      # comma separated, whose ``X-Sran-Egress: closed`` is believed. Empty (the default) = no
+      # request is ever sent to a model unmasked, whatever its headers say.
+      DLP_IN_HOUSE_PROJECTS: ${DLP_IN_HOUSE_PROJECTS:-}
       # FIX129 A1 — per-connection Postgres time limits (ms; 0 = off). The
       # code defaults are 60000 / 10000 / 30000; these are the override knobs.
       DB_STATEMENT_TIMEOUT_MS: ${DB_STATEMENT_TIMEOUT_MS:-}

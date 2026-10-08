@@ -201,6 +201,7 @@ class ProviderDispatcher:
         key_resolver: Callable[[str, str | None], str | None] | None = None,
         invalidate_key: Callable[[str, str], None] | None = None,
         max_hops: int = _MAX_LAYER1_HOPS,
+        in_house_only: bool = False,
     ) -> tuple[ProviderResponse, str, str]:
         """Dispatch the primary route with up to ``max_hops`` Layer-1
         fallback hops on a fallback-eligible error.
@@ -252,6 +253,35 @@ class ProviderDispatcher:
                     reason="outside_boundary",
                 )
             _hops = [(p, m) for (p, m) in _hops if not _fb_policy_mod.outside_boundary(p, _allowed)]
+        # ``in_house_only`` — ``messages`` is text that was NOT masked because it was going to an
+        # in-house model (app/services/dlp/in_house.py). It goes nowhere else: a primary that is
+        # not in-house is refused before anything is sent, and a hop to an outside provider is
+        # never a candidate. This is the one place such text meets a provider, so the rule is
+        # held here and not only by whoever decided to call with it.
+        if in_house_only:
+            from app.core.exceptions import ProviderError as _InHouseErr
+            from app.services.dlp import in_house as _in_house_rule
+
+            if not _in_house_rule.is_in_house(route.provider_name):
+                logger.error(
+                    "in_house_route_refused",
+                    provider=route.provider_name,
+                    model=route.model_name,
+                )
+                raise _InHouseErr(
+                    "This request may only be answered by an in-house model.",
+                    code="in_house_route_refused",
+                    details={"provider": route.provider_name, "model": route.model_name},
+                )
+            for p, m in _hops:
+                if not _in_house_rule.is_in_house(p):
+                    logger.info(
+                        "dispatch_candidate_skipped",
+                        candidate_provider=p,
+                        candidate_model=m,
+                        reason="in_house_only",
+                    )
+            _hops = [(p, m) for (p, m) in _hops if _in_house_rule.is_in_house(p)]
         attempts: list[tuple[str, str]] = [
             (route.provider_name, route.model_name)
         ] + [(p, m) for (p, m) in _hops]

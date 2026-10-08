@@ -162,6 +162,28 @@ This pass-through is deliberate and bounded:
 
 Enterprise/PDPA customers should be shown this section as the disclosure they consent to.
 
+## Masking follows where the data goes — an in-house model is not egress
+
+Masking exists to stop data leaving the organisation. A request that cannot leave is not masked; every other request is masked as described above. The rule lives in one module, `app/services/dlp/in_house.py`, and it is **not** a fifth raw-egress channel: nothing reaches a third party.
+
+A chat-completion request reaches its model **as typed** only when all of these hold:
+
+| condition | where it comes from |
+| --- | --- |
+| the caller says the data may not leave | request header `X-Sran-Egress: closed` |
+| the operator has named the caller | the caller's project id is in `DLP_IN_HOUSE_PROJECTS` (empty by default: the header then means nothing) |
+| the provider that answers is in-house | `SELF_HOSTED_PROVIDERS` (`app/services/providers/base_urls.py`) |
+| nothing in the request can carry it elsewhere | no tools, not a stream, no secure calculator, responses scanned |
+
+What does not change for such a request:
+
+1. **A block still blocks.** Only the mask is not applied.
+2. **Our own stores never hold the unmasked text.** The scan and the mask still run; the request log (`input_masked`, `output_raw`, `output_final`), the guardrail and moderation are fed the masked copy. The response cache is neither read nor written.
+3. **No other provider gets it.** The request switches fallback off for itself, and the dispatcher holds the rule on its own (`dispatch_with_fallback(in_house_only=True)`): a primary that is not in-house is refused before anything is sent, a hop outside is never a candidate. If a turn is rescued by another provider after all, that provider is handed the masked copy and the answer is restored the usual way.
+4. **The record says what happened.** The caller is told by `X-Gateway-Masking: off | on` — what was done, not what it asked for — and the log row carries `dlp_input_action = 'in_house_unmasked'` (`'mask'` keeps meaning "the provider saw placeholders").
+
+Today the one caller that sends the header is Agent Market's runner, which holds each agent's egress switch (documents may leave: off → no outside model, no web, and now no masking; on → masked as before). Ordinary chat never sends it: a chat has no egress switch — its tools, connectors and web search can carry what the model read out of the organisation — so chat is masked whichever model answers. Tests: `tests/test_dlp_in_house.py`, `tests/test_dlp_in_house_dispatcher.py`.
+
 ## Code interpreter sandbox (Phase 13) — an internal trust boundary
 
 The gateway runs a code interpreter: the model can author Python (the `run_python` tool) and the plan-exec workspaces (Excel/Doc/Pptx) run generated code against the user's own files. Unlike the two raw-egress channels above, **this is not an egress channel at all** — it is an *internal trust boundary*, the same class as the NER sidecar. The interpreter processes RAW user data, but nothing it touches can reach a third party from inside the boundary.

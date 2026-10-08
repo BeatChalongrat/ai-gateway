@@ -310,6 +310,7 @@
         "DLP_GRPC_ADDRESS": "${DLP_GRPC_ADDRESS:-dlp-sidecar:50051}",
         "DLP_GRPC_TIMEOUT_SECONDS": "${DLP_GRPC_TIMEOUT_SECONDS:-1.0}",
         "DLP_HMAC_KEY": "${DLP_HMAC_KEY:-dev-dlp-hmac-key-change-in-production}",
+        "DLP_IN_HOUSE_PROJECTS": "${DLP_IN_HOUSE_PROJECTS:-}",
         "DLP_PROMPT_VARIANT": "${DLP_PROMPT_VARIANT:-v1}",
         "DLP_PSEUDONYM_MODE": "${DLP_PSEUDONYM_MODE:-true}",
         "EMAIL_DELIVERY": "${EMAIL_DELIVERY:-auto}",
