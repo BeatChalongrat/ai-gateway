@@ -54,10 +54,18 @@ func AddPackageEnglish(manifest json.RawMessage) {
 	}
 	var m struct {
 		En map[string]string `json:"en"`
+		// AM14: the English of one key, where the same Thai words are said two ways in English (a field's
+		// name in a sentence, and the twelve characters of a card's heading) — its words are the package's too
+		ByKey map[string]string `json:"en_by_key"`
 	}
 	_ = json.Unmarshal(manifest, &m)
 	learnAgentName(manifest) // AM14: and the names it gives its agent (asread_am14.go)
-	words := make([]string, 0, len(m.En))
+	words := make([]string, 0, len(m.En)+len(m.ByKey))
+	for _, en := range m.ByKey {
+		if en != "" {
+			words = append(words, en)
+		}
+	}
 	packageEnglish.mu.Lock()
 	if packageEnglish.by == nil {
 		packageEnglish.by, packageEnglish.seen = map[string]string{}, map[[32]byte]bool{}
@@ -107,6 +115,12 @@ func (s *Store) LearnPackageEnglish(ctx context.Context) error {
 // "en" map is taken out in both. A manifest with no "en" is returned as it
 // is. Keys, numbers and everything that is not one of those strings are
 // untouched.
+//
+// AM14: what the package's engine says while it runs — "strings", by key, and
+// the English kept by key beside it — is the engine's: a screen is sent the
+// sentences of the runs it reads, never the list of everything an engine can
+// say (a manifest carries hundreds of them since its engine speaks two
+// languages). This plane reads them from the manifest it keeps (reasonWords).
 func ManifestIn(l Lang, raw json.RawMessage) json.RawMessage {
 	if !bytes.Contains(raw, []byte(`"en"`)) {
 		return raw
@@ -122,6 +136,8 @@ func ManifestIn(l Lang, raw json.RawMessage) json.RawMessage {
 		return raw
 	}
 	delete(m, "en")
+	delete(m, "strings")
+	delete(m, "en_by_key")
 	if l == English && len(en) > 0 {
 		for k, v := range m {
 			m[k] = withEnglish(v, en, k)

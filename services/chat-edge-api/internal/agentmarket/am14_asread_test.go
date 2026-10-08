@@ -212,3 +212,38 @@ func TestANameNobodyKnowsIsShownAsItWasKept(t *testing.T) {
 		t.Fatalf("%s %v", b, err)
 	}
 }
+
+// What a package's engine says while it runs is kept in its manifest by key ("strings", and the English of
+// one key in "en_by_key"). A screen is sent a manifest's words for a person — never that list.
+func TestAScreenIsNotSentTheListOfEverythingAnEngineCanSay(t *testing.T) {
+	raw := json.RawMessage(`{"id":"sran.am14-engine","version":"1.0.0","name":"ชื่อ","name_en":"Name","cannot":"อ่านอย่างเดียว",
+		"strings":{"card.header":"ผู้ขาย","field.seller":"ผู้ขาย","q":"อ่าน{what}ไม่ได้"},
+		"en":{"ชื่อ":"Name","อ่านอย่างเดียว":"Read-only.","ผู้ขาย":"seller","อ่าน{what}ไม่ได้":"{what} could not be read"},
+		"en_by_key":{"card.header":"Zzyzx seller"}}`)
+	for _, l := range []Lang{Thai, English} {
+		var sent map[string]any
+		if err := json.Unmarshal(ManifestIn(l, raw), &sent); err != nil {
+			t.Fatal(err)
+		}
+		for _, k := range []string{"strings", "en", "en_by_key"} {
+			if _, there := sent[k]; there {
+				t.Errorf("%s: a screen is sent %q", l, k)
+			}
+		}
+		if sent["id"] != "sran.am14-engine" || sent["cannot"] == nil {
+			t.Errorf("%s: the manifest's own words are sent: %v", l, sent)
+		}
+	}
+	// the server keeps them: it reads a reason's words from the manifest it stores …
+	if w := reasonWords(json.RawMessage(`{"strings":{"drop.not_read":"อ่านไม่ได้"},"en":{"อ่านไม่ได้":"could not be read"}}`), English); w["not_read"] != "could not be read" {
+		t.Errorf("reasonWords: %v", w)
+	}
+	// … and learns the English kept by key as the package's own words, like the rest of its English
+	if ReadsIn(English, "Zzyzx seller") {
+		t.Fatal("the word is known before the manifest is learnt: the test proves nothing")
+	}
+	AddPackageEnglish(raw)
+	if !ReadsIn(English, "Zzyzx seller") {
+		t.Error("a heading kept by its key is not among the package's English words")
+	}
+}
