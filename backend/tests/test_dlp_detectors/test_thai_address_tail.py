@@ -1,6 +1,6 @@
 """The address is the match — never the rest of the line.
 
-Found walking Agent Market on 2026-10-07 and true of every chat on the platform: a person typed a
+Found on a walk of the live product on 2026-10-07 and true of every chat on the platform: a person typed a
 delivery address and went on typing, and everything after the address was masked with it —
 
     ขอซื้อเก้าอี้สำนักงาน 20 ตัว มีที่วางแขน ส่งที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ขอให้เรียงจากถูกสุด
