@@ -439,7 +439,10 @@ func (rc *runCtx) step(ctx context.Context, name, kind, key string, input any, c
 			return nil, err
 		}
 	}
-	out, credits, script, model, err := fn(ctx)
+	// AM13b (masking.go): every model call a step makes carries whether the round's data may leave,
+	// and what the gateway did with each is written beside the step's output
+	stepCtx, calls := withModelCalls(ctx, !rc.docsMayLeave)
+	out, credits, script, model, err := fn(stepCtx)
 	if err != nil {
 		msg := err.Error()
 		if ctx.Err() != nil {
@@ -450,6 +453,7 @@ func (rc *runCtx) step(ctx context.Context, name, kind, key string, input any, c
 		return nil, err
 	}
 	b, _ := json.Marshal(out)
+	b = stampMasking(b, calls.masking())
 	if err := rc.r.Store.FinishStep(ctx, st.ID, "succeeded", b, "", script, model, credits); err != nil {
 		return nil, err
 	}

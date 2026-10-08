@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -58,6 +59,14 @@ type itEnv struct {
 	// many readings were asked for (am13_asked_it_test.go)
 	askedSilent atomic.Int32
 	askedCalls  atomic.Int32
+	// AM13b (masking): what each model call said about egress, and whether the stand-in gateway is one
+	// that knows this runner — it then answers "off" to a call that said closed and "on" to any other,
+	// as the real one does; unset, it says nothing at all (a gateway older than the rule)
+	egressMu       sync.Mutex
+	egressSaid     []string
+	egressMark     string
+	rounds         int
+	gatewayHonours atomic.Bool
 }
 
 func newIT(t *testing.T) *itEnv {
@@ -102,7 +111,24 @@ func envOr(k, d string) string {
 // the guard passes) unless the test asks it to lie.
 func (e *itEnv) fakeModel(w http.ResponseWriter, r *http.Request) {
 	e.calls.Add(1)
+	said := r.Header.Get(EgressHeader)
+	if e.gatewayHonours.Load() {
+		if said == EgressClosed {
+			w.Header().Set(MaskingHeader, "off")
+		} else {
+			w.Header().Set(MaskingHeader, "on")
+		}
+	}
 	body, _ := io.ReadAll(r.Body)
+	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/chat/completions") {
+		// (the runner also reads the model catalogue from here: that is not a model call; and a call is
+		// counted for the round whose words it carries — a job of the round before may still be running)
+		e.egressMu.Lock()
+		if e.egressMark == "" || strings.Contains(string(body), e.egressMark) {
+			e.egressSaid = append(e.egressSaid, said)
+		}
+		e.egressMu.Unlock()
+	}
 	content := `{"summary":"ภาพรวมของงวดนี้ รายได้และค่าใช้จ่ายเปลี่ยนไปตามตาราง","movements":["ค่าที่ปรึกษาเพิ่มขึ้นมาก"],"watch":["ตรวจค่าที่ปรึกษา"],"next_steps":["ทบทวนสัญญาที่ปรึกษา"]}`
 	if e.lying.Load() {
 		content = `{"summary":"รายได้ 99,999,999 บาท","movements":["x"],"watch":["x"],"next_steps":["x"]}`

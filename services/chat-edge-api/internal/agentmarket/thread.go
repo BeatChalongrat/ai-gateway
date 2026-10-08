@@ -223,7 +223,18 @@ type OutputsModel struct {
 	// Web (AM12, Uses "web"): the models that read the request and the saved pages in a round on the
 	// web, in the order they first answered. Empty: no model answered (a sample round reads none).
 	Web []OutputsWebModel `json:"web,omitempty"`
+	// Masking (AM13b): what the gateway did with the text of this round's model calls — MaskingOff when
+	// every call reached an in-house model as typed (nothing could leave: the agent's egress is off),
+	// MaskingOn when every call was masked, MaskingMixed when some were. Empty: no model was called.
+	Masking string `json:"masking,omitempty"`
 }
+
+// What a round's card says about masking (OutputsModel.Masking).
+const (
+	MaskingOff   = "off"
+	MaskingOn    = "on"
+	MaskingMixed = "mixed"
+)
 
 // OutputsWebModel is one model that read in a round on the web.
 type OutputsWebModel struct {

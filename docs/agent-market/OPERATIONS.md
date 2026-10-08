@@ -97,6 +97,36 @@ there is no fallback to another model. Its reading is only a proposal next to
 E2's; a person decides. Every run records `model_used` and
 `model_self_hosted`; the workbook lists which model saw which document.
 
+## Whether a run is masked (AM13b)
+
+Masking exists to stop data leaving the organisation, so it follows where a run's data can go — the
+same switch that already decides which models an agent may use and whether it may open the web:
+
+| the agent's "documents may leave" (the organisation's switch AND the agent's own) | the model | what the model is sent |
+|---|---|---|
+| **off** — only in-house models, no web: nothing of the run can leave | in-house | **as typed, not masked** |
+| **on** | in-house or outside | masked first, as before |
+
+The runner says so per model call (`X-Sran-Egress: closed`, only when both hold) and the gateway decides
+(`backend/app/services/dlp/in_house.py`; `docs/DLP_ARCHITECTURE.md`, "Masking follows where the data
+goes"). The gateway believes the header only from a project the operator named:
+
+    DLP_IN_HOUSE_PROJECTS=<the id of the portal project "Agent Market runner">     # .env, then restart the backend
+
+Empty (the default) switches the whole rule off: every run is masked, whatever the runner sends. The id
+is not a secret; it is the `project_id` on any `request_logs` row the runner's key made.
+
+What a person sees: each run's files card says which of the two was done — `outputs.model.masking`
+`off` / `on` / `mixed`, from the gateway's own answer to each call (`X-Gateway-Masking`), never from what
+the runner asked for; a run in which no model was called says nothing. An admin sees it where they
+decide it: the per-agent switch in the admin app says it also decides masking. In the request log a
+row whose findings reached the in-house model as typed has `dlp_input_action = 'in_house_unmasked'`;
+its `input_masked` / `output_raw` / `output_final` still hold the masked copy.
+
+What does not change: a block still blocks; nothing unmasked is cached, logged or sent to moderation;
+no other model is tried with unmasked text. Ordinary chat is not part of this — it has no egress switch
+and is masked whichever model answers.
+
 ## What waits on a person (AM2)
 
 Questions are cards (`agent_run_clarifications`). What a rule found after

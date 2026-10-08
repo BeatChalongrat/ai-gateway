@@ -587,6 +587,10 @@ func knowledgeGuard(l am.Lang, quotable map[string]string, k *am.KnowledgeContex
 // sentence that says so, not an answer.
 func (r *Runner) askModel(ctx context.Context, rc *runCtx, models []string, system, user string, check func(string) error) (am.PersonText, bool) {
 	var answer string
+	if rc != nil {
+		// AM13b (masking.go): an answer about a round is made from that round's data — the same rule
+		ctx, _ = withModelCalls(ctx, !rc.docsMayLeave)
+	}
 	c, _, err := r.Model.CompleteWith(ctx, models, system, user, func(s string) error {
 		var v struct {
 			Answer string `json:"answer"`

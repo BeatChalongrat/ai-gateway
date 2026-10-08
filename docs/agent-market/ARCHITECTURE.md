@@ -925,3 +925,28 @@ makes one more model call (the reading: about 950 tokens). The three that
 show no model their documents send those words — and only the words — to a
 model inside the organisation, and their data sheets now say so. A round
 with no words, or with only thanks, makes none.
+
+## Masking follows where the data goes (AM13b)
+
+One rule, two parties. The **runner** knows whether a run's data can leave (the agent's egress switch,
+`egress.go`; `rc.docsMayLeave`) and which model it is calling; the **gateway** owns masking. So the runner
+states the fact and the gateway decides:
+
+- `runner/masking.go` — every model call a step makes carries the round's egress state in its context
+  (`rc.step` wraps the step's context; `askModel`, which answers outside a step, does the same). The model
+  client (`model.go send`) adds `X-Sran-Egress: closed` only when the state is closed AND the model is
+  in-house. Nothing else about a call changes.
+- The gateway answers each call with what it DID (`X-Gateway-Masking: off | on`); the client notes that,
+  not the request. `rc.step` writes the result beside the step's own output (`"masking"` in
+  `agent_run_steps.output`), so a later pass over the same run — which reads the step back and calls no
+  model — still knows. No migration: the note lives in a column that was already free-form.
+- The files card: `OutputsModel.Masking` (`thread.go`, declared in `schema.go`) is every model step of the
+  round put together — `off`, `on`, `mixed`, or absent when no model was called. Web: one more line in the
+  card's "seen by" block (`workspace/OutputsCard.tsx`, strings in `i18n.am4.ts`). Admin app: one sentence
+  at the per-agent switch.
+
+Three things hold it in place: a unit test that the header is sent in exactly one of the four cases and
+that a silent gateway reads as "masked"; an integration test that runs the same agent egress-off,
+egress-on and against a gateway that does not comply (`am13b_masking_it_test.go`); and a test that no
+file of the runner calls the model client with a context of its own making.
+

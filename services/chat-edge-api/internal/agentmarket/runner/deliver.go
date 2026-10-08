@@ -805,7 +805,7 @@ func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts [
 // plainly — when another model was used instead.
 func (rc *runCtx) modelLine(ctx context.Context, run am.Run, narrative narrativeOut) *am.OutputsModel {
 	line := &am.OutputsModel{Model: narrative.Model, SelfHosted: narrative.SelfHosted, Choice: rc.choice(),
-		Uses: am.ModelUse(rc.pkg.Manifest)}
+		Uses: am.ModelUse(rc.pkg.Manifest), Masking: rc.roundMasking(ctx, run)}
 	flag := func(v bool) *bool { return &v }
 	if rc.pkg.Manifest.UsesWeb() {
 		// AM12: a round on the web has no narrative for a model to write; what a model did is read the

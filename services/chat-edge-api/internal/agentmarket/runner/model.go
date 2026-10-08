@@ -247,6 +247,12 @@ func (m *ModelClient) send(ctx context.Context, model string, messages any, temp
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Client-Name", "agent-runner")
 	req.Header.Set(FallbackOptOutHeader, FallbackOptOutValue)
+	// AM13b (masking.go): this call's data may not leave the organisation and the model is in-house —
+	// nothing leaves, so the gateway is told and does not mask. Any other call is masked as before.
+	calls := modelCallsOf(ctx)
+	if calls != nil && calls.closed && m.IsSelfHosted(model) {
+		req.Header.Set(EgressHeader, EgressClosed)
+	}
 	start := time.Now()
 	resp, err := m.HTTP.Do(req)
 	if err != nil {
@@ -257,6 +263,8 @@ func (m *ModelClient) send(ctx context.Context, model string, messages any, temp
 	if resp.StatusCode >= 400 {
 		return Completion{}, fmt.Errorf("gateway %d: %s", resp.StatusCode, trim(string(raw), 200))
 	}
+	// what the gateway DID with the text, in its own words; no word from it means masked
+	calls.note(resp.Header.Get(MaskingHeader) == maskingOff)
 	var out struct {
 		Model   string `json:"model"`
 		Cached  bool   `json:"cached"`

@@ -368,6 +368,7 @@ var itemSchema = map[string]field{
 		"summary": summary,
 		"model": obj(map[string]field{"model": model, "chosen_model": model, "vision_model": model, "choice": model, "uses": code,
 			"self_hosted": number, "vision_self_hosted": number, "not_chosen": number, "written_by_rules": number,
+			"masking": code,
 			"web": list(obj(map[string]field{"model": model, "self_hosted": number}))}),
 		"review": obj(map[string]field{"id": id, "reviewer": person, "at_label": label(fromPlatform), "note": person,
 			"skipped": list(label(fromPlatform))}),
