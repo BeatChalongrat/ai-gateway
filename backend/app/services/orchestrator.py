@@ -1188,6 +1188,10 @@ class GatewayOrchestrator:
                     log.warning("cache_hit_log_persist_failed", error=str(exc))
             cache_hit["cached"] = True
             cache_hit["id"] = request_id
+            if out_meta is not None:
+                # in_house.py — an answer from the cache was made from masked text (a request sent
+                # unmasked never reads or writes the cache), and the caller is told so here too
+                out_meta["masking"] = _in_house.MASKING_ON
             return ChatCompletionsResponse(**cache_hit)
 
         # 7. Dispatch to provider with (potentially transformed) messages.

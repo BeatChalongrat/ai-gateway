@@ -123,14 +123,42 @@ def test_egress_closed_and_an_in_house_model_reaches_the_model_as_typed(named, p
     assert TOKEN in row["input_masked"]
 
 
-def test_an_unmasked_request_is_never_answered_from_or_written_to_the_cache(named, provider):
+def test_an_unmasked_request_never_reads_or_writes_the_cache_and_a_cached_answer_says_it_is_masked(named, provider, monkeypatch):
+    """(No cache server in this lane, so the cache is a stand-in: it records every read and write, and can
+    be told to hold an answer.)"""
+    from app.services.cache_service import CacheService
+
+    reads, writes, held = [], [], {}
+
+    async def get(self, **kw):
+        reads.append(kw)
+        return dict(held["answer"]) if held else None
+
+    async def put(self, *a, **kw):
+        writes.append(kw)
+
+    monkeypatch.setattr(CacheService, "get_async", get)
+    monkeypatch.setattr(CacheService, "set_async", put)
+
+    # unmasked: twice the same words — the model is asked twice, the cache is never touched
     first, second = _chat(CLOSED), _chat(CLOSED)
     assert first.status_code == second.status_code == 200
-    assert len(provider) == 2, "the second identical request went to the model again"
-    assert not second.json().get("cached")
-    # and it left nothing behind for a masked request with the same words to be answered from
+    assert len(provider) == 2 and reads == [] and writes == []
+
+    # masked: the cache is read and written as before, and what is written is not the address
     masked = _chat(KEY)
-    assert masked.status_code == 200 and len(provider) == 3 and not masked.json().get("cached")
+    assert masked.status_code == 200 and len(reads) == 1 and len(writes) == 1
+    assert EMAIL not in str(writes[0])
+
+    # an answer the cache holds was made from masked text: it is served to a masked request, which is told so —
+    # and never to a request that goes unmasked
+    held["answer"] = {**masked.json(), "cached": False}
+    again = _chat(KEY)
+    assert again.status_code == 200 and again.json().get("cached") is True and len(provider) == 3
+    assert again.headers[in_house.RESPONSE_HEADER] == in_house.MASKING_ON
+    unmasked = _chat(CLOSED)
+    assert not unmasked.json().get("cached") and len(provider) == 4 and len(reads) == 2
+    assert unmasked.headers[in_house.RESPONSE_HEADER] == in_house.MASKING_OFF
 
 
 # ── the other way: masked exactly as before ─────────────────────────────────────────────────────
