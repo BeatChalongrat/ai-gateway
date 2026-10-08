@@ -60,6 +60,7 @@ func (a *API) rail(w http.ResponseWriter, r *http.Request) {
 			a.fail(w, err, "installs")
 			return
 		}
+		x.Title = AgentNameIn(langOfWriter(w), x.Slug, x.Title) // AM14: the agent's name as this screen reads it
 		x.Look = scanLook(icon, accent)
 		total += x.Waiting
 		out = append(out, x)

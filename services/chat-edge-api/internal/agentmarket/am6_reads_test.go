@@ -101,10 +101,16 @@ func TestTextOfAShapeNobodyListedNeverReachesAPerson(t *testing.T) {
 	// what was built for a person is still there
 	for _, kept := range []string{"สร้างไฟล์ผลงานไม่สำเร็จ", "รายงาน: หัวข้อครบทุกส่วน", "อ่านไฟล์ 1 ไฟล์", "GL_2569-09.xlsx", "สร้างไฟล์ผลลัพธ์", "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท",
 		"กันยายน 2569", "ชีตครบ", "ฟอนต์ไทยฝังครบ", "รายการนอกงวด", "พบรายการนอกงวด 12 รายการ จะให้ตัดออกไหมครับ", "ตัดออก", "นับรวมด้วย", "นับรายการทั้งหมด",
-		"ขายสินค้า", "มี 1 เรื่องที่ผมไม่แน่ใจ", "ขอไฟล์ PDF", "พิมพ์คำถามได้เลย", "สวัสดีครับ", "อ่านอย่างเดียว", "บัญชีแยกประเภท (GL)", "a.xlsx", "a.pdf"} {
+		"ขายสินค้า", "มี 1 เรื่องที่ผมไม่แน่ใจ", "ขอไฟล์ PDF", "พิมพ์คำถามได้เลย", "สวัสดีครับ", "อ่านอย่างเดียว", "a.xlsx", "a.pdf"} {
 		if !strings.Contains(joined, kept) {
 			t.Fatalf("what a person can read stays (%q):\n%s", kept, joined)
 		}
+	}
+	// AM14: a greeting is read from the agent's own manifest in the language of the screen, not from the
+	// words its row was first written with — so the row's own label is not what a person is shown; the
+	// manifest's is (testManifest: "GL"), and the day's facts of the item stay
+	if strings.Contains(joined, "บัญชีแยกประเภท (GL)") || !strings.Contains(joined, `"label":"GL"`) {
+		t.Fatalf("the greeting's tick list is the manifest's own: %s", joined)
 	}
 	// the event stream sends the same items
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)

@@ -353,5 +353,5 @@ func (a *API) rollback(w http.ResponseWriter, r *http.Request) {
 	}
 	_, _, _ = a.store.AddItem(ctx, a.store.Pool, in.ID, in.TenantID, in.UserID, nil,
 		AgentText{Text: Text("ย้อนกลับไปใช้รุ่น %s แล้วครับ รอบที่ทำไปแล้วยังเป็นของรุ่นที่ใช้ตอนนั้น", Version(prev.Version))}, nil)
-	writeJSON(w, http.StatusOK, map[string]any{"install": out})
+	writeJSON(w, http.StatusOK, map[string]any{"install": out.AsRead(langOfWriter(w))})
 }

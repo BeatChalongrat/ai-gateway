@@ -494,7 +494,7 @@ func (a *API) install(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "install")
 		return
 	}
-	out := map[string]any{"install": in, "created": created, "bindings": res}
+	out := map[string]any{"install": in.AsRead(langOfWriter(w)), "created": created, "bindings": res}
 	if created && req.SelfTest {
 		run, err := a.startSelfTest(ctx, in, def)
 		if err != nil {
@@ -734,7 +734,7 @@ func (a *API) listInstalls(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []row{}
 	for _, i := range list {
-		x := row{Install: i}
+		x := row{Install: i.AsRead(langOfWriter(w))} // AM14: under the agent's name as this screen reads it
 		if d, err := a.store.DefinitionByID(r.Context(), i.DefinitionID); err == nil {
 			if m, err := ParseManifest(d.Manifest); err == nil {
 				x.Icon = m.Icon
@@ -777,7 +777,7 @@ func (a *API) getInstall(w http.ResponseWriter, r *http.Request) {
 		st := a.webState(r.Context(), in, m)
 		web = &st
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"install": in, "manifest": shownManifest(def.Manifest), "defaults": nonNil(defaults),
+	writeJSON(w, http.StatusOK, map[string]any{"install": in.AsRead(langOfWriter(w)), "manifest": shownManifest(def.Manifest), "defaults": nonNil(defaults),
 		"web":    web,
 		"look":   a.store.LookForSlug(r.Context(), in.Slug),
 		"budget": map[string]any{"credits": in.BudgetCredits, "spent_this_month": spent}})
@@ -897,6 +897,9 @@ func (a *API) thread(w http.ResponseWriter, r *http.Request) {
 			cursor = it.Rev
 		}
 	}
+	// AM14: a greeting is the agent introducing itself, not the work of a run — it is read in the
+	// language of the screen that asks, whatever screen the agent was installed from
+	items = a.greetingsAsRead(r.Context(), langOfWriter(w), in, items)
 	writeJSON(w, http.StatusOK, map[string]any{"items": nonNil(items), "cursor": cursor})
 }
 
@@ -935,6 +938,7 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
+		items = a.greetingsAsRead(ctx, langOfWriter(w), in, items) // AM14: as the thread sends it
 		for _, it := range items {
 			b, _ := json.Marshal(it)
 			_, _ = fmt.Fprintf(w, "id: %d\nevent: item\ndata: %s\n\n", it.Rev, b)
@@ -1818,7 +1822,7 @@ func (a *API) runDetail(ctx context.Context, run Run) (map[string]any, string, e
 	in, _ := a.store.InstallByID(ctx, run.InstallID)
 	spent, _ := a.store.SpentThisMonth(ctx, run.InstallID)
 	return map[string]any{"run": run, "steps": steps, "clarifications": cards, "artifacts": arts,
-		"files": files, "children": children, "install": map[string]any{"id": in.ID, "title": in.Title, "slug": in.Slug},
+		"files": files, "children": children, "install": map[string]any{"id": in.ID, "title": agentTitle{in.Slug, in.Title}, "slug": in.Slug},
 		"budget": map[string]any{"credits": in.BudgetCredits, "spent_this_month": spent}}, "", nil
 }
 

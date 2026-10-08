@@ -56,6 +56,7 @@ func AddPackageEnglish(manifest json.RawMessage) {
 		En map[string]string `json:"en"`
 	}
 	_ = json.Unmarshal(manifest, &m)
+	learnAgentName(manifest) // AM14: and the names it gives its agent (asread_am14.go)
 	words := make([]string, 0, len(m.En))
 	packageEnglish.mu.Lock()
 	if packageEnglish.by == nil {

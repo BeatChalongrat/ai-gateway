@@ -356,6 +356,7 @@ func (a *API) sharedWithMe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		x.RunOutcome = OutcomeOf(x.RunStatus, open)
+		x.Agent = AgentNameIn(langOfWriter(w), x.Slug, x.Agent) // AM14: the agent's name as this screen reads it
 		list = append(list, x)
 	}
 	rows.Close()
@@ -411,7 +412,7 @@ func (a *API) sharedRun(w http.ResponseWriter, r *http.Request) {
 			agentName = m.NameIn(langOfWriter(w), d.Name) // the reader's screen, not the owner's
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"share": sh, "owner": owner, "agent": map[string]any{"title": in.Title,
+	writeJSON(w, http.StatusOK, map[string]any{"share": sh, "owner": owner, "agent": map[string]any{"title": AgentNameIn(langOfWriter(w), in.Slug, in.Title),
 		"name": agentName, "slug": in.Slug, "version": run.DefinitionVersion},
 		"run": map[string]any{"id": run.ID, "status": run.Status, "outcome": run.Outcome(), "status_reason": run.StatusReason, "period": run.Period,
 			"created_at": run.CreatedAt, "finished_at": run.FinishedAt, "assumptions": run.Assumptions, "model_used": run.ModelUsed,
