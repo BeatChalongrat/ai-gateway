@@ -32,10 +32,11 @@ run() {
 }
 case "$WHAT" in
   spans) run python /probe/dlp_rust_spans.py; rc=$? ;;
+  matrix) run python /probe/dlp_lead_matrix.py; rc=$? ;;   # which lead-ins the engine hears, two kinds of address
   tests) run python -c "import os,sys,pytest; rc=pytest.main(sys.argv[1:]); sys.stdout.flush(); os._exit(int(rc))" \
            tests/test_dlp_eval_gate.py tests/test_dlp_parity.py tests/test_dlp_parity_batch1.py tests/test_dlp_parity_batch2.py \
            tests/test_dlp_parity_batch3.py tests/test_dlp_parity_batch4.py tests/test_rust_dlp_client.py -q -p no:cacheprovider -rs; rc=$? ;;
-  *) echo "spans | tests | down"; rc=2 ;;
+  *) echo "spans | matrix | tests | down"; rc=2 ;;
 esac
 down
 exit $rc
