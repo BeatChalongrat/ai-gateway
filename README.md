@@ -214,8 +214,9 @@ the reply is restored to you. The response carries `policy_action`
 (`allow` / `mask` / `block`) and `policy_reasons`.
 
 **Multi-turn restore**: add `"metadata": {"conversation_id": "thread-42"}` so
-tokens are HMAC-derived (`DLP_HMAC_KEY`) and the same value resolves across turns
-via the Redis conversation vault.
+the same value keeps the same placeholder across turns: the Redis conversation
+vault remembers which placeholder stands for which value (placeholders are
+counters, not derived from any key).
 
 **Models**: `GET /v1/models` returns the DB-backed registry (`model_configs`),
 the same list the admin UI's **Models** page edits.
@@ -306,7 +307,6 @@ is required in every mode**):
 | `REDIS_PASSWORD` | Redis AUTH — **mandatory**, stack won't start without it |
 | `JWT_SECRET` / `PORTAL_JWT_SECRET` | Backend / portal JWT signing |
 | `MASTER_ENCRYPTION_KEY` | AES-256-GCM key for `input_raw_encrypted` |
-| `DLP_HMAC_KEY` | Deterministic per-conversation mask-token derivation |
 | `INTERNAL_SERVICE_SECRET` | Trust anchor for chat-edge → gateway `X-User-ID` |
 | `NEXTAUTH_SECRET` | NextAuth on the portal |
 

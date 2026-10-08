@@ -814,10 +814,6 @@ services:
       # here (not hardcoded) so `VIDEO_GEN_ENABLED=true docker compose up -d
       # backend` flips it without a code change.
       VIDEO_GEN_ENABLED: ${VIDEO_GEN_ENABLED:-false}
-      # DLP HMAC secret — drives deterministic per-conversation
-      # tokenization when a request supplies metadata.conversation_id.
-      # Generate prod value with: python3 -c "import secrets;print(secrets.token_hex(32))"
-      DLP_HMAC_KEY: ${DLP_HMAC_KEY:-dev-dlp-hmac-key-change-in-production}
       # NER microservice URL. When set, presidio_ner.py delegates to
       # this service instead of loading spaCy in-process.
       NER_SERVICE_URL: ${NER_SERVICE_URL:-http://ner-service:8001}

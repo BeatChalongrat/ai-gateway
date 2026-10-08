@@ -806,16 +806,11 @@ class Settings(BaseSettings):
     # Unknown values silently fall back to v1.
     dlp_prompt_variant: str = "v1"
 
-    # DLP deterministic-tokenization secret.
-    # When a request supplies ``metadata.conversation_id``, the DLP
-    # transformer derives a per-conversation HMAC key from this
-    # secret and uses it to mint opaque, content-stable tokens of
-    # the form ``[CATEGORY_xxxxxxxx]`` (8-char base64url suffix).
-    # Same PII value in the same conversation always produces the
-    # same token; different conversations produce different tokens.
-    # MUST be replaced in production — generate with
-    # ``python3 -c "import secrets; print(secrets.token_hex(32))"``.
-    dlp_hmac_key: str = "dev-dlp-hmac-key-change-in-production"
+    # (There is no ``dlp_hmac_key``. Mask tokens were once derived from an
+    # HMAC of the value; they are counters now — ``<rN>`` / ``<<CATEGORY_N>>``
+    # — kept stable across turns by the vault below. The setting was read by
+    # nothing and was removed so that nobody takes it for a key in use;
+    # tests/test_no_dead_dlp_hmac_key.py keeps it from coming back.)
     # Redis-backed cross-turn token vault stores raw token->original
     # mappings. Required for safe multi-turn DLP: when turn 2's history
     # echoes a turn-1 ``<rN>`` token, the vault lets the transformer

@@ -47,7 +47,7 @@ debugging only. External clients must hit `:8080`.
 │     1. cache lookup (Redis)                                        │
 │     2. DLP inbound: regex detectors + NER ──► ner-service:8001     │
 │     3. policy evaluate (allow / mask / redact / block)             │
-│     4. MASK → neutral tokens (deterministic w/ DLP_HMAC_KEY)       │
+│     4. MASK → neutral tokens (counters, stable via the vault)      │
 │     5. moderation + guardrail                                      │
 │     6. routing (keyword → semantic → cost-tier → fallback)         │
 │     7. provider dispatch ──► OpenAI / Anthropic / 9 others         │
