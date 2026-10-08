@@ -25,6 +25,7 @@ import unittest
 
 from agent_market.engine import words
 from agent_market.tests import bankkit as K
+from agent_market.tests import invoicekit as IK
 from agent_market.tests.test_manifest_english import ERROR_SHAPE, PLACEHOLDER, same_numbers, without_literals
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -38,9 +39,10 @@ KEY = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$")
 SPEAKERS = {
     "the shared engine": (("engine", "deliverables"), os.path.join("engine", "words.json"), "S"),
     "bank_reconciliation": ((os.path.join("packages", "bank_reconciliation"),), os.path.join("packages", "bank_reconciliation", "agent.json"), "W"),
+    "invoice_processing": ((os.path.join("packages", "invoice_processing"),), os.path.join("packages", "invoice_processing", "agent.json"), "W"),
 }
-# dotted names in the code that begin as a key does and are not one
-NOT_KEYS = {"e3.match.v1"}
+# a dotted name in the code that begins as a key does and is not one: the name of a schema ("e3.match.v1")
+SCHEMA_NAME = re.compile(r"\.v[0-9]+$")
 
 
 def _load(path):
@@ -147,7 +149,8 @@ class TheCodeAndItsWords(unittest.TestCase):
         cls.speakers = {}
         for who, (dirs, file, call) in SPEAKERS.items():
             m = _load(os.path.join(ROOT, file))
-            cls.speakers[who] = {"src": _sources(dirs), "strings": m.get("strings") or {}, "en": m.get("en") or {}, "call": call}
+            cls.speakers[who] = {"src": _sources(dirs), "strings": m.get("strings") or {}, "en": m.get("en") or {},
+                                 "by_key": m.get("en_by_key") or {}, "call": call}
 
     def test_every_sentence_the_code_names_is_there_with_the_places_it_fills(self):
         for who, s in self.speakers.items():
@@ -166,7 +169,8 @@ class TheCodeAndItsWords(unittest.TestCase):
                     thai = s["strings"][key]
                     given = sorted(k.arg for k in n.keywords if k.arg)
                     self.assertEqual(given, sorted(set(PLACE.findall(thai))) if given or "{" in thai else [], f"{where} {key}: the places of the Thai")
-                    self.assertEqual(given, sorted(set(PLACE.findall(s["en"][thai]))) if given else [], f"{where} {key}: the places of the English")
+                    english = s["by_key"].get(key) or s["en"].get(thai, thai)
+                    self.assertEqual(given, sorted(set(PLACE.findall(english))) if given else [], f"{where} {key}: the places of the English")
                     named += 1
             self.assertGreater(named, 40, who)
 
@@ -193,7 +197,7 @@ class TheCodeAndItsWords(unittest.TestCase):
         for who, s in self.speakers.items():
             heads = {k.split(".")[0] for k in s["strings"]}
             for lit in sorted(self._literals(s)):
-                if KEY.match(lit) and lit.split(".")[0] in heads and lit not in NOT_KEYS and not lit.startswith("xlsx."):
+                if KEY.match(lit) and lit.split(".")[0] in heads and not SCHEMA_NAME.search(lit) and not lit.startswith("xlsx."):
                     self.assertIn(lit, s["strings"], f"{who}: {lit}")
 
     def test_no_sentence_is_left_that_nothing_asks_for(self):
@@ -207,9 +211,13 @@ class TheCodeAndItsWords(unittest.TestCase):
             self.assertGreater(len(s["strings"]), 60, who)
             for key, thai in s["strings"].items():
                 where = f"{who} {key}"
-                self.assertTrue(THAI.search(thai), f"{where}: a sentence with no Thai in it cannot have an English of its own")
+                if not THAI.search(thai):
+                    # words with no Thai in them (“VAT”) are said as they are in both languages
+                    self.assertNotIn(thai, s["en"], f"{where}: words with no Thai in them have no English of their own")
+                    self.assertNotIn(key, s["by_key"], where)
+                    continue
                 self.assertIn(thai, s["en"], where)
-                en = s["en"][thai]
+                en = s["by_key"].get(key) or s["en"][thai]
                 self.assertTrue(en.strip() and en == en.strip(), where)
                 self.assertIsNone(THAI.search(without_literals(thai, en)), f"{where}: Thai in the English: {en[:80]}")
                 self.assertEqual(sorted(PLACEHOLDER.findall(thai)), sorted(PLACEHOLDER.findall(en)), f"{where}: places differ")
@@ -226,73 +234,110 @@ class TheCodeAndItsWords(unittest.TestCase):
         seen = 0
         for who, s in self.speakers.items():
             for key, thai in s["strings"].items():
-                if key.startswith("e3.header.") or (key.startswith("card.") and key.endswith(".header")):
+                if key.startswith(("e3.header.", "e2.header.")) or key.endswith(".head") or (key.startswith("card.") and key.endswith(".header")):
                     seen += 1
                     self.assertLessEqual(display_len(thai), 12, f"{who} {key}")
-                    self.assertLessEqual(display_len(s["en"][thai]), 12, f"{who} {key}: {s['en'][thai]}")
+                    english = s["by_key"].get(key) or s["en"].get(thai, thai)
+                    self.assertLessEqual(display_len(english), 12, f"{who} {key}: {english}")
         self.assertGreaterEqual(seen, 8)
+
+    def test_an_english_of_one_key_is_kept_only_where_the_thai_is_said_two_ways(self):
+        for who, s in self.speakers.items():
+            thais = list(s["strings"].values())
+            for key, en in s["by_key"].items():
+                self.assertIn(key, s["strings"], f"{who}: en_by_key names {key}, which is no sentence")
+                thai = s["strings"][key]
+                self.assertGreater(thais.count(thai), 1, f"{who} {key}: its Thai is said under no other key — its English belongs in \"en\"")
+                self.assertNotEqual(en, s["en"][thai], f"{who} {key}: the same English as \"en\" has")
 
     def test_the_shared_engines_words_are_no_packages(self):
         # a package says its own words; the shared engine's are in words.json and are every package's
-        shared, bank = self.speakers["the shared engine"], self.speakers["bank_reconciliation"]
-        self.assertFalse(set(shared["strings"]) & set(bank["strings"]))
-        for path, src in bank["src"].items():
-            self.assertNotIn("SHARED as S", src, path)
+        shared = self.speakers["the shared engine"]
+        for who, s in self.speakers.items():
+            if s is shared:
+                continue
+            self.assertFalse(set(shared["strings"]) & set(s["strings"]), who)
+            for path, src in s["src"].items():
+                self.assertNotIn("SHARED as S", src, path)
+
+
+# what of a computed table reaches a screen, whatever the package
+SCREEN_KEYS = ("gate", "exceptions", "run_exceptions", "not_included", "fallback_narrative", "assumptions", "reason_codes",
+               "names", "period_label")
 
 
 def said_to_a_person(res: dict) -> list:
-    """Every string of a bank run that reaches a screen: its questions, what it assumed, why it does or
-    does not tie, its exceptions, what was left out, its summary, and every line of its gate."""
+    """Every string of a run that reaches a screen: its questions, what it assumed, how it ended and why, its
+    exceptions, what was left out, its summary, the names of its figures, and every line of its gate."""
     out = []
-    for f in res.get("asked") or []:
+    asked = res.get("asked") or []
+    for f in (asked.values() if isinstance(asked, dict) else asked):
         out += [f["header"], f["question"]] + [o[k] for o in f["options"] for k in ("label", "description")]
         out += list((f.get("evidence") or {}).get("columns") or [])
-        out += [r[k] for r in f.get("request") or [] for k in ("label", "why")]
+        out += [r.get(k) or "" for r in f.get("request") or [] for k in ("label", "why")]
         out += [(f.get("input") or {}).get("hint") or ""]
-    pre = res.get("preflight") or {}
+    pre = res.get("preflight") or res.get("first") or {}
     out += [a["text"] for a in pre.get("assumptions") or []]
     c = res.get("computed")
     if c:
-        out += strings_of([c["gate"][k] for k in ("what", "next", "reasons") if k in c["gate"]] + [c["gate"].get("next_steps")])
-        out += strings_of([[e[k] for k in ("reason", "detail", "proposed_action")] + [x["label"] for x in e["choices"]] for e in c["run_exceptions"]])
-        out += strings_of([[e[k] for k in ("reason", "detail", "how")] for e in c["not_included"]])
-        out += strings_of([c["fallback_narrative"], [a["text"] for a in c["assumptions"]], c["reason_codes"], c["names"], c["period_label"]])
-        out += [x[k] for x in c["citations"] for k in ("label", "formula")]
-        out += strings_of([[t["label"] for t in c["match"]["tiers"]], [m["pass_label"] for m in c["match"]["groups"]["matched"]]])
-        out += strings_of([res["summary"]["gate"], res["summary"]["tiers"], res["summary"]["not_included"]])
+        out += strings_of([c.get(k) for k in SCREEN_KEYS])
+        out += [x.get(k) or "" for x in c.get("citations") or [] for k in ("label", "formula")]
+        match = c.get("match") or {}
+        out += strings_of([[t["label"] for t in match.get("tiers") or []],
+                           [m["pass_label"] for m in (match.get("groups") or {}).get("matched") or []]])
+        out += strings_of(res.get("summary"))
         out += strings_of([[k["label"], k["detail"]] for a in res["render"]["artifacts"] for k in a["quality"]["checks"]])
     return [s for s in out if s]
 
 
-class ABankRunInEnglish(unittest.TestCase):
-    """The agent's own eval set — every layout, every question, every way of not tying — run in English."""
+def checks_of(res: dict) -> list:
+    return [(k["name"], k["ok"]) for a in res["render"]["artifacts"] for k in a["quality"]["checks"]]
+
+
+class EnglishRuns:
+    """A package's own eval set — every layout it reads, every question it asks, every way a run of it ends —
+    run in English beside the same set in Thai. Mixed into a TestCase that names the package and its kit."""
+
+    package = ""
+    kit = None
+
+    @classmethod
+    def files_of(cls, case: dict) -> list:
+        """[(path, the name the person gave the file)] of a case."""
+        raise NotImplementedError
+
+    @classmethod
+    def paper_follows_the_run(cls, case: dict) -> bool:
+        """A case whose file holds words written when its input was parsed (so in the run's language)."""
+        return False
 
     @classmethod
     def setUpClass(cls):
-        from agent_market.packages.bank_reconciliation.checks import inputs as I
+        import importlib
 
-        cls.cases = K.load_cases()["cases"]
-        cls.th = {c["id"]: K.run_case(c) for c in cls.cases}
-        cls.en = {c["id"]: K.run_case(c, lang="en") for c in cls.cases}
-        # what is the person's own: the names of their files and everything read out of them
+        from agent_market.engine import dataset
+
+        pkg = importlib.import_module(f"agent_market.packages.{cls.package}")
+        dump = getattr(pkg, "dump", dataset.dump)
+        loaded = cls.kit.load_cases()
+        cls.cases = loaded["cases"] if isinstance(loaded, dict) else loaded
+        cls.th = {c["id"]: cls.kit.run_case(c) for c in cls.cases}
+        cls.en = {c["id"]: cls.kit.run_case(c, lang="en") for c in cls.cases}
+        # what is the person's own: the names of their files, everything read out of them, their settings and answers
+        shared = strings_of({k: v for k, v in loaded.items() if k != "cases"}) if isinstance(loaded, dict) else []
+        read: dict = {}
         cls.own = {}
         for c in cls.cases:
-            mine = list(c["files"])
-            for name in c["files"]:
-                mine += strings_of(I.dump(I.parse(os.path.join(K.FIX, name), name, {})))
-            mine += strings_of([c.get("defaults"), c.get("answers"), K.load_cases()["defaults"]])
+            mine = strings_of(c) + shared
+            for path, name in cls.files_of(c):
+                if path not in read:
+                    read[path] = strings_of(dump(pkg.parse(path, name, {})))
+                mine += [name] + read[path]
             cls.own[c["id"]] = thai_only("\n".join(mine))
         words.use("th")
 
-    def test_the_set_asks_every_kind_of_question_and_ends_every_way(self):
-        codes = {f["code"] for r in self.en.values() for f in r["asked"]}
-        self.assertEqual(codes, {"bankrec_side", "missing_file", "bankrec_account", "bankrec_closing", "bankrec_carried",
-                                 "e3_candidate", "e3_confirm_all", "e3_unmatched"} & codes)
-        self.assertGreaterEqual(len(codes), 6, codes)
-        gates = {r["computed"]["gate"]["code"] for r in self.en.values() if r.get("computed")}
-        self.assertEqual(gates, {"tied", "not_tied"})
-        reasons = {e["reason_code"] for r in self.en.values() if r.get("computed") for e in r["computed"]["run_exceptions"]}
-        self.assertGreaterEqual(len(reasons), 8, reasons)
+    def case(self, cid: str) -> dict:
+        return next(c for c in self.cases if c["id"] == cid)
 
     def test_a_person_who_reads_only_english_meets_no_thai_but_their_own_data_and_the_papers_own_words(self):
         left = []
@@ -305,11 +350,71 @@ class ABankRunInEnglish(unittest.TestCase):
                         left.append(f"{cid}: “{run}” in: {text[:140]}")
         self.assertEqual(left, [], "\n" + "\n".join(sorted(set(left))[:40]))
 
+    def test_a_run_in_english_is_the_same_run(self):
+        # the same questions by key, the same answers, the same figures and the same end
+        for cid, en in self.en.items():
+            th = self.th[cid]
+            self.assertEqual(sorted(f if isinstance(f, str) else f["key"] for f in en["asked"]),
+                             sorted(f if isinstance(f, str) else f["key"] for f in th["asked"]), cid)
+            self.assertEqual((en["answers"], en.get("stops_at")), (th["answers"], th.get("stops_at")), cid)
+            if th.get("computed"):
+                self.assertEqual(en["computed"]["totals"], th["computed"]["totals"], cid)
+                self.assertEqual((en["computed"].get("gate") or {}).get("code"), (th["computed"].get("gate") or {}).get("code"), cid)
+                self.assertEqual((en["render"]["passed"], checks_of(en)), (th["render"]["passed"], checks_of(th)), cid)
+            # (the eval set's own expectations are of the Thai run — its words included — and are held by its own test)
+            self.assertEqual(self.kit.check(self.case(cid), th), [], cid)
+
+    def test_the_paper_is_the_one_a_thai_run_writes(self):
+        # the documents' own pass has not been made: the file is written from the Thai table, whatever the run
+        seen = 0
+        for cid, en in self.en.items():
+            th = self.th[cid]
+            if not th.get("computed"):
+                continue
+            self.assertNotIn("document", th["computed"], cid)           # a Thai run carries one table, as before
+            self.assertIn("document", en["computed"], cid)
+            if self.paper_follows_the_run(self.case(cid)):
+                continue
+            self.assertEqual(en["computed"]["document"], th["computed"], cid)
+            self.assertEqual(en["sheets"], th["sheets"], cid)
+            seen += 1
+        self.assertGreater(seen, 3)
+
+    def test_a_thai_run_after_an_english_one_is_thai(self):
+        cid = next(c for c, r in self.th.items() if r.get("computed"))
+        self.kit.run_case(self.case(cid), lang="en")
+        again = self.kit.run_case(self.case(cid))
+        self.assertEqual(again["computed"], self.th[cid]["computed"])
+
+
+class ABankRunInEnglish(EnglishRuns, unittest.TestCase):
+    package, kit = "bank_reconciliation", K
+
+    @classmethod
+    def files_of(cls, case):
+        return [(os.path.join(K.FIX, n), n) for n in case["files"]]
+
+    @classmethod
+    def paper_follows_the_run(cls, case):
+        # where a row of a PDF is ("หน้า 1 บรรทัด 4") is written when the file is parsed
+        return "statement_sep.pdf" in case["files"]
+
+    def test_the_set_asks_every_kind_of_question_and_ends_every_way(self):
+        codes = {f["code"] for r in self.en.values() for f in r["asked"]}
+        self.assertEqual(codes, {"bankrec_side", "missing_file", "bankrec_account", "bankrec_closing", "bankrec_carried",
+                                 "e3_candidate", "e3_confirm_all", "e3_unmatched"} & codes)
+        self.assertGreaterEqual(len(codes), 6, codes)
+        gates = {r["computed"]["gate"]["code"] for r in self.en.values() if r.get("computed")}
+        self.assertEqual(gates, {"tied", "not_tied"})
+        reasons = {e["reason_code"] for r in self.en.values() if r.get("computed") for e in r["computed"]["run_exceptions"]}
+        self.assertGreaterEqual(len(reasons), 8, reasons)
+
     def test_what_is_said_is_english_and_not_only_free_of_thai(self):
         res = self.en["does_not_tie_recorded_twice"]
         gate = res["computed"]["gate"]
         self.assertRegex(gate["what"], r"^Not yet reconciled: the two adjusted balances differ by [\d,]+\.\d\d baht$")
         self.assertTrue(all(re.match(r"^[A-Z0-9]", r) for r in gate["reasons"]), gate["reasons"])
+        self.assertTrue(self.th["does_not_tie_recorded_twice"]["computed"]["gate"]["what"].startswith("ยังไม่ลงตัว"))
         tied = self.en["clean_kbank_layout"]
         self.assertEqual(tied["computed"]["gate"]["what"], "Reconciled: the adjusted bank balance and the adjusted book balance are equal")
         self.assertEqual(tied["computed"]["period_label"], "September 2026")
@@ -338,42 +443,40 @@ class ABankRunInEnglish(unittest.TestCase):
             where = lambda x: [(s["file"], s["sheet"], s["row"], s["value"]) for s in x["sources"]]   # noqa: E731
             self.assertEqual((en[cid]["value"], where(en[cid])), (c["value"], where(c)), cid)
 
-    def test_a_run_in_english_is_the_same_run(self):
-        # the same questions by key, the same answers, the same figures and the same end
-        for cid, en in self.en.items():
-            th = self.th[cid]
-            self.assertEqual([f["key"] for f in en["asked"]], [f["key"] for f in th["asked"]], cid)
-            self.assertEqual((en["answers"], en["stops_at"]), (th["answers"], th["stops_at"]), cid)
-            if th.get("computed"):
-                self.assertEqual(en["computed"]["totals"], th["computed"]["totals"], cid)
-                self.assertEqual(en["computed"]["gate"]["code"], th["computed"]["gate"]["code"], cid)
-                self.assertEqual(en["render"]["passed"], th["render"]["passed"], cid)
-                self.assertEqual([k["name"] for a in en["render"]["artifacts"] for k in a["quality"]["checks"]],
-                                 [k["name"] for a in th["render"]["artifacts"] for k in a["quality"]["checks"]], cid)
-                self.assertEqual([k["ok"] for a in en["render"]["artifacts"] for k in a["quality"]["checks"]],
-                                 [k["ok"] for a in th["render"]["artifacts"] for k in a["quality"]["checks"]], cid)
-            # (the eval set's own expectations are of the Thai run — its words included — and are held by its own test)
-            self.assertEqual(K.check(next(c for c in self.cases if c["id"] == cid), th), [], cid)
 
-    def test_the_working_paper_is_the_one_a_thai_run_writes(self):
-        # the documents' own pass has not been made: the file is written from the Thai table, whatever the run
-        for cid, en in self.en.items():
-            th = self.th[cid]
-            if not th.get("computed"):
-                continue
-            self.assertNotIn("document", th["computed"], cid)           # a Thai run carries one table, as before
-            self.assertIn("document", en["computed"], cid)
-            if any(n.endswith(".pdf") and "statement_sep.pdf" == n for n in next(c for c in self.cases if c["id"] == cid)["files"]):
-                continue   # where a row of a PDF is ("หน้า 1 บรรทัด 4") is written when the file is parsed, in the run's language
-            self.assertEqual(en["computed"]["document"], th["computed"], cid)
-            self.assertEqual(en["sheets"], th["sheets"], cid)
+class AnInvoiceRunInEnglish(EnglishRuns, unittest.TestCase):
+    package, kit = "invoice_processing", IK
 
-    def test_a_thai_run_after_an_english_one_is_thai(self):
-        case = next(c for c in self.cases if c["id"] == "does_not_tie_recorded_twice")
-        K.run_case(case, lang="en")
-        again = K.run_case(case)
-        self.assertEqual(again["computed"], self.th[case["id"]]["computed"])
-        self.assertTrue(again["computed"]["gate"]["what"].startswith("ยังไม่ลงตัว"))
+    @classmethod
+    def files_of(cls, case):
+        fmap = IK._files()
+        return [(os.path.join(IK.E2, fmap[fid]), os.path.basename(fmap[fid])) for fid in case["files"]]
+
+    def test_the_set_asks_the_questions_of_a_document_and_leaves_documents_out(self):
+        codes = {f["code"] for r in self.en.values() for f in r["asked"].values()}
+        self.assertGreaterEqual(len(codes & {"e2_check_failed", "e2_field_missing", "e2_low_confidence", "e2_duplicate", "e2_source_conflict",
+                                             "e2_copy", "e2_doc_type", "e2_typed_invalid", "e2_page_quality"}), 4, codes)
+        self.assertTrue(any(r["computed"]["not_included"] for r in self.en.values()))
+
+    def test_what_is_said_is_english_and_not_only_free_of_thai(self):
+        cards = [f for r in self.en.values() for f in r["asked"].values()]
+        failed = next(f for f in cards if f["code"] == "e2_check_failed" and f["facts"]["check"] == "vat_7_percent")
+        self.assertEqual(failed["header"], "VAT?")
+        self.assertRegex(failed["question"], r": the VAT is not 7% of the base \(the document prints VAT of [\d,.]+ baht, but 7% of the amount "
+                                             r"before VAT is [\d,.]+ baht\)$")
+        self.assertEqual([o["label"] for o in failed["options"]], ["Record as printed, with an exception", "Leave this document out"])
+        missing = next(f for f in cards if f["code"] == "e2_field_missing")
+        self.assertRegex(missing["question"], r"Please type the value you see, or confirm that the document does not print it")
+        self.assertRegex(missing["input"]["hint"], r"^Type ")
+        res = self.en["clean_batch_zero_questions"]
+        self.assertRegex(res["computed"]["fallback_narrative"]["summary"],
+                         r"^This run received \d+ documents and entered \d+ in the register: total [\d,.]+ baht, VAT [\d,.]+ baht")
+        labels = [k["label"] for a in res["render"]["artifacts"] for k in a["quality"]["checks"]]
+        self.assertIn("The number of rows equals the documents recorded", labels)
+        self.assertTrue(all(re.match(r"^[A-Z]", x) for x in labels), labels)
+        self.assertEqual({c["id"]: c["label"] for c in res["computed"]["citations"]}["i3"], "Total (THB)")
+        left = [e for r in self.en.values() for e in r["computed"]["not_included"]]
+        self.assertTrue(left and all(not THAI.search(e["reason"] + e["how"]) for e in left), left[:2])
 
 
 if __name__ == "__main__":

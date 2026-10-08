@@ -23,53 +23,76 @@ document then goes on the round's "เอกสารที่ยังไม่
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
+from .. import words
 from ..findings import Finding, finding
+from ..words import SHARED as S
 from .schema import FIELD_KINDS
 
-FIELD_TH = {
-    "seller_name": "ชื่อผู้ขาย", "seller_tax_id": "เลขผู้เสียภาษีผู้ขาย", "seller_branch": "สาขาผู้ขาย",
-    "buyer_name": "ชื่อผู้ซื้อ", "buyer_tax_id": "เลขผู้เสียภาษีผู้ซื้อ", "document_number": "เลขที่เอกสาร",
-    "document_date": "วันที่เอกสาร", "due_date": "วันครบกำหนด", "sum_lines": "รวมเป็นเงิน", "discount": "ส่วนลด",
-    "subtotal": "ยอดก่อน VAT", "vat_amount": "VAT", "total": "ยอดรวมทั้งสิ้น", "wht_amount": "หัก ณ ที่จ่าย",
-    "net_payable": "ยอดชำระสุทธิ", "currency": "สกุลเงิน",
-    # AM3: every field a card can name has a Thai name (a card once said "อ่านbank_accountได้")
-    "buyer_branch": "สาขาผู้ซื้อ", "seller_address": "ที่อยู่ผู้ขาย", "buyer_address": "ที่อยู่ผู้ซื้อ",
-    "vat_rate": "อัตรา VAT", "wht_rate": "อัตราหัก ณ ที่จ่าย", "amount_in_words": "จำนวนเงินตัวอักษร",
-    "bank_account": "เลขบัญชีธนาคาร",
-}
-HEADER = {  # ≤ 12 display characters
-    "seller_name": "ผู้ขาย", "seller_tax_id": "เลขภาษีผู้ขาย", "seller_branch": "สาขาผู้ขาย", "buyer_name": "ผู้ซื้อ",
-    "buyer_tax_id": "เลขภาษีผู้ซื้อ", "document_number": "เลขที่", "document_date": "วันที่", "due_date": "ครบกำหนด",
-    "sum_lines": "รวมเงิน", "discount": "ส่วนลด", "subtotal": "ยอดก่อนVAT", "vat_amount": "VAT", "total": "ยอดรวม",
-    "wht_amount": "หัก ณ ที่จ่าย", "net_payable": "ยอดสุทธิ", "currency": "สกุลเงิน",
-    "buyer_branch": "สาขาผู้ซื้อ", "seller_address": "ที่อยู่ผู้ขาย", "buyer_address": "ที่อยู่ผู้ซื้อ",
-    "vat_rate": "อัตรา VAT", "wht_rate": "อัตราหักภาษี", "amount_in_words": "ตัวอักษร", "bank_account": "เลขบัญชี",
-}
-DOC_TYPE_TH = {"full_tax_invoice": "ใบกำกับภาษีเต็มรูป", "abbreviated_tax_invoice": "ใบกำกับภาษีอย่างย่อ",
-               "receipt": "ใบเสร็จรับเงิน", "invoice": "ใบแจ้งหนี้", "credit_note": "ใบลดหนี้", "debit_note": "ใบเพิ่มหนี้"}
+# Every table here keeps the keys of its words (engine/words.json) and says each in the language of the run
+# when it is read: a table is made when this module is imported, before the step has said the language.
+FIELDS = ("seller_name", "seller_tax_id", "seller_branch", "buyer_name", "buyer_tax_id", "document_number", "document_date", "due_date",
+          "sum_lines", "discount", "subtotal", "vat_amount", "total", "wht_amount", "net_payable", "currency",
+          "buyer_branch", "seller_address", "buyer_address", "vat_rate", "wht_rate", "amount_in_words", "bank_account")
+# the name of a field in a sentence
+FIELD_TH = S.table({f: f"e2.field.{f}" for f in FIELDS})
+# … and on a card's heading: ≤ 12 display characters, in either language
+HEADER = S.table({f: f"e2.header.{f}" for f in FIELDS}, then=words.cap)
+DOC_TYPE_TH = S.table({k: f"e2.doc.{k}" for k in ("full_tax_invoice", "abbreviated_tax_invoice", "receipt", "invoice",
+                                                  "credit_note", "debit_note")})
 # where a value came from, as a person would say it (a source_conflict card names both readings)
-SOURCE_TH = {"etax_xml": ("ข้อมูล e-Tax (XML)", "ตัวหนังสือในไฟล์ PDF")}
-SOURCE_DEFAULT = ("ตัวหนังสือในเอกสาร", "โมเดลในองค์กรอ่านจากภาพ")
-MATCH_TH = {"document number": "เลขที่เอกสาร", "date and total": "วันที่และยอดรวม"}
-CHECK_TH = {
-    "line_arithmetic": ("ยอดรายการ", "จำนวน × ราคาต่อหน่วย ไม่เท่ากับยอดของบางรายการ"),
-    "subtotal_sum": ("ผลรวมรายการ", "ผลรวมของรายการไม่เท่ากับยอดรวมที่พิมพ์"),
-    "discount_arithmetic": ("ส่วนลดไม่ตรง", "รวมเป็นเงิน − ส่วนลด ไม่เท่ากับยอดหลังหักส่วนลด"),
-    "vat_7_percent": ("VAT ไม่ตรง", "ภาษีมูลค่าเพิ่มไม่เท่ากับ 7% ของฐาน"),
-    "grand_total": ("ยอดรวม", "ยอดก่อน VAT + VAT ไม่เท่ากับยอดรวมทั้งสิ้น"),
-    "wht": ("หัก ณ ที่จ่าย", "ตัวเลขภาษีหัก ณ ที่จ่ายไม่สอดคล้องกัน"),
-    "currency": ("สกุลเงิน", "เอกสารเป็นเงินตราต่างประเทศ ต้องมีอัตราแลกเปลี่ยนก่อนบันทึกเป็นบาท"),
-    "buyer_match": ("ผู้ซื้อไม่ตรง", "ใบกำกับภาษีออกในนามเลขผู้เสียภาษีอื่น ขอคืนภาษีซื้อไม่ได้"),
-    "seller_tax_id_format": ("เลขภาษีผิด", "เลขผู้เสียภาษีของผู้ขายไม่ผ่านการตรวจหลักสุดท้าย"),
-    "buyer_tax_id_format": ("เลขภาษีผิด", "เลขผู้เสียภาษีของผู้ซื้อไม่ผ่านการตรวจหลักสุดท้าย"),
-    "document_date": ("วันที่แปลก", "วันที่เอกสารอยู่ในอนาคตหรือเก่าผิดปกติ"),
-    "amount_in_words": ("ตัวอักษร", "จำนวนเงินตัวอักษรไม่เท่ากับยอดรวม"),
-}
+SOURCE_TH = {"etax_xml": ("e2.source.etax", "e2.source.pdf_text")}
+SOURCE_DEFAULT = ("e2.source.text", "e2.source.model")
+MATCH_TH = S.table({"document number": "e2.field.document_number", "date and total": "e2.match.date_total"})
+
+
+class _Checks(Mapping):
+    """A check that failed → (a card's heading, what is wrong), by the check's code."""
+
+    KEYS = {
+        "line_arithmetic": ("e2.check.line_arithmetic.head", "e2.check.line_arithmetic"),
+        "subtotal_sum": ("e2.check.subtotal_sum.head", "e2.check.subtotal_sum"),
+        "discount_arithmetic": ("e2.check.discount_arithmetic.head", "e2.check.discount_arithmetic"),
+        "vat_7_percent": ("e2.check.vat_7_percent.head", "e2.check.vat_7_percent"),
+        "grand_total": ("e2.header.total", "e2.check.grand_total"),
+        "wht": ("e2.check.wht.head", "e2.check.wht"),
+        "currency": ("e2.check.currency.head", "e2.check.currency"),
+        "buyer_match": ("e2.check.buyer_match.head", "e2.check.buyer_match"),
+        "seller_tax_id_format": ("e2.check.tax_id.head", "e2.check.seller_tax_id_format"),
+        "buyer_tax_id_format": ("e2.check.tax_id.head", "e2.check.buyer_tax_id_format"),
+        "document_date": ("e2.check.document_date.head", "e2.check.document_date"),
+        "amount_in_words": ("e2.header.amount_in_words", "e2.check.amount_in_words"),
+    }
+
+    def __getitem__(self, code):
+        head, why = self.KEYS[code]
+        return words.cap(S(head)), S(why)
+
+    def __iter__(self):
+        return iter(self.KEYS)
+
+    def __len__(self):
+        return len(self.KEYS)
+
+
+CHECK_TH = _Checks()
 INPUT_KIND = {"money": "money", "tax_id": "tax_id", "date": "date", "code": "text", "party": "text", "text": "text",
               "rate": "rate", "bank_account": "text"}
-INPUT_HINT = {"money": "พิมพ์ตัวเลข เช่น 12,850.70", "tax_id": "พิมพ์เลข 13 หลัก", "date": "พิมพ์วันที่ เช่น 15/09/2569",
-              "rate": "พิมพ์ตัวเลข เช่น 36.25", "text": "พิมพ์ตามที่เห็นในเอกสาร"}
-EXCLUDE = ("ตัดเอกสารนี้ออก", "exclude", "ไม่นำเอกสารนี้เข้าทะเบียน บันทึกเป็นข้อยกเว้นให้คนตรวจ")
+INPUT_HINT = S.table({k: f"e2.hint.{k}" for k in ("money", "tax_id", "date", "rate", "text")})
+
+
+def said(words_or_key) -> str:
+    """Words an extraction keeps by key, said in the language of the run (a notice kept as words by an
+    extraction made before AM14 is given as it is)."""
+    return S(words_or_key) if words_or_key in S.strings else (words_or_key or "")
+
+
+def exclude() -> tuple:
+    """The answer every one of these cards has: leave the document out."""
+    return S("e2.opt.exclude"), "exclude", S("e2.opt.exclude.d")
+
+
 LEAVES_OUT = ("exclude", "reupload")
 # failed checks of a real purchase: recording it as printed (with an exception) loses nothing.
 # Not among them: an invoice in another company's name (it may not be this company's purchase)
@@ -90,12 +113,12 @@ def _doc_label(doc: dict) -> str:
             seller = seller[:39] + "…"
     num = (f.get("document_number") or {}).get("normalized")
     name = doc.get("document", {}).get("name", "")
-    parts = [p for p in (seller, f"เลขที่ {num}" if num else None) if p]
+    parts = [p for p in (seller, S("e2.doc_no", num=num) if num else None) if p]
     return " ".join(parts) + f" ({name})" if parts else name
 
 
 def _where(ev: dict) -> str:
-    return f" (ดูที่หน้า {ev['page']})" if ev.get("page") else ""
+    return " " + S("e2.where", page=ev["page"]) if ev.get("page") else ""
 
 
 def _plain(v) -> str:
@@ -111,7 +134,8 @@ def _plain(v) -> str:
 
 
 def _check_detail(code: str, ev: dict, reason: str) -> str:
-    """What a failed check found, in Thai, from its own numbers (never the engine's English message)."""
+    """What a failed check found, from its own numbers, in the words of the run's language (never the engine's
+    own English message)."""
     import re
 
     exp, act = ev.get("expected"), ev.get("actual")
@@ -120,32 +144,32 @@ def _check_detail(code: str, ev: dict, reason: str) -> str:
         return v is not None and not isinstance(v, (dict, list)) and str(v).replace(".", "", 1).replace("-", "", 1).isdigit()
 
     if code == "vat_7_percent" and num(act) and num(exp):
-        return f"เอกสารพิมพ์ VAT {_plain(act)} บาท แต่ 7% ของยอดก่อน VAT คือ {_plain(exp)} บาท"
+        return S("e2.detail.vat", act=_plain(act), exp=_plain(exp))
     if code == "grand_total" and num(act) and num(exp):
-        return f"เอกสารพิมพ์ยอดรวม {_plain(act)} บาท แต่ยอดก่อน VAT + VAT = {_plain(exp)} บาท"
+        return S("e2.detail.total", act=_plain(act), exp=_plain(exp))
     if code == "subtotal_sum" and num(act) and num(exp):
-        return f"รายการรวมกันได้ {_plain(exp)} บาท แต่เอกสารพิมพ์ {_plain(act)} บาท"
+        return S("e2.detail.subtotal", exp=_plain(exp), act=_plain(act))
     if code == "buyer_match" and act:
-        return f"เอกสารออกในนามเลขผู้เสียภาษี {act} แต่บริษัทของคุณคือ {exp}"
+        return S("e2.detail.buyer", act=act, exp=exp)
     if code in ("seller_tax_id_format", "buyer_tax_id_format") and act:
-        return f"เลขในเอกสาร {act} หลักสุดท้ายไม่ตรงกับ 12 หลักแรก อาจพิมพ์หรืออ่านผิด"
+        return S("e2.detail.tax_id", act=act)
     if code == "document_date" and act:
-        return f"วันที่ในเอกสาร {act}"
+        return S("e2.detail.date", act=act)
     if code == "currency" and act:
-        return f"เอกสารเป็นเงินสกุล “{act}”"
+        return S("e2.detail.currency", act=act)
     if code == "amount_in_words" and act:
-        return f"ตัวอักษรในเอกสาร “{str(act)[:60]}”"
+        return S("e2.detail.words", words=str(act)[:60])
     if code == "wht" and isinstance(act, dict):
         if "net" in act and "total" in act and "wht" not in act:
-            return f"ยอดชำระสุทธิ {_plain(act['net'])} บาท ไม่เท่ากับยอดรวม {_plain(act['total'])} บาท แต่อ่านยอดหัก ณ ที่จ่ายไม่ได้"
-        bits = [f"หัก {_plain(act.get('wht'))} บาท" if act.get("wht") is not None else "",
-                f"อัตรา {act['rate']}%" if act.get("rate") is not None else "",
-                f"ยอดสุทธิ {_plain(act.get('net'))} บาท" if act.get("net") is not None else "ไม่พบยอดชำระสุทธิ"]
-        return "เอกสารพิมพ์ " + " ".join(b for b in bits if b)
+            return S("e2.detail.wht_unread", net=_plain(act["net"]), total=_plain(act["total"]))
+        bits = [S("e2.detail.wht.withheld", wht=_plain(act.get("wht"))) if act.get("wht") is not None else "",
+                S("e2.detail.wht.rate", rate=act["rate"]) if act.get("rate") is not None else "",
+                S("e2.detail.wht.net", net=_plain(act.get("net"))) if act.get("net") is not None else S("e2.detail.wht.no_net")]
+        return S("e2.detail.wht", bits=words.clauses(*bits))
     if code == "line_arithmetic":
         rows = re.findall(r"row (\d+): ([\d.,-]+) printed, ([\d.,-]+) computed", reason or "")
         if rows:
-            return " · ".join(f"รายการที่ {r} พิมพ์ {_plain(p)} แต่จำนวน × ราคาต่อหน่วย = {_plain(c)}" for r, p, c in rows[:3])
+            return " · ".join(S("e2.detail.line", r=r, p=_plain(p), c=_plain(c)) for r, p, c in rows[:3])
     return ""
 
 
@@ -173,7 +197,7 @@ def findings_for(doc_key: str, doc: dict) -> list[Finding]:
     out: list[Finding] = []
     label = _doc_label(doc)
     triage = doc.get("document", {}).get("triage_only")
-    note = " (รูปถ่าย อ่านแบบพยายามที่สุด)" if triage else ""
+    note = " " + S("e2.photo_note") if triage else ""
     for q in doc.get("questions") or []:
         code, subject, field = q["code"], q.get("subject") or "", q.get("field")
         subj = f"{doc_key}:{subject}" if subject else doc_key
@@ -185,41 +209,39 @@ def findings_for(doc_key: str, doc: dict) -> list[Finding]:
             kind = FIELD_KINDS[field]
             shown = _shown(kind, q.get("proposed"))
             what = FIELD_TH.get(field, field)
-            this = "ตัวเลขนี้" if kind in ("money", "tax_id", "rate", "bank_account") else "ค่านี้"
+            this = S("e2.this.number") if kind in ("money", "tax_id", "rate", "bank_account") else S("e2.this.value")
             reason = str(q.get("reason") or "")
             other = _shown(kind, (q.get("evidence") or {}).get("other")) if code == "source_conflict" else None
-            first, second = SOURCE_TH.get(doc.get("method"), SOURCE_DEFAULT)
+            first, second = (S(k) for k in SOURCE_TH.get(doc.get("method"), SOURCE_DEFAULT))
             where = _where(ev)
             if code == "source_conflict" and shown is not None and other is not None:
-                text = (f"{label}: {what}อ่านได้สองค่าที่ไม่ตรงกัน — {first}: “{shown}” · {second}: “{other}”{where} "
-                        f"ค่าไหนตรงกับเอกสาร หรือพิมพ์ค่าที่ถูก{note}")
+                text = S("e2.q.conflict", label=label, what=what, first=first, shown=shown, second=second, other=other,
+                         where=where, note=note)
             elif code == "source_conflict":
-                text = f"{label}: {what}อ่านได้ไม่ตรงกันสองแบบ{where} ช่วยพิมพ์ค่าที่เห็นในเอกสาร{note}"
+                text = S("e2.q.conflict_unshown", label=label, what=what, where=where, note=note)
             elif shown is None and reason.startswith("the label is printed"):
-                text = f"{label}: เห็นหัวข้อ{what}ในเอกสาร แต่อ่านค่าไม่ออก{where} ช่วยพิมพ์ค่าที่เห็นในเอกสาร{note}"
+                text = S("e2.q.label_only", label=label, what=what, where=where, note=note)
             elif shown is None:
-                text = f"{label}: อ่าน{what}ไม่ได้{where} ช่วยพิมพ์ค่าที่เห็นในเอกสาร{note}"
+                text = S("e2.q.unread", label=label, what=what, where=where, note=note)
             elif reason.startswith("only a model"):
-                text = (f"{label}: ตัวหนังสือในเอกสารอ่าน{what}ไม่ได้ โมเดลในองค์กรอ่านจากภาพได้ “{shown}”{where} "
-                        f"ตรงกับที่เห็นในเอกสารไหม ถ้าไม่ตรง พิมพ์ค่าที่ถูก{note}")
+                text = (S("e2.q.model_only", label=label, what=what, shown=shown, where=where, note=note))
             elif reason.startswith("the numbers do not add up"):
-                why = CHECK_TH.get(str((q.get("evidence") or {}).get("check") or ""), ("", "ตัวเลขในเอกสารบวกกันไม่ลงตัว"))[1]
-                text = (f"{label}: อ่าน{what}ได้ “{shown}” แต่{why}{where} ช่วยดูว่าเอกสารพิมพ์ “{shown}” จริงไหม "
-                        f"ถ้าไม่ใช่ พิมพ์ค่าที่ถูก{note}")
+                why = CHECK_TH.get(str((q.get("evidence") or {}).get("check") or ""), ("", S("e2.check.default")))[1]
+                text = (S("e2.q.sums", label=label, what=what, shown=shown, why=why, where=where, note=note))
             else:
-                text = f"{label}: อ่าน{what}ได้ “{shown}” แต่ภาพไม่ชัดพอให้มั่นใจ{where} {this}ตรงกับเอกสารไหม ถ้าไม่ตรง พิมพ์ค่าที่ถูก{note}"
+                text = S("e2.q.unsure", label=label, what=what, shown=shown, where=where, this=this, note=note)
             if shown is not None and other is not None and str(other) != str(shown):
                 # two readings: the person picks the one the document shows (or types it)
                 raw_other = (q.get("evidence") or {}).get("other")
-                options = [(f"ใช้ {shown}"[:60], {"accept": shown if kind == "party" else str(q["proposed"])}, f"ค่าจาก{first}"),
-                           (f"ใช้ {other}"[:60], {"accept": other if kind == "party" else str(raw_other)}, f"ค่าจาก{second}"),
-                           EXCLUDE]
+                options = [(S("e2.opt.use", shown=shown)[:60], {"accept": shown if kind == "party" else str(q["proposed"])}, S("e2.opt.from", source=first)),
+                           (S("e2.opt.use", shown=other)[:60], {"accept": other if kind == "party" else str(raw_other)}, S("e2.opt.from", source=second)),
+                           exclude()]
             elif shown is not None:
-                options = [(f"ถูกต้อง {shown}"[:60], {"accept": shown if kind == "party" else str(q["proposed"])},
-                            f"ยืนยันว่าเอกสารพิมพ์{this}"), EXCLUDE]
+                options = [(S("e2.opt.correct", shown=shown)[:60], {"accept": shown if kind == "party" else str(q["proposed"])},
+                            S("e2.opt.correct.d", this=this)), exclude()]
             else:
-                options = [("ไม่มีในเอกสาร", "absent", "เอกสารไม่ได้พิมพ์ค่านี้"), EXCLUDE]
-            out.append(finding(f"e2_{code}", "blocking", "preflight", HEADER.get(field, "ค่าในเอกสาร"), text,
+                options = [(S("e2.opt.absent"), "absent", S("e2.opt.absent.d")), exclude()]
+            out.append(finding(f"e2_{code}", "blocking", "preflight", HEADER.get(field, S("e2.header.value")), text,
                                options, "exclude", evidence=ev, subject=subj, leaves_out=True,
                                input={"kind": INPUT_KIND[kind], "hint": INPUT_HINT[INPUT_KIND[kind]]},
                                facts={"field": field, "proposed": shown}))
@@ -228,14 +250,13 @@ def findings_for(doc_key: str, doc: dict) -> list[Finding]:
             e = q.get("evidence") or {}
             read, full = str(e.get("read") or ""), str(q.get("proposed") or "")
             left = " ".join(str(x) for x in e.get("left_out") or [])
-            where = f" (หน้า {e['page']})" if e.get("page") else ""
-            text = (f"{label}: รายการที่ {e.get('row')} อ่านชื่อได้ “{read or '—'}” แต่แถวเดียวกันในเอกสารมีคำว่า “{left}” "
-                    f"ที่ยังไม่ได้อ่านเข้ามา{where} ชื่อรายการที่พิมพ์ในเอกสารคือข้อไหน ถ้าไม่ใช่ทั้งสองแบบ พิมพ์ชื่อที่ถูก{note}")
-            opts = [(f"ชื่อเต็ม: {full}"[:60], {"accept": full}, "ตามข้อความทั้งแถวในเอกสาร")]
+            where = " " + S("e2.page", page=e["page"]) if e.get("page") else ""
+            text = (S("e2.q.item_text", label=label, row=e.get("row"), read=read or "—", left=left, where=where, note=note))
+            opts = [(S("e2.opt.full", full=full)[:60], {"accept": full}, S("e2.opt.full.d"))]
             if read:
-                opts.append((f"ตามที่อ่าน: {read}"[:60], {"accept": read}, "ชื่อตามที่ระบบอ่านได้"))
-            opts.append(("ข้ามไว้ ยังไม่ยืนยัน", "unconfirmed", "บันทึกตามที่อ่าน และขึ้นในทะเบียนว่าต้องตรวจ"))
-            out.append(finding("e2_item_text", "blocking", "preflight", "ชื่อรายการ", text, opts, "unconfirmed",
+                opts.append((S("e2.opt.as_read", read=read)[:60], {"accept": read}, S("e2.opt.as_read.d")))
+            opts.append((S("e2.opt.unconfirmed"), "unconfirmed", S("e2.opt.unconfirmed.d")))
+            out.append(finding("e2_item_text", "blocking", "preflight", S("e2.header.item_text"), text, opts, "unconfirmed",
                                evidence={**ev, "raw_text": e.get("raw_text"), "page": e.get("page")}, subject=subj,
                                input={"kind": "text", "hint": INPUT_HINT["text"]},
                                facts={"row": e.get("row"), "read": read, "proposed": full}))
@@ -245,59 +266,58 @@ def findings_for(doc_key: str, doc: dict) -> list[Finding]:
             reason = str(q.get("reason") or "")
             dtype = DOC_TYPE_TH.get(str((doc.get("document_type") or {}).get("normalized") or ""))
             if reason.startswith("could not be read, and"):
-                text = f"{label}: อ่าน{what}ไม่ได้ และถ้าไม่มีค่านี้ ตัวเลขในเอกสารจะบวกกันไม่ลงตัว ช่วยพิมพ์ค่าที่เห็นในเอกสาร{note}"
+                text = S("e2.q.missing_sums", label=label, what=what, note=note)
             elif reason.startswith("a ") and dtype:
-                text = f"{label}: {dtype}ต้องมี{what} แต่ไม่พบในเอกสารนี้ ช่วยพิมพ์ค่าที่เห็น หรือยืนยันว่าเอกสารไม่ได้พิมพ์ไว้{note}"
+                text = S("e2.q.missing_required", label=label, dtype=dtype, what=what, note=note)
             else:
-                text = f"{label}: ไม่พบ{what}ในเอกสาร ช่วยพิมพ์ค่าที่เห็น หรือยืนยันว่าเอกสารไม่ได้พิมพ์ไว้{note}"
-            out.append(finding("e2_field_missing", "blocking", "preflight", HEADER.get(field, "ค่าที่ขาด"), text,
-                               [("ไม่มีในเอกสาร", "absent", "บันทึกเป็นข้อยกเว้น: เอกสารไม่ครบ"), EXCLUDE], "exclude",
+                text = S("e2.q.missing", label=label, what=what, note=note)
+            out.append(finding("e2_field_missing", "blocking", "preflight", HEADER.get(field, S("e2.header.missing")), text,
+                               [(S("e2.opt.absent"), "absent", S("e2.opt.absent.exception")), exclude()], "exclude",
                                evidence=ev, subject=subj, leaves_out=True,
                                input={"kind": INPUT_KIND[kind], "hint": INPUT_HINT[INPUT_KIND[kind]]}, facts={"field": field}))
         elif code == "check_failed":
-            head, why = CHECK_TH.get(subject, ("ตรวจไม่ผ่าน", "ตัวเลขในเอกสารไม่ผ่านการตรวจ"))
+            head, why = CHECK_TH.get(subject, (S("e2.check.head"), S("e2.check.why")))
             detail = _check_detail(subject, q.get("evidence") or {}, str(q.get("reason") or ""))
             text = f"{label}: {why}" + (f" ({detail})" if detail else "")
-            opts = [("บันทึกตามเอกสาร มีข้อยกเว้น", "accept_as_printed",
-                     "เข้าทะเบียนตามที่เอกสารพิมพ์ และมีข้อยกเว้นให้ผู้ตรวจดู"), EXCLUDE]
+            opts = [(S("e2.opt.as_printed"), "accept_as_printed",
+                     S("e2.opt.as_printed.d")), exclude()]
             inp = None
             if subject == "currency":
-                opts = [("ระบุอัตราแลกเปลี่ยน", "rate", "พิมพ์อัตรา เช่น 36.25"), EXCLUDE]
-                inp = {"kind": "rate", "hint": "พิมพ์อัตราแลกเปลี่ยนเป็นบาทต่อ 1 หน่วย เช่น 36.25"}
+                opts = [(S("e2.opt.rate"), "rate", S("e2.opt.rate.d")), exclude()]
+                inp = {"kind": "rate", "hint": S("e2.hint.fx")}
             out.append(finding("e2_check_failed", "blocking", "preflight", head, text, opts, "exclude",
                                evidence=ev, subject=subj, input=inp, facts={"check": subject}, leaves_out=True,
                                recommended="accept_as_printed" if subject in RECORD_AS_PRINTED else None))
         elif code == "duplicate_candidate":
             m = (q.get("evidence") or {}).get("match") or {}
             if isinstance(m, dict) and m.get("name"):
-                how = MATCH_TH.get(str(m.get("match")), "รายละเอียด")
-                text = (f"{label}: ผู้ขายเดียวกันและ{how}ตรงกับ “{m['name']}” ที่บันทึกไว้แล้ว "
-                        f"เป็นเอกสารฉบับเดียวกันที่ส่งซ้ำหรือไม่")
+                how = MATCH_TH.get(str(m.get("match")), S("e2.match.details"))
+                text = (S("e2.q.duplicate_named", label=label, how=how, name=m["name"]))
             else:
-                text = f"{label}: ดูเหมือนเอกสารที่บันทึกไว้แล้ว เป็นเอกสารฉบับเดียวกันที่ส่งซ้ำหรือไม่"
-            out.append(finding("e2_duplicate", "blocking", "preflight", "เอกสารซ้ำ", text,
-                               [("ซ้ำ ตัดออก", "exclude", "ไม่นำฉบับนี้เข้าทะเบียนอีก"),
-                                ("ไม่ซ้ำ นับรวม", "include", "เป็นเอกสารคนละฉบับ นำเข้าทะเบียนด้วย")],
+                text = S("e2.q.duplicate", label=label)
+            out.append(finding("e2_duplicate", "blocking", "preflight", S("e2.header.duplicate"), text,
+                               [(S("e2.opt.dup_exclude"), "exclude", S("e2.opt.dup_exclude.d")),
+                                (S("e2.opt.dup_include"), "include", S("e2.opt.dup_include.d"))],
                                # the same purchase is already in the register: leaving the copy out loses nothing
                                "exclude", evidence=ev, subject=subj, leaves_out=True, recommended="exclude"))
         elif code == "copy_not_original":
             # blocking: whether a copy is recorded changes which documents count (a cosmetic answer never
             # reaches the numbers); skipped → left out, like every other E2 card
-            out.append(finding("e2_copy", "blocking", "preflight", "สำเนา",
-                               f"{label}: เอกสารนี้เป็นสำเนา ขอคืนภาษีซื้อต้องใช้ต้นฉบับ บันทึกไว้หรือไม่",
-                               [("บันทึก พร้อมหมายเหตุ", "ok", "บันทึกตามเดิม พร้อมข้อยกเว้นว่าเป็นสำเนา"), EXCLUDE], "exclude",
+            out.append(finding("e2_copy", "blocking", "preflight", S("e2.header.copy"),
+                               S("e2.q.copy", label=label),
+                               [(S("e2.opt.copy_ok"), "ok", S("e2.opt.copy_ok.d")), exclude()], "exclude",
                                evidence=ev, subject=subj, leaves_out=True, recommended="ok"))
         elif code == "document_type_unknown":
-            out.append(finding("e2_doc_type", "blocking", "preflight", "ชนิดเอกสาร",
-                               f"{label}: หัวเอกสารไม่ได้บอกชัดว่าเป็นเอกสารชนิดไหน ดูหัวกระดาษแล้วเลือกให้หน่อย",
-                               [("ใบกำกับภาษีเต็มรูป", "full_tax_invoice", "มีชื่อ ที่อยู่ และเลขผู้เสียภาษีของผู้ซื้อ"),
-                                ("ใบกำกับภาษีอย่างย่อ", "abbreviated_tax_invoice", "ไม่มีชื่อผู้ซื้อ เช่น บิลจากร้านค้าปลีก"),
-                                ("ใบเสร็จรับเงิน", "receipt", "ใบเสร็จที่ไม่ใช่ใบกำกับภาษี"), EXCLUDE],
+            out.append(finding("e2_doc_type", "blocking", "preflight", S("e2.header.doc_type"),
+                               S("e2.q.doc_type", label=label),
+                               [(words.cap(DOC_TYPE_TH["full_tax_invoice"]), "full_tax_invoice", S("e2.doc.full.d")),
+                                (words.cap(DOC_TYPE_TH["abbreviated_tax_invoice"]), "abbreviated_tax_invoice", S("e2.doc.abbreviated.d")),
+                                (words.cap(DOC_TYPE_TH["receipt"]), "receipt", S("e2.doc.receipt.d")), exclude()],
                                "exclude", evidence=ev, subject=subj, leaves_out=True))
         elif code == "page_quality":
-            out.append(finding("e2_page_quality", "blocking", "preflight", "ภาพไม่ชัด",
-                               f"{label}: หน้า {subject[1:]} ภาพไม่ชัดพอ ตัวเลขเงินที่อ่านจากหน้านี้อาจผิด",
-                               [("อัปโหลดไฟล์ที่ชัดกว่า", "reupload", "สแกนใหม่ที่ 300 DPI แล้วส่งมาแทน"), EXCLUDE],
+            out.append(finding("e2_page_quality", "blocking", "preflight", S("e2.header.page_quality"),
+                               S("e2.q.page_quality", label=label, page=subject[1:]),
+                               [(S("e2.opt.reupload"), "reupload", S("e2.opt.reupload.d")), exclude()],
                                "exclude", evidence=ev, subject=subj, leaves_out=True))
     return out
 

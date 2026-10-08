@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 
+from ..words import SHARED as S
 from . import thai_text as T
 from . import typed
 from .schema import FIELD_KINDS
@@ -93,15 +94,15 @@ def to_value(name: str, raw):
         return typed.parse(kind, text)
     t = T.arabic(text).strip()
     if not t:
-        return None, "ไม่ได้พิมพ์ค่า"
+        return None, S("e2.typed.empty")
     if kind == "party":
         return (T.legal_form(t) or {"legal_form": "unknown", "core": t, "key": T.core_key(t)}), None
     if name.endswith("_branch"):
         b = T.parse_branch(t) or ("".join(ch for ch in t if ch.isdigit()).zfill(5) if any(ch.isdigit() for ch in t) else None)
-        return (b, None) if b else (None, "พิมพ์ 'สำนักงานใหญ่' หรือเลขสาขา 5 หลัก")
+        return (b, None) if b else (None, S("e2.typed.branch"))
     if kind == "bank_account":
         d = "".join(ch for ch in t if ch.isdigit())
-        return (d, None) if 10 <= len(d) <= 15 else (None, "เลขบัญชีต้องมี 10–15 หลัก")
+        return (d, None) if 10 <= len(d) <= 15 else (None, S("e2.typed.bank_account"))
     return t[:200], None
 
 
@@ -141,7 +142,7 @@ def _apply(d: Decisions, key: str, val) -> None:
         if val == "absent":
             d.absent.add(name)
             d.invalid.pop(name, None)
-            _note(d, "field_absent", name, "ผู้ใช้ยืนยันว่าเอกสารไม่ได้พิมพ์ค่านี้")
+            _note(d, "field_absent", name, S("e2.note.absent"))
             return
         raw = None
         if isinstance(val, dict) and "typed" in val:
@@ -166,7 +167,7 @@ def _apply(d: Decisions, key: str, val) -> None:
     elif code == "e2_check_failed" or (code == "e2_typed_invalid" and subject == "fx_rate"):
         if subject in ("currency", "fx_rate"):
             raw = val.get("typed") if isinstance(val, dict) else None
-            rate, why = typed.parse("rate", raw) if raw is not None else (None, "ยังไม่ได้พิมพ์อัตราแลกเปลี่ยน")
+            rate, why = typed.parse("rate", raw) if raw is not None else (None, S("e2.note.no_rate"))
             if why:
                 if code == "e2_typed_invalid":
                     _exclude(d, "typed_value_invalid", "fx_rate", key, False)
@@ -176,10 +177,10 @@ def _apply(d: Decisions, key: str, val) -> None:
             d.invalid.pop("fx_rate", None)
             d.fx_rate = rate
             d.accepted_checks.add("currency")
-            _note(d, "foreign_currency", "currency", f"อัตราแลกเปลี่ยนที่ผู้ใช้ระบุ {rate} บาทต่อหน่วย")
+            _note(d, "foreign_currency", "currency", S("e2.note.rate", rate=rate))
         elif val == "accept_as_printed":
             d.accepted_checks.add(subject)
-            _note(d, "accepted_as_printed", subject, "ผู้ใช้ให้บันทึกตามที่พิมพ์ แม้ตรวจไม่ผ่าน")
+            _note(d, "accepted_as_printed", subject, S("e2.note.as_printed"))
     elif code == "e2_item_text":
         # AM8: an item's name the row printed in full — the person's choice, never a model's
         row = subject[4:] if subject.startswith("line") else ""
@@ -187,13 +188,13 @@ def _apply(d: Decisions, key: str, val) -> None:
         if row.isdigit() and raw and str(raw).strip():
             d.item_names[int(row)] = T.arabic(str(raw)).strip()[:200]
         elif val == "unconfirmed":
-            _note(d, "item_name_unconfirmed", subject, "ชื่อรายการอาจไม่ครบ ผู้ใช้ข้ามไว้ ยังไม่มีคนยืนยัน")
+            _note(d, "item_name_unconfirmed", subject, S("e2.note.item_text"))
     elif code == "e2_duplicate" and val == "include":
         d.accepted_checks.add("duplicate")
-        _note(d, "not_duplicate_by_person", "duplicate", "ผู้ใช้ยืนยันว่าเป็นเอกสารคนละฉบับ")
+        _note(d, "not_duplicate_by_person", "duplicate", S("e2.note.not_duplicate"))
     elif code == "e2_copy" and val == "ok":
         d.accepted_checks.add("original_copy")
-        _note(d, "copy_not_original", "copy", "เอกสารเป็นสำเนา ขอคืนภาษีซื้อต้องใช้ต้นฉบับ")
+        _note(d, "copy_not_original", "copy", S("e2.note.copy"))
     elif code == "e2_doc_type" and val in DOC_TYPES:
         d.doc_type = val
 
@@ -203,8 +204,8 @@ def _apply(d: Decisions, key: str, val) -> None:
 # (recorded as printed with an exception; "not a duplicate"; "a copy, record
 # it"), and is taken back — so its question is asked again — when the
 # document cannot be recorded without a value or a choice of theirs.
-BRING_BACK = {"e2_check_failed": ("accept_as_printed", "บันทึกตามเอกสาร มีข้อยกเว้น"),
-              "e2_duplicate": ("include", "ไม่ซ้ำ นับรวม"), "e2_copy": ("ok", "บันทึก พร้อมหมายเหตุ")}
+BRING_BACK = {"e2_check_failed": ("accept_as_printed", "e2.opt.as_printed"),      # (the answer, the key of its words)
+              "e2_duplicate": ("include", "e2.opt.dup_include"), "e2_copy": ("ok", "e2.opt.copy_ok")}
 
 
 def restore_of(dec: Decisions) -> dict:
@@ -214,7 +215,7 @@ def restore_of(dec: Decisions) -> dict:
         code, _, subject = split_key(key)
         alt = BRING_BACK.get(code)
         if alt and not (code == "e2_check_failed" and subject in ("currency", "fx_rate", "buyer_match")):
-            out["set"][key] = {"value": alt[0], "label": alt[1], "code": code}
+            out["set"][key] = {"value": alt[0], "label": S(alt[1]), "code": code}
         else:
             out["drop"].append(key)
     # a typed value that was asked again belongs to the question it corrects

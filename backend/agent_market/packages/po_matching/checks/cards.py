@@ -97,12 +97,12 @@ def invalid_cards(u, out: dict, dec) -> list:
     for name, (key, why) in sorted(dec.invalid.items()):
         if name == "fx_rate":
             what, kind, hint = "อัตราแลกเปลี่ยน", "rate", "พิมพ์อัตราเป็นบาทต่อ 1 หน่วย เช่น 36.25"
-            opts = [E2C.EXCLUDE, ("ยังไม่ทราบอัตรา", "reupload", "ตัดออกไว้ก่อน ส่งใหม่เมื่อทราบอัตรา")]
+            opts = [E2C.exclude(), ("ยังไม่ทราบอัตรา", "reupload", "ตัดออกไว้ก่อน ส่งใหม่เมื่อทราบอัตรา")]
         else:
             what = E2C.FIELD_TH.get(name, "ค่าในเอกสาร")
             kind = E2C.INPUT_KIND.get(FIELD_KINDS.get(name, "text"), "text")
             hint = E2C.INPUT_HINT.get(kind, E2C.INPUT_HINT["text"])
-            opts = [("ไม่มีในเอกสาร", "absent", "เอกสารไม่ได้พิมพ์ค่านี้"), E2C.EXCLUDE]
+            opts = [("ไม่มีในเอกสาร", "absent", "เอกสารไม่ได้พิมพ์ค่านี้"), E2C.exclude()]
         fs.append(finding("e2_typed_invalid", "blocking", "preflight", "พิมพ์ใหม่",
                           f"{label}: ค่า{what}ที่พิมพ์มาใช้ไม่ได้ ({why}) ช่วยพิมพ์ใหม่อีกครั้ง", opts, "exclude",
                           subject=f"{u.key}:{name}", input={"kind": kind, "hint": hint}, leaves_out=True,

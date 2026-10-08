@@ -25,47 +25,29 @@ from __future__ import annotations
 import datetime as _dt
 from decimal import ROUND_HALF_UP, Decimal
 
+from ....engine import words
 from ....engine.e2 import cards
 from ....engine.e2.schema import FIELD_KINDS, MONEY_FIELDS, ORDINARY_THRESHOLD, STRICT_THRESHOLD
-from ....engine.thai import fmt_money, period_label_th
+from ....engine.thai import fmt_money
 from ..checks import review as R
+from ..words import W
 
 SCHEMA = "invoice.register.v1"
 Q2 = Decimal("0.01")
 
-DOC_TYPE_TH = {
-    "full_tax_invoice": "ใบกำกับภาษีเต็มรูป", "abbreviated_tax_invoice": "ใบกำกับภาษีอย่างย่อ", "receipt": "ใบเสร็จรับเงิน",
-    "invoice": "ใบแจ้งหนี้", "credit_note": "ใบลดหนี้", "debit_note": "ใบเพิ่มหนี้", "wht_certificate": "หนังสือรับรองหัก ณ ที่จ่าย",
-    "quotation": "ใบเสนอราคา", "unknown": "ไม่ทราบชนิด",
-}
-TIER_TH = {"digital": "PDF ดิจิทัล", "etax": "e-Tax (XML)", "scan": "สแกน", "photo": "รูปถ่าย (อ่านได้เท่าที่ภาพชัด)"}
+# every table keeps the keys of its words (agent.json) and says each in the language of the run when it is read
+DOC_TYPE_TH = W.table({k: f"doc.{k}" for k in ("full_tax_invoice", "abbreviated_tax_invoice", "receipt", "invoice", "credit_note", "debit_note",
+                                               "wht_certificate", "quotation", "unknown")})
+TIER_TH = W.table({k: f"tier.{k}" for k in ("digital", "etax", "scan", "photo")})
 
 # reason codes (the exceptions sheet and the report list them with these words)
-REASON_TH = {
-    "same_file_twice": "ไฟล์เดียวกันส่งมาซ้ำ",
-    "duplicate": "เอกสารซ้ำกับที่เคยบันทึก",
-    "missing_required_field": "ขาดข้อมูลที่เอกสารชนิดนี้ต้องมี",
-    "unconfirmed_value": "ค่าที่อ่านได้ไม่มั่นใจ และไม่ได้ยืนยัน",
-    "sources_disagree": "สองแหล่งอ่านได้ไม่ตรงกัน",
-    "check_failed": "ตรวจตัวเลขไม่ผ่าน",
-    "copy_not_original": "เอกสารเป็นสำเนา",
-    "unknown_document_type": "ไม่ทราบชนิดเอกสาร",
-    "unreadable_page": "ภาพไม่ชัด",
-    "typed_value_invalid": "ค่าที่พิมพ์มาใช้ไม่ได้",
-    "unresolved_question": "ยังมีคำถามที่ไม่ได้ตอบ",
-    "excluded_by_person": "ผู้ใช้ตัดออก",
-    "accepted_as_printed": "บันทึกตามที่พิมพ์ แม้ตรวจไม่ผ่าน",
-    "field_absent": "เอกสารไม่ได้พิมพ์ค่าที่ควรมี",
-    "foreign_currency": "เงินตราต่างประเทศ แปลงด้วยอัตราที่ผู้ใช้ระบุ",
-    "not_duplicate_by_person": "คล้ายเอกสารเดิม แต่ผู้ใช้ยืนยันว่าคนละฉบับ",
-    "photo_triage_only": "รูปถ่าย: บันทึกเฉพาะผู้ขาย วันที่ ยอดรวม VAT และเลขผู้เสียภาษี",
-    "line_items_unverified": "รายการสินค้าบางบรรทัดอ่านได้ไม่มั่นใจ ยอดหัวเอกสารยังถูกต้อง",
-}
+REASON_TH = W.table({k: f"reason.{k}" for k in (
+    "same_file_twice", "duplicate", "missing_required_field", "unconfirmed_value", "sources_disagree",
+    "check_failed", "copy_not_original", "unknown_document_type", "unreadable_page",
+    "typed_value_invalid", "unresolved_question", "excluded_by_person", "accepted_as_printed",
+    "field_absent", "foreign_currency", "not_duplicate_by_person", "photo_triage_only",
+    "line_items_unverified")})
 KEEP_NOTES = ("accepted_as_printed", "field_absent", "foreign_currency", "not_duplicate_by_person", "copy_not_original")
-# AM5: what bringing a document back does, as the list says it
-HOW_RECORD = "นำกลับมารวมได้: บันทึกตามที่เอกสารพิมพ์ พร้อมข้อยกเว้นให้ผู้ตรวจดู"
-HOW_ASK = "นำกลับมารวมได้: ต้องตอบคำถามของเอกสารนี้ก่อน"
-HOW_NONE = "ไม่ต้องนำกลับ: ไฟล์เดียวกันนี้อยู่ในทะเบียนแล้ว"
 REGISTER_FIELDS = ("seller_name", "seller_tax_id", "seller_branch", "buyer_name", "buyer_tax_id", "buyer_branch",
                    "document_number", "document_date", "due_date", "currency", "sum_lines", "discount", "subtotal",
                    "vat_amount", "total", "wht_amount", "net_payable")
@@ -163,14 +145,15 @@ def compute(docs: list[R.Doc], roles: dict, period: str, *, answers: dict | None
         checks += [{"doc_key": doc.key, "name": doc.name, **c} for c in out["deterministic_checks"]]
         if status == "excluded":
             others = [REASON_TH.get(c, c) for c in exclusion.get("codes", []) if c != exclusion["code"]]
-            detail = "; ".join(x for x in (exclusion.get("detail", ""), ("และ: " + ", ".join(others)) if others else "") if x)
+            detail = "; ".join(x for x in (exclusion.get("detail", ""), W("detail.and", others=", ".join(others)) if others else "") if x)
             exceptions.append({"doc_key": doc.key, "name": doc.name, "code": exclusion["code"],
                                "reason": REASON_TH.get(exclusion["code"], exclusion["code"]), "detail": detail,
                                "codes": exclusion.get("codes", [exclusion["code"]]),
                                "severity": "excluded", "decided_by": exclusion.get("decided_by", "rule"),
                                "subject": exclusion.get("subject")})
             restore = exclusion.get("restore")
-            how = HOW_NONE if restore is None else HOW_ASK if (restore["drop"] or not restore["set"]) else HOW_RECORD
+            # AM5: what bringing a document back does, as the list says it
+            how = W("how.none") if restore is None else W("how.ask") if (restore["drop"] or not restore["set"]) else W("how.record")
             not_included.append({"doc_key": doc.key, "name": doc.name, "code": exclusion["code"],
                                  "reason": REASON_TH.get(exclusion["code"], exclusion["code"]), "detail": detail,
                                  "decided_by": exclusion.get("decided_by", "rule"), "how": how,
@@ -197,7 +180,7 @@ def compute(docs: list[R.Doc], roles: dict, period: str, *, answers: dict | None
                                    "severity": "recorded", "decided_by": "person", "subject": note.get("subject")})
         if out["document"]["triage_only"]:
             exceptions.append({"doc_key": doc.key, "name": doc.name, "code": "photo_triage_only",
-                               "reason": REASON_TH["photo_triage_only"], "detail": out["document"].get("notice") or "",
+                               "reason": REASON_TH["photo_triage_only"], "detail": cards.said(out["document"].get("notice")),
                                "severity": "recorded", "decided_by": "rule", "subject": None})
         weak = [it["row"] for it in out["line_items"]
                 if (it.get("amount") or {}).get("normalized") is not None and it["amount"]["confidence"] < STRICT_THRESHOLD]
@@ -207,8 +190,8 @@ def compute(docs: list[R.Doc], roles: dict, period: str, *, answers: dict | None
         if (weak or line_fail) and out["line_items"]:
             exceptions.append({"doc_key": doc.key, "name": doc.name, "code": "line_items_unverified",
                                "reason": REASON_TH["line_items_unverified"],
-                               "detail": "; ".join(x for x in ("บรรทัด " + ", ".join(str(x) for x in weak) if weak else "",
-                                                             "ตรวจไม่ผ่าน: " + ", ".join(line_fail) if line_fail else "") if x),
+                               "detail": "; ".join(x for x in (W("detail.lines", rows=", ".join(str(x) for x in weak)) if weak else "",
+                                                             W("detail.failed", checks=", ".join(line_fail)) if line_fail else "") if x),
                                "severity": "recorded", "decided_by": "rule", "subject": None})
             weak_rows = set(weak) if weak else {it["row"] for it in out["line_items"]}
         else:
@@ -255,14 +238,14 @@ def compute(docs: list[R.Doc], roles: dict, period: str, *, answers: dict | None
     tot["payable"] = _s(_q2(payable))
     counts = {"documents": len(documents), "included": len(included), "excluded": len(documents) - len(included),
               "exceptions": len(exceptions), "questions_answered": sum(d["answered"] for d in documents)}
-    label = period_label_th(period)
+    label = words.period(period)
     quotable = {"documents": str(counts["documents"]), "included": str(counts["included"]),
                 "excluded": str(counts["excluded"]), "total_thb": fmt_money(totals["total"]),
                 "vat_thb": fmt_money(totals["vat_amount"])}
     citations = _citations(documents, tot, exceptions)
-    fallback = {"summary": (f"รอบนี้ได้รับเอกสาร {counts['documents']} ฉบับ บันทึกเข้าทะเบียน {counts['included']} ฉบับ "
-                            f"ยอดรวม {fmt_money(totals['total'])} บาท ภาษีมูลค่าเพิ่ม {fmt_money(totals['vat_amount'])} บาท"
-                            + (f" และมี {counts['excluded']} ฉบับที่ยังไม่ได้รวม ดูรายการ “เอกสารที่ยังไม่ได้รวม”" if counts["excluded"] else "")),
+    fallback = {"summary": (W("say.summary", documents=counts["documents"], included=counts["included"],
+                              total=fmt_money(totals["total"]), vat_amount=fmt_money(totals["vat_amount"]))
+                            + (" " + W("say.summary.excluded", excluded=counts["excluded"]) if counts["excluded"] else "")),
                 "movements": [], "watch": sorted({e["reason"] for e in exceptions}), "next_steps": []}
     return {"schema": SCHEMA, "period": period, "period_label": label,
             "prepared_on": (today or _dt.date.today()).isoformat(), "company": (defaults or {}).get("company") or "",
@@ -293,39 +276,35 @@ def _citations(documents: list[dict], tot: dict, exceptions: list[dict]) -> list
         return [{"file": d["name"], "value": d.get(f"thb_{field}"), "note": note(d) if note else ""} for d in included]
 
     def printed(field: str):
-        return lambda d: "เอกสารไม่ได้พิมพ์ค่านี้ จึงไม่ได้นับ" if d.get(f"thb_{field}") is None else "ตามที่เอกสารพิมพ์"
+        return lambda d: W("cite.not_printed") if d.get(f"thb_{field}") is None else W("cite.as_printed")
 
     def payable_note(d: dict) -> str:
         if d.get("thb_payable") is None:
-            return "ไม่มียอดรวม จึงไม่ได้นับ"
-        return ("ยอดรวมหักภาษีหัก ณ ที่จ่าย (เอกสารไม่ได้พิมพ์ยอดชำระสุทธิ)" if d.get("payable_computed")
-                else "ยอดชำระสุทธิตามที่เอกสารพิมพ์")
+            return W("cite.no_total")
+        return (W("cite.payable_computed") if d.get("payable_computed")
+                else W("cite.payable_printed"))
 
-    def c(cid: str, label: str, field: str, formula: str, aliases: list[str], note=None, value=None) -> dict:
-        return {"id": cid, "label": label, "value": value if value is not None else tot.get(field),
-                "formula": formula, "sources": parts(field, note), "left_out": left_out, "aliases": aliases,
+    def named(key: str, aliases: list[str]) -> tuple:
+        # a name of a figure is a sentence of the manifest, or a word that is the same in both languages ("vat")
+        return words.names(lambda: (W(f"cite.{key}.label"), [W(x) if x in W.strings else x for x in aliases]))
+
+    def c(cid: str, key: str, aliases: list[str], note=None, value=None) -> dict:
+        label, names = named(key, aliases)
+        return {"id": cid, "label": label, "value": value if value is not None else tot.get(key),
+                "formula": W(f"cite.{key}"), "sources": parts(key, note), "left_out": left_out, "aliases": names,
                 "script": "packages/invoice_processing/scripts/register.py"}
 
+    label, names = named("count", ["cite.count.a1", "cite.count.a2", "cite.count.a3", "cite.count.a4", "cite.count.a5"])
     return [
-        c("i1", "ยอดก่อน VAT (บาท)", "subtotal", "ผลรวมยอดก่อนภาษีมูลค่าเพิ่มของเอกสารที่บันทึกเข้าทะเบียน เป็นเงินบาท",
-          ["ยอดก่อน vat", "ยอดก่อนภาษี", "มูลค่าก่อนภาษี"], printed("subtotal")),
-        c("i2", "ภาษีมูลค่าเพิ่ม (บาท)", "vat_amount", "ผลรวมภาษีมูลค่าเพิ่มที่เอกสารที่บันทึกเข้าทะเบียนพิมพ์ไว้ เป็นเงินบาท",
-          ["ภาษีมูลค่าเพิ่ม", "vat", "ภาษีซื้อ"], printed("vat_amount")),
-        c("i3", "ยอดรวม (บาท)", "total", "ผลรวมยอดรวม (รวมภาษีมูลค่าเพิ่ม) ของเอกสารที่บันทึกเข้าทะเบียน เป็นเงินบาท",
-          ["ยอดรวม", "รวมทั้งสิ้น"], printed("total")),
-        c("i4", "หัก ณ ที่จ่าย (บาท)", "wht_amount", "ผลรวมภาษีหัก ณ ที่จ่ายที่เอกสารที่บันทึกเข้าทะเบียนพิมพ์ไว้ เป็นเงินบาท",
-          ["หัก ณ ที่จ่าย", "ภาษีหัก ณ ที่จ่าย", "wht"], printed("wht_amount")),
-        c("i5", "ยอดชำระสุทธิตามเอกสาร (บาท)", "net_payable",
-          "ผลรวมยอดชำระสุทธิเฉพาะที่เอกสารพิมพ์ไว้ เอกสารที่ไม่ได้พิมพ์ยอดนี้ไม่ถูกนับ (ยอดที่ต้องจ่ายจริงดูที่ “ยอดที่ต้องชำระ”)",
-          ["ยอดชำระสุทธิ", "ชำระสุทธิ", "net payable"], printed("net_payable")),
-        c("i6", "ยอดที่ต้องชำระ (บาท)", "payable",
-          "ของแต่ละฉบับ: ยอดชำระสุทธิที่เอกสารพิมพ์ไว้ ถ้าไม่ได้พิมพ์ ใช้ยอดรวมหักภาษีหัก ณ ที่จ่าย แล้วรวมทุกฉบับที่บันทึกเข้าทะเบียน",
-          ["ยอดที่ต้องชำระ", "ต้องชำระ", "ต้องจ่าย", "ยอดจ่าย"], payable_note),
-        {"id": "i7", "label": "จำนวนเอกสารที่บันทึกเข้าทะเบียน", "value": str(len(included)), "unit": "count",
-         "formula": "เอกสารที่ผ่านการตรวจและไม่มีคำถามค้าง ส่วนเอกสารที่ถูกตัดออกอยู่ในชีตข้อยกเว้นพร้อมเหตุผล",
-         "sources": [{"file": d["name"], "value": None, "note": "บันทึก"} for d in included], "left_out": left_out,
-         "aliases": ["บันทึก", "จำนวนเอกสาร", "กี่ฉบับ", "ไม่ได้บันทึก", "ตัดออก"],
-         "script": "packages/invoice_processing/scripts/register.py"},
+        c("i1", "subtotal", ["cite.subtotal.a1", "cite.subtotal.a2", "cite.subtotal.a3"], printed("subtotal")),
+        c("i2", "vat_amount", ["cite.vat_amount.a1", "vat", "cite.vat_amount.a2"], printed("vat_amount")),
+        c("i3", "total", ["cite.total.a1", "cite.total.a2"], printed("total")),
+        c("i4", "wht_amount", ["cite.wht_amount.a1", "cite.wht_amount.a2", "wht"], printed("wht_amount")),
+        c("i5", "net_payable", ["cite.net_payable.a1", "cite.net_payable.a2", "net payable"], printed("net_payable")),
+        c("i6", "payable", ["cite.payable.a1", "cite.payable.a2", "cite.payable.a3", "cite.payable.a4"], payable_note),
+        {"id": "i7", "label": label, "value": str(len(included)), "unit": "count", "formula": W("cite.count"),
+         "sources": [{"file": d["name"], "value": None, "note": W("cite.count.a1")} for d in included], "left_out": left_out,
+         "aliases": names, "script": "packages/invoice_processing/scripts/register.py"},
     ]
 
 

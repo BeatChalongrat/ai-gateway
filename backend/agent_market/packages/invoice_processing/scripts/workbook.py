@@ -25,7 +25,9 @@ from openpyxl.utils import get_column_letter
 
 from ....deliverables import workpaper
 from ....deliverables.reread import sheets, table
+from ....engine import words
 from ....engine.e2.cards import CHECK_TH, FIELD_TH
+from ..words import W
 from .register import DOC_TYPE_TH, REASON_TH
 
 MONEY = '#,##0.00;[Red](#,##0.00);"-"'
@@ -382,25 +384,25 @@ def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
         return {"name": name, "ok": bool(ok), "detail": detail, "label": label}
 
     wb = load_workbook(path)
-    out = [ck("xlsx.sheets", set(SHEETS) <= set(wb.sheetnames), ", ".join(wb.sheetnames), "ชีตครบ")]
+    out = [ck("xlsx.sheets", set(SHEETS) <= set(wb.sheetnames), ", ".join(wb.sheetnames), W("check.sheets"))]
     rows = table(parts(wb, S_REGISTER), H_REGISTER)
     want = computed["totals"]["included"]
-    out.append(ck("xlsx.register_rows", len(rows) == want, f"{len(rows)} แถว / {want} ฉบับ", "จำนวนแถวตรงกับเอกสารที่บันทึก"))
+    out.append(ck("xlsx.register_rows", len(rows) == want, W("check.rows.detail", n=len(rows), want=want), W("check.rows")))
     out.append(_figures(wb, rows, computed))
     pv = [r for r in wb["ที่มา"].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
     out.append(ck("xlsx.provenance", len(pv) == len(computed["provenance"]) and all(r[4] for r in pv),
-                  f"{len(pv)} ค่า", "ทุกค่ามีที่มา"))
+                  W("check.n_values", n=len(pv)), W("check.provenance")))
     ex = [r for r in wb["ข้อยกเว้น"].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
     out.append(ck("xlsx.exceptions", len(ex) == len(computed["exceptions"]) and all(r[1] in REASON_TH for r in ex),
-                  f"{len(ex)} รายการ", "ข้อยกเว้นครบและมีรหัสเหตุผล"))
+                  W("check.n_items", n=len(ex)), W("check.exceptions")))
     left = [r for r in wb[NOT_INCLUDED].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
     want_left = sorted(e["name"] for e in computed.get("not_included") or [])
     out.append(ck("xlsx.not_included", sorted(r[0] for r in left) == want_left and all(r[1] and r[3] for r in left)
                   and len(want_left) == computed["totals"]["excluded"],
-                  f"{len(left)} ฉบับ / {computed['totals']['excluded']} ฉบับ", "เอกสารที่ยังไม่ได้รวมอยู่ในรายการครบทุกฉบับ"))
+                  W("check.left.detail", n=len(left), excluded=computed["totals"]["excluded"]), W("check.left")))
     unknown = sorted({d["document_type"] for d in computed["documents"] if d["document_type"] not in DOC_TYPE_TH})
-    out.append(ck("xlsx.doc_types", not unknown, ", ".join(unknown) or "ครบ", "ชนิดเอกสารมีชื่อไทย"))
-    out.extend(workpaper.checks(path))
+    out.append(ck("xlsx.doc_types", not unknown, ", ".join(unknown) or W("check.complete"), W("check.doc_types")))
+    out.extend(workpaper.checks(path, words.lang()))
     return out
 
 
@@ -423,8 +425,8 @@ def _figures(wb, rows: list, computed: dict) -> dict:
     t = Tally()
     docs = [d for d in computed["documents"] if d["status"] == "included"]
     for i, (r, d) in enumerate(zip(rows, docs), start=1):
-        where = f"ทะเบียน แถว {i} ({d.get('document_number') or d['name']})"
-        t.number(f"{where} ลำดับ", r[0], i)
+        where = W("where.register", i=i, name=d.get("document_number") or d["name"])
+        t.number(W("where.no", where=where), r[0], i)
         for col, head, key, money in REGISTER_FIELDS:
             want = d.get("payable", d.get("net_payable")) if key == "payable" else d.get(key)
             if money:
@@ -438,14 +440,14 @@ def _figures(wb, rows: list, computed: dict) -> dict:
                         ("ยอดก่อน VAT (บาท)", tt["thb"]["subtotal"]), ("ภาษีมูลค่าเพิ่ม (บาท)", tt["thb"]["vat_amount"]),
                         ("ยอดรวม (บาท)", tt["thb"]["total"]), ("หัก ณ ที่จ่าย (บาท)", tt["thb"]["wht_amount"]),
                         ("ยอดที่ต้องชำระ (บาท)", tt["thb"].get("payable", tt["thb"]["net_payable"]))):
-        t.number(f"สรุป “{label}”", face.get(label), want)
+        t.number(W("where.summary", label=label), face.get(label), want)
     items = [r for r in wb["รายการสินค้า"].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
     if len(items) != len(computed["line_items"]):
-        t.fail(f"รายการสินค้า: ในไฟล์ {len(items)} รายการ ควรมี {len(computed['line_items'])} รายการ")
+        t.fail(W("check.items.count", got=len(items), want=len(computed["line_items"])))
     for r, li in zip(items, computed["line_items"]):
-        where = f"รายการสินค้า {li['name']} บรรทัด {li['row']}"
-        t.text(f"{where} รายการ", r[2], li["description"] or "")
+        where = W("where.item", name=li["name"], row=li["row"])
+        t.text(W("where.item.name", where=where), r[2], li["description"] or "")
         for col, head, key in ((3, "จำนวน", "quantity"), (4, "ราคาต่อหน่วย", "unit_price"), (5, "จำนวนเงิน", "amount")):
             t.number(f"{where} {head}", r[col], li[key])
-        t.text(f"{where} สถานะ", r[7], item_status(li))
-    return t.result("xlsx.figures", "ทุกค่าในทะเบียน สรุป และรายการสินค้า (อ่านจากไฟล์) ตรงกับที่คำนวณ", "ค่า")
+        t.text(W("where.item.status", where=where), r[7], item_status(li))
+    return t.result("xlsx.figures", W("check.figures"), W("noun.values"))

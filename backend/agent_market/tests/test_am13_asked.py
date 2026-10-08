@@ -340,7 +340,7 @@ class AskedOfTheInvoiceRegister(unittest.TestCase):
 
     def test_its_manifest_declares_what_its_renderer_applies(self):
         m = _manifest_says(self, "invoice_processing", self.IP.DIRECTIVES, grouped=True)
-        self.assertEqual(m["version"], "1.8.0")
+        self.assertEqual(m["version"], "1.9.0")
         split = next(d for d in m["instructions"]["cannot"] if d["id"] == "split_by_seller")
         self.assertIn("ยอดรวมย่อย", split["why"])
 

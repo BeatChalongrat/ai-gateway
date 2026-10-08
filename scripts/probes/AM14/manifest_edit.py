@@ -56,6 +56,21 @@ class Manifest:
         if thai not in m["en"]:
             self._add("en", thai, english)
 
+    def add_plain(self, key, text):
+        """Words with no Thai in them (“VAT”): said as they are in both languages, so they have no English."""
+        assert key not in self.now["strings"], key
+        assert not re.search("[฀-๿]", text), text
+        self._add("strings", key, text)
+
+    def by_key(self, key, english):
+        """The English of one key whose Thai is said another way under another key ("en_by_key")."""
+        assert key in self.now["strings"], key
+        if "en_by_key" not in self.now:
+            end = self.raw.rstrip().rindex("}")
+            self.raw = self.raw[:end].rstrip("\n") + ',\n  "en_by_key": {\n  }\n}\n'
+        assert key not in self.now["en_by_key"], key
+        self._add("en_by_key", key, english)
+
     def drop(self, key):
         m = self.now
         thai = m["strings"][key]
@@ -74,7 +89,7 @@ class Manifest:
 
     def save(self):
         after = self.now
-        rest = lambda m: {k: v for k, v in m.items() if k not in ("strings", "en")}  # noqa: E731
+        rest = lambda m: {k: v for k, v in m.items() if k not in ("strings", "en", "en_by_key")}  # noqa: E731
         assert rest(after) == rest(self.before), "something outside strings/en changed"
         io.open(self.path, "w", encoding="utf-8", newline="\n").write(self.raw)
         print(self.path, "·", len(after.get("strings") or {}), "keys ·", len(after["en"]), "English entries")

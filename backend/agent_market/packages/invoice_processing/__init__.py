@@ -15,10 +15,12 @@ import datetime as _dt
 import json
 import os
 
+from ...engine import words as _words   # (this package has a module of its own named words)
 from ...engine.e2.extract import extract as _extract
 from .checks import preflight as _pre
 from .checks.review import SCAN_TIERS, Doc
 from .scripts import register as _register
+from .words import W
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 FORMAT = "am.e2doc.v1"
@@ -88,8 +90,11 @@ def preflight(files: list[Doc], *, message: str = "", defaults: dict | None = No
 
 
 def compute(files, roles, period, *, answers=None, defaults=None, today=None, history=None, proposals=None) -> dict:
-    return _register.compute(files, roles, period, answers=answers, defaults=defaults, today=today, history=history,
-                             proposals=proposals)
+    def table():
+        return _register.compute(files, roles, period, answers=answers, defaults=defaults, today=today, history=history,
+                                 proposals=proposals)
+
+    return _words.with_document(table(), table)
 
 
 def postcompute(files, roles, period, computed, *, answers=None, defaults=None) -> dict:
@@ -105,6 +110,7 @@ def template_values(computed: dict) -> dict:
     """The values a customer's template can take (the manifest's templates block): money as printed text."""
     from ...engine.thai import fmt_money
 
+    computed = _words.for_document(computed)   # a customer's form is a document: it is filled from the documents' table
     t = computed["totals"]
     thb = t["thb"]
 
@@ -160,17 +166,17 @@ def _asked_check(path: str, view: dict, applied: list[str]) -> dict:
     same = len(rows) == len([d for d in view["documents"] if d["status"] == "included"])
     col = {h: i for i, h in enumerate(H_REGISTER)}
     if applied == ["sort_by_seller"]:
-        ok, what, said = asked.names_run_up([r[col["ผู้ขาย"]] for r in rows]), "ตามผู้ขาย", "เรียงตามชื่อผู้ขาย"
+        ok, what, said = asked.names_run_up([r[col["ผู้ขาย"]] for r in rows]), W("asked.what.seller"), W("asked.said.seller")
     elif applied == ["sort_by_date"]:
         ok = asked.runs_up([str(r[col["วันที่"]]) if r[col["วันที่"]] not in (None, "") else None for r in rows])
-        what, said = "ตามวันที่เอกสาร", "เรียงจากวันที่เอกสารเก่าที่สุดขึ้นก่อน"
+        what, said = W("asked.what.date"), W("asked.said.date")
     else:
         c = col["ยอดรวม (บาท)"]
         ok = asked.runs_down([asked.number(r[c]) if isinstance(r[c], (int, float)) and not isinstance(r[c], bool) else None for r in rows])
-        what, said = "จากยอดรวมมากที่สุด", "เรียงจากยอดรวมเป็นบาทมากที่สุดลงไป"
+        what, said = W("asked.what.amount"), W("asked.said.amount")
     if not same or not ok:
-        return asked.check(False, f"ขอให้เรียงทะเบียน{what} แต่ชีต “{S_REGISTER}” ในไฟล์ไม่ได้เรียงตามนั้น")
-    return asked.check(True, f"ทะเบียน {len(rows)} แถว{said}", len(rows))
+        return asked.check(False, W("asked.not", what=what, sheet=S_REGISTER))
+    return asked.check(True, W("asked.ok", n=len(rows), said=said), len(rows))
 
 
 def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
@@ -180,14 +186,17 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     from ...deliverables.theme import resolve
     from .scripts.workbook import InvoiceWorkbook, check
 
-    view, applied = _as_asked(computed, req)
+    # the register is written from the table in the documents' language; what the gate then says of the
+    # file is said in the run's
+    view, applied = _as_asked(_words.for_document(computed), req)
     theme = resolve(req.get("theme"))
     names = req.get("names") or {}
     artifacts, all_ok = [], True
     for fmt in [f for f in wanted_formats(req, ["xlsx"]) if f == "xlsx"]:
         name = os.path.basename(names.get(fmt) or "register.xlsx")
         path = os.path.join(out_dir, name)
-        meta = InvoiceWorkbook(view, theme, req.get("run")).write(path)
+        with _words.speaking(_words.DOCUMENT):
+            meta = InvoiceWorkbook(view, theme, req.get("run")).write(path)
         checks = check(path, view, req.get("run"))
         if applied:
             checks.append(_asked_check(path, view, applied))

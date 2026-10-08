@@ -21,6 +21,7 @@ from ....engine.e2 import cards
 from ....engine.e2.extract import rejudge
 from ....engine.e2.schema import FIELD_KINDS
 from ....engine.findings import Finding, finding
+from ..words import W
 from . import decisions as D
 
 SCAN_TIERS = ("scan", "photo")
@@ -102,17 +103,17 @@ def _invalid_cards(doc: Doc, out: dict, dec: D.Decisions) -> list[Finding]:
     label = cards._doc_label(out)
     for name, (key, why) in sorted(dec.invalid.items()):
         if name == "fx_rate":
-            what, kind, hint = "อัตราแลกเปลี่ยน", "rate", "พิมพ์อัตราเป็นบาทต่อ 1 หน่วย เช่น 36.25"
-            opts = [cards.EXCLUDE, ("ยังไม่ทราบอัตรา", "reupload", "ตัดออกไว้ก่อน ส่งใหม่เมื่อทราบอัตรา")]
+            what, kind, hint = W("field.fx_rate"), "rate", W("hint.fx")
+            opts = [cards.exclude(), (W("opt.no_rate"), "reupload", W("opt.no_rate.d"))]
             default = "exclude"
         else:
             what = cards.FIELD_TH.get(name, name)
             kind = cards.INPUT_KIND.get(FIELD_KINDS.get(name, "text"), "text")
             hint = cards.INPUT_HINT.get(kind, cards.INPUT_HINT["text"])
-            opts = [("ไม่มีในเอกสาร", "absent", "เอกสารไม่ได้พิมพ์ค่านี้"), cards.EXCLUDE]
+            opts = [(W("opt.absent"), "absent", W("opt.absent.d")), cards.exclude()]
             default = "exclude"
-        fs.append(finding("e2_typed_invalid", "blocking", "preflight", "พิมพ์ใหม่",
-                          f"{label}: ค่า{what}ที่พิมพ์มาใช้ไม่ได้ ({why}) ช่วยพิมพ์ใหม่อีกครั้ง",
+        fs.append(finding("e2_typed_invalid", "blocking", "preflight", W("card.retype.header"),
+                          W("card.retype.question", label=label, what=what, why=why),
                           opts, default, subject=f"{doc.key}:{name}", input={"kind": kind, "hint": hint},
                           evidence={"document": doc.name, "answered_by": key}, facts={"field": name}))
     return fs
@@ -129,7 +130,7 @@ def review(docs: list[Doc], *, answers: dict | None, defaults: dict | None, toda
         dec = D.for_document(doc.key, answers or {})
         if doc.sha256 in seen:
             res.append(Reviewed(doc, doc.extraction, dec, "excluded",
-                                {"code": "same_file_twice", "detail": f"ไฟล์เดียวกับ {seen[doc.sha256]} (ไบต์ตรงกันทุกตัว)",
+                                {"code": "same_file_twice", "detail": W("left.same_file", name=seen[doc.sha256]),
                                  "decided_by": "rule", "restore": None}))
             continue
         seen[doc.sha256] = doc.name
@@ -141,7 +142,7 @@ def review(docs: list[Doc], *, answers: dict | None, defaults: dict | None, toda
             # the card's question as the person read it (evidence["question"] is the engine's English reason)
             detail = (f.question if f else "") or ""
             if dec.excluded.get("reupload"):
-                detail = (detail + " · ขอไฟล์ที่ชัดกว่า").strip(" ·")
+                detail = (detail + " · " + W("left.reupload")).strip(" ·")
             res.append(Reviewed(doc, out, dec, "excluded",
                                 {"code": dec.excluded["code"], "codes": dec.excluded.get("codes", [dec.excluded["code"]]),
                                  "detail": detail, "decided_by": "card", "subject": dec.excluded.get("subject"),

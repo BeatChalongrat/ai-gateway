@@ -59,38 +59,54 @@ def speaking(value):
         _lang = was
 
 
-class Words:
-    """The sentences of one manifest (or of the shared engine), said in the run's language."""
+def _has_thai(text: str) -> bool:
+    return any(0x0E00 <= ord(c) <= 0x0E7F for c in text)
 
-    def __init__(self, strings: dict, english: dict):
+
+class Words:
+    """The sentences of one manifest (or of the shared engine), said in the run's language.
+
+    ``english`` is found by the Thai sentence. Two things are not: words with no Thai in them (“VAT”,
+    “PDF”) are said as they are in both languages; and where the same Thai words are said two ways in
+    English — the name of a field in a sentence, and the twelve characters of a card's heading —
+    ``by_key`` holds the English of the one key that differs ("en_by_key")."""
+
+    def __init__(self, strings: dict, english: dict, by_key: dict | None = None):
         self.strings: dict[str, str] = strings or {}
         self.english: dict[str, str] = english or {}
+        self.by_key: dict[str, str] = by_key or {}
+
+    def english_of(self, key: str) -> str:
+        thai = self.strings[key]
+        if key in self.by_key:
+            return self.by_key[key]
+        return self.english[thai] if _has_thai(thai) else thai
 
     def __call__(self, key: str, **values) -> str:
         """The sentence ``key``, with its {places} filled."""
-        thai = self.strings[key]
-        text = self.english[thai] if _lang == "en" else thai
+        text = self.english_of(key) if _lang == "en" else self.strings[key]
         return text.format(**values) if values else text
 
     def both(self, key: str) -> dict:
         """A sentence in both languages (words a file is read back by)."""
-        thai = self.strings[key]
-        return {"th": thai, "en": self.english[thai]}
+        return {"th": self.strings[key], "en": self.english_of(key)}
 
-    def table(self, keys: dict) -> "Table":
-        """Codes → sentences, each said when it is read (see Table)."""
-        return Table(self, keys)
+    def table(self, keys: dict, then=None) -> "Table":
+        """Codes → sentences, each said when it is read (see Table). ``then`` is done to each as it is said
+        (``cap`` for a table of headings)."""
+        return Table(self, keys, then)
 
 
 class Table(Mapping):
     """A module's table of codes and their words. A table is made when its module is imported — before
     the step has said the run's language — so it keeps keys and says each sentence when it is read."""
 
-    def __init__(self, words: Words, keys: dict):
-        self._words, self._keys = words, dict(keys)
+    def __init__(self, words: Words, keys: dict, then=None):
+        self._words, self._keys, self._then = words, dict(keys), then
 
     def __getitem__(self, code):
-        return self._words(self._keys[code])
+        text = self._words(self._keys[code])
+        return self._then(text) if self._then else text
 
     def __iter__(self):
         return iter(self._keys)
@@ -166,7 +182,7 @@ def of(package: str) -> Words:
         import importlib
 
         m = _read(os.path.join(os.path.dirname(os.path.abspath(importlib.import_module(package).__file__)), "agent.json"))
-    return Words(m.get("strings"), m.get("en"))
+    return Words(m.get("strings"), m.get("en"), m.get("en_by_key"))
 
 
 def _shared() -> Words:
@@ -176,7 +192,7 @@ def _shared() -> Words:
         m = json.loads(files(__package__).joinpath("words.json").read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         m = _read(os.path.join(os.path.dirname(os.path.abspath(__file__)), "words.json"))
-    return Words(m.get("strings"), m.get("en"))
+    return Words(m.get("strings"), m.get("en"), m.get("en_by_key"))
 
 
 SHARED = _shared()

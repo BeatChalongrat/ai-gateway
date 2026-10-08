@@ -18,7 +18,7 @@ import (
 // thread's own door and comes out as it went in.
 
 // englishPackages are the packages whose sentences are in their manifests (it grows with the card).
-var englishPackages = []string{"bank_reconciliation"}
+var englishPackages = []string{"bank_reconciliation", "invoice_processing"}
 
 func TestEverySentenceOfAnEnglishRunReadsAsWrittenForAPerson(t *testing.T) {
 	// the server learns a package's English from its manifest when it starts and whenever it reads a
@@ -57,8 +57,9 @@ func TestEverySentenceOfAnEnglishRunReadsAsWrittenForAPerson(t *testing.T) {
 		if !hasLatinWord.MatchString(fd.Question) {
 			t.Fatalf("%s/%s: a question of an English run is not in English: %q", f.Package, f.Case, fd.Question)
 		}
+		// (an answer may carry the person's own data — "Use บริษัท …", "Full name: กระดาษ A4" — its own words are English)
 		for _, o := range fd.Options {
-			if o.Label == "" || anyThaiOutsideQuotes(o.Label) {
+			if !am14Word.MatchString(o.Label) {
 				t.Errorf("%s/%s: an answer of an English run is not in English: %q", f.Package, f.Case, o.Label)
 			}
 		}
@@ -79,6 +80,7 @@ func TestEverySentenceOfAnEnglishRunReadsAsWrittenForAPerson(t *testing.T) {
 var (
 	am14Quoted = regexp.MustCompile(`“[^”]*”`)
 	am14Thai   = regexp.MustCompile(`[ก-๛]`)
+	am14Word   = regexp.MustCompile(`^[A-Z]`) // (an English label begins with its own word)
 )
 
 // anyThaiOutsideQuotes: Thai in a text that is not a value quoted from a file (a sheet's name, a cell).

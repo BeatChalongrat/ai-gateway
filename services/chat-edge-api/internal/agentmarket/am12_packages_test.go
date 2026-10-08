@@ -92,6 +92,7 @@ func engineEnglish(t *testing.T) []string {
 	var shared struct {
 		Strings map[string]string `json:"strings"`
 		En      map[string]string `json:"en"`
+		ByKey   map[string]string `json:"en_by_key"`
 	}
 	if err := json.Unmarshal(raw, &shared); err != nil {
 		t.Fatal(err)
@@ -101,9 +102,16 @@ func engineEnglish(t *testing.T) []string {
 	}
 	for key, thai := range shared.Strings {
 		en := shared.En[thai]
+		if !anyThai.MatchString(thai) {
+			en = thai // words with no Thai in them ("VAT") are said as they are in both languages
+		}
 		if en == "" {
 			t.Fatalf("engine/words.json: %s has no English", key)
 		}
+		out = append(out, pyField.ReplaceAllString(en, " "))
+	}
+	// the English of one key, where its Thai is said another way under another key (a card's heading)
+	for _, en := range shared.ByKey {
 		out = append(out, pyField.ReplaceAllString(en, " "))
 	}
 	return out

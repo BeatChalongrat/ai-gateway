@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as _dt
 
+from ..words import W
 from . import review as R
 
 
@@ -20,11 +21,10 @@ def run(docs: list[R.Doc], *, message: str = "", defaults: dict | None = None, a
     assumptions = []
     if R.org_from(defaults or {}) is None:
         assumptions.append({"code": "no_company_tax_id", "source": "rule",
-                            "text": "ยังไม่ได้ตั้งเลขผู้เสียภาษีของบริษัท จึงยังไม่ได้ตรวจว่าใบกำกับภาษีออกในนามบริษัทหรือไม่ "
-                                    "(ตั้งได้ในหน้าตั้งค่า agent)"})
+                            "text": W("assume.no_tax_id")})
     if any(r.status == "excluded" and (r.exclusion or {}).get("code") == "same_file_twice" for r in reviewed):
         assumptions.append({"code": "same_file_twice", "source": "rule",
-                            "text": "มีไฟล์เดียวกันส่งมาซ้ำ นับครั้งเดียว", "changes_numbers": True})
+                            "text": W("assume.same_file"), "changes_numbers": True})
     count = lambda s: sum(1 for r in reviewed if r.status == s)  # noqa: E731
     return {
         "roles": {r.doc.key: "document" for r in reviewed},

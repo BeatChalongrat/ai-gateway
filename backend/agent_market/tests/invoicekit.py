@@ -136,9 +136,10 @@ def _person(case: dict, finding: dict, keys: dict) -> object | None:
     return {"typed": str(truth)}
 
 
-def run_case(case: dict) -> dict:
+def run_case(case: dict, lang: str | None = None) -> dict:
+    """``lang``: the run's language, when it is not Thai (AM14)."""
     fmap = _files()
-    job = Job()
+    job = Job(lang)
     try:
         defaults = dict(load_cases()["company"])
         parsed, keys, vision = [], {}, {}
@@ -187,8 +188,13 @@ def run_case(case: dict) -> dict:
         shutil.copy(os.path.join(job.out, "computed.json"), os.path.join(job.inp, "computed.json"))
         rend = job.run({"op": "render", "package": "invoice_processing", "computed": "computed.json", "formats": ["xlsx"],
                         "names": {"xlsx": "register.xlsx"}, "theme": {"id": "navy"}, "run": {"date": TODAY.isoformat()}})
+        from openpyxl import load_workbook
+
+        book = load_workbook(os.path.join(job.out, "register.xlsx"))
+        sheets = {ws.title: [list(r) for r in ws.iter_rows(values_only=True)] for ws in book.worksheets}
         return {"id": case["id"], "keys": keys, "vision_pages": vision, "first": first, "asked": asked,
-                "answers": answers, "computed": computed, "summary": comp["summary"], "render": rend}
+                "answers": answers, "computed": computed, "summary": comp["summary"], "render": rend, "sheets": sheets,
+                "paths": [os.path.join(E2, fmap[fid]) for fid in case["files"]]}
     finally:
         job.close()
 
