@@ -30,6 +30,14 @@ NONCE_BYTES = 12
 KEY_BYTES = 32
 HKDF_INFO = b"dlp-audit-key-v1"
 
+# The table's own key: request_logs is partitioned by created_at and a row is named by request_id. (The
+# first version of this script said "id", a column the table does not have — its dry run stopped on live
+# before anything was read; backend/tests/test_reencrypt_dlp_audit_key.py now holds these to the model.)
+KEY_COLUMN = "request_id"
+SELECT_IDS = f"SELECT {KEY_COLUMN} FROM request_logs WHERE input_raw_encrypted IS NOT NULL ORDER BY created_at"
+SELECT_ROWS = f"SELECT {KEY_COLUMN}, input_raw_encrypted FROM request_logs WHERE {KEY_COLUMN} = ANY(:ids)"
+UPDATE_ROW = f"UPDATE request_logs SET input_raw_encrypted = :t WHERE {KEY_COLUMN} = :id"
+
 
 def key_from(raw: str) -> bytes:
     """The 32-byte key a non-empty DLP_AUDIT_KEY stands for — the rule of dlp_audit_crypto._derive_key."""
@@ -122,12 +130,12 @@ def main(argv: list[str] | None = None) -> int:
     total = {"already_new": 0, "to_rewrite": 0, "unreadable": 0, "empty": 0}
     written = 0
     try:
-        ids = [r[0] for r in session.execute(text("SELECT id FROM request_logs WHERE input_raw_encrypted IS NOT NULL ORDER BY created_at")).all()]
+        ids = [r[0] for r in session.execute(text(SELECT_IDS)).all()]
         # first pass: count, and stop before any write if something opens under neither key
         plans = []
         for i in range(0, len(ids), args.batch):
             chunk = ids[i:i + args.batch]
-            rows = session.execute(text("SELECT id, input_raw_encrypted FROM request_logs WHERE id = ANY(:ids)"), {"ids": chunk}).all()
+            rows = session.execute(text(SELECT_ROWS), {"ids": chunk}).all()
             updates, n = rewrite([(r[0], r[1]) for r in rows], old, new)
             for k in total:
                 total[k] += n[k]
@@ -142,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         for updates in plans:
             for row_id, token in updates:
-                session.execute(text("UPDATE request_logs SET input_raw_encrypted = :t WHERE id = :id"), {"t": token, "id": row_id})
+                session.execute(text(UPDATE_ROW), {"t": token, "id": row_id})
                 written += 1
             session.commit()
         print(f"[audit-key] rewritten: {written}")

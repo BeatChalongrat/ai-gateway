@@ -82,3 +82,21 @@ def test_the_keys_come_from_the_environment_by_name_and_are_never_said(monkeypat
         assert rk.main(wrong) == 2
         said = capsys.readouterr()
         assert OLD not in said.out + said.err and NEW not in said.out + said.err
+
+
+def test_the_queries_name_the_tables_own_columns():
+    """The first version asked for ``request_logs.id``; the table has no such column and the dry run stopped
+    on live. Every column a query names is one the model has, and a row is named by the model's own key."""
+    import re
+
+    from app.models.request_log import RequestLogORM
+
+    table = RequestLogORM.__table__
+    assert table.name == "request_logs"
+    assert rk.KEY_COLUMN in [c.name for c in table.primary_key.columns]
+    known = {c.name for c in table.columns}
+    words = r"\b(SELECT|FROM|WHERE|IS|NOT|NULL|ORDER|BY|UPDATE|SET|ANY|request_logs)\b|:[a-z]+"
+    for sql in (rk.SELECT_IDS, rk.SELECT_ROWS, rk.UPDATE_ROW):
+        assert " request_logs " in sql
+        named = set(re.findall(r"[a-z_]+", re.sub(words, " ", sql)))
+        assert named and named <= known, (sql, named - known)
