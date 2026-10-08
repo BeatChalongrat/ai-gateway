@@ -20,7 +20,9 @@ NAME = "DLP_HMAC_KEY"
 # the checkout's root — or "/", where the backend test lane mounts the compose files read-only
 ROOT = next((p for p in (Path(__file__).resolve().parents[2], Path("/")) if (p / "docker-compose.webchat.yml").is_file()),
             Path(__file__).resolve().parents[2])
-COMPOSE = ["docker-compose.yml", "docker-compose.prod.yml", "docker-compose.webchat.yml", "docker-compose.agent-market.yml"]
+# (every compose file this lane mounts that the core product is made from; the host-side sweep reads
+# every tracked file, whatever it is called)
+COMPOSE = ["docker-compose.yml", "docker-compose.prod.yml", "docker-compose.webchat.yml"]
 
 
 def test_the_settings_have_no_such_field_and_ignore_the_variable(monkeypatch):
