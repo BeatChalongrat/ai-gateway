@@ -18,7 +18,7 @@ import (
 // thread's own door and comes out as it went in.
 
 // englishPackages are the packages whose sentences are in their manifests (it grows with the card).
-var englishPackages = []string{"bank_reconciliation", "invoice_processing"}
+var englishPackages = []string{"bank_reconciliation", "invoice_processing", "expense_audit", "po_matching"}
 
 func TestEverySentenceOfAnEnglishRunReadsAsWrittenForAPerson(t *testing.T) {
 	// the server learns a package's English from its manifest when it starts and whenever it reads a

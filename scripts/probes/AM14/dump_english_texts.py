@@ -32,9 +32,10 @@ def _am6():
 def main():
     sys.path[0:0] = [os.environ.get("AM_SRC", "/src"), "/sandbox/scripts"]
     d = _am6()
-    from agent_market.tests import bankkit, invoicekit
+    from agent_market.tests import bankkit, expensekit, invoicekit, pokit
 
-    packages = (("bank_reconciliation", bankkit), ("invoice_processing", invoicekit))
+    packages = (("bank_reconciliation", bankkit), ("invoice_processing", invoicekit), ("expense_audit", expensekit),
+                ("po_matching", pokit))
     for pkg, kit in packages:
         cases = kit.load_cases()
         for c in cases["cases"] if isinstance(cases, dict) else cases:
