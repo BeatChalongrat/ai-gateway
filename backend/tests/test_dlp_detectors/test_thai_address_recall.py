@@ -38,8 +38,9 @@ CASES = [
     pytest.param("อยู่ที่ 77/1 บางใหญ่ นนทบุรี", id="province_bare",
                  marks=pytest.mark.xfail(strict=True, reason=GAP + "bare amphoe/province names")),
     pytest.param("ที่อยู่ 199/22 Lumpini Condo", id="english_building"),  # FIX26: recovered (HIGH keyword)
-    pytest.param("ที่อยู่สำหรับจัดส่งสินค้าของลูกค้ารายนี้คือ 99/88 ถนนสุขุมวิท 10110", id="long_prose_gap",
-                 marks=pytest.mark.xfail(strict=True, reason=GAP + ">30-char prose gap before house number")),
+    # 8 Oct 2026: recovered — a house number, a street and a postcode are an address whatever comes before
+    # them (the house-number-first opener), so the 30-character reach of the keyword no longer matters here
+    pytest.param("ที่อยู่สำหรับจัดส่งสินค้าของลูกค้ารายนี้คือ 99/88 ถนนสุขุมวิท 10110", id="long_prose_gap"),
     pytest.param("ส่งที่ 23 ตึกบี ห้อง 402", id="building_room"),  # FIX46: gate knows ตึก/ห้อง
     pytest.param("อยู่ที่ 55 นิคมอุตสาหกรรมอมตะ ชลบุรี", id="industrial_estate"),  # FIX46: gate knows นิคม
     pytest.param("ที่อยู่ ถนนสุขุมวิท กรุงเทพ", id="no_house_number",

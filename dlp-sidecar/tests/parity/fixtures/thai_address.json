@@ -239,6 +239,313 @@
       "expected_spans": []
     },
     {
+      "id": "lead_send_documents_to_office",
+      "input": "ขอบคุณครับ ส่งเอกสารไปที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ภายในวันศุกร์นะครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 25,
+          "end": 61
+        }
+      ]
+    },
+    {
+      "id": "lead_send_documents_to_office_as_scanned",
+      "input": "ขอบคุณครับ ส่งเอกสารไปที่สํานักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ภายในวันศุกร์นะครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 25,
+          "end": 62
+        }
+      ]
+    },
+    {
+      "id": "lead_deliver_to_office",
+      "input": "จัดส่งไปที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ภายในวันศุกร์นะครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 11,
+          "end": 47
+        }
+      ]
+    },
+    {
+      "id": "lead_send_goods_here_office",
+      "input": "ส่งของมาที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ภายในวันศุกร์นะครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 11,
+          "end": 47
+        }
+      ]
+    },
+    {
+      "id": "lead_pick_up_at_office",
+      "input": "นัดรับที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ภายในวันศุกร์นะครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 9,
+          "end": 45
+        }
+      ]
+    },
+    {
+      "id": "lead_send_until_office",
+      "input": "ส่งถึงสำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ภายในวันศุกร์นะครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 6,
+          "end": 42
+        }
+      ]
+    },
+    {
+      "id": "lead_collect_goods_at_office",
+      "input": "มารับของที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ภายในวันศุกร์นะครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 11,
+          "end": 47
+        }
+      ]
+    },
+    {
+      "id": "lead_plain_song_thi_keeps_its_keyword",
+      "input": "จัดส่งที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ภายในวันศุกร์นะครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 3,
+          "end": 45
+        }
+      ]
+    },
+    {
+      "id": "lead_song_pai_thi_house_number",
+      "input": "ส่งไปที่ 199/22 คอนโดลุมพินี ชั้น 8 ห้อง 812",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 9,
+          "end": 44
+        }
+      ]
+    },
+    {
+      "id": "house_first_alone",
+      "input": "99/9 ถนนสีลม แขวงสีลม เขตบางรัก กรุงเทพฯ 10500",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 46
+        }
+      ]
+    },
+    {
+      "id": "house_first_after_thanks",
+      "input": "ขอบคุณครับ 99/9 ถนนสีลม แขวงสีลม เขตบางรัก กรุงเทพฯ 10500 ภายในวันศุกร์นะครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 11,
+          "end": 57
+        }
+      ]
+    },
+    {
+      "id": "house_first_after_pick_up",
+      "input": "นัดรับที่ 99/9 ถนนสีลม แขวงสีลม เขตบางรัก กรุงเทพฯ 10500 ภายในวันศุกร์นะครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 10,
+          "end": 56
+        }
+      ]
+    },
+    {
+      "id": "house_first_after_meet",
+      "input": "เจอกันที่ 99/9 ถนนสีลม แขวงสีลม เขตบางรัก กรุงเทพฯ 10500 ภายในวันศุกร์นะครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 10,
+          "end": 56
+        }
+      ]
+    },
+    {
+      "id": "house_first_glued_after_thai",
+      "input": "พักที่99/9 ถนนสีลม แขวงสีลม ครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 6,
+          "end": 27
+        }
+      ]
+    },
+    {
+      "id": "house_first_tambon_amphoe",
+      "input": "12 ตำบลบางรัก อำเภอเมือง ลำปาง ขอบคุณครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 30
+        }
+      ]
+    },
+    {
+      "id": "house_first_tambon_amphoe_as_scanned",
+      "input": "12 ตําบลบางรัก อําเภอเมือง ลําปาง ขอบคุณครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 33
+        }
+      ]
+    },
+    {
+      "id": "house_first_moo",
+      "input": "88 หมู่ 3 ตำบลบางพลีใหญ่ อำเภอบางพลี สมุทรปราการ 10540 ส่งได้เลย",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 54
+        }
+      ]
+    },
+    {
+      "id": "house_first_own_line",
+      "input": "ที่ทำงานใหม่\n99/9 ถนนสีลม แขวงสีลม เขตบางรัก กรุงเทพฯ 10500\nเริ่มวันจันทร์",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 13,
+          "end": 59
+        }
+      ]
+    },
+    {
+      "id": "lead_prose_send_to_department",
+      "input": "ส่งเอกสารไปที่ฝ่ายบัญชีภายใน 5 วันทำการนะครับ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "lead_prose_send_work_to_boss",
+      "input": "ส่งงานไปที่หัวหน้าแล้ว 2 รอบ ยังไม่ตอบ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "lead_prose_pick_up_at_cafe",
+      "input": "นัดรับที่ร้านกาแฟ 3 โมงเย็น",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "lead_prose_collect_in_front",
+      "input": "มารับที่หน้าบริษัทได้เลย รอ 10 นาที",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "lead_prose_received_adviser",
+      "input": "ได้รับที่ปรึกษาใหม่ 2 คนในไตรมาสนี้",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "lead_prose_promotion",
+      "input": "ส่งเสริมการขายที่สาขา 5 แห่งทั่วประเทศ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "lead_prose_delivered_to_hand",
+      "input": "ส่งถึงมือลูกค้าภายใน 3 วัน",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "house_first_prose_three_soi",
+      "input": "เดินไปอีก 3 ซอย ก็ถึงแล้ว",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "house_first_prose_two_roads",
+      "input": "ร้านนี้มี 2 ถนนให้เลือกเข้า",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "house_first_prose_third_time",
+      "input": "ครั้งที่ 3 ถนนคนเดินเปิดถึงเที่ยงคืน",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "house_first_prose_code",
+      "input": "รหัส A12 ถนนสีลม แขวงสีลม",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "house_first_prose_amount",
+      "input": "ยอด 1,250 ถนนสีลม แขวงสีลม",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "house_first_prose_time",
+      "input": "เวลา 10:30 ถนนสีลม แขวงสีลม",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
       "id": "fix23_recall_question_prose",
       "input": "เลขที่ให้จำเมื่อกี้คืออะไร",
       "should_match": false,
@@ -377,9 +684,14 @@
     {
       "id": "fix23b_long_prose_gap",
       "input": "ที่อยู่สำหรับจัดส่งสินค้าของลูกค้ารายนี้คือ 99/88 ถนนสุขุมวิท 10110",
-      "should_match": false,
-      "expected_count": 0,
-      "expected_spans": []
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 44,
+          "end": 67
+        }
+      ]
     },
     {
       "id": "fix23b_amphoe_word",

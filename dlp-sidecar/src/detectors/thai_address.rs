@@ -72,7 +72,23 @@ const NOT_AFTER_THAI: &str = r"(?<![\u{0E01}-\u{0E3A}\u{0E40}-\u{0E4E}])";
 // FIX46 #5 (sf03) — bare ``ที่`` + <street-level part><name> <number> + a
 // second part. First part street-level only (rooms/floors are meeting places).
 const STREET_WORDS: &[&str] = &["ซอย", "ซ.", "ถนน", "ถ.", "หมู่บ้าน", "หมู่", "ตำบล", "ต.", "แขวง", "เขต"];
-const BODY: &str = r"([^\n]{3,200}?\d{5}(?=[\s,]|$)|[^\n]{3,200}?(?=\n|$|\s{3,}))";
+// 8 Oct 2026 — two openers more (mirrors thai_address.py; found by asking the engine about lead-ins one
+// by one). ``ส่งที่`` was the only way of saying "send it to" this detector heard, and a house number was
+// an address only after one of a handful of words: ``ส่งเอกสารไปที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ`` and
+// ``99/9 ถนนสีลม แขวงสีลม เขตบางรัก กรุงเทพฯ 10500`` on a line of its own were not found.
+//
+// DELIVERY — sending and collecting, said with an object or a direction: ส่ง<what>ไปที่ / ส่ง<what>มาที่ /
+// จัดส่ง<what>ที่ / ส่งถึง / นัดรับ<what>ที่ / มารับที่. The AMBIGUOUS grade exactly (a digit near AND an address
+// part). <what> is at most 14 characters with no space, no digit and no ``ที่`` in it, so plain ``ส่งที่`` /
+// ``จัดส่งที่`` stay with AMBIG_KW and mask as they always did. What is masked begins AFTER the lead-in.
+const WHAT: &str = r"(?:(?!ที่)[^\s\d])";
+// HOUSE NUMBER FIRST — no lead-in at all: a number that starts a token, a street-level part right after
+// it, and a second address part or a postcode further on. (A Thai word glued in front is no reason
+// against: Thai writes no space there. What the lookbehind keeps out is the tail of a longer number or
+// code: A12, 1,250, 10:30, 02-123.)
+const NUMBER_STARTS_TOKEN: &str = r"(?<![\d/\-.,:A-Za-z])";
+// Group 1 = a keyword opener (+separators) when one matched; the group named ``body`` = the body.
+const BODY: &str = r"(?P<body>[^\n]{3,200}?\d{5}(?=[\s,]|$)|[^\n]{3,200}?(?=\n|$|\s{3,}))";
 
 // Sara am, one spelling (mirrors thai_address.py). The sidecar NFKC-normalises its input (main.rs), which
 // splits ``ำ`` (U+0E33) into nikhahit + sara aa (U+0E4D U+0E32); the word lists are written the way people
@@ -108,8 +124,19 @@ static ADDRESS_RE: Lazy<Regex> = Lazy::new(|| {
         "(?=\\s*(?:{street})\\S{{0,25}}\\s+\\d[\\d/\\-]*(?:[\\s,]+|$)[^\\n]{{0,120}}?(?:{comp}|\\d{{5}}(?=[\\s,]|$)))",
         street = street_alt, comp = comp_alt
     );
+    let delivery = format!(
+        "(?:(?:จัด)?ส่ง{what}{{1,14}}?ที่|(?:จัด)?ส่งถึง(?:ที่)?|(?:นัด|มา|ไป)?รับ{what}{{0,14}}?ที่)",
+        what = WHAT
+    );
+    let house_no_first = format!(
+        "{nst}(?=\\d+(?:/\\d+)?[\\s,]+(?:{street})\\S{{0,25}}[\\s,]+[^\\n]{{0,120}}?{nat}(?:{comp}|\\d{{5}}(?=[\\s,]|$)))",
+        nst = NUMBER_STARTS_TOKEN, street = street_alt, nat = NOT_AFTER_THAI, comp = comp_alt
+    );
+    // The keyword openers are tried first at every position (group 1), so everything that matched
+    // before matches as it did; the two after them have no group of their own — what is masked
+    // begins where the body does.
     let pat = format!(
-        "({high}[\\s:：]*{dn}|{amb}[\\s:：]*{dn}{comp}|{lead}{hnc}[\\s:：]*|ที่{cnc}[\\s:：]*){body}",
+        "(?:({high}[\\s:：]*{dn}|{amb}[\\s:：]*{dn}{comp}|{lead}{hnc}[\\s:：]*|ที่{cnc}[\\s:：]*)|{delivery}[\\s:：]*{dn}{comp}|{hnf}){body}",
         high = HIGH_KW,
         amb = AMBIG_KW,
         dn = DIGIT_NEAR,
@@ -117,6 +144,8 @@ static ADDRESS_RE: Lazy<Regex> = Lazy::new(|| {
         lead = LEADIN_KW,
         hnc = house_no_then_component,
         cnc = component_number_component,
+        delivery = delivery,
+        hnf = house_no_first,
         body = BODY,
     );
     Regex::new(&pat).expect("thai address regex")
@@ -240,16 +269,15 @@ impl Detector for ThaiAddressDetector {
     fn detect(&self, text: &str) -> Vec<RawMatch> {
         let mut out = Vec::new();
         for caps in ADDRESS_RE.captures_iter(text).engine_ok() {
-            let g1 = match caps.get(1) {
+            let g2 = match caps.name("body") {
                 Some(g) => g,
                 None => continue,
             };
-            let g2 = match caps.get(2) {
-                Some(g) => g,
-                None => continue,
-            };
+            // from the keyword when a keyword opened the match; from the place when a delivery
+            // lead-in or a house number did
+            let start = caps.get(1).map(|g| g.start()).unwrap_or_else(|| g2.start());
             let g2_end = trim_address_end(text, g2.start(), g2.end());
-            let full = &text[g1.start()..g2_end];
+            let full = &text[start..g2_end];
             let matched = full.trim();
             if matched.chars().count() < 6 {
                 continue;
@@ -262,7 +290,7 @@ impl Detector for ThaiAddressDetector {
                 continue;
             }
             out.push(RawMatch {
-                start: byte_to_char(text, g1.start()),
+                start: byte_to_char(text, start),
                 end: byte_to_char(text, g2_end),
                 matched_text: matched.to_string(),
                 confidence: 1.0,
@@ -394,5 +422,105 @@ mod tail_tests {
     fn a_walk_that_keeps_nothing_is_not_an_address_to_the_end_of_the_line() {
         let text = format!("ที่อยู่{}เรื่องที่เขาพูดถึงกันเมื่อวานนี้ในที่ประชุมใหญ่ของบริษัท", " ".repeat(40));
         assert!(spans(&text).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod lead_in_tests {
+    //! 2026-10-08 — an address is an address whatever was typed before it. The sentences the Python tests
+    //! pin (backend/tests/test_dlp_detectors/test_thai_address_lead_in.py), in both spellings of sara am.
+    use super::ThaiAddressDetector;
+    use crate::detectors::base::Detector;
+
+    const OFFICE: &str = "สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ";
+    const FULL: &str = "99/9 ถนนสีลม แขวงสีลม เขตบางรัก กรุงเทพฯ 10500";
+    const TAIL: &str = " ภายในวันศุกร์นะครับ";
+    const DELIVERY: &[&str] = &[
+        "ส่งเอกสารไปที่", "จัดส่งไปที่", "ส่งของมาที่", "นัดรับที่", "ส่งไปที่", "ส่งมาที่", "จัดส่งสินค้ามาที่", "ส่งถึง",
+        "ส่งให้ที่", "นัดรับของที่", "มารับที่", "รับของที่", "รับสินค้าที่",
+    ];
+
+    fn spans(text: &str) -> Vec<String> {
+        ThaiAddressDetector.detect(text).into_iter().map(|m| m.matched_text).collect()
+    }
+
+    fn as_scanned(text: &str) -> String {
+        text.replace("\u{0E33}", "\u{0E4D}\u{0E32}")
+    }
+
+    fn both(text: &str, masked: &str) {
+        assert_eq!(spans(text), vec![masked.to_string()], "as typed: {text}");
+        assert_eq!(spans(&as_scanned(text)), vec![as_scanned(masked)], "as scanned: {text}");
+    }
+
+    #[test]
+    fn a_delivery_lead_in_opens_an_office_address_and_stays_in_front_of_it() {
+        for lead in DELIVERY {
+            both(&format!("ขอบคุณครับ {lead}{OFFICE}{TAIL}"), OFFICE);
+        }
+    }
+
+    #[test]
+    fn a_whole_address_is_found_whatever_comes_before_it() {
+        for lead in DELIVERY.iter().chain(["เจอกันที่", "พักที่", "ทำงานที่", ""].iter()) {
+            both(&format!("ขอบคุณครับ {lead}{FULL}{TAIL}"), FULL);
+        }
+        both(FULL, FULL);
+        both("12 ตำบลบางรัก อำเภอเมือง ลำปาง ขอบคุณครับ", "12 ตำบลบางรัก อำเภอเมือง ลำปาง");
+        both(
+            "88 หมู่ 3 ตำบลบางพลีใหญ่ อำเภอบางพลี สมุทรปราการ 10540 ส่งได้เลย",
+            "88 หมู่ 3 ตำบลบางพลีใหญ่ อำเภอบางพลี สมุทรปราการ 10540",
+        );
+    }
+
+    #[test]
+    fn what_matched_before_matches_as_it_did() {
+        both(&format!("ส่งที่{OFFICE}{TAIL}"), &format!("ส่งที่{OFFICE}"));
+        both(&format!("จัดส่งที่{OFFICE}{TAIL}"), &format!("ส่งที่{OFFICE}"));
+        both(&format!("ที่อยู่ {FULL}{TAIL}"), &format!("ที่อยู่ {FULL}"));
+        both("ไปที่ 23 ตึกบี ห้อง 402", "ไปที่ 23 ตึกบี ห้อง 402");
+        both("เขาอยู่ 88/4 ถนนสุขุมวิท กรุงเทพ", "อยู่ 88/4 ถนนสุขุมวิท กรุงเทพ");
+        // ส่งไปที่ is a delivery lead-in of its own now: masked from the house number on
+        both("ส่งไปที่ 199/22 คอนโดลุมพินี ชั้น 8 ห้อง 812", "199/22 คอนโดลุมพินี ชั้น 8 ห้อง 812");
+    }
+
+    #[test]
+    fn prose_is_not_an_address() {
+        for text in [
+            "ส่งเอกสารไปที่ฝ่ายบัญชีภายใน 5 วันทำการนะครับ",
+            "ส่งงานไปที่หัวหน้าแล้ว 2 รอบ ยังไม่ตอบ",
+            "นัดรับที่ร้านกาแฟ 3 โมงเย็น",
+            "มารับที่หน้าบริษัทได้เลย รอ 10 นาที",
+            "ได้รับที่ปรึกษาใหม่ 2 คนในไตรมาสนี้",
+            "ส่งเสริมการขายที่สาขา 5 แห่งทั่วประเทศ",
+            "ส่งถึงมือลูกค้าภายใน 3 วัน",
+            "เดินไปอีก 3 ซอย ก็ถึงแล้ว",
+            "ร้านนี้มี 2 ถนนให้เลือกเข้า",
+            "ครั้งที่ 3 ถนนคนเดินเปิดถึงเที่ยงคืน",
+            "ราคา 1200 บาท ต่อ 3 ชั้น",
+            "ไปที่หน้า 3 แล้วกดปุ่มสีเขียว",
+            "นัดที่ห้องประชุมชั้น 2 ตอนบ่าย",
+            "ประชุมที่ห้อง 402 ชั้น 5",
+            "ไปที่ 3 โมงเย็นพอดีนะ อย่าสาย",
+            "เลขที่ให้จำเมื่อกี้คืออะไร",
+            "โทร 02 123 4567 ต่อ 12",
+            "ออเดอร์ 12 ชิ้น ส่งวันที่ 5 ตุลาคม",
+        ] {
+            assert!(spans(text).is_empty(), "as typed: {text} -> {:?}", spans(text));
+            assert!(spans(&as_scanned(text)).is_empty(), "as scanned: {text}");
+        }
+    }
+
+    #[test]
+    fn a_number_that_does_not_start_a_token_is_not_a_house_number() {
+        for (text, not) in [
+            ("รหัส A12 ถนนสีลม แขวงสีลม", "12 "),
+            ("ยอด 1,250 ถนนสีลม แขวงสีลม", "250 "),
+            ("เวลา 10:30 ถนนสีลม แขวงสีลม", "30 "),
+            ("โทร 02-99 ถนนสีลม แขวงสีลม", "99 "),
+        ] {
+            assert!(spans(text).iter().all(|s| !s.starts_with(not)), "{text} -> {:?}", spans(text));
+        }
+        both("พักที่99/9 ถนนสีลม แขวงสีลม ครับ", "99/9 ถนนสีลม แขวงสีลม");
     }
 }

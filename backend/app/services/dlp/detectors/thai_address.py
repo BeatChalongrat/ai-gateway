@@ -15,9 +15,17 @@ addresses mask again. AMBIGUOUS keywords (``เลขที่`` "the number tha
 ``อยู่ที่`` "is at", ``ส่งที่`` "send to") keep FIX23's strict rule — house
 number AND an address component (road, soi, moo, tambon/amphoe/province
 words or abbreviations, khwaeng/khet, Bangkok, or a 5-digit postcode).
-KNOWN GAPS that remain: addresses with no house number, a prose gap of
-more than 30 characters before the number, and ambiguous-keyword
-addresses written with only a building / estate / bare province name.
+Two openers need no keyword of this kind (8 Oct 2026): a delivery or
+pick-up lead-in said with an object or a direction (``ส่งเอกสารไปที่`` /
+``จัดส่งไปที่`` / ``ส่งของมาที่`` / ``นัดรับที่`` — the AMBIGUOUS rule), and a
+house number followed by a street-level part and a second part, whatever
+comes before it. Both mask from the place on, not from the lead-in.
+KNOWN GAPS that remain: addresses with no number in them at all, a prose
+gap of more than 30 characters before the number, ambiguous-keyword
+addresses written with only a building / estate / bare province name,
+and a place named after a verb that is neither a keyword nor a delivery
+lead-in (``เจอกันที่`` / ``ประชุมที่`` + a building and a floor: a meeting
+place, left alone on purpose since FIX38).
 Fixtures exist in BOTH directions (``test_thai_address_recall.py`` must
 mask; ``test_thai_address.py`` prose must not; the FIX26 prose corpus).
 
@@ -142,12 +150,50 @@ _COMPONENT_NUMBER_COMPONENT = (
     rf"(?=\s*(?:{_STREET_ALT})\S{{0,25}}\s+\d[\d/\-]*(?:[\s,]+|$)"
     rf"[^\n]{{0,120}}?(?:{_COMPONENT_ALT}|\d{{5}}(?=[\s,]|$)))"
 )
-_BODY = r"([^\n]{3,200}?\d{5}(?=[\s,]|$)|[^\n]{3,200}?(?=\n|$|\s{3,}))"
+# 8 Oct 2026 — two openers more, found by asking the engine about lead-ins one by one
+# (scripts/probes/AM13/dlp_lead_matrix.py). ``ส่งที่`` was the only way of saying "send it to" this detector
+# heard, and a house number was only an address when one of a handful of words came before it:
+#
+#   ส่งเอกสารไปที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ          not found (ส่งที่ + the same place: found)
+#   นัดรับที่ 99/9 ถนนสีลม แขวงสีลม เขตบางรัก กรุงเทพฯ 10500    not found
+#   99/9 ถนนสีลม แขวงสีลม เขตบางรัก กรุงเทพฯ 10500             not found — a whole address, on its own
+#
+# (On a tenant with name recognition the street and the city are masked by it; the house number, the
+# district and the postcode are not, and where it is off or down nothing was.)
+#
+# DELIVERY — sending and collecting, said with an object or a direction: ส่ง<what>ไปที่ / ส่ง<what>มาที่ /
+# จัดส่ง<what>ที่ / ส่งถึง / นัดรับ<what>ที่ / มารับที่ / รับ<what>ที่. The AMBIGUOUS grade exactly: a digit within
+# 30 characters AND an address part. ``<what>`` is at most 14 characters with no space, no digit and no
+# ``ที่`` in it, so plain ``ส่งที่`` / ``จัดส่งที่`` stay with the keyword above and mask as they always did.
+# What is masked begins AFTER the lead-in: a person who typed "ส่งเอกสารไปที่ …" still has "ส่งเอกสารไปที่"
+# in front of the placeholder — the model is told that something is sent, and what, and not where.
+_WHAT = r"(?:(?!ที่)[^\s\d])"
+_DELIVERY_KW = (
+    rf"(?:(?:จัด)?ส่ง{_WHAT}{{1,14}}?ที่"
+    rf"|(?:จัด)?ส่งถึง(?:ที่)?"
+    rf"|(?:นัด|มา|ไป)?รับ{_WHAT}{{0,14}}?ที่)"
+)
+# HOUSE NUMBER FIRST — no lead-in at all: a number that starts a token (``99/9``, ``12``), a street-level
+# part right after it, and a SECOND address part or a postcode further on. The same strength as the bare
+# ``ที่`` shape above, with the number in front instead of behind: ``3 ถนน`` alone is not an address,
+# ``99/9 ถนนสีลม แขวงสีลม`` is, whatever was typed before it. The lead-ins above are tried first at every
+# position, so everything that matched before matches as it did.
+# (a Thai word glued in front — ``พักที่99/9`` — is no reason: Thai writes no space there; what the
+# lookbehind keeps out is the tail of a longer number or code: ``A12``, ``1,250``, ``10:30``, ``02-123``)
+_NUMBER_STARTS_TOKEN = r"(?<![\d/\-.,:A-Za-z])"
+_HOUSE_NO_FIRST = (
+    rf"{_NUMBER_STARTS_TOKEN}(?=\d+(?:/\d+)?[\s,]+(?:{_STREET_ALT})\S{{0,25}}[\s,]+"
+    rf"[^\n]{{0,120}}?{_NOT_AFTER_THAI}(?:{_COMPONENT_ALT}|\d{{5}}(?=[\s,]|$)))"
+)
+_BODY = r"(?P<body>[^\n]{3,200}?\d{5}(?=[\s,]|$)|[^\n]{3,200}?(?=\n|$|\s{3,}))"
 _ADDRESS_RE = re.compile(
-    rf"({_HIGH_KW}[\s:：]*{_DIGIT_NEAR}"
+    rf"(?:({_HIGH_KW}[\s:：]*{_DIGIT_NEAR}"
     rf"|{_AMBIG_KW}[\s:：]*{_DIGIT_NEAR}{_COMPONENT}"
     rf"|{_LEADIN_KW}{_HOUSE_NO_THEN_COMPONENT}[\s:：]*"
     rf"|ที่{_COMPONENT_NUMBER_COMPONENT}[\s:：]*)"
+    # the two below have no group of their own: what is masked begins where the body does
+    rf"|{_DELIVERY_KW}[\s:：]*{_DIGIT_NEAR}{_COMPONENT}"
+    rf"|{_HOUSE_NO_FIRST})"
     rf"{_BODY}"
 )
 
@@ -279,15 +325,18 @@ class ThaiAddressDetector(BaseDetector):
     def detect(self, text: str) -> list[DetectionMatch]:
         matches: list[DetectionMatch] = []
         for m in _ADDRESS_RE.finditer(text):
-            # Match the full span from the keyword through the address body.
-            full_start = m.start(1)
-            full_end = trim_address_end(text, m.start(2), m.end(2))
+            # Match the full span from the keyword through the address body —
+            # or, for the two openers that have no keyword of their own (a
+            # delivery lead-in, a house number first), from the place on.
+            body_start, body_end = m.span("body")
+            full_start = m.start(1) if m.start(1) >= 0 else body_start
+            full_end = trim_address_end(text, body_start, body_end)
             matched = text[full_start:full_end].strip()
             if len(matched) < 6:
                 continue
             # The trim may have dropped the digit that qualified the match
             # (a far-away house number in prose): then it is not an address.
-            if not any(ch.isdigit() for ch in text[m.start(2):full_end]):
+            if not any(ch.isdigit() for ch in text[body_start:full_end]):
                 continue
             matches.append(
                 DetectionMatch(

@@ -475,6 +475,40 @@ SPECS = [
             Case("tail_tambon_amphoe_as_scanned", "ส่งที่ 12 ตําบลบางรัก อําเภอเมือง ลําปาง ขอบคุณครับ", True),
             Case("tail_nothing_kept_is_no_address",
                  "ที่อยู่                                        เรื่องที่เขาพูดถึงกันเมื่อวานนี้ในที่ประชุมใหญ่ของบริษัท", False),
+            # 8 Oct 2026 — an address is an address whatever was typed before it: delivery and pick-up
+            # lead-ins (masked from the place on, the lead-in stays), a house number first with no lead-in
+            # at all, and the prose both must leave alone (test_thai_address_lead_in.py).
+            Case("lead_send_documents_to_office", "ขอบคุณครับ ส่งเอกสารไปที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ภายในวันศุกร์นะครับ", True),
+            Case("lead_send_documents_to_office_as_scanned", "ขอบคุณครับ ส่งเอกสารไปที่สํานักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ภายในวันศุกร์นะครับ", True),
+            Case("lead_deliver_to_office", "จัดส่งไปที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ภายในวันศุกร์นะครับ", True),
+            Case("lead_send_goods_here_office", "ส่งของมาที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ภายในวันศุกร์นะครับ", True),
+            Case("lead_pick_up_at_office", "นัดรับที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ภายในวันศุกร์นะครับ", True),
+            Case("lead_send_until_office", "ส่งถึงสำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ภายในวันศุกร์นะครับ", True),
+            Case("lead_collect_goods_at_office", "มารับของที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ภายในวันศุกร์นะครับ", True),
+            Case("lead_plain_song_thi_keeps_its_keyword", "จัดส่งที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ภายในวันศุกร์นะครับ", True),
+            Case("lead_song_pai_thi_house_number", "ส่งไปที่ 199/22 คอนโดลุมพินี ชั้น 8 ห้อง 812", True),
+            Case("house_first_alone", "99/9 ถนนสีลม แขวงสีลม เขตบางรัก กรุงเทพฯ 10500", True),
+            Case("house_first_after_thanks", "ขอบคุณครับ 99/9 ถนนสีลม แขวงสีลม เขตบางรัก กรุงเทพฯ 10500 ภายในวันศุกร์นะครับ", True),
+            Case("house_first_after_pick_up", "นัดรับที่ 99/9 ถนนสีลม แขวงสีลม เขตบางรัก กรุงเทพฯ 10500 ภายในวันศุกร์นะครับ", True),
+            Case("house_first_after_meet", "เจอกันที่ 99/9 ถนนสีลม แขวงสีลม เขตบางรัก กรุงเทพฯ 10500 ภายในวันศุกร์นะครับ", True),
+            Case("house_first_glued_after_thai", "พักที่99/9 ถนนสีลม แขวงสีลม ครับ", True),
+            Case("house_first_tambon_amphoe", "12 ตำบลบางรัก อำเภอเมือง ลำปาง ขอบคุณครับ", True),
+            Case("house_first_tambon_amphoe_as_scanned", "12 ตําบลบางรัก อําเภอเมือง ลําปาง ขอบคุณครับ", True),
+            Case("house_first_moo", "88 หมู่ 3 ตำบลบางพลีใหญ่ อำเภอบางพลี สมุทรปราการ 10540 ส่งได้เลย", True),
+            Case("house_first_own_line", "ที่ทำงานใหม่\n99/9 ถนนสีลม แขวงสีลม เขตบางรัก กรุงเทพฯ 10500\nเริ่มวันจันทร์", True),
+            Case("lead_prose_send_to_department", "ส่งเอกสารไปที่ฝ่ายบัญชีภายใน 5 วันทำการนะครับ", False),
+            Case("lead_prose_send_work_to_boss", "ส่งงานไปที่หัวหน้าแล้ว 2 รอบ ยังไม่ตอบ", False),
+            Case("lead_prose_pick_up_at_cafe", "นัดรับที่ร้านกาแฟ 3 โมงเย็น", False),
+            Case("lead_prose_collect_in_front", "มารับที่หน้าบริษัทได้เลย รอ 10 นาที", False),
+            Case("lead_prose_received_adviser", "ได้รับที่ปรึกษาใหม่ 2 คนในไตรมาสนี้", False),
+            Case("lead_prose_promotion", "ส่งเสริมการขายที่สาขา 5 แห่งทั่วประเทศ", False),
+            Case("lead_prose_delivered_to_hand", "ส่งถึงมือลูกค้าภายใน 3 วัน", False),
+            Case("house_first_prose_three_soi", "เดินไปอีก 3 ซอย ก็ถึงแล้ว", False),
+            Case("house_first_prose_two_roads", "ร้านนี้มี 2 ถนนให้เลือกเข้า", False),
+            Case("house_first_prose_third_time", "ครั้งที่ 3 ถนนคนเดินเปิดถึงเที่ยงคืน", False),
+            Case("house_first_prose_code", "รหัส A12 ถนนสีลม แขวงสีลม", False),
+            Case("house_first_prose_amount", "ยอด 1,250 ถนนสีลม แขวงสีลม", False),
+            Case("house_first_prose_time", "เวลา 10:30 ถนนสีลม แขวงสีลม", False),
             # FIX23 — keyword words used as ordinary prose (no house
             # number / digit within 30 chars) must NOT be an address.
             # The first case is the exact recall turn that echoed.
@@ -495,7 +529,7 @@ SPECS = [
             Case("fix23b_postcode_only", "ส่งที่ 88 มัณฑนา 10540", True),
             Case("fix23b_abbrev_m_t", "ที่อยู่ 45 ม.7 ต.บางพลี", True),
             Case("fix23b_english_building", "ที่อยู่ 199/22 Lumpini Condo", True),  # FIX26: HIGH keyword recovers it
-            Case("fix23b_long_prose_gap", "ที่อยู่สำหรับจัดส่งสินค้าของลูกค้ารายนี้คือ 99/88 ถนนสุขุมวิท 10110", False),
+            Case("fix23b_long_prose_gap", "ที่อยู่สำหรับจัดส่งสินค้าของลูกค้ารายนี้คือ 99/88 ถนนสุขุมวิท 10110", True),  # 8 Oct 2026: recovered (house number first)
             Case("fix23b_amphoe_word", "อยู่ที่ 10 อำเภอเมือง เชียงใหม่", True),
             Case("fix23b_building_room", "ส่งที่ 23 ตึกบี ห้อง 402", True),  # FIX46: gap closed
             Case("fix23b_condo_postcode", "ที่อยู่ 199/22 คอนโดลุมพินี 10120", True),
