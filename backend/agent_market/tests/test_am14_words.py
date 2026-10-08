@@ -35,12 +35,14 @@ THAI_RUN = re.compile(r"[฀-๿]+(?:[  ]*[฀-๿]+)*")
 PLACE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)[!:}]")
 KEY = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$")
 
-# whose sentences are where: the code that says them, the file that holds them, the name the code calls
-SPEAKERS = {
-    "the shared engine": (("engine", "deliverables"), os.path.join("engine", "words.json"), "S"),
-    "bank_reconciliation": ((os.path.join("packages", "bank_reconciliation"),), os.path.join("packages", "bank_reconciliation", "agent.json"), "W"),
-    "invoice_processing": ((os.path.join("packages", "invoice_processing"),), os.path.join("packages", "invoice_processing", "agent.json"), "W"),
-}
+# whose sentences are where: the code that says them, the file that holds them, the name the code calls.
+# A package whose sentences are in its manifest has a module of its own named words (W = engine words of the
+# package) — every such package is held here without being listed; procurement keeps its own shape (AM12:
+# test_am12_package_words.py).
+SPEAKERS = {"the shared engine": (("engine", "deliverables"), os.path.join("engine", "words.json"), "S")}
+for _pkg in sorted(os.listdir(os.path.join(ROOT, "packages"))):
+    if _pkg != "procurement" and os.path.exists(os.path.join(ROOT, "packages", _pkg, "words.py")):
+        SPEAKERS[_pkg] = ((os.path.join("packages", _pkg),), os.path.join("packages", _pkg, "agent.json"), "W")
 # a dotted name in the code that begins as a key does and is not one: the name of a schema ("e3.match.v1")
 SCHEMA_NAME = re.compile(r"\.v[0-9]+$")
 
@@ -207,6 +209,7 @@ class TheCodeAndItsWords(unittest.TestCase):
                 self.assertTrue(key in lits or any(key.startswith(f) for f in families), f"{who}: nothing asks for {key}")
 
     def test_every_sentence_is_in_both_languages_and_says_the_same(self):
+        self.assertGreaterEqual(len(self.speakers), 3)
         for who, s in self.speakers.items():
             self.assertGreater(len(s["strings"]), 60, who)
             for key, thai in s["strings"].items():
