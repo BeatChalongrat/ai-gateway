@@ -35,6 +35,7 @@ from decimal import Decimal, InvalidOperation
 
 from ....engine import thai as TH
 from ....engine.e2 import thai_text as T
+from ..words import W
 
 SCHEMA = "am2.expense_policy.v1"
 Q2 = Decimal("0.01")
@@ -94,14 +95,14 @@ def _strip_kha(s: str) -> str:
 def _money(v, where: str, problems: list, *, required: bool = False) -> Decimal | None:
     if v is None or v == "":
         if required:
-            problems.append(f"{where}: ยังไม่ได้กำหนด")
+            problems.append(W("policy.not_set", where=where))
         return None
     if isinstance(v, bool):
-        problems.append(f"{where}: ต้องเป็นจำนวนเงิน")
+        problems.append(W("policy.must_be_money", where=where))
         return None
     t = T.arabic(str(v)).replace(",", "").replace("บาท", "").replace("฿", "").strip()
     if not re.fullmatch(r"\d+(?:\.\d+)?", t):
-        problems.append(f"{where}: {v!r} ไม่ใช่จำนวนเงิน")
+        problems.append(W("policy.not_money", where=where, v=v))
         return None
     return Decimal(t).quantize(Q2)
 
@@ -113,10 +114,10 @@ def _rate(v, where: str, problems: list) -> Decimal | None:
     try:
         r = Decimal(t)
     except InvalidOperation:
-        problems.append(f"{where}: {v!r} ไม่ใช่อัตราร้อยละ")
+        problems.append(W("policy.not_rate", where=where, v=v))
         return None
     if not Decimal(0) < r <= Decimal(100):
-        problems.append(f"{where}: อัตรา {v} ต้องอยู่ระหว่าง 0 ถึง 100")
+        problems.append(W("policy.rate_range", where=where, v=v))
         return None
     return r
 
@@ -130,19 +131,19 @@ def load_policy(defaults: dict | None) -> tuple[Policy | None, list[str]]:
     plain amount: "ประมาณ 2,000" is not one, and nothing here reads between the lines."""
     raw = (defaults or {}).get("policy")
     if not raw:
-        return None, ["ยังไม่ได้ตั้งตารางนโยบายการเบิก (policy) ใน agent"]
+        return None, [W("policy.none")]
     if not isinstance(raw, dict):
-        return None, ["ตารางนโยบายการเบิกต้องเป็นตาราง (JSON object)"]
+        return None, [W("policy.not_table")]
     problems: list[str] = []
     cats_raw = raw.get("categories")
     cats: dict[str, Category] = {}
     if not isinstance(cats_raw, dict) or not cats_raw:
-        problems.append("categories: ยังไม่มีหมวดค่าใช้จ่าย")
+        problems.append(W("policy.no_categories"))
         cats_raw = {}
     for code, c in cats_raw.items():
         where = f"categories.{code}"
         if not CODE_RX.fullmatch(str(code)) or not isinstance(c, dict):
-            problems.append(f"{where}: รหัสหมวดต้องเป็นตัวอักษรอังกฤษ ตัวเลข หรือ _ และมีรายละเอียดเป็นตาราง")
+            problems.append(W("policy.bad_code", where=where))
             continue
         cat = Category(code=code, label=str(c.get("label") or code).strip(),
                        per_claim=_money(c.get("per_claim"), f"{where}.per_claim", problems),
@@ -151,22 +152,22 @@ def load_policy(defaults: dict | None) -> tuple[Policy | None, list[str]]:
                        wht_rate=_rate(c.get("wht_rate"), f"{where}.wht_rate", problems),
                        wht_from=_money(c.get("wht_from"), f"{where}.wht_from", problems))
         if cat.wht_rate is not None and cat.wht_from is None and "wht_from" not in c:
-            problems.append(f"{where}.wht_from: มีอัตราหัก ณ ที่จ่ายแต่ยังไม่ได้กำหนดว่าหักตั้งแต่ยอดเท่าใด")
+            problems.append(W("policy.wht_from", where=where))
         cats[code] = cat
     receipt_above = _money(raw.get("receipt_required_above"), "receipt_required_above", problems, required=True)
     approval = _money(raw.get("approval_threshold"), "approval_threshold", problems, required=True)
     weekend = raw.get("weekend_holiday", "flag")
     if weekend not in WEEKEND_RULES:
-        problems.append(f"weekend_holiday: {weekend!r} (ใช้ได้: {', '.join(WEEKEND_RULES)})")
+        problems.append(W("policy.weekend", weekend=weekend, weekend_rules=", ".join(WEEKEND_RULES)))
     vat_doc = raw.get("vat_claim_requires", "full_tax_invoice")
     if vat_doc not in VAT_DOCUMENTS:
-        problems.append(f"vat_claim_requires: {vat_doc!r} (ใช้ได้: {', '.join(VAT_DOCUMENTS)})")
+        problems.append(W("policy.vat_doc", vat_doc=vat_doc, vat_documents=", ".join(VAT_DOCUMENTS)))
     currency = raw.get("currency", "THB")
     if currency != "THB":
-        problems.append(f"currency: {currency!r} — การเบิกตรวจเป็นเงินบาทเท่านั้น")
+        problems.append(W("policy.currency", currency=currency))
     words = raw.get("prohibited_merchants", [])
     if not isinstance(words, list) or not all(isinstance(w, str) and w.strip() for w in words):
-        problems.append("prohibited_merchants: ต้องเป็นรายการคำ")
+        problems.append(W("policy.prohibited"))
         words = []
     if problems:
         return None, problems
@@ -197,11 +198,8 @@ class Calendar:
         return year in self.years
 
 
-OFF_NOTE = {
-    "not_set": "ยังไม่ได้ตั้งปฏิทินวันหยุดของบริษัท",
-    "not_company": "ปฏิทินวันหยุดที่ตั้งไว้ไม่ได้ระบุว่าเป็นปฏิทินวันหยุดของบริษัท (วันหยุดธนาคารหรือวันหยุดราชการใช้แทนไม่ได้)",
-    "unconfirmed": "ปฏิทินวันหยุดของบริษัทที่ตั้งไว้ยังไม่ได้ยืนยัน",
-}
+# why the holiday check is off (a table says its words when it is read, in the language of the run)
+OFF_NOTE = W.table({k: f"cal.off.{k}" for k in ("not_set", "not_company", "unconfirmed")})
 
 
 def _package_calendar() -> dict:
@@ -248,12 +246,12 @@ def calendar_for(defaults: dict | None) -> Calendar:
     for k, v in raw["dates"].items():
         d = _parse_day(k)
         if d is None:
-            problems.append(f"holidays: {k!r} ไม่ใช่วันที่")
+            problems.append(W("policy.holiday_date", k=k))
             continue
-        dates[d] = str(v or "วันหยุด")
+        dates[d] = str(v or W("day.off"))
     years = {int(y) for y in raw.get("years") or [] if str(y).isdigit()} or {d.year for d in dates}
     by, at = str(raw.get("confirmed_by") or "").strip(), str(raw.get("confirmed_at") or "").strip()
-    note = "ปฏิทินวันหยุดของบริษัท" + (f" ยืนยันโดย {by}" if by else "") + (f" เมื่อ {at[:10]}" if at else "")
+    note = W("cal.company") + (" " + W("cal.by", by=by) if by else "") + (" " + W("cal.at", at=at[:10]) if at else "")
     return Calendar(dates, "company", years, note, problems, active=True, confirmed_by=by, confirmed_at=at)
 
 

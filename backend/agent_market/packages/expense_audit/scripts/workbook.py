@@ -25,6 +25,8 @@ from openpyxl.utils import get_column_letter
 
 from ....deliverables import workpaper
 from ....deliverables.reread import Tally, sheets, table
+from ....engine import words
+from ..words import W
 from .audit import CHOICES, OUTCOME_TH, REASON_TH, RESOLUTION_TH
 
 MONEY = '#,##0.00;[Red](#,##0.00);"-"'
@@ -379,25 +381,28 @@ def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
         return {"name": name, "ok": bool(ok), "detail": detail, "label": label}
 
     wb = load_workbook(path)
-    out = [ck("xlsx.sheets", set(SHEETS) <= set(wb.sheetnames), ", ".join(wb.sheetnames), "ชีตครบ")]
+    out = [ck("xlsx.sheets", set(SHEETS) <= set(wb.sheetnames), ", ".join(wb.sheetnames), W("check.sheets"))]
     rows = table(parts(wb, S_CLAIMS), H_CLAIMS)
     claims = computed["claims"]
     same = len(rows) == len(claims) and all(r[1] == c["id"] and r[15] == c["outcome_label"] for r, c in zip(rows, claims))
-    out.append(ck("xlsx.claims", same, f"{len(rows)} แถว / {len(claims)} รายการ", "ทุกรายการเบิกมีผลตรวจ"))
-    known = set(OUTCOME_TH.values())
-    out.append(ck("xlsx.no_rejection", all(r[15] in known for r in rows), ", ".join(sorted({str(r[15]) for r in rows})),
-                  "ผลตรวจมีแค่ ผ่าน / ข้อยกเว้น / ต้องใช้วิจารณญาณ"))
+    out.append(ck("xlsx.claims", same, W("check.claims.detail", rows=len(rows), claims=len(claims)), W("check.claims")))
+    with words.speaking(words.DOCUMENT):   # the outcomes as the workbook writes them …
+        known = {v: k for k, v in OUTCOME_TH.items()}
+    # … and what was read is said in the run's words (a cell that is none of them, as it is)
+    read = sorted({str(r[15]) for r in rows})
+    out.append(ck("xlsx.no_rejection", all(r[15] in known for r in rows),
+                  ", ".join(OUTCOME_TH[known[v]] if v in known else v for v in read), W("check.no_rejection")))
     got = sum((Decimal(str(r[9])) for r in rows if r[9] is not None), Decimal(0)).quantize(Decimal("0.01"))
     exp = Decimal(computed["totals"]["claimed"])
-    out.append(ck("xlsx.claims_total", got == exp, f"{got} / {exp}", "ยอดเบิกรวมตรงกับที่คำนวณ"))
+    out.append(ck("xlsx.claims_total", got == exp, f"{got} / {exp}", W("check.claims_total")))
     numeric = all(isinstance(r[9], (int, float)) for r, c in zip(rows, claims) if c["amount"] is not None)
-    out.append(ck("xlsx.amounts_are_numbers", numeric, "", "จำนวนเงินเป็นตัวเลข ไม่ใช่ข้อความ"))
+    out.append(ck("xlsx.amounts_are_numbers", numeric, "", W("check.numbers")))
     ex = table(parts(wb, S_EXC), H_EXC)
     run_ex = computed["run_exceptions"]
     ok = len(ex) == len(run_ex) and all(r[2] in REASON_TH and r[2] == e["reason_code"] for r, e in zip(ex, run_ex)) and \
         all(r[7] for r, e in zip(ex, run_ex) if e["severity"] == "review") and \
         all(e["reason_code"] in CHOICES or e["severity"] == "info" for e in run_ex)
-    out.append(ck("xlsx.exceptions", ok, f"{len(ex)} รายการ", "ข้อยกเว้นครบ มีรหัสเหตุผล และทางเลือกให้คนตัดสิน"))
+    out.append(ck("xlsx.exceptions", ok, W("check.n_items", n=len(ex)), W("check.exceptions")))
     ws = wb["นโยบายที่ใช้"]
     cats = computed["policy"]["table"]["categories"]
     prow = [r for r in ws.iter_rows(min_row=5, max_row=4 + len(cats), values_only=True)]
@@ -411,18 +416,18 @@ def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
     kb_at = next((i for i, r in enumerate(ws.iter_rows(values_only=True), start=1) if r and r[0] == KB_TITLE), None)
     kb_rows = [r for r in ws.iter_rows(min_row=(kb_at or 0) + 2, values_only=True) if r and r[5] is not None] if kb_at else []
     ok = ok and kb_at is not None and all(r[5] == NOT_A_LIMIT for r in kb_rows)
-    out.append(ck("xlsx.policy_is_the_table", ok, f"{len(prow)} หมวด", "วงเงินในชีตนโยบายคือตาราง เอกสารระเบียบเป็นบริบทเท่านั้น"))
+    out.append(ck("xlsx.policy_is_the_table", ok, W("check.n_categories", n=len(prow)), W("check.policy")))
     rc = table(parts(wb, S_RECEIPTS), H_RECEIPTS)
-    out.append(ck("xlsx.receipts", len(rc) == len(computed["receipts"]) and all(r[2] for r in rc), f"{len(rc)} ฉบับ",
-                  "ใบเสร็จครบ และบอกว่าอ่านด้วยวิธีใด"))
+    out.append(ck("xlsx.receipts", len(rc) == len(computed["receipts"]) and all(r[2] for r in rc), W("check.n_receipts", n=len(rc)),
+                  W("check.receipts")))
     # AM8: every claim's own figures, not only their sum (two errors that cancel out passed before)
     t = Tally()
     for r, c in zip(rows, claims):
-        where = f"รายการเบิก {c['id'] or r[0]}"
-        t.number(f"{where} จำนวนเงิน", r[9], c["amount"])
-        t.number(f"{where} ยอดในใบเสร็จ", r[11], c["receipt_total"])
-        t.number(f"{where} หัก ณ ที่จ่าย", r[13], c["wht_deducted"])
-        t.text(f"{where} ผลการตรวจ", r[15], c["outcome_label"])
+        where = W("where.claim", id=c["id"] or r[0])
+        t.number(W("where.claim.amount", where=where), r[9], c["amount"])
+        t.number(W("where.claim.receipt", where=where), r[11], c["receipt_total"])
+        t.number(W("where.claim.wht", where=where), r[13], c["wht_deducted"])
+        t.text(W("where.claim.outcome", where=where), r[15], c["outcome_label"])
     face = {}
     for row in wb["สรุป"].iter_rows(min_row=5, max_col=2, values_only=True):
         if row and isinstance(row[0], str):
@@ -432,9 +437,9 @@ def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
     for label, want in (("รายการเบิกทั้งหมด", tt["claims"]), ("ผ่านทุกกฎ", tt["pass"]), ("ข้อยกเว้น รอคนตัดสิน", tt["exception"]),
                         ("ยอดเบิกรวม (บาท)", tt["claimed"]), ("ยอดที่ผ่าน (บาท)", by["pass"]),
                         ("ยอดที่เป็นข้อยกเว้น (บาท)", by["exception"]), ("ยอดที่ต้องใช้วิจารณญาณ (บาท)", by["question"])):
-        t.number(f"สรุป “{label}”", face.get(label), want)
+        t.number(W("where.summary", label=label), face.get(label), want)
     for r, rec in zip(rc, computed["receipts"]):
-        t.number(f"ใบเสร็จ {rec['name']} ยอดรวม", r[7], rec["total"])
-    out.append(t.result("xlsx.figures", "ยอดของทุกรายการเบิก หน้าสรุป และใบเสร็จ (อ่านจากไฟล์) ตรงกับที่คำนวณ", "ตัวเลข"))
-    out.extend(workpaper.checks(path))
+        t.number(W("where.receipt", name=rec["name"]), r[7], rec["total"])
+    out.append(t.result("xlsx.figures", W("check.figures"), W("noun.figures")))
+    out.extend(workpaper.checks(path, words.lang()))
     return out

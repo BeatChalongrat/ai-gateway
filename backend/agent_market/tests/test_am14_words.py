@@ -176,6 +176,22 @@ class TheCodeAndItsWords(unittest.TestCase):
                     named += 1
             self.assertGreater(named, 40, who)
 
+    def test_no_sentence_is_said_when_a_module_is_imported(self):
+        # a module is imported before the step has said the run's language: a sentence said there would be
+        # Thai in every run. A table keeps keys (W.table) and a function says its sentence when it is called.
+        for who, s in self.speakers.items():
+            for path, src in s["src"].items():
+                if not re.search(r"^from [.a-z_]+ import (SHARED as S|W)$", src, re.M):
+                    continue
+                tree = ast.parse(src)
+                inside = set()
+                for n in ast.walk(tree):
+                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                        inside.update(id(x) for x in ast.walk(n) if x is not n)
+                for n in ast.walk(tree):
+                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == s["call"] and id(n) not in inside:
+                        self.fail(f"{who} {path}:{n.lineno}: a sentence is said when the module is imported")
+
     def _literals(self, s) -> set:
         out = set()
         for src in s["src"].values():

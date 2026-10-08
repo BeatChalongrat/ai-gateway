@@ -23,12 +23,15 @@ from __future__ import annotations
 
 import re
 
+from ....engine import words
 from ....engine.findings import FORBIDDEN_WORDS, Finding, finding
+from ..words import W
 from .rules import ClaimAudit, date_th
 
 CARD_CODES = {"weekend_or_holiday": "expense_weekend_holiday", "vague_purpose": "expense_vague_purpose"}
 FLAG_OF = {v: k for k, v in CARD_CODES.items()}
-HEADER = {"weekend_or_holiday": "วันหยุด", "vague_purpose": "วัตถุประสงค์"}      # ≤ 12 display characters
+# a card's heading: ≤ 12 display characters in either language (a table says its words when it is read)
+HEADER = W.table({"weekend_or_holiday": "day.off", "vague_purpose": "word.purpose"}, then=words.cap)
 DEFAULT = "review"
 RESOLUTIONS = ("accepted", "typed", "ask_employee", "review")
 _FORBIDDEN = re.compile("|".join(re.escape(w) for w in FORBIDDEN_WORDS), re.IGNORECASE)
@@ -67,7 +70,8 @@ def _what(a: ClaimAudit) -> str:
     c = a.claim
     label = a.category.label if a.category else c.category_raw
     amount = f"{c.amount:,.2f}" if c.amount is not None else c.amount_raw
-    return safe(f"เบิก{label} {amount} บาท ที่ {c.merchant or 'ไม่ระบุร้าน'}")
+    merchant = c.merchant or W("card.no_merchant")
+    return safe(W("card.what", label=label, amount=amount, merchant=merchant))
 
 
 def card(a: ClaimAudit, flag: str) -> Finding:
@@ -77,24 +81,22 @@ def card(a: ClaimAudit, flag: str) -> Finding:
     if flag == "weekend_or_holiday":
         day = fact.evidence.get("weekday") if (c.date and c.date.weekday() >= 5) else ""
         hol = fact.evidence.get("holiday")
-        what = " และ".join(x for x in (day, f"วันหยุด{hol}" if hol else "") if x)
-        q = (f"{_who(a)} {_what(a)} วันที่ {date_th(c.date)} ซึ่งเป็น{what} เป็นงานของบริษัทหรือไม่ "
-             f"(กฎบอกได้แค่ว่าเป็นวันหยุด เหตุผลต้องให้คนพิจารณา)")
-        opts = [("เป็นงานบริษัท รับได้", "accept", "บันทึกว่าคุณยืนยันแล้ว ไม่ต้องมีคนตัดสินอีก"),
-                ("ให้ถามพนักงาน", "ask_employee", "ส่งเป็นข้อยกเว้น: ขอเหตุผลจากพนักงาน"),
-                ("ส่งให้ผู้อนุมัติตัดสิน", DEFAULT, "ส่งเป็นข้อยกเว้นรอคนตัดสิน (ข้ามการ์ดนี้ก็เป็นแบบนี้)")]
+        what = words.and_(x for x in (day, W("day.holiday", hol=hol) if hol else "") if x)
+        q = (W("card.weekend.question", who=_who(a), claim=_what(a), date=date_th(c.date), days=what))
+        opts = [(W("card.weekend.accept"), "accept", W("card.accept.d")),
+                (W("card.ask"), "ask_employee", W("card.weekend.ask.d")),
+                (W("card.review"), DEFAULT, W("card.review.d"))]
         return finding(CARD_CODES[flag], "blocking", "preflight", HEADER[flag], q, opts, DEFAULT, subject=c.key,
                        evidence=ev, facts={"claim": c.label, "check": "weekend_or_holiday", "date": c.date.isoformat(),
                                            "holiday": hol})
     desc = safe(c.description)
-    said = f"รายละเอียดเขียนว่า “{desc}”" if desc.strip() else "ไม่ได้เขียนรายละเอียด"
-    q = (f"{_who(a)} {_what(a)} ({date_th(c.date)}) {said} ซึ่งยังไม่บอกวัตถุประสงค์ทางธุรกิจ "
-         f"รับได้หรือไม่ หรือพิมพ์วัตถุประสงค์ที่ได้จากพนักงาน")
-    opts = [("วัตถุประสงค์ชัดพอ รับได้", "accept", "บันทึกว่าคุณยืนยันแล้ว ไม่ต้องมีคนตัดสินอีก"),
-            ("ให้ถามพนักงาน", "ask_employee", "ส่งเป็นข้อยกเว้น: ขอวัตถุประสงค์จากพนักงาน"),
-            ("ส่งให้ผู้อนุมัติตัดสิน", DEFAULT, "ส่งเป็นข้อยกเว้นรอคนตัดสิน (ข้ามการ์ดนี้ก็เป็นแบบนี้)")]
+    said = W("said.description", desc=desc) if desc.strip() else W("said.none")
+    q = (W("card.purpose.question", who=_who(a), claim=_what(a), date=date_th(c.date), said=said))
+    opts = [(W("card.purpose.accept"), "accept", W("card.accept.d")),
+            (W("card.ask"), "ask_employee", W("card.purpose.ask.d")),
+            (W("card.review"), DEFAULT, W("card.review.d"))]
     return finding(CARD_CODES[flag], "blocking", "preflight", HEADER[flag], q, opts, DEFAULT, subject=c.key, evidence=ev,
-                   input={"kind": "text", "hint": "หรือพิมพ์วัตถุประสงค์ เช่น เลี้ยงรับรองลูกค้าบริษัท ก. หลังประชุมเสนอราคา"},
+                   input={"kind": "text", "hint": W("card.purpose.hint")},
                    facts={"claim": c.label, "check": "vague_purpose", "description": desc})
 
 
@@ -105,11 +107,9 @@ def cards_for(audits: list[ClaimAudit], answers: dict | None) -> list[Finding]:
 
 
 # the policy table's keys as the settings page names them (a card once said "categories.meals.per_claim")
-POLICY_KEY_TH = {"per_claim": "วงเงินต่อครั้ง", "per_person_month": "วงเงินต่อคนต่อเดือน", "wht_rate": "อัตราหัก ณ ที่จ่าย",
-                 "wht_from": "หัก ณ ที่จ่ายตั้งแต่ยอด", "needs_purpose": "ต้องระบุวัตถุประสงค์", "label": "ชื่อหมวด",
-                 "receipt_required_above": "ยอดที่ต้องมีใบเสร็จ", "approval_threshold": "วงเงินอนุมัติ",
-                 "prohibited_merchants": "ร้านต้องห้าม", "weekend_holiday": "การเบิกในวันหยุด",
-                 "vat_claim_requires": "เอกสารที่ใช้ขอคืน VAT", "currency": "สกุลเงิน", "categories": "หมวดค่าใช้จ่าย"}
+POLICY_KEY_TH = W.table({k: f"setting.{k}" for k in (
+    "per_claim", "per_person_month", "wht_rate", "wht_from", "needs_purpose", "label", "receipt_required_above",
+    "approval_threshold", "prohibited_merchants", "weekend_holiday", "vat_claim_requires", "currency", "categories")})
 
 
 def plain_problem(p: str) -> str:
@@ -119,7 +119,7 @@ def plain_problem(p: str) -> str:
         return p
     parts = where.split(".")
     if parts[0] == "categories" and len(parts) >= 2:
-        named = f"หมวด {parts[1]}" + (f" · {POLICY_KEY_TH.get(parts[2], parts[2])}" if len(parts) > 2 else "")
+        named = W("setting.category", code=parts[1]) + (f" · {POLICY_KEY_TH.get(parts[2], parts[2])}" if len(parts) > 2 else "")
     else:
         named = POLICY_KEY_TH.get(parts[0], parts[0])
     return f"{named}: {rest}"
@@ -127,21 +127,20 @@ def plain_problem(p: str) -> str:
 
 def no_policy(problems: list[str]) -> Finding:
     plain = [plain_problem(p) for p in problems]
-    listed = safe("; ".join(plain[:4]) + (f" และอีก {len(plain) - 4} ข้อ" if len(plain) > 4 else ""))
-    return finding("expense_no_policy", "blocking", "preflight", "นโยบายการเบิก",
-                   f"ยังตรวจไม่ได้: ตารางนโยบายการเบิกของ agent นี้ยังใช้ไม่ได้ ({listed}) ตั้งหรือแก้ตารางในหน้าตั้งค่า agent "
-                   f"แล้วสั่งทำรอบนี้ต่อ ผมจะไม่เดาวงเงินเอง และจะไม่เอาวงเงินจากเอกสารระเบียบมาใช้แทน",
-                   [("ตั้งแล้ว ทำต่อ", "wait", "ตรวจต่อเมื่อมีตารางนโยบายที่ใช้ได้"),
-                    ("ยกเลิกรอบนี้", "cancel", "ปิดรอบนี้ไว้ก่อน")], "wait", facts={"problems": problems[:10]})
+    listed = safe("; ".join(plain[:4]) + (" " + W("card.policy.more", n=len(plain) - 4) if len(plain) > 4 else ""))
+    return finding("expense_no_policy", "blocking", "preflight", W("card.policy.header"),
+                   W("card.policy.question", listed=listed),
+                   [(W("card.policy.continue"), "wait", W("card.policy.continue.d")),
+                    (W("opt.cancel"), "cancel", W("opt.cancel.d"))], "wait", facts={"problems": problems[:10]})
 
 
 def missing_claims(others: list[str]) -> Finding:
-    extra = f" (ไฟล์ {safe(', '.join(others[:3]))} ไม่มีหัวคอลัมน์ของรายการเบิก)" if others else ""
-    return finding("missing_file", "blocking", "preflight", "ขาดไฟล์",
-                   f"ยังไม่มีไฟล์รายการเบิกค่าใช้จ่าย (Excel หรือ CSV){extra} ผมต้องใช้ไฟล์นี้ก่อนจึงจะเริ่มตรวจได้",
-                   [("รอก่อน จะอัปโหลดให้", "wait", "ผมจะรอไฟล์ แล้วทำต่อจากจุดนี้"),
-                    ("ยกเลิกรอบนี้", "cancel", "ปิดรอบนี้ไว้ก่อน")], "wait", kind="request_files", subject="claims",
-                   request=[{"role": "claims", "label": "ไฟล์รายการเบิกค่าใช้จ่าย",
-                             "why": "ทุกรายการที่ตรวจมาจากไฟล์นี้: เลขที่เบิก พนักงาน วันที่ หมวด ร้านค้า จำนวนเงิน ใบเสร็จ",
+    return finding("missing_file", "blocking", "preflight", W("card.missing.header"),
+                   W("card.missing.question_others", extra=W("card.missing.others", files=safe(", ".join(others[:3]))))
+                   if others else W("card.missing.question"),
+                   [(W("opt.wait"), "wait", W("opt.wait.d")),
+                    (W("opt.cancel"), "cancel", W("opt.cancel.d"))], "wait", kind="request_files", subject="claims",
+                   request=[{"role": "claims", "label": W("need.claims"),
+                             "why": W("need.claims.why"),
                              "required": True, "accept": [".xlsx", ".xlsm", ".csv"]}],
                    facts={"missing": "claims"})

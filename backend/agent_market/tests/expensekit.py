@@ -112,8 +112,9 @@ def _person(case: dict, finding: dict):
     return (case.get("answers") or {}).get(finding["key"])
 
 
-def run_case(case: dict, *, defaults: dict | None = None, files: list[str] | None = None) -> dict:
-    job = Job()
+def run_case(case: dict, lang: str | None = None, *, defaults: dict | None = None, files: list[str] | None = None) -> dict:
+    """``lang``: the run's language, when it is not Thai (AM14)."""
+    job = Job(lang)
     try:
         defaults = defaults_for(case) if defaults is None else defaults
         parsed, keys = [], {}
@@ -155,8 +156,12 @@ def run_case(case: dict, *, defaults: dict | None = None, files: list[str] | Non
         shutil.copy(os.path.join(job.out, "computed.json"), os.path.join(job.inp, "computed.json"))
         rend = job.run({"op": "render", "package": "expense_audit", "computed": "computed.json", "formats": ["xlsx"],
                         "names": {"xlsx": "audit.xlsx"}, "theme": {"id": "navy"}, "run": {"date": TODAY.isoformat()}})
+        from openpyxl import load_workbook
+
+        book = load_workbook(os.path.join(job.out, "audit.xlsx"))
+        sheets = {ws.title: [list(r) for r in ws.iter_rows(values_only=True)] for ws in book.worksheets}
         return {"id": case["id"], "keys": keys, "first": first, "asked": asked, "answers": answers,
-                "computed": computed, "summary": comp["summary"], "render": rend, "defaults": defaults}
+                "computed": computed, "summary": comp["summary"], "render": rend, "defaults": defaults, "sheets": sheets}
     finally:
         job.close()
 

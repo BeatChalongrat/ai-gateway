@@ -28,6 +28,7 @@ from ....engine.e2.extract import rejudge
 from ...invoice_processing.checks import decisions as D
 from ...invoice_processing.checks import review as IR
 from ...invoice_processing.scripts.register import decided_by
+from ..words import W
 from .inputs import Upload
 from .rules import ReceiptView
 
@@ -89,11 +90,10 @@ def review(receipts: list[Upload], *, vat_claimed: dict, aliases: dict, answers:
     return out
 
 
-REASON = {"unconfirmed_value": "ยอดที่อ่านได้ไม่มั่นใจ และไม่ได้ยืนยัน", "sources_disagree": "สองแหล่งอ่านยอดได้ไม่ตรงกัน",
-          "missing_required_field": "หายอดรวมไม่พบ", "check_failed": "ตัวเลขในใบเสร็จไม่สอดคล้องกัน",
-          "unreadable_page": "ภาพไม่ชัด", "typed_value_invalid": "ค่าที่พิมพ์มาใช้ไม่ได้",
-          "unknown_document_type": "ไม่ทราบชนิดเอกสาร", "excluded_by_person": "ผู้ใช้ตัดใบเสร็จนี้ออก",
-          "unresolved_question": "ยังมีคำถามเรื่องยอดในใบเสร็จที่ไม่ได้ตอบ"}
+# why a receipt's amount is not confirmed: keys of the manifest's sentences, each said when it is read
+REASON = W.table({k: f"receipt.{k}" for k in (
+    "unconfirmed_value", "sources_disagree", "missing_required_field", "check_failed", "unreadable_page",
+    "typed_value_invalid", "unknown_document_type", "excluded_by_person", "unresolved_question")})
 
 
 def view(r: ReceiptReview, *, final: bool) -> ReceiptView:
@@ -105,7 +105,7 @@ def view(r: ReceiptReview, *, final: bool) -> ReceiptView:
     status = r.status if not (final and r.status == "pending") else "unconfirmed"
     why = ""
     if r.status == "unconfirmed":
-        why = REASON.get((r.exclusion or {}).get("code"), "ผู้ใช้ตัดใบเสร็จนี้ออก")
+        why = REASON.get((r.exclusion or {}).get("code"), W("receipt.excluded_by_person"))
     elif status == "unconfirmed":
         why = REASON["unresolved_question"]
     tf = f.get("total") or {}

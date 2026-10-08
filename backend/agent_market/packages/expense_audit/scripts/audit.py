@@ -39,60 +39,51 @@ from __future__ import annotations
 import datetime as _dt
 from decimal import Decimal
 
-from ....engine.thai import fmt_money, period_label_th
+from ....engine import words
+from ....engine.thai import fmt_money
 from ..checks import cards as CARDS
 from ..checks import review as RV
 from ..checks import rules as R
 from ..checks.receipts import SCAN_TIERS, index_entry
+from ..words import W
 
 SCHEMA = "expense.audit.v1"
 
-REASON_TH = {
+# every reason's words are a sentence of the manifest ("reason.<code>"), said in the language of the run when read
+REASON_TH = W.table({code: f"reason.{code}" for code in (
     # rules → a person decides (severity review)
-    "claim_row_unreadable": "อ่านวันที่ จำนวนเงิน หรือพนักงานในแถวนี้ไม่ได้",
-    "unknown_category": "หมวดไม่อยู่ในตารางนโยบาย",
-    "over_claim_limit": "เกินวงเงินต่อครั้ง",
-    "over_period_limit": "เกินวงเงินต่อคนต่อเดือน",
-    "missing_receipt": "ไม่มีใบเสร็จ ทั้งที่ยอดเกินเกณฑ์",
-    "receipt_amount_mismatch": "ยอดในใบเสร็จไม่ตรงกับยอดที่เบิก",
-    "receipt_unconfirmed": "ยืนยันยอดในใบเสร็จไม่ได้",
-    "duplicate_claim": "เบิกซ้ำ",
-    "split_purchase": "แยกบิลให้ต่ำกว่าวงเงินอนุมัติ",
-    "prohibited_merchant": "ร้านค้าต้องห้ามตามนโยบาย",
-    "vat_claim_without_full_tax_invoice": "ขอคืนภาษีซื้อโดยไม่มีใบกำกับภาษีเต็มรูป",
-    "wht_missing": "ไม่ได้หักภาษี ณ ที่จ่าย",
-    "wht_mismatch": "หักภาษี ณ ที่จ่ายไม่ตรงอัตรา",
-    "missing_purpose": "ไม่ระบุวัตถุประสงค์ (หมวดนี้ต้องระบุ)",
+    "claim_row_unreadable", "unknown_category", "over_claim_limit", "over_period_limit", "missing_receipt",
+    "receipt_amount_mismatch", "receipt_unconfirmed", "duplicate_claim", "split_purchase", "prohibited_merchant",
+    "vat_claim_without_full_tax_invoice", "wht_missing", "wht_mismatch", "missing_purpose",
     # judgement → a card; skipped / "ask the employee" → review, accepted / typed → info
-    "weekend_or_holiday": "เบิกในวันหยุด",
-    "vague_purpose": "วัตถุประสงค์ไม่ชัด",
+    "weekend_or_holiday", "vague_purpose",
     # about a file, not a claim (info)
-    "receipt_not_linked": "ใบเสร็จที่ไม่มีรายการเบิกอ้างถึง",
-}
+    "receipt_not_linked")})
 assert set(R.EXCEPTION_CODES) | set(R.JUDGEMENT_CODES) <= set(REASON_TH)
 
-_APPROVE = ("อนุมัติเป็นกรณียกเว้น", "approve_exception")
-_ASK = ("ถามพนักงาน", "ask_employee")
-_NOT_PAID = ("ไม่เบิกจ่ายรายการนี้", "exclude_from_reimbursement")      # a person's choice, never a default
+# what a person can decide: (the key of the answer's words, its value)
+_APPROVE = ("choice.approve", "approve_exception")
+_ASK = ("choice.ask", "ask_employee")
+_NOT_PAID = ("choice.not_paid", "exclude_from_reimbursement")      # a person's choice, never a default
 CHOICES = {
-    "claim_row_unreadable": [("แก้ไฟล์แล้วส่งใหม่", "fix_sheet"), _ASK, ("ตรวจรายการนี้เอง", "check_by_hand")],
-    "unknown_category": [_ASK, ("เพิ่มหมวดในตารางนโยบาย", "update_policy"), _APPROVE],
-    "over_claim_limit": [_APPROVE, ("เบิกได้เท่าวงเงิน", "reimburse_up_to_limit"), _ASK, _NOT_PAID],
-    "over_period_limit": [_APPROVE, ("เบิกได้เท่าวงเงินที่เหลือ", "reimburse_up_to_limit"), _ASK, _NOT_PAID],
-    "missing_receipt": [("ขอใบเสร็จจากพนักงาน", "request_receipt"), ("อนุมัติโดยใช้ใบรับรองแทนใบเสร็จ", "approve_with_substitute"),
+    "claim_row_unreadable": [("choice.fix_sheet", "fix_sheet"), _ASK, ("choice.by_hand", "check_by_hand")],
+    "unknown_category": [_ASK, ("choice.update_policy", "update_policy"), _APPROVE],
+    "over_claim_limit": [_APPROVE, ("choice.up_to_limit", "reimburse_up_to_limit"), _ASK, _NOT_PAID],
+    "over_period_limit": [_APPROVE, ("choice.up_to_rest", "reimburse_up_to_limit"), _ASK, _NOT_PAID],
+    "missing_receipt": [("choice.request_receipt", "request_receipt"), ("choice.substitute", "approve_with_substitute"),
                         _NOT_PAID],
-    "receipt_amount_mismatch": [("เบิกตามยอดในใบเสร็จ", "reimburse_receipt_amount"), _ASK, _APPROVE],
-    "receipt_unconfirmed": [("ตรวจใบเสร็จเองแล้วอนุมัติ", "approve_after_checking"), ("ขอใบเสร็จที่ชัดกว่า", "request_receipt"), _ASK],
-    "duplicate_claim": [("ไม่ใช่รายการซ้ำ", "not_duplicate"), _ASK, ("จ่ายครั้งเดียว ไม่เบิกรายการซ้ำ", "pay_once")],
-    "split_purchase": [("อนุมัติรวมเป็นรายการเดียว", "approve_as_one"), _ASK, _NOT_PAID],
+    "receipt_amount_mismatch": [("choice.receipt_amount", "reimburse_receipt_amount"), _ASK, _APPROVE],
+    "receipt_unconfirmed": [("choice.after_checking", "approve_after_checking"), ("choice.clearer_receipt", "request_receipt"), _ASK],
+    "duplicate_claim": [("choice.not_duplicate", "not_duplicate"), _ASK, ("choice.pay_once", "pay_once")],
+    "split_purchase": [("choice.as_one", "approve_as_one"), _ASK, _NOT_PAID],
     "prohibited_merchant": [_APPROVE, _ASK, _NOT_PAID],
-    "vat_claim_without_full_tax_invoice": [("เบิกได้ แต่ไม่ขอคืนภาษีซื้อ", "reimburse_without_vat"),
-                                           ("ขอใบกำกับภาษีเต็มรูปจากร้าน", "request_full_tax_invoice"), _ASK],
-    "wht_missing": [("หักภาษี ณ ที่จ่ายก่อนจ่าย", "withhold_tax"), _ASK, _APPROVE],
-    "wht_mismatch": [("ปรับยอดหักภาษี ณ ที่จ่าย", "withhold_tax"), _ASK, _APPROVE],
+    "vat_claim_without_full_tax_invoice": [("choice.without_vat", "reimburse_without_vat"),
+                                           ("choice.full_tax_invoice", "request_full_tax_invoice"), _ASK],
+    "wht_missing": [("choice.withhold", "withhold_tax"), _ASK, _APPROVE],
+    "wht_mismatch": [("choice.fix_wht", "withhold_tax"), _ASK, _APPROVE],
     "missing_purpose": [_ASK, _APPROVE, _NOT_PAID],
-    "weekend_or_holiday": [("อนุมัติ เป็นงานของบริษัท", "approve_exception"), _ASK, _NOT_PAID],
-    "vague_purpose": [("อนุมัติ วัตถุประสงค์ชัดพอ", "approve_exception"), _ASK, _NOT_PAID],
+    "weekend_or_holiday": [("choice.approve.work", "approve_exception"), _ASK, _NOT_PAID],
+    "vague_purpose": [("choice.approve.purpose", "approve_exception"), _ASK, _NOT_PAID],
 }
 # KB paragraphs quoted next to an exception: the claim's category, or the rule's topic
 TOPICS = {"weekend_or_holiday": ("วันหยุด",), "missing_receipt": ("ใบเสร็จ",), "receipt_amount_mismatch": ("ใบเสร็จ",),
@@ -107,8 +98,8 @@ FACT_CELL = {"claim_data": "amount", "category": "category", "within_claim_limit
              "receipt": "receipt", "receipt_amount": "amount", "duplicate": "id", "split_purchase": "amount",
              "prohibited_merchant": "merchant", "vat_document": "vat_claim", "wht": "wht_deducted",
              "weekend_holiday": "date", "purpose": "description"}
-TIER_TH = {"digital": "PDF ดิจิทัล", "etax": "e-Tax (XML)", "scan": "สแกน", "photo": "รูปถ่าย (อ่านได้เท่าที่ภาพชัด)"}
-OUTCOME_TH = {"pass": "ผ่าน", "exception": "ข้อยกเว้น รอคนตัดสิน", "question": "ต้องใช้วิจารณญาณ"}
+TIER_TH = W.table({k: f"tier.{k}" for k in ("digital", "etax", "scan", "photo")})
+OUTCOME_TH = W.table({k: f"outcome.{k}" for k in R.OUTCOMES})
 RESOLUTION_TH = {"accepted": "ผู้ใช้ยืนยันว่ารับได้", "typed": "ผู้ใช้ระบุวัตถุประสงค์", "ask_employee": "ให้ถามพนักงาน",
                  "review": "ส่งให้ผู้อนุมัติตัดสิน"}
 
@@ -122,37 +113,45 @@ def _proposed(code: str, a: R.ClaimAudit, f: R.Fact | None, res: str | None = No
     label = a.category.label if a.category else c.category_raw
     if code == "weekend_or_holiday":
         what = " ".join(x for x in (ev.get("weekday") if c.date and c.date.weekday() >= 5 else "", ev.get("holiday") or "") if x)
-        return {"accepted": "ผู้ใช้ยืนยันระหว่างตรวจว่าเป็นงานของบริษัท ไม่ต้องทำอะไรเพิ่ม",
-                "ask_employee": f"ถามพนักงานว่าค่าใช้จ่ายวันที่ {R.date_th(c.date)} ({what}) เป็นงานอะไร แล้วตัดสิน"}.get(
-            res, f"พิจารณาว่าค่าใช้จ่ายวันที่ {R.date_th(c.date)} ({what}) เป็นงานของบริษัทหรือไม่ — กฎบอกได้แค่ว่าเป็นวันหยุด")
+        return {"accepted": W("do.weekend.accepted"),
+                "ask_employee": W("do.weekend.ask", date=R.date_th(c.date), what=what)}.get(
+            res, W("do.weekend.review", date=R.date_th(c.date), what=what))
     if code == "vague_purpose":
-        return {"accepted": "ผู้ใช้ยืนยันระหว่างตรวจว่าวัตถุประสงค์ชัดพอ ไม่ต้องทำอะไรเพิ่ม",
-                "typed": f"ผู้ใช้ระบุวัตถุประสงค์ระหว่างตรวจ: “{typed}”",
-                "ask_employee": "ขอวัตถุประสงค์ทางธุรกิจของรายการนี้จากพนักงาน แล้วตัดสิน"}.get(
-            res, f"พิจารณาวัตถุประสงค์ทางธุรกิจของรายการนี้ (รายละเอียดเขียนเพียง “{c.description}”)")
+        return {"accepted": W("do.purpose.accepted"),
+                "typed": W("do.purpose.typed", typed=typed),
+                "ask_employee": W("do.purpose.ask")}.get(
+            res, W("do.purpose.review", description=c.description))
     return {
-        "claim_row_unreadable": f"แก้แถว {c.row} ของ {c.sheet} ({f.detail if f else ''}) แล้วส่งใหม่ หรือตรวจรายการนี้เอง",
-        "unknown_category": f"หมวด “{c.category_raw}” ไม่อยู่ในตารางนโยบาย: ถามพนักงานว่าเป็นหมวดใด หรือเพิ่มหมวดในตารางนโยบายก่อน",
-        "over_claim_limit": f"ตัดสินว่าจะอนุมัติเกินวงเงิน{label}ต่อครั้ง {_money(ev.get('limit'))} บาท เป็นกรณียกเว้น "
-                            f"หรือเบิกได้เท่าวงเงิน (เกิน {_money(ev.get('excess'))} บาท) — วงเงินจากตารางนโยบาย",
-        "over_period_limit": f"ยอด{label}ของพนักงานในเดือน {ev.get('month')} รวม {_money(ev.get('after'))} บาท เกินวงเงิน "
-                             f"{_money(ev.get('limit'))} บาท ตัดสินว่าจะอนุมัติส่วนเกินหรือเบิกได้เท่าที่เหลือ "
-                             f"{_money(max(Decimal(0), Decimal(ev.get('limit') or 0) - Decimal(ev.get('before') or 0)))} บาท",
-        "missing_receipt": "ขอใบเสร็จจากพนักงาน หรืออนุมัติโดยใช้ใบรับรองแทนใบเสร็จ",
-        "receipt_amount_mismatch": f"เปิดใบเสร็จ {ev.get('receipt')} ดู: ยอดในใบเสร็จ {_money(ev.get('receipt_total'))} บาท "
-                                   f"แต่เบิก {_money(ev.get('amount'))} บาท เลือกเบิกตามใบเสร็จ หรือถามพนักงาน",
-        "receipt_unconfirmed": f"เปิดใบเสร็จ {ev.get('receipt')} ดูยอดเอง ({f.detail if f else ''}) แล้วตัดสิน",
-        "duplicate_claim": f"ตรวจว่าเป็นค่าใช้จ่ายเดียวกับ{(' รายการ ' + ev['duplicate_of']) if ev.get('duplicate_of') else ''}"
-                           f"{(' ใบเสร็จที่เบิกในรอบก่อน ' + str(ev['earlier_run'].get('name'))) if ev.get('earlier_run') else ''} "
-                           f"หรือไม่ ถ้าซ้ำจริงให้จ่ายครั้งเดียว",
-        "split_purchase": f"รายการ {', '.join(ev.get('group') or [])} รวม {_money(ev.get('sum'))} บาท เกินวงเงินอนุมัติ "
-                          f"{_money(ev.get('limit'))} บาท ให้ผู้มีอำนาจอนุมัติตามยอดรวม",
-        "prohibited_merchant": f"ร้านนี้ตรงกับรายชื่อร้านต้องห้าม (“{ev.get('word')}”) ให้ผู้อนุมัติตัดสินว่าจะอนุมัติเป็นกรณียกเว้นหรือไม่",
-        "vat_claim_without_full_tax_invoice": "ขอคืนภาษีซื้อด้วยเอกสารนี้ไม่ได้: เบิกได้แต่ไม่ขอคืนภาษีซื้อ หรือขอใบกำกับภาษีเต็มรูปจากร้าน",
-        "wht_missing": f"หักภาษี ณ ที่จ่าย {_money(ev.get('due'))} บาท ({ev.get('rate')}%) ก่อนจ่าย และออกหนังสือรับรองการหักภาษี (50 ทวิ)",
-        "wht_mismatch": f"ปรับยอดหักภาษี ณ ที่จ่ายเป็น {_money(ev.get('due'))} บาท ({ev.get('rate')}%) จากที่หัก {_money(ev.get('deducted'))} บาท",
-        "missing_purpose": f"ขอวัตถุประสงค์ทางธุรกิจจากพนักงานก่อนอนุมัติ (หมวด{label}ต้องระบุ)",
+        "claim_row_unreadable": W("do.claim_row_unreadable", row=c.row, sheet=c.sheet, detail=f.detail if f else ""),
+        "unknown_category": W("do.unknown_category", category_raw=c.category_raw),
+        "over_claim_limit": W("do.over_claim_limit", label=label, limit=_money(ev.get("limit")), excess=_money(ev.get("excess"))),
+        "over_period_limit": W("do.over_period_limit", label=label, month=ev.get("month"), after=_money(ev.get("after")),
+                               limit=_money(ev.get("limit")),
+                               left=_money(max(Decimal(0), Decimal(ev.get("limit") or 0) - Decimal(ev.get("before") or 0)))),
+        "missing_receipt": W("do.missing_receipt"),
+        "receipt_amount_mismatch": W("do.receipt_amount_mismatch", receipt=ev.get("receipt"),
+                                     receipt_total=_money(ev.get("receipt_total")), amount=_money(ev.get("amount"))),
+        "receipt_unconfirmed": W("do.receipt_unconfirmed", receipt=ev.get("receipt"), detail=f.detail if f else ""),
+        "duplicate_claim": _same_expense(ev),
+        "split_purchase": W("do.split_purchase", group=", ".join(ev.get("group") or []), sum=_money(ev.get("sum")), limit=_money(ev.get("limit"))),
+        "prohibited_merchant": W("do.prohibited_merchant", word=ev.get("word")),
+        "vat_claim_without_full_tax_invoice": W("do.vat"),
+        "wht_missing": W("do.wht_missing", due=_money(ev.get("due")), rate=ev.get("rate")),
+        "wht_mismatch": W("do.wht_mismatch", due=_money(ev.get("due")), rate=ev.get("rate"), deducted=_money(ev.get("deducted"))),
+        "missing_purpose": W("do.missing_purpose", label=label),
     }[code]
+
+
+def _same_expense(ev: dict) -> str:
+    """What to do about a duplicate: which claim, which receipt of an earlier run, or both, it repeats."""
+    first, earlier = ev.get("duplicate_of"), ev.get("earlier_run")
+    if first and earlier:
+        return W("do.duplicate.both", first=first, name=str(earlier.get("name")))
+    if first:
+        return W("do.duplicate.claim", first=first)
+    if earlier:
+        return W("do.duplicate.earlier", name=str(earlier.get("name")))
+    return W("do.duplicate")
 
 
 def _kb_for(code: str, a: R.ClaimAudit, context: list[dict]) -> list[dict]:
@@ -179,19 +178,26 @@ def _source_ref(a: R.ClaimAudit, f: R.Fact | None) -> dict:
     return ref
 
 
+def _head(text: str) -> str:
+    """A fact on a line of its own. A fact is also said inside a sentence, so its words are kept without a capital;
+    Thai has none, and a Thai line is left as it is."""
+    return text if words.lang() == "th" else words.cap(text)
+
+
 def _row(code: str, severity: str, a: R.ClaimAudit, f: R.Fact | None, context: list[dict], *, res: str | None = None,
          typed: str | None = None) -> dict:
     ref = _source_ref(a, f)
     if a.also_flagged and severity == "review" and code not in R.JUDGEMENT_CODES:
-        ref["also_flagged"] = [{"code": j, "reason": REASON_TH[j], "detail": a.facts[_fact_of(j)].detail} for j in a.also_flagged]
+        ref["also_flagged"] = [{"code": j, "reason": REASON_TH[j], "detail": _head(a.facts[_fact_of(j)].detail)}
+                               for j in a.also_flagged]
     kb = _kb_for(code, a, context)
     if kb:
         ref["kb_context"] = kb
     if res:
         ref["answered"] = res
     return {"reason_code": code, "reason": REASON_TH[code], "severity": severity, "subject": a.claim.key,
-            "source_ref": ref, "detail": f.detail if f else "", "proposed_action": _proposed(code, a, f, res, typed),
-            "choices": [] if severity == "info" else [{"label": l, "value": v} for l, v in CHOICES[code]],
+            "source_ref": ref, "detail": _head(f.detail) if f else "", "proposed_action": _proposed(code, a, f, res, typed),
+            "choices": [] if severity == "info" else [{"label": W(l), "value": v} for l, v in CHOICES[code]],
             "status": "open"}
 
 
@@ -241,7 +247,7 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
     for r in rv.unlinked:
         run_ex.append({"reason_code": "receipt_not_linked", "reason": REASON_TH["receipt_not_linked"], "severity": "info",
                        "subject": r.up.name, "source_ref": {"receipt": r.up.name, "receipt_sha256": r.up.sha256},
-                       "detail": "", "proposed_action": f"ใบเสร็จ {r.up.name} ไม่มีรายการเบิกใดอ้างถึง ตรวจว่าลืมใส่ในไฟล์รายการเบิกหรือไม่",
+                       "detail": "", "proposed_action": W("do.receipt_not_linked", name=r.up.name),
                        "choices": [], "status": "open"})
     receipts, index = [], []
     linked = {k for a in rv.audits if a.receipt for k in [a.receipt.key]}
@@ -286,14 +292,13 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
               "run_exceptions": len(run_ex), "review": review_n, "info": len(run_ex) - review_n,
               "receipts": len(receipts), "judgement_cards": sum(len(a.flags) for a in rv.audits)}
     p = rv.policy
-    label = period_label_th(period)
+    label = words.period(period)
     reasons = sorted({e["reason"] for e in run_ex if e["severity"] == "review"})
-    fallback = {"summary": (f"ตรวจรายการเบิก {len(claims)} รายการ ยอดเบิกรวม {fmt_money(claimed)} บาท: ผ่าน {count['pass']} รายการ "
-                            f"เป็นข้อยกเว้นรอคนตัดสิน {count['exception']} รายการ และต้องใช้วิจารณญาณ {count['question']} รายการ "
-                            f"ไม่มีรายการใดถูกปฏิเสธอัตโนมัติ ทุกวงเงินมาจากตารางนโยบายของบริษัท"),
+    fallback = {"summary": W("say.summary", n=len(claims), claimed=fmt_money(claimed), pass_=count["pass"],
+                             exception=count["exception"], question=count["question"]),
                 "movements": [], "watch": reasons,
-                "next_steps": ([f"ผู้อนุมัติตัดสินข้อยกเว้น {review_n} รายการในชีต “ข้อยกเว้น”"] if review_n else [])
-                + (["ตรวจตารางนโยบายในหน้าตั้งค่า agent: ตอนนี้ยังเป็นตารางตัวอย่าง"] if p.source == "package_sample" else [])}
+                "next_steps": ([W("say.next.review", review_n=review_n)] if review_n else [])
+                + ([W("say.next.sample_table")] if p.source == "package_sample" else [])}
     quotable = {"claims": str(len(claims)), "pass": str(count["pass"]), "exception": str(count["exception"]),
                 "question": str(count["question"]), "claimed_thb": fmt_money(claimed), "review": str(review_n)}
     cal = rv.calendar
@@ -309,7 +314,7 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
                    "context": rv.context, "conflicts": rv.conflicts},
         "totals": totals,
         "by_employee": [{**e, "claimed": f"{e['claimed']:.2f}"} for e in by_emp.values()],
-        "reason_codes": REASON_TH, "assumptions": rv.assumptions,
+        "reason_codes": dict(REASON_TH), "assumptions": rv.assumptions,
         "index_entries": index, "models": [m for m in models.values() if m["documents"]],
         "quotable": quotable, "quotable_ids": [], "fallback_narrative": fallback,
         # the runner's generic view of computed.json
@@ -332,22 +337,21 @@ def _citations(claims: list[dict], totals: dict) -> list[dict]:
         return {"file": c.get("sheet") or "", "sheet": c.get("sheet_name") or "", "row": c.get("row"),
                 "value": c.get("amount"), "note": f"{who} · {c.get('outcome_label') or ''}".strip(" ·")}
 
-    def c(cid: str, label: str, value, formula: str, rows: list[dict], aliases: list[str]) -> dict:
-        return {"id": cid, "label": label, "value": value, "formula": formula, "sources": [part(x) for x in rows],
-                "left_out": [], "aliases": aliases, "script": "packages/expense_audit/scripts/audit.py"}
+    def c(cid: str, key: str, value, rows: list[dict], aliases: list[str]) -> dict:
+        # a figure is asked about by its name in the run's language — and, where the workbook is not in it, by the
+        # names the workbook gives it (engine/words.names)
+        label, names = words.names(lambda: (W(f"cite.{key}.label"), [W(x) for x in aliases]))
+        return {"id": cid, "label": label, "value": value, "formula": W(f"cite.{key}"), "sources": [part(x) for x in rows],
+                "left_out": [], "aliases": names, "script": "packages/expense_audit/scripts/audit.py"}
 
     with_amount = [x for x in claims if x.get("amount")]
     return [
-        c("e1", "ยอดเบิกรวม (บาท)", totals["claimed"], "ผลรวมยอดเบิกของทุกรายการในไฟล์รายการเบิก ตามที่พนักงานกรอก",
-          with_amount, ["ยอดเบิกรวม", "ยอดเบิก", "เบิกรวม"]),
-        c("e2", "ยอดที่ผ่าน (บาท)", by["pass"], "ผลรวมยอดเบิกของรายการที่ผ่านทุกกฎในตารางนโยบาย",
-          [x for x in with_amount if x["outcome"] == "pass"], ["ยอดที่ผ่าน", "ผ่าน"]),
-        c("e3", "ยอดที่เป็นข้อยกเว้น (บาท)", by["exception"],
-          "ผลรวมยอดเบิกของรายการที่ไม่ผ่านกฎข้อใดข้อหนึ่ง รอคนตัดสินในชีตข้อยกเว้น",
-          [x for x in with_amount if x["outcome"] == "exception"], ["ข้อยกเว้น", "ไม่ผ่าน"]),
-        c("e4", "ยอดที่ต้องใช้วิจารณญาณ (บาท)", by["question"],
-          "ผลรวมยอดเบิกของรายการที่กฎตัดสินเองไม่ได้ จึงถามผู้ตรวจในการ์ดคำถาม",
-          [x for x in with_amount if x["outcome"] == "question"], ["วิจารณญาณ", "ต้องใช้วิจารณญาณ"]),
+        c("e1", "claimed", totals["claimed"], with_amount, ["cite.claimed.a1", "cite.claimed.a2", "cite.claimed.a3"]),
+        c("e2", "pass", by["pass"], [x for x in with_amount if x["outcome"] == "pass"], ["cite.pass.a1", "outcome.pass"]),
+        c("e3", "exception", by["exception"], [x for x in with_amount if x["outcome"] == "exception"],
+          ["cite.exception.a1", "cite.exception.a2"]),
+        c("e4", "question", by["question"], [x for x in with_amount if x["outcome"] == "question"],
+          ["cite.question.a1", "outcome.question"]),
     ]
 
 

@@ -19,11 +19,13 @@ import datetime as _dt
 import json
 import os
 
+from ...engine import words as _words   # (this package has a module of its own named words)
 from .checks import inputs as _in
 from .checks import preflight as _pre
 from .checks.inputs import FORMAT, Upload  # noqa: F401
 from .checks.policy import policy_from_xlsx  # noqa: F401
 from .scripts import audit as _audit
+from .words import W
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -70,8 +72,11 @@ def preflight(files: list[Upload], *, message: str = "", defaults: dict | None =
 
 
 def compute(files, roles, period, *, answers=None, defaults=None, today=None, history=None, proposals=None) -> dict:
-    return _audit.compute(files, roles, period, answers=answers, defaults=defaults, today=today, history=history,
-                          proposals=proposals)
+    def table():
+        return _audit.compute(files, roles, period, answers=answers, defaults=defaults, today=today, history=history,
+                              proposals=proposals)
+
+    return _words.with_document(table(), table)
 
 
 def postcompute(files, roles, period, computed, *, answers=None, defaults=None) -> dict:
@@ -112,18 +117,16 @@ def _asked_check(path: str, view: dict, applied: list[str]) -> dict:
     bottom, by the numbers in its own cells."""
     from openpyxl import load_workbook
 
+    from ...deliverables import asked
     from ...deliverables.reread import table
     from .scripts.workbook import H_CLAIMS, S_CLAIMS, parts
 
     rows = table(parts(load_workbook(path), S_CLAIMS), H_CLAIMS)
     amounts = [float(r[9]) if isinstance(r[9], (int, float)) else -1.0 for r in rows]
     ordered = len(rows) == len(view["claims"]) and all(a >= b for a, b in zip(amounts, amounts[1:]))
-    label = "เอกสารเป็นไปตามที่ขอ (อ่านจากไฟล์)"
     if not ordered:
-        return {"name": "xlsx.asked", "ok": False, "label": label,
-                "detail": "ขอให้เรียงรายการเบิกจากยอดสูงสุด แต่ชีตรายการเบิกในไฟล์ไม่ได้เรียงตามนั้น"}
-    return {"name": "xlsx.asked", "ok": True, "label": label, "values": len(amounts),
-            "detail": f"รายการเบิก {len(amounts)} แถวเรียงจากยอดสูงสุดลงไป"}
+        return asked.check(False, W("asked.not"))
+    return asked.check(True, W("asked.ok", n=len(amounts)), len(amounts))
 
 
 def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
@@ -133,7 +136,9 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     from ...deliverables.theme import resolve
     from .scripts.workbook import ExpenseWorkbook, check
 
-    view, applied = _as_asked(computed, req)
+    # the workbook is written from the table in the documents' language; what the gate then says of the file is
+    # said in the run's
+    view, applied = _as_asked(_words.for_document(computed), req)
 
     theme = resolve(req.get("theme"))
     names = req.get("names") or {}
@@ -141,7 +146,8 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     for fmt in [f for f in wanted_formats(req, ["xlsx"]) if f == "xlsx"]:
         name = os.path.basename(names.get(fmt) or "expense_audit.xlsx")
         path = os.path.join(out_dir, name)
-        meta = ExpenseWorkbook(view, theme, req.get("run")).write(path)
+        with _words.speaking(_words.DOCUMENT):
+            meta = ExpenseWorkbook(view, theme, req.get("run")).write(path)
         checks = check(path, view, req.get("run"))
         if applied:
             checks.append(_asked_check(path, view, applied))

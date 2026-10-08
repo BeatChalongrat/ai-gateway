@@ -31,8 +31,9 @@ import re
 from dataclasses import asdict, dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 
+from ....engine import words
 from ....engine.e2 import thai_text as T
-from ....engine.thai import MONTHS_TH_ABBR
+from ..words import W
 from .policy import Calendar, Category, Policy
 
 OUTCOMES = ("pass", "exception", "question")
@@ -45,7 +46,8 @@ EXCEPTION_CODES = ("claim_row_unreadable", "unknown_category", "over_claim_limit
                    "missing_purpose")
 # … or a clarification card (judgement). weekend_or_holiday is an exception instead when the policy says so.
 JUDGEMENT_CODES = ("weekend_or_holiday", "vague_purpose")
-WEEKDAY_TH = ("วันจันทร์", "วันอังคาร", "วันพุธ", "วันพฤหัสบดี", "วันศุกร์", "วันเสาร์", "วันอาทิตย์")
+# (a table keeps the keys of its words — agent.json — and says each in the language of the run when it is read)
+WEEKDAY_TH = W.table({i: f"weekday.{i}" for i in range(7)})
 Q2 = Decimal("0.01")
 # a description that says nothing about the business reason (compared without spaces, punctuation or ค่า)
 GENERIC = ("ใช้จ่าย", "ใช้จ่ายทั่วไป", "ใช้จ่ายอื่นๆ", "ใช้จ่ายในงาน", "อื่นๆ", "อื่น", "ทั่วไป", "เบ็ดเตล็ด", "ตามใบเสร็จ",
@@ -54,12 +56,18 @@ _PUNCT = re.compile(r"[\s\.,\-/\\()\[\]{}\"'“”‘’!?:;_*#]+")
 
 
 def date_th(d: _dt.date | None) -> str:
-    """2026-10-10 → '10 ต.ค. 2569'."""
-    return f"{d.day} {MONTHS_TH_ABBR[d.month - 1]} {d.year + 543}" if d else "ไม่ระบุวันที่"
+    """A day in a sentence, in the language of the run: 2026-10-10 → '10 ต.ค. 2569', '10 Oct 2026' (the name is
+    from before a run could be in English)."""
+    return words.date(d) or W("date.none")
 
 
 def _q2(v: Decimal) -> Decimal:
     return v.quantize(Q2, rounding=ROUND_HALF_UP)
+
+
+def _m(v) -> str:
+    """An amount as a sentence prints it: 1,234.50."""
+    return f"{v:,.2f}"
 
 
 def _s(v) -> str | None:
@@ -124,7 +132,7 @@ class Claim:
 
     @property
     def label(self) -> str:
-        return self.id or f"แถว {self.row}"
+        return self.id or W("claim.row", row=self.row)
 
     @classmethod
     def from_row(cls, d: dict, *, sheet: str = "", sheet_name: str = "", key: str | None = None) -> "Claim":
@@ -243,13 +251,13 @@ def audit(claims: list[Claim], *, policy: Policy, calendar: Calendar, receipts: 
 def _claim_data(c: Claim) -> Fact:
     problems = []
     if c.amount is None:
-        problems.append(("amount", f"จำนวนเงิน “{c.amount_raw}” อ่านเป็นตัวเลขไม่ได้" if c.amount_raw else "ไม่มีจำนวนเงิน"))
+        problems.append(("amount", W("fact.amount_unreadable", amount_raw=c.amount_raw) if c.amount_raw else W("fact.no_amount")))
     elif c.amount <= 0:
-        problems.append(("amount", f"จำนวนเงิน {c.amount:,.2f} ต้องมากกว่า 0"))
+        problems.append(("amount", W("fact.amount_not_positive", amount=_m(c.amount))))
     if c.date is None:
-        problems.append(("date", f"วันที่ “{c.date_raw}” อ่านเป็นวันที่ไม่ได้" if c.date_raw else "ไม่มีวันที่"))
+        problems.append(("date", W("fact.date_unreadable", date_raw=c.date_raw) if c.date_raw else W("fact.no_date")))
     if not c.employee:
-        problems.append(("employee", "ไม่มีรหัสหรือชื่อพนักงาน"))
+        problems.append(("employee", W("fact.no_employee")))
     if problems:
         return Fact("claim_data", "fail", "claim_row_unreadable", "; ".join(p[1] for p in problems),
                     {"problems": [p[0] for p in problems], "amount_raw": c.amount_raw, "date_raw": c.date_raw},
@@ -260,7 +268,7 @@ def _claim_data(c: Claim) -> Fact:
 def _category(c: Claim, cat: Category | None, policy: Policy) -> Fact:
     if cat is None:
         return Fact("category", "fail", "unknown_category",
-                    f"หมวด “{c.category_raw}” ไม่มีในตารางนโยบาย จึงไม่มีวงเงินให้ตรวจ",
+                    W("fact.unknown_category", category_raw=c.category_raw),
                     {"category_raw": c.category_raw, "policy_ref": "categories",
                      "known": [x.label for x in policy.categories.values()]}, "exception")
     return Fact("category", "pass", evidence={"code": cat.code, "label": cat.label, "policy_ref": f"categories.{cat.code}"})
@@ -268,13 +276,13 @@ def _category(c: Claim, cat: Category | None, policy: Policy) -> Fact:
 
 def _skip(name: str, cat: Category | None, what: str, c: Claim) -> Fact:
     if cat is None or c.amount is None:
-        return Fact(name, "skip", detail="ไม่มีหมวดในตารางหรือไม่มีจำนวนเงิน")
-    per = "ต่อครั้ง" if what == "per_claim" else "ต่อคนต่อเดือน"
+        return Fact(name, "skip", detail=W("fact.skip.no_category"))
+    per = W("per.claim") if what == "per_claim" else W("per.month")
     if getattr(cat, what) is None:
         # the table sets no such limit: none is applied (a KB document never supplies one)
-        return Fact(name, "skip", detail=f"ตารางนโยบายไม่ได้กำหนดวงเงิน{per}ของหมวด{cat.label}",
+        return Fact(name, "skip", detail=W("fact.skip.no_limit", per=per, label=cat.label),
                     evidence={"policy_ref": f"categories.{cat.code}.{what}", "limit_source": "policy_table"})
-    return Fact(name, "skip", detail="ไม่มีวันที่หรือพนักงาน")
+    return Fact(name, "skip", detail=W("fact.skip.no_date_or_employee"))
 
 
 def _claim_limit(c: Claim, cat: Category | None) -> Fact:
@@ -284,9 +292,10 @@ def _claim_limit(c: Claim, cat: Category | None) -> Fact:
     if c.amount > cat.per_claim:
         ev["excess"] = _s(c.amount - cat.per_claim)
         return Fact("within_claim_limit", "fail", "over_claim_limit",
-                    f"เบิก {c.amount:,.2f} บาท เกินวงเงิน{cat.label}ต่อครั้ง {cat.per_claim:,.2f} บาท อยู่ {c.amount - cat.per_claim:,.2f} บาท",
+                    W("fact.over_claim_limit", amount=_m(c.amount), label=cat.label, per_claim=_m(cat.per_claim),
+                      excess=_m(c.amount - cat.per_claim)),
                     ev, "exception")
-    return Fact("within_claim_limit", "pass", detail=f"ไม่เกินวงเงินต่อครั้ง {cat.per_claim:,.2f} บาท", evidence=ev)
+    return Fact("within_claim_limit", "pass", detail=W("fact.within_claim_limit", per_claim=_m(cat.per_claim)), evidence=ev)
 
 
 def _periods(claims: list[Claim], cats: dict, order: dict) -> dict[str, Fact]:
@@ -311,50 +320,53 @@ def _periods(claims: list[Claim], cats: dict, order: dict) -> dict[str, Fact]:
                   "amount": _s(c.amount), "before": _s(before), "after": _s(run), "counted": list(counted)}
             if run > cat.per_person_month:
                 out[c.key] = Fact("within_period_limit", "fail", "over_period_limit",
-                                  f"{cat.label}ของพนักงานคนนี้ในเดือน {month} รวม {run:,.2f} บาท (รายการ {', '.join(counted)}) "
-                                  f"เกินวงเงินต่อคนต่อเดือน {cat.per_person_month:,.2f} บาท — นับยอดที่เบิก ก่อนมีใครตัดสินข้อยกเว้น",
+                                  W("fact.over_period_limit", label=cat.label, month=month, run=_m(run),
+                                    counted=", ".join(counted), per_person_month=_m(cat.per_person_month)),
                                   ev, "exception")
             else:
-                out[c.key] = Fact("within_period_limit", "pass", detail=f"รวมทั้งเดือน {run:,.2f} จาก {cat.per_person_month:,.2f} บาท",
+                out[c.key] = Fact("within_period_limit", "pass",
+                                  detail=W("fact.within_period_limit", run=_m(run), per_person_month=_m(cat.per_person_month)),
                                   evidence=ev)
     return out
 
 
 def _receipt(c: Claim, rec: ReceiptView | None, policy: Policy) -> Fact:
     if c.amount is None:
-        return Fact("receipt", "skip", detail="ไม่มีจำนวนเงิน")
+        return Fact("receipt", "skip", detail=W("fact.no_amount"))
     required = c.amount > policy.receipt_required_above
     ev = {**_limit_ev("receipt_required_above", policy.receipt_required_above), "amount": _s(c.amount),
           "required": required, "referenced": c.receipt_ref, "receipt": rec.name if rec else None, "uploaded": rec is not None}
     if rec is not None:
-        return Fact("receipt", "pass", detail=f"แนบใบเสร็จ {rec.name}", evidence=ev)
+        return Fact("receipt", "pass", detail=W("fact.receipt.attached", name=rec.name), evidence=ev)
     if not required:
-        return Fact("receipt", "pass", detail=f"ยอด {c.amount:,.2f} ไม่เกิน {policy.receipt_required_above:,.2f} บาท ไม่ต้องมีใบเสร็จ",
+        return Fact("receipt", "pass",
+                    detail=W("fact.receipt.not_required", amount=_m(c.amount), receipt_required_above=_m(policy.receipt_required_above)),
                     evidence=ev)
-    why = (f"แถวนี้อ้างถึงไฟล์ {c.receipt_ref} แต่ไม่ได้ส่งไฟล์นั้นมา" if c.receipt_ref else "ไม่ได้ระบุใบเสร็จ")
+    why = (W("fact.receipt.not_sent", receipt_ref=c.receipt_ref) if c.receipt_ref else W("fact.receipt.none"))
     return Fact("receipt", "fail", "missing_receipt",
-                f"ยอด {c.amount:,.2f} บาท เกิน {policy.receipt_required_above:,.2f} บาท ต้องมีใบเสร็จ: {why}", ev, "exception")
+                W("fact.receipt.missing", amount=_m(c.amount), receipt_required_above=_m(policy.receipt_required_above), why=why), ev, "exception")
 
 
 def _receipt_amount(c: Claim, rec: ReceiptView | None) -> Fact:
     if rec is None or c.amount is None:
-        return Fact("receipt_amount", "skip", detail="ไม่มีใบเสร็จให้เทียบ")
+        return Fact("receipt_amount", "skip", detail=W("fact.receipt_amount.none"))
     ev = {"receipt": rec.name, "amount": _s(c.amount), "receipt_total": _s(rec.total), **rec.total_source}
     if rec.status != "read":
+        why = rec.unconfirmed_reason or W("fact.receipt_unconfirmed.open")
         return Fact("receipt_amount", "fail", "receipt_unconfirmed",
-                    f"ยืนยันยอดในใบเสร็จ {rec.name} ไม่ได้ ({rec.unconfirmed_reason or 'ยังมีคำถามที่ไม่ได้ตอบ'})", ev, "exception")
+                    W("fact.receipt_unconfirmed", name=rec.name, why=why), ev, "exception")
     if rec.currency not in (None, "THB"):
         return Fact("receipt_amount", "fail", "receipt_amount_mismatch",
-                    f"ใบเสร็จ {rec.name} เป็นเงิน {rec.currency} แต่เบิกเป็นบาท {c.amount:,.2f}", {**ev, "currency": rec.currency},
+                    W("fact.receipt_currency", name=rec.name, currency=rec.currency, amount=_m(c.amount)), {**ev, "currency": rec.currency},
                     "exception")
     if rec.total is None:
-        return Fact("receipt_amount", "fail", "receipt_unconfirmed", f"อ่านยอดรวมในใบเสร็จ {rec.name} ไม่ได้", ev, "exception")
+        return Fact("receipt_amount", "fail", "receipt_unconfirmed", W("fact.receipt_total_unread", name=rec.name), ev, "exception")
     if rec.total != c.amount:
         ev["difference"] = _s(c.amount - rec.total)
         return Fact("receipt_amount", "fail", "receipt_amount_mismatch",
-                    f"เบิก {c.amount:,.2f} บาท แต่ใบเสร็จ {rec.name} ยอดรวม {rec.total:,.2f} บาท ต่างกัน {c.amount - rec.total:,.2f} บาท",
+                    W("fact.receipt_mismatch", amount=_m(c.amount), name=rec.name, total=_m(rec.total), difference=_m(c.amount - rec.total)),
                     ev, "exception")
-    return Fact("receipt_amount", "pass", detail=f"ยอดในใบเสร็จ {rec.total:,.2f} ตรงกับที่เบิก", evidence=ev)
+    return Fact("receipt_amount", "pass", detail=W("fact.receipt_match", total=_m(rec.total)), evidence=ev)
 
 
 def _duplicates(claims: list[Claim], linked: dict, history: list[dict]) -> dict[str, Fact]:
@@ -386,9 +398,9 @@ def _duplicates(claims: list[Claim], linked: dict, history: list[dict]) -> dict[
                 ev["earlier_run"] = {"name": earlier.get("name"), "sha256": earlier.get("sha256"),
                                      "document_date": earlier.get("document_date"), "total": earlier.get("total")}
                 match.append("receipt_in_an_earlier_run")
-            where = (f"รายการ {first}" if first else "") + (" และ" if first and earlier else "") + \
-                    (f"ใบเสร็จ {earlier.get('name')} ที่เบิกในรอบก่อน" if earlier else "")
-            out[c.key] = Fact("duplicate", "fail", "duplicate_claim", f"ซ้ำกับ{where}", ev, "exception")
+            where = words.and_(x for x in (W("dup.claim", first=first) if first else "",
+                                           W("dup.earlier", name=earlier.get("name")) if earlier else "") if x)
+            out[c.key] = Fact("duplicate", "fail", "duplicate_claim", W("fact.duplicate", where=where), ev, "exception")
         if sig and sig not in by_details:
             by_details[sig] = c.label
         if rkey and rkey not in by_receipt:
@@ -413,7 +425,7 @@ def _history_match(rec: ReceiptView, history: list[dict]) -> dict | None:
 
 def _split_skip(c: Claim) -> Fact:
     return Fact("split_purchase", "pass") if c.amount is not None and c.date and c.merchant else \
-        Fact("split_purchase", "skip", detail="ไม่มีจำนวนเงิน วันที่ หรือร้านค้า")
+        Fact("split_purchase", "skip", detail=W("fact.split.skip"))
 
 
 def _splits(claims: list[Claim], dup: dict, policy: Policy) -> dict[str, Fact]:
@@ -434,82 +446,81 @@ def _splits(claims: list[Claim], dup: dict, policy: Policy) -> dict[str, Fact]:
         ids = [c.label for c in under]
         for c in under:
             out[c.key] = Fact("split_purchase", "fail", "split_purchase",
-                              f"{len(under)} รายการที่ร้านเดียวกันวันเดียวกัน ({', '.join(ids)}) แต่ละรายการต่ำกว่าวงเงินอนุมัติ "
-                              f"{t:,.2f} บาท แต่รวมกัน {total:,.2f} บาท",
+                              W("fact.split", n=len(under), ids=", ".join(ids), t=_m(t), total=_m(total)),
                               {**_limit_ev("approval_threshold", t), "group": ids, "sum": _s(total)}, "exception")
     return out
 
 
 def _prohibited(c: Claim, rec: ReceiptView | None, policy: Policy) -> Fact:
     if not policy.prohibited:
-        return Fact("prohibited_merchant", "skip", detail="ตารางนโยบายไม่มีรายชื่อร้านต้องห้าม")
+        return Fact("prohibited_merchant", "skip", detail=W("fact.prohibited.none"))
     seller = rec.seller_name if rec is not None and rec.status == "read" else None
     for w in policy.prohibited:
         where = [n for n, text in (("claim_merchant", c.merchant), ("receipt_seller", seller)) if text and _norm(w) in _norm(text)]
         if where:
             return Fact("prohibited_merchant", "fail", "prohibited_merchant",
-                        f"ร้าน “{c.merchant}”{' / ใบเสร็จ “' + seller + '”' if seller and 'receipt_seller' in where else ''} "
-                        f"มีคำว่า “{w}” ซึ่งอยู่ในรายชื่อร้านต้องห้าม",
+                        (W("fact.prohibited.seller", merchant=c.merchant, seller=seller, w=w) if seller and "receipt_seller" in where else
+                         W("fact.prohibited", merchant=c.merchant, w=w)),
                         {"policy_ref": "prohibited_merchants", "word": w, "where": where, "merchant": c.merchant,
                          "receipt_seller": seller}, "exception")
     return Fact("prohibited_merchant", "pass", evidence={"policy_ref": "prohibited_merchants"})
 
 
-DOC_TH = {"full_tax_invoice": "ใบกำกับภาษีเต็มรูป", "abbreviated_tax_invoice": "ใบกำกับภาษีอย่างย่อ", "receipt": "ใบเสร็จรับเงิน",
-          "invoice": "ใบแจ้งหนี้", "unknown": "ไม่ทราบชนิด", None: "ไม่มีเอกสาร"}
+DOC_TH = W.table({"full_tax_invoice": "doc.full_tax_invoice", "abbreviated_tax_invoice": "doc.abbreviated_tax_invoice",
+                  "receipt": "doc.receipt", "invoice": "doc.invoice", "unknown": "doc.unknown", None: "doc.none"})
 
 
 def _vat(c: Claim, rec: ReceiptView | None, policy: Policy) -> Fact:
     if not c.vat_claim:
-        return Fact("vat_document", "skip", detail="ไม่ได้ขอคืนภาษีซื้อ")
+        return Fact("vat_document", "skip", detail=W("fact.vat.not_claimed"))
     need = policy.vat_claim_requires
     ok_types = ("full_tax_invoice",) if need == "full_tax_invoice" else ("full_tax_invoice", "abbreviated_tax_invoice")
     dtype = rec.document_type if rec is not None and rec.status == "read" else None
     ev = {"policy_ref": "vat_claim_requires", "required": need, "document_type": dtype, "receipt": rec.name if rec else None}
     problems = []
     if rec is None:
-        problems.append("ไม่มีเอกสารแนบ")
+        problems.append(W("fact.vat.no_document"))
     elif rec.status != "read":
-        problems.append(f"ยืนยันชนิดเอกสาร {rec.name} ไม่ได้")
+        problems.append(W("fact.vat.unconfirmed", name=rec.name))
     elif dtype not in ok_types:
-        problems.append(f"{rec.name} เป็น{DOC_TH.get(dtype, dtype)}")
+        problems.append(W("fact.vat.is", name=rec.name, dtype=DOC_TH.get(dtype, dtype)))
     else:
         if rec.buyer_match == "fail":
-            problems.append(f"{rec.name} ออกในนามผู้ซื้ออื่น ไม่ใช่บริษัท")
+            problems.append(W("fact.vat.other_buyer", name=rec.name))
         if rec.missing_fields:
-            problems.append(f"{rec.name} ขาด {', '.join(rec.missing_fields)}")
+            problems.append(W("fact.vat.lacks", name=rec.name, missing_fields=", ".join(rec.missing_fields)))
             ev["missing_fields"] = list(rec.missing_fields)
     if problems:
         return Fact("vat_document", "fail", "vat_claim_without_full_tax_invoice",
-                    f"ขอคืนภาษีซื้อได้เฉพาะเมื่อมี{DOC_TH[need]}ที่ออกในนามบริษัท: {'; '.join(problems)}", ev, "exception")
-    return Fact("vat_document", "pass", detail=f"{rec.name} เป็น{DOC_TH.get(dtype, dtype)}", evidence=ev)
+                    W("fact.vat", need=DOC_TH[need], problems="; ".join(problems)), ev, "exception")
+    return Fact("vat_document", "pass", detail=W("fact.vat.is", name=rec.name, dtype=DOC_TH.get(dtype, dtype)), evidence=ev)
 
 
 def _wht(c: Claim, cat: Category | None) -> Fact:
     if cat is None or cat.wht_rate is None or c.amount is None:
-        return Fact("wht", "skip", detail="หมวดนี้ไม่มีภาษีหัก ณ ที่จ่ายในตารางนโยบาย")
+        return Fact("wht", "skip", detail=W("fact.wht.none"))
     frm = cat.wht_from or Decimal(0)
     ev = {**(_limit_ev(f"categories.{cat.code}.wht_from", frm) if cat.wht_from is not None else {}),
           "rate": str(cat.wht_rate), "rate_ref": f"categories.{cat.code}.wht_rate", "amount": _s(c.amount)}
     if c.amount < frm:
-        return Fact("wht", "skip", detail=f"ยอด {c.amount:,.2f} ต่ำกว่า {frm:,.2f} บาท ไม่ต้องหัก", evidence=ev)
+        return Fact("wht", "skip", detail=W("fact.wht.below", amount=_m(c.amount), frm=_m(frm)), evidence=ev)
     due = _q2(c.amount * cat.wht_rate / Decimal(100))
     deducted = c.wht_deducted if c.wht_deducted is not None else Decimal("0.00")
     ev.update({"due": _s(due), "deducted": _s(deducted), "stated": c.wht_deducted is not None})
     if deducted == due:
-        return Fact("wht", "pass", detail=f"หัก {deducted:,.2f} บาท ตรงกับ {cat.wht_rate}%", evidence=ev)
-    said = "" if c.wht_deducted is not None else " (ไม่ได้ระบุในไฟล์)"
+        return Fact("wht", "pass", detail=W("fact.wht.ok", deducted=_m(deducted), wht_rate=cat.wht_rate), evidence=ev)
     if deducted == 0:
+        # (a file that does not state what was deducted says so)
         return Fact("wht", "fail", "wht_missing",
-                    f"{cat.label} {c.amount:,.2f} บาท ต้องหักภาษี ณ ที่จ่าย {cat.wht_rate}% = {due:,.2f} บาท แต่หัก 0.00{said}",
-                    ev, "exception")
+                    W("fact.wht.missing" if c.wht_deducted is not None else "fact.wht.missing_unstated",
+                      label=cat.label, amount=_m(c.amount), wht_rate=cat.wht_rate, due=_m(due)), ev, "exception")
     return Fact("wht", "fail", "wht_mismatch",
-                f"ต้องหักภาษี ณ ที่จ่าย {cat.wht_rate}% = {due:,.2f} บาท แต่หัก {deducted:,.2f} บาท", ev, "exception")
+                W("fact.wht.mismatch", wht_rate=cat.wht_rate, due=_m(due), deducted=_m(deducted)), ev, "exception")
 
 
 def _weekend(c: Claim, calendar: Calendar, policy: Policy) -> Fact:
     if c.date is None:
-        return Fact("weekend_holiday", "skip", detail="ไม่มีวันที่")
+        return Fact("weekend_holiday", "skip", detail=W("fact.no_date"))
     wd = c.date.weekday()
     hol = calendar.holiday(c.date)
     # the holiday part runs only on the company's own confirmed calendar (AM3: fail closed); weekends always
@@ -518,9 +529,9 @@ def _weekend(c: Claim, calendar: Calendar, policy: Policy) -> Fact:
           "calendar_covers_year": calendar.covers(c.date.year) if calendar.active else None}
     if wd < 5 and not hol:
         return Fact("weekend_holiday", "pass", detail=WEEKDAY_TH[wd], evidence=ev)
-    what = " และ".join(x for x in ((WEEKDAY_TH[wd] if wd >= 5 else ""), (f"วันหยุด{hol}" if hol else "")) if x)
+    what = words.and_(x for x in ((WEEKDAY_TH[wd] if wd >= 5 else ""), (W("day.holiday", hol=hol) if hol else "")) if x)
     disp = {"flag": "question", "exception": "exception"}.get(policy.weekend_holiday)
-    return Fact("weekend_holiday", "fail", "weekend_or_holiday", f"วันที่ {date_th(c.date)} เป็น{what}", ev, disp)
+    return Fact("weekend_holiday", "fail", "weekend_or_holiday", W("fact.weekend", date=date_th(c.date), what=what), ev, disp)
 
 
 def _purpose(c: Claim, cat: Category | None) -> Fact:
@@ -532,7 +543,7 @@ def _purpose(c: Claim, cat: Category | None) -> Fact:
         return Fact("purpose", "pass", evidence=ev)
     ev["why"] = why
     if why == "empty" and needs:
-        return Fact("purpose", "fail", "missing_purpose", f"หมวด{cat.label}ต้องระบุวัตถุประสงค์ แต่ไม่ได้เขียนรายละเอียด", ev, "exception")
-    text = {"empty": "ไม่ได้เขียนรายละเอียด", "restates_category": f"รายละเอียด “{c.description}” เป็นแค่ชื่อหมวด",
-            "generic": f"รายละเอียด “{c.description}” ไม่บอกวัตถุประสงค์"}[why]
-    return Fact("purpose", "fail", "vague_purpose", text + " — วัตถุประสงค์ทางธุรกิจต้องให้คนพิจารณา", ev, "question")
+        return Fact("purpose", "fail", "missing_purpose", W("fact.purpose.missing", label=cat.label), ev, "exception")
+    text = {"empty": W("said.none"), "restates_category": W("fact.purpose.restates", description=c.description),
+            "generic": W("fact.purpose.generic", description=c.description)}[why]
+    return Fact("purpose", "fail", "vague_purpose", text + " " + W("fact.purpose.judge"), ev, "question")

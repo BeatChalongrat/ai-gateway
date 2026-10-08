@@ -22,7 +22,9 @@ import datetime as _dt
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 
+from ....engine import words
 from ....engine.thai import fmt_money
+from ..words import W
 from . import cards as CARDS
 from . import policy as P
 from . import receipts as RC
@@ -166,49 +168,46 @@ def _assumptions(rv: Review) -> list[dict]:
     out = []
     for c, ref, u in rv.content_links:
         out.append({"code": "receipt_matched_by_content", "source": "rule",
-                    "text": f"รายการ {c.label} ระบุใบเสร็จ “{ref}” แต่ไม่มีไฟล์ชื่อนี้ — ใช้ “{u.name}” แทน "
-                            f"เพราะยอดรวมและวันที่ในใบเสร็จตรงกับรายการนี้ (และตรงกับรายการนี้เพียงรายการเดียว)"})
+                    "text": W("assume.content_link", label=c.label, ref=ref, name=u.name)})
     p = rv.policy
     if p is not None and p.source == "package_sample":
         out.append({"code": "package_sample_policy", "source": "rule",
-                    "text": "ตารางนโยบายที่ใช้ตรวจเป็นตารางตัวอย่างที่มากับ agent ยังไม่ได้แก้ให้เป็นของบริษัท "
-                            "ตรวจวงเงินในหน้าตั้งค่า agent ก่อนใช้ผลจริง", "changes_numbers": True})
+                    "text": W("assume.sample_policy"), "changes_numbers": True})
     if rv.kb:
         out.append({"code": "kb_context_only", "source": "rule",
-                    "text": f"เอกสารระเบียบ ({', '.join(u.name for u in rv.kb)}) ใช้เป็นบริบทเท่านั้น วงเงินทุกตัวมาจากตารางนโยบาย"})
+                    "text": W("assume.kb", names=", ".join((u.name for u in rv.kb)))})
     for c in rv.conflicts:
-        table = f"กำหนด {fmt_money(c['table'])} บาท" if c["table"] else "ไม่ได้กำหนดวงเงินนี้"
+        table = W("assume.kb.sets", table=fmt_money(c["table"])) if c["table"] else W("assume.kb.sets_none")
         out.append({"code": "kb_differs_from_table", "source": "rule",
-                    "text": f"{c['file']} ย่อหน้า {c['paragraph']} กล่าวถึง{c['label']} {fmt_money(c['document'])} บาท แต่ตารางนโยบาย{table} "
-                            f"— ใช้ตาราง เอกสารเป็นบริบทเท่านั้น"})
+                    "text": W("assume.kb_differs", file=c["file"], paragraph=c["paragraph"], label=c["label"],
+                              document=fmt_money(c["document"]), table=table)})
     cal = rv.calendar
     years = sorted({c.date.year for c in rv.claims if c.date})
     if not cal.active:
         # fail closed (AM3): no holiday is flagged from a calendar nobody confirmed as the company's
         out.append({"code": "holiday_check_off", "source": "rule", "changes_numbers": True,
-                    "text": f"ยังไม่ได้ตรวจวันหยุดนักขัตฤกษ์ ({cal.note}) รอบนี้ตรวจเฉพาะวันเสาร์–อาทิตย์ "
-                            "ตั้งและยืนยันปฏิทินวันหยุดของบริษัทได้ในหน้าตั้งค่า agent"})
+                    "text": W("assume.holiday_off", note=cal.note)})
     else:
         out.append({"code": "company_holiday_calendar", "source": "rule",
-                    "text": f"ตรวจวันหยุดตาม{cal.note} และวันเสาร์–อาทิตย์"})
+                    "text": W("assume.holiday_on", note=cal.note)})
         for y in years:
             if not cal.covers(y):
                 out.append({"code": "holiday_calendar_missing_year", "source": "rule",
-                            "text": f"ปฏิทินวันหยุดของบริษัทไม่มีปี {y + 543} ตรวจได้เฉพาะเสาร์–อาทิตย์ของปีนั้น"})
+                            "text": W("assume.calendar_year", year=y + 543 if words.lang() == "th" else y)})
     for copy, orig in rv.same_file:
         out.append({"code": "same_file_twice", "source": "rule",
-                    "text": f"{copy.name} เป็นไฟล์เดียวกับ {orig.name} (ไบต์ตรงกันทุกตัว) นับครั้งเดียว"})
+                    "text": W("assume.same_file", copy=copy.name, orig=orig.name)})
     for u in rv.others:
-        why = {"policy_sheet": "เป็นตารางนโยบาย: ตารางนโยบายตั้งในหน้าตั้งค่า agent รอบนี้ใช้ตารางที่ตั้งไว้",
-               "unrecognised_sheet": "ไม่มีหัวคอลัมน์ของรายการเบิก", "unsupported_type": "ไม่ใช่ชนิดไฟล์ที่ agent นี้ใช้",
-               "unreadable": "เปิดไฟล์ไม่ได้"}.get(u.data.get("reason"), "ไม่ได้ใช้")
-        out.append({"code": "file_not_used", "source": "rule", "text": f"ไม่ได้ใช้ไฟล์ {u.name}: {why}"})
+        why = {"policy_sheet": W("unused.policy_sheet"),
+               "unrecognised_sheet": W("unused.unrecognised_sheet"), "unsupported_type": W("unused.unsupported_type"),
+               "unreadable": W("unused.unreadable")}.get(u.data.get("reason"), W("unused.other"))
+        out.append({"code": "file_not_used", "source": "rule", "text": W("assume.file_not_used", name=u.name, why=why)})
     if rv.missing_refs:
         out.append({"code": "receipt_files_missing", "source": "rule",
-                    "text": "รายการเบิกอ้างถึงใบเสร็จที่ไม่ได้ส่งมา: " + ", ".join(f"{c.label} → {ref}" for c, ref in rv.missing_refs[:10])})
+                    "text": W("assume.receipts_missing", refs=", ".join(f"{c.label} → {ref}" for c, ref in rv.missing_refs[:10]))})
     for r in rv.unlinked:
         out.append({"code": "receipt_not_linked", "source": "rule",
-                    "text": f"ใบเสร็จ {r.up.name} ไม่มีรายการเบิกใดอ้างถึง จึงไม่ได้ใช้ตรวจ"})
+                    "text": W("assume.receipt_unlinked", name=r.up.name)})
     return out
 
 
