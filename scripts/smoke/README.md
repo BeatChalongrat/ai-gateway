@@ -8,7 +8,7 @@ result in `scripts/probes/FIX134/results/smoke/smoke_<target>_<utc>.json` (gitig
 ```
 SMOKE_TARGET=live bash scripts/smoke.sh                 # the live stack, read-mostly (default)
 SMOKE_TARGET=test bash scripts/smoke.sh                 # the test stack (compose project sran-test)
-SMOKE_ONLY=tls,jobs bash scripts/smoke.sh               # a subset: tls apps api jobs alert desktop
+SMOKE_ONLY=tls,jobs bash scripts/smoke.sh               # a subset: tls apps api jobs due alert desktop
 SMOKE_DESKTOP=0 bash scripts/smoke.sh                   # without the installed desktop app
 ```
 
@@ -70,6 +70,7 @@ test alert to the `[TEST]` topic, one 429 loop of empty bodies.
 | `jobs.sweep` | chat-edge's `interrupted_turn_sweep` in the last 10 min | — |
 | `jobs.ops_watch` | ops-watch's tick in the last 2 min | live |
 | `jobs.maintenance` | no maintenance window left on (`python -m app.ops.maintenance status`) | — |
+| `ops.old_audit_key` (area `due`) | a dated reminder: passes until 2027-01-06, then FAILS while `DLP_AUDIT_KEY_OLD` is still in `.env`, naming the one command (`python scripts/ops/rotate_dlp_audit_key.py drop-old`); passes once the line is gone. New dated items are entries in `scripts/smoke/due.js` | live |
 | `alert.test_routing` | `python -m app.ops.fire_test_alert` reports `channels=["ntfy-test"]` and a delivered outcome — only the `[TEST]` topic, never the owner's | ALERT_TEST_NTFY_URL |
 | `desktop.startup` | the installed app launched with `--remote-debugging-port`, CDP open, its startup over https clean in `shell.log` (no TLS error) | Windows, playwright-core |
 | `desktop.session` | the window is the signed-in page — or the shell's signed-out/signing-in view (SKIP: sign-in is Google-only in the system browser; the suite never starts it) | — |

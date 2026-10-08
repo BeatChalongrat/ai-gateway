@@ -4,7 +4,7 @@
 #   SMOKE_TARGET=live bash scripts/smoke.sh          # the live stack, read-mostly (default)
 #   SMOKE_TARGET=test bash scripts/smoke.sh          # the test stack (compose project sran-test)
 #   SMOKE_DESKTOP=1|0     the installed desktop app over CDP (default: on for live, off for test)
-#   SMOKE_ONLY=tls,apps   a subset of the areas (tls apps api jobs alert desktop)
+#   SMOKE_ONLY=tls,apps   a subset of the areas (tls apps api jobs due alert desktop)
 #   SMOKE_OUT=<file>      a copy of the JSON result (the daily task points it at the backup folder)
 #   SMOKE_ENV_FILE=<.env> the .env to read credentials from (default: the repo's; a worktree has none)
 #

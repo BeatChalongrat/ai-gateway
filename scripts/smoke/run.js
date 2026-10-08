@@ -1,5 +1,5 @@
 // FIX134 F — the smoke suite's orchestrator (started by scripts/smoke.sh).
-//   SMOKE_TARGET=live|test   SMOKE_DESKTOP=1|0   SMOKE_ONLY=tls,apps,api,jobs,alert,desktop
+//   SMOKE_TARGET=live|test   SMOKE_DESKTOP=1|0   SMOKE_ONLY=tls,apps,api,jobs,due,alert,desktop
 //   SMOKE_RESULT=<json path> (set by smoke.sh)
 // Prints one line per check (PASS|FAIL|SKIP <name> <detail>), a summary, writes the JSON
 // result, deletes every chat it created, and exits 0 only when nothing FAILED.
@@ -15,7 +15,10 @@ const AREAS = ["tls", "apps", "api", "jobs", "alert", "desktop", "agent_market"]
 async function main() {
   const t0 = Date.now();
   const R = new L.Report();
-  const only = (process.env.SMOKE_ONLY || AREAS.join(",")).split(",").map((s) => s.trim()).filter(Boolean);
+  // The dated reminders (due.js) are an area too. They are named here, not in the list above, and
+  // registered beside tls below: both places are lines of the core suite, so the list and the
+  // reminders can each change — or be taken out — without touching the other.
+  const only = (process.env.SMOKE_ONLY || [...AREAS, "due"].join(",")).split(",").map((s) => s.trim()).filter(Boolean);
   const desktopOn = (process.env.SMOKE_DESKTOP ?? (L.TARGET === "live" ? "1" : "0")) === "1";
   let head = null;
   try { head = execFileSync("git", ["-C", L.ROOT, "rev-parse", "--short", "HEAD"], { encoding: "utf8" }).trim(); } catch { /* not a checkout */ }
@@ -36,6 +39,8 @@ async function main() {
   let session = null;
   if (!setupError) {
     if (only.includes("tls")) await require("./tls")(R);
+    // things with a date on them: quiet before it, red from it until done (due.js)
+    if (only.includes("due")) await require("./due")(R);
     if (only.includes("apps")) session = await require("./apps")(R);
     if (only.includes("api")) {
       if (!session && !only.includes("apps")) { try { session = (await require("./apps").signIn(R)).session; } catch (e) { R.fail("portal.session", L.errText(e)); } }
