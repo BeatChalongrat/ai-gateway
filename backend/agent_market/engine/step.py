@@ -85,20 +85,20 @@ def _write_json(name: str, obj) -> str:
 def _preview(path: str, name: str, pf) -> dict:
     """Headers, the proposed mapping and five raw rows — the install wizard's
     column-mapping screen (no numbers are computed here)."""
-    from .headers import FIELD_LABEL_TH, candidates_for
+    from .headers import FIELD_LABEL, candidates_for
     from .tabular import read_workbook
 
     wb = read_workbook(path, name)
     sheet = next((s for s in wb.sheets if s.name == pf.sheet), None)
     if sheet is None or pf.header is None:
-        return {"headers": [], "rows": [], "proposal": {}, "fields": FIELD_LABEL_TH}
+        return {"headers": [], "rows": [], "proposal": {}, "fields": dict(FIELD_LABEL)}
     hr = pf.header.header_row
     rows = [["" if v is None else str(v) for v in r] for r in sheet.rows[hr + 1: hr + 6]]
     proposal = {f: {"header": pf.header.headers[c], "source": pf.header.source.get(f)} for f, c in pf.header.fields.items()}
     need = ["date", "account_code", "debit", "credit", "amount", "account_name", "description", "cost_center", "dc_indicator"]
     candidates = {f: candidates_for(f, sheet, pf.header) for f in need if f not in pf.header.fields}
     return {"sheet": pf.sheet, "header_row": hr + 1, "headers": pf.header.headers, "rows": rows,
-            "proposal": proposal, "candidates": candidates, "fields": FIELD_LABEL_TH, "doc_type": pf.doc_type}
+            "proposal": proposal, "candidates": candidates, "fields": dict(FIELD_LABEL), "doc_type": pf.doc_type}
 
 
 def _fill_template(pkg, computed: dict, t: dict, req: dict | None = None) -> dict:

@@ -19,26 +19,29 @@ from dataclasses import dataclass, field
 
 from .tabular import Sheet, col_letter
 from .thai import date_order_evidence, looks_like_date, month_from_word
+from .words import SHARED as S
+from .words import cap
 
 FIELDS = (
     "date", "doc_no", "account_code", "account_name", "description",
     "debit", "credit", "amount", "dc_indicator", "currency", "cost_center", "budget",
 )
 
-FIELD_LABEL_TH = {
-    "date": "วันที่",
-    "doc_no": "เลขที่เอกสาร",
-    "account_code": "รหัสบัญชี",
-    "account_name": "ชื่อบัญชี",
-    "description": "คำอธิบายรายการ",
-    "debit": "เดบิต",
-    "credit": "เครดิต",
-    "amount": "จำนวนเงิน",
-    "dc_indicator": "เดบิต/เครดิต",
-    "currency": "สกุลเงิน",
-    "cost_center": "ศูนย์ต้นทุน",
-    "budget": "งบประมาณ",
-}
+# the name of each field on the screen of columns and in a question, said when it is read
+FIELD_LABEL = S.table({
+    "date": "field.date",
+    "doc_no": "field.doc_no",
+    "account_code": "field.account_code",
+    "account_name": "field.account_name",
+    "description": "field.description",
+    "debit": "field.debit",
+    "credit": "field.credit",
+    "amount": "field.amount",
+    "dc_indicator": "field.dc_indicator",
+    "currency": "field.currency",
+    "cost_center": "field.cost_center",
+    "budget": "field.budget",
+}, then=cap)
 
 
 def norm(text) -> str:

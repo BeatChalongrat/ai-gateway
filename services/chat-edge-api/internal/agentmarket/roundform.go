@@ -177,7 +177,7 @@ func formWhy(code string) PersonText {
 	return NoText
 }
 
-// unfilledWhy says in words why one field of a delivered form has no value (template_out.WHY_TH's codes).
+// unfilledWhy says in words why one field of a delivered form has no value (template_out.WHY's codes).
 func unfilledWhy(code, packageWords string) PersonText {
 	switch code {
 	case "not_mapped":

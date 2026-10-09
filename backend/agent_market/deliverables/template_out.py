@@ -40,6 +40,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ..engine.words import SHARED as S
 from . import template_fill as tf
 
 LIST_KINDS = ("list", "table")
@@ -93,7 +94,7 @@ def slots(inspection: dict) -> list[dict]:
         out.append({"key": b["key"], "kind": "target", "label": b["label"], "where": b["key"], "fillable": True, "reason": None,
                     "required": bool(b["required"]), "side": "inline", "label_at": b["key"], "context": b.get("context") or ""})
     for sh in inspection.get("shapes") or []:
-        out.append({"key": sh["key"], "kind": "shape", "label": sh["name"], "where": f"สไลด์ {sh['slide']}",
+        out.append({"key": sh["key"], "kind": "shape", "label": sh["name"], "where": S("form.where.slide", slide=sh["slide"]),
                     "fillable": True, "reason": None, "context": sh.get("text") or ""})
     ctx = inspection.get("context") or {}
     for slot in out:
@@ -215,19 +216,21 @@ def fill(path: str, out_path: str, saved: dict, values: dict) -> dict:
     return report
 
 
-WHY_TH = {"no_value": "รอบนี้ไม่มีค่าให้ช่องนี้", "not_in_file": "เปิดไฟล์ที่เติมแล้วไม่พบค่าในช่องนี้",
-          "not_mapped": "ยังว่าง — ไม่ได้จับคู่ค่าให้ช่องนี้",
-          "wrong_label": "ป้ายข้างช่องนี้ไม่ตรงกับป้ายที่จับคู่ไว้",
-          "marker_left": "ยังมีเครื่องหมายช่องว่างค้างอยู่", "cut_off": "ข้อความยาวเกินช่องที่สูงคงที่ จะถูกตัด",
-          "unsupported_location": "อยู่ในส่วนของไฟล์ที่ระบบเติมไม่ได้",
-          "chart_not_updated": "กราฟเดิมในแบบฟอร์มจะยังแสดงตัวเลขเดิม",
-          "merged_cell": "เป็นช่องที่ถูกผสานและไม่ใช่ช่องแรก", "formula_cell": "เป็นช่องสูตร", "protected": "ชีตถูกล็อกไว้",
-          "not_plain_text": "เป็นช่องที่ไม่ใช่ข้อความธรรมดา", "content_locked": "ช่องถูกล็อกไม่ให้แก้",
-          "rows_short": "แบบฟอร์มมีแถวรายการไม่พอสำหรับทุกรายการ"}
+# why a field of the form was not filled, said when it is read
+WHY = S.table({"no_value": "form.why.no_value", "not_in_file": "form.why.not_in_file",
+          "not_mapped": "form.why.not_mapped",
+          "wrong_label": "form.why.wrong_label",
+          "marker_left": "form.why.marker_left", "cut_off": "form.why.cut_off",
+          "unsupported_location": "form.why.unsupported_location",
+          "chart_not_updated": "form.why.chart_not_updated",
+          "merged_cell": "form.why.merged_cell", "formula_cell": "form.why.formula_cell", "protected": "form.why.protected",
+          "not_plain_text": "form.why.not_plain_text", "content_locked": "form.why.content_locked",
+          "rows_short": "form.why.rows_short"})
 
 
 def _why(reason) -> str:
-    return WHY_TH.get(str(reason or ""), str(reason or "เติมไม่ได้"))
+    code = str(reason or "")
+    return WHY[code] if code in WHY else (code or S("form.why.cannot"))
 
 
 _NO_VALUE = object()
@@ -316,35 +319,35 @@ def verify(src: str, out: str, sl: list[dict], mapping: dict, tvals: dict, repor
         return c
     gaps = [u for u in unfilled.values() if u["why"] != _why("marker_left")]
     checks = [
-        ck("template.filled", bool(filled), f"เติมแล้ว {len(filled)} ช่อง", "เติมค่าลงแบบฟอร์มได้"),
+        ck("template.filled", bool(filled), S("form.filled.detail", n=len(filled)), S("form.filled.label")),
         # the slots by name are in ``unfilled`` (the form's own names, shown on the file's row); a check's
         # detail says how many, in the package's words
         ck("template.every_slot", not gaps,
-           f"ยังไม่ได้ค่า {len(gaps)} ช่อง จาก {asked} ช่องของแบบฟอร์ม (ชื่อช่องอยู่บนแถวของแบบฟอร์ม)" if gaps
-           else f"เปิดไฟล์อ่านกลับ ทุกช่องของแบบฟอร์ม {asked} ช่องมีค่าของรอบนี้",
-           "ทุกช่องของแบบฟอร์มมีค่า (อ่านจากไฟล์ที่เติมแล้ว)", asked),
+           S("form.every.gaps", n=len(gaps), asked=asked) if gaps
+           else S("form.every.ok", asked=asked),
+           S("form.every.label"), asked),
         # AM11: a value written beside another label than the one it was mapped for is in the wrong slot
         ck("template.beside_label", not misplaced,
-           ("ป้ายข้างช่องไม่ตรงกับที่จับคู่ไว้: " + ", ".join(misplaced))[:300] if misplaced
-           else "ทุกค่าที่เติมอยู่ข้างป้ายที่จับคู่ไว้",
-           "ค่าที่เติมอยู่ข้างป้ายของมัน (อ่านจากไฟล์ที่เติมแล้ว)"),
+           S("form.beside.bad", fields=", ".join(misplaced))[:300] if misplaced
+           else S("form.beside.ok"),
+           S("form.beside.label")),
         ck("template.no_marker_left", not left,
-           f"ยังมีช่องที่ไม่ได้เติมค้างในไฟล์ {len(left)} ช่อง (ชื่อช่องอยู่บนแถวของแบบฟอร์ม)" if left else "ไม่มีช่องว่างค้างในไฟล์",
-           "ไม่มีช่องว่างค้างในไฟล์"),
-        ck("template.fits", not cut, ("ข้อความถูกตัดใน: " + ", ".join(cut))[:300] if cut else "ข้อความที่เติมพอดีช่อง",
-           "ข้อความที่เติมไม่ล้นช่องที่สูงคงที่"),
+           S("form.marker.left", n=len(left)) if left else S("form.marker.none"),
+           S("form.marker.none")),
+        ck("template.fits", not cut, S("form.fits.cut", places=", ".join(cut))[:300] if cut else S("form.fits.ok"),
+           S("form.fits.label")),
         ck("template.no_static_chart", not charts,
-           f"แบบฟอร์มมีกราฟ {len(charts)} กราฟ ที่ระบบไม่ได้วาดใหม่ จะยังแสดงตัวเลขเดิม" if charts else "ไม่มีกราฟที่ค้างตัวเลขเดิม",
-           "ไม่มีกราฟที่ยังแสดงตัวเลขเดิม"),
+           S("form.chart.static", n=len(charts)) if charts else S("form.chart.none"),
+           S("form.chart.label")),
         ck("template.formulas_kept", not report.get("formulas_changed"),
-           f"สูตรคงเดิม {len(report.get('formulas_kept') or [])} สูตร", "ไม่เขียนทับสูตร"),
-        ck("template.parts_kept", not report.get("parts_dropped"), ", ".join(report.get("parts_dropped") or []) or "ครบ",
-           "ส่วนประกอบของไฟล์ครบ"),
+           S("form.formulas.kept", n=len(report.get("formulas_kept") or [])), S("form.formulas.label")),
+        ck("template.parts_kept", not report.get("parts_dropped"), ", ".join(report.get("parts_dropped") or []) or S("form.parts.ok"),
+           S("form.parts.label")),
     ]
     for where in cut:
         unfilled.setdefault(f"cut:{where}", {"slot": f"cut:{where}", "label": where, "why": _why("cut_off")})
     for c in charts:
-        unfilled.setdefault(c, {"slot": c, "label": "กราฟในแบบฟอร์ม", "why": _why("chart_not_updated")})
+        unfilled.setdefault(c, {"slot": c, "label": S("form.chart.name"), "why": _why("chart_not_updated")})
     return checks, list(unfilled.values())
 
 

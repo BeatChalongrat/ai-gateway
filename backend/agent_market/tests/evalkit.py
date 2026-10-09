@@ -16,6 +16,7 @@ import os
 import sys
 import time
 
+from agent_market.engine import words
 from agent_market.packages import financial_report as pkg
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -30,7 +31,18 @@ def load_cases() -> list[dict]:
         return json.load(f)["cases"]
 
 
-def run_case(case: dict) -> dict:
+def run_case(case: dict, lang: str | None = None, formats: tuple = ()) -> dict:
+    """``lang`` (AM14): the run's language, as a step is told it (engine/words.use) — Thai when not given.
+    ``formats``: the round's files are written too and put through the gate (``render``), and the words
+    each file prints are read back out of it (``texts``: {file name: [every text in the file]})."""
+    words.use(lang)
+    try:
+        return _run_case(case, formats)
+    finally:
+        words.use("th")
+
+
+def _run_case(case: dict, formats: tuple = ()) -> dict:
     t0 = time.monotonic()
     defaults = case.get("defaults") or {}
     answers = dict(case.get("answers") or {})
@@ -50,8 +62,64 @@ def run_case(case: dict) -> dict:
         result["postcompute"] = [f["code"] for f in post["findings"]]
         result["findings"] += post["findings"]
         result["computed"] = computed
+        result["summary"] = pkg.summarize(computed)
+        if formats:
+            result.update(_render(computed, pre, defaults, formats))
+    result["answers"] = answers
     result["ms"] = int((time.monotonic() - t0) * 1000)
     return result
+
+
+def _render(computed: dict, pre: dict, defaults: dict, formats: tuple) -> dict:
+    """The files of a round as the runner has them made: the assumptions of the run, and — no model here —
+    the commentary the rules wrote, taken from the computed table as the runner takes it."""
+    import shutil
+    import tempfile
+
+    out = tempfile.mkdtemp(prefix="am_eval_")
+    try:
+        req = {"formats": list(formats), "names": {f: f"report.{f}" for f in formats},
+               "theme": {"id": "navy", "company": defaults.get("company") or ""},
+               "narrative": dict(computed["fallback_narrative"]), "assumptions": list(pre["assumptions"]),
+               "run": {"id": "eval", "date": TODAY.isoformat(), "agent_version": pkg.VERSION},
+               "model_info": {"model": None, "self_hosted": None}}
+        rend = pkg.render(computed, req, in_dir=out, out_dir=out)
+        return {"render": rend, "texts": {a["name"]: texts(os.path.join(out, a["name"])) for a in rend["artifacts"]}}
+    finally:
+        shutil.rmtree(out, ignore_errors=True)
+
+
+def texts(path: str) -> list[str]:
+    """Every text a finished file prints, in the file's own order: a report's paragraphs and table cells, a
+    deck's shapes and tables, a workbook's sheet names and cells."""
+    out: list[str] = []
+    if path.endswith(".docx"):
+        from docx import Document
+
+        doc = Document(path)
+        out += [p.text for p in doc.paragraphs]
+        out += [c.text for t in doc.tables for row in t.rows for c in row.cells]
+        for sec in doc.sections:
+            out += [p.text for part in (sec.header, sec.footer) for p in part.paragraphs]
+    elif path.endswith(".pptx"):
+        from pptx import Presentation
+
+        for slide in Presentation(path).slides:
+            for sh in slide.shapes:
+                if sh.has_text_frame:
+                    out.append(sh.text_frame.text)
+                if getattr(sh, "has_table", False) and sh.has_table:
+                    out += [c.text for row in sh.table.rows for c in row.cells]
+                if getattr(sh, "has_chart", False) and sh.has_chart:
+                    out += [str(c) for c in sh.chart.plots[0].categories] + [s.name for s in sh.chart.plots[0].series]
+    else:
+        from openpyxl import load_workbook
+
+        wb = load_workbook(path)
+        for ws in wb.worksheets:
+            out.append(ws.title)
+            out += [str(v) for row in ws.iter_rows(values_only=True) for v in row if v is not None]
+    return [t for t in out if t]
 
 
 def check(case: dict, res: dict) -> list[str]:

@@ -15,6 +15,7 @@ import datetime as _dt
 from collections import defaultdict
 from decimal import ROUND_HALF_UP, Decimal
 
+from ....engine import words as _words
 from ....engine.ledger import (
     LedgerRow, ParsedFile, account_digits, account_level_rows, apply_convention, indicator_guess,
 )
@@ -26,9 +27,13 @@ from .rules import (
     PL_GROUPS, RULES_VERSION, STANDARD_NAMES, Chart, apply_date_orders, chart_for, duplicate_docs, expense_total,
     group_of, is_pl, large_entries,
 )
+from ..words import W
+from ..words import printed as _printed
 
 SCRIPT_VERSION = "metrics.py@1.2.0"
-# What a rule-flagged exception is, in words (the figure table names an exception's amount by it).
+# What a rule-flagged exception is, in words (the figure table names an exception's amount by it). These, the
+# names of the figures a sentence may quote, the exceptions and the commentary the rules write are read by the
+# files and by the model that writes their commentary, never by a screen: the documents' own words, in Thai.
 EXC_TH = {"budget_variance_high": "สูงกว่างบมาก", "expense_spike": "เพิ่มขึ้นผิดปกติ", "new_account": "บัญชีใหม่",
           "negative_revenue": "รายได้ติดลบ", "large_single_entry": "รายการเดียวยอดสูง", "unbalanced_ledger": "ไม่สมดุล"}
 FORMAT = "am.computed.v1"
@@ -48,6 +53,25 @@ def pct(num: Decimal, den: Decimal) -> Decimal | None:
 
 def s(x) -> str | None:
     return None if x is None else str(x)
+
+
+def _month(m: str) -> str:
+    """A month in the name of a figure: the short form the report's charts print (“ก.ย. 69”); a run in
+    another language says the month in full."""
+    return period_short_th(m) if _words.lang() == _words.DOCUMENT else _words.period(m)
+
+
+def _name(label) -> tuple:
+    """(name, the other names a question may ask by) of a figure. ``label`` is its name, or what says it: a
+    figure's record names it in the run's language, and a person looking at the report may still ask by the
+    words it prints (engine/words.names)."""
+    return _words.names(lambda: (label(), [])) if callable(label) else (label, [])
+
+
+def _named(item: dict, also: list) -> dict:
+    if also:
+        item["aliases"] = list(also)
+    return item
 
 
 # ── citations ─────────────────────────────────────────────────────────────
@@ -76,7 +100,7 @@ class Citations:
     def __init__(self):
         self.items: list[dict] = []
 
-    def add(self, label: str, value, refs: list[LedgerRow], formula: str, script: str = SCRIPT_VERSION) -> str:
+    def add(self, label, value, refs: list[LedgerRow], formula: str, script: str = SCRIPT_VERSION) -> str:
         cid = f"c{len(self.items) + 1}"
         by_file: dict[tuple, list[int]] = defaultdict(list)
         cols: dict[tuple, str] = {}
@@ -86,25 +110,28 @@ class Citations:
         sources = [{"file": f, "sheet": sh, "cells": cell_ranges(rows, cols[(f, sh)] or "A"),
                     "rows": len(rows), "row_numbers": sorted(rows)[:2000]}
                    for (f, sh), rows in by_file.items()]
-        self.items.append({"id": cid, "label": label, "value": s(value), "sources": sources,
-                           "script": script, "formula": formula})
+        label, also = _name(label)
+        self.items.append(_named({"id": cid, "label": label, "value": s(value), "sources": sources,
+                                  "script": script, "formula": formula}, also))
         return cid
 
-    def cells(self, label: str, value, file: str, sheet: str, cells: str, formula: str) -> str:
+    def cells(self, label, value, file: str, sheet: str, cells: str, formula: str) -> str:
         """A value read from named cells (a budget figure): file · sheet · cells, like any other."""
         cid = f"c{len(self.items) + 1}"
-        self.items.append({"id": cid, "label": label, "value": s(value),
-                           "sources": [{"file": file, "sheet": sheet, "cells": cells, "rows": 1}],
-                           "script": SCRIPT_VERSION, "formula": formula})
+        label, also = _name(label)
+        self.items.append(_named({"id": cid, "label": label, "value": s(value),
+                                  "sources": [{"file": file, "sheet": sheet, "cells": cells, "rows": 1}],
+                                  "script": SCRIPT_VERSION, "formula": formula}, also))
         return cid
 
-    def derived(self, label: str, value, from_ids: list[str], formula: str, unit: str | None = None) -> str:
+    def derived(self, label, value, from_ids: list[str], formula: str, unit: str | None = None) -> str:
         cid = f"c{len(self.items) + 1}"
+        label, also = _name(label)
         item = {"id": cid, "label": label, "value": s(value), "sources": [],
                 "derived_from": from_ids, "script": SCRIPT_VERSION, "formula": formula}
         if unit:
             item["unit"] = unit  # "pct": the value is a percentage, not baht
-        self.items.append(item)
+        self.items.append(_named(item, also))
         return cid
 
 
@@ -157,7 +184,7 @@ def prepare(files: list[ParsedFile], roles: dict, period: str, answers: dict, de
         # were answered: those accounts stay out of the P&L, and the report says so.
         codes = {p["code"] for p in chart.pending}
         excluded.append({"code": "account_group",
-                         "reason": f"บัญชีที่ยังไม่รู้หมวดในงบกำไรขาดทุน ({', '.join(sorted(codes))})",
+                         "reason": W("left.account_group", codes=", ".join(sorted(codes))),
                          "rows": [r.row for r in rows if r.account_code in codes]})
     base = defaults.get("currency", "THB")
     # AM4: a remembered answer carries only the export's convention ("the amounts are already baht");
@@ -167,7 +194,7 @@ def prepare(files: list[ParsedFile], roles: dict, period: str, answers: dict, de
     if cur_ans == "exclude_foreign":
         foreign = [r for r in rows if r.currency != base]
         if foreign:
-            excluded.append({"code": "currency_mixed", "reason": f"รายการสกุลเงินอื่น ({len(foreign)} รายการ)",
+            excluded.append({"code": "currency_mixed", "reason": W("left.currency", n=len(foreign)),
                              "rows": [r.row for r in foreign]})
         rows = [r for r in rows if r.currency == base]
 
@@ -189,9 +216,9 @@ def prepare(files: list[ParsedFile], roles: dict, period: str, answers: dict, de
     if strays:
         if pm == "include":
             current += strays
-            notes.append({"code": "period_mixed", "text": f"นับรวม {len(strays)} รายการที่ลงวันที่นอกงวดตามที่เลือก"})
+            notes.append({"code": "period_mixed", "text": W("note.period_mixed", n=len(strays))})
         else:
-            excluded.append({"code": "period_mixed", "reason": f"ลงวันที่นอกงวด ({len(strays)} รายการ)",
+            excluded.append({"code": "period_mixed", "reason": W("left.period_mixed", n=len(strays)),
                              "rows": [r.row for r in strays]})
 
     dup_ans = answers.get("duplicate_suspect")
@@ -200,7 +227,7 @@ def prepare(files: list[ParsedFile], roles: dict, period: str, answers: dict, de
         for g in duplicate_docs(current, chart):
             drop.update(g["rows"])
         if drop:
-            excluded.append({"code": "duplicate_suspect", "reason": f"รายการซ้ำ ({len(drop)} แถว)", "rows": sorted(drop)})
+            excluded.append({"code": "duplicate_suspect", "reason": W("left.duplicate", n=len(drop)), "rows": sorted(drop)})
             current = [r for r in current if r.row not in drop]
 
     mat_ans = answers.get("materiality_exceeded")
@@ -210,7 +237,7 @@ def prepare(files: list[ParsedFile], roles: dict, period: str, answers: dict, de
         rows_drop = {f["row"] for f in flagged}
         drop = {r.row for r in current if (r.doc_no and r.doc_no in docs) or r.row in rows_drop}
         if drop:
-            excluded.append({"code": "materiality_exceeded", "reason": f"รายการผิดปกติที่เลือกไม่นับ ({len(drop)} แถว)",
+            excluded.append({"code": "materiality_exceeded", "reason": W("left.large", n=len(drop)),
                              "rows": sorted(drop)})
             current = [r for r in current if r.row not in drop]
 
@@ -226,7 +253,7 @@ def prepare(files: list[ParsedFile], roles: dict, period: str, answers: dict, de
                 if r.period:
                     months_p[r.period] += 1
             pp = max(months_p, key=months_p.get) if months_p else prior_period
-            notes.append({"code": "prior_period_mismatch", "text": f"เทียบกับ{period_label_th(pp)} ตามที่เลือก"})
+            notes.append({"code": "prior_period_mismatch", "text": W("note.prior", month=_words.period(pp))})
         prior_rows = [r for r in prior_file.rows if r.period == pp]
         prior_period = pp
     elif history:
@@ -296,6 +323,16 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
     def acct_name(code: str) -> str:
         return names.get(code, "")
 
+    def account(kind: str, code: str, squeeze: bool = False):
+        """What says the name of an account's figure (cite.account.*): “5300-01 ค่าเช่า งวดนี้”. An account its
+        file gives no name is named by its code (cite.code.*)."""
+        name = acct_name(code)
+        if not name:
+            return lambda: W(f"cite.code.{kind}", code=code)
+        if squeeze:  # (as these names always were: two spaces in a row are one)
+            return lambda: W(f"cite.account.{kind}", code=code, name=name).replace("  ", " ")
+        return lambda: W(f"cite.account.{kind}", code=code, name=name)
+
     cur_acc = _acct_sum(cur_rows)
     pri_acc = _acct_sum(prior_rows)
     budget = _budget_for(prep["budget_file"], period)
@@ -326,15 +363,15 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
         cur = _natural(code, cur_acc.get(code, ZERO), chart)
         pri = _natural(code, pri_acc.get(code, ZERO), chart) if has_prior else None
         bud = budget_by_digits.get(dg) if has_budget else None
-        cid = cites.add(f"{code} {acct_name(code)} งวดนี้", cur, rows_by_acct.get(code, []),
-                        "ผลรวม เดบิต − เครดิต ของบัญชีนี้ในงวด (รายได้แสดงเป็นบวก)")
-        pid = cites.add(f"{code} งวดก่อน", pri, prior_by_acct.get(code, []), "ผลรวมของบัญชีนี้ในงวดก่อน") if has_prior else None
+        cid = cites.add(account("now", code), cur, rows_by_acct.get(code, []),
+                        W("formula.account.now"))
+        pid = cites.add(lambda: W("cite.code.prior", code=code), pri, prior_by_acct.get(code, []), W("formula.account.prior")) if has_prior else None
         bid = vid = None
         if bud is not None and bfile is not None:
-            bid = cites.cells(f"{code} {acct_name(code)} งบประมาณ".replace("  ", " "), q2(bud), bfile.name,
-                              bfile.sheet or "", budget_cell_by_digits.get(dg, ""), "งบประมาณของบัญชีนี้ในงวด")
-            vid = cites.derived(f"{code} {acct_name(code)} ต่างจากงบ".replace("  ", " "), q2(cur - bud), [cid, bid],
-                                "งวดนี้ − งบประมาณ")
+            bid = cites.cells(account("budget", code, squeeze=True), q2(bud), bfile.name,
+                              bfile.sheet or "", budget_cell_by_digits.get(dg, ""), W("formula.account.budget"))
+            vid = cites.derived(account("var_budget", code, squeeze=True), q2(cur - bud), [cid, bid],
+                                W("formula.var_budget"))
         accounts.append({
             "code": code, "name": acct_name(code), "group": group_of(code, chart),
             "current": s(cur), "prior": s(pri), "budget": s(q2(bud)) if bud is not None else None,
@@ -357,21 +394,23 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
 
     line_cite_of: dict[str, dict[str, str]] = {}
 
-    def add_line(key, label, cur, pri, bud, formula, from_ids, prior_ids=(), budget_ids=()):
+    def add_line(key, name, cur, pri, bud, formula, from_ids, prior_ids=(), budget_ids=()):
         """A P&L line. Each figure it gives a sentence (this period, the prior one, the budget and the
         differences) has its own citation (AM8): "over budget by 10.5%" cites the budget comparison of
-        this line, never another figure that happens to print the same."""
-        cid = cites.derived(label, cur, from_ids, formula)
+        this line, never another figure that happens to print the same. ``name``: the key of the line's
+        name — the table's line carries it as the report prints it, each citation in the run's language."""
+        label = _printed(name)
+        cid = cites.derived(lambda: W(name), cur, from_ids, formula)
         line_cite[key] = cid
         own = {"cite": cid}
         if pri is not None:
-            own["cite_prior"] = cites.derived(f"{label} งวดก่อน", pri, list(prior_ids), formula)
-            own["cite_var_prior"] = cites.derived(f"{label} เปลี่ยนแปลงจากงวดก่อน", q2(cur - pri),
-                                                  [cid, own["cite_prior"]], "งวดนี้ − งวดก่อน (ร้อยละ: ÷ |งวดก่อน| × 100)")
+            own["cite_prior"] = cites.derived(lambda: W("cite.prior", label=W(name)), pri, list(prior_ids), formula)
+            own["cite_var_prior"] = cites.derived(lambda: W("cite.var_prior", label=W(name)), q2(cur - pri),
+                                                  [cid, own["cite_prior"]], W("formula.var_prior.pct"))
         if bud is not None:
-            own["cite_budget"] = cites.derived(f"{label} งบประมาณ", bud, list(budget_ids), formula)
-            own["cite_var_budget"] = cites.derived(f"{label} ต่างจากงบ", q2(cur - bud), [cid, own["cite_budget"]],
-                                                   "งวดนี้ − งบประมาณ (ร้อยละ: ÷ |งบประมาณ| × 100)")
+            own["cite_budget"] = cites.derived(lambda: W("cite.budget", label=W(name)), bud, list(budget_ids), formula)
+            own["cite_var_budget"] = cites.derived(lambda: W("cite.var_budget", label=W(name)), q2(cur - bud), [cid, own["cite_budget"]],
+                                                   W("formula.var_budget.pct"))
         line_cite_of[key] = own
         lines.append({
             "key": key, "label": label, "current": s(cur), "prior": s(pri), "budget": s(bud),
@@ -382,10 +421,10 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
             **own,
         })
 
-    for key, label, _, _ in PL_GROUPS:
+    for key, name, _, _ in PL_GROUPS:
         ids = [a["cite"] for a in accounts if a["group"] == key]
-        add_line(key, label, total(key, "current"), total(key, "prior") if has_prior else None,
-                 total(key, "budget") if has_budget else None, f"ผลรวมบัญชีในหมวด{label}", ids,
+        add_line(key, name, total(key, "current"), total(key, "prior") if has_prior else None,
+                 total(key, "budget") if has_budget else None, W("formula.group", label=W(name)), ids,
                  [a["cite_prior"] for a in accounts if a["group"] == key and a.get("cite_prior")],
                  [a["cite_budget"] for a in accounts if a["group"] == key and a.get("cite_budget")])
 
@@ -408,38 +447,39 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
     def of(keys, which):
         return [line_cite_of[k][which] for k in keys if line_cite_of.get(k, {}).get(which)]
 
-    for key, label, cur, pri, bud, formula, parts in (
-            ("gross_profit", "กำไรขั้นต้น", gp_c, gp_p, gp_b, "รายได้จากการขายและบริการ − ต้นทุนขาย",
+    for key, name, cur, pri, bud, formula, parts in (
+            ("gross_profit", "line.gross_profit", gp_c, gp_p, gp_b, W("formula.gross_profit"),
              ("revenue", "cost_of_sales")),
-            ("total_expenses", "ค่าใช้จ่ายรวม", te_c, te_p, te_b,
-             "ต้นทุนขาย + ค่าใช้จ่ายในการขายและบริหาร + ต้นทุนทางการเงิน + ภาษีเงินได้",
+            ("total_expenses", "line.total_expenses", te_c, te_p, te_b,
+             W("formula.total_expenses"),
              ("cost_of_sales", "operating_expenses", "finance_costs", "income_tax")),
-            ("net_profit", "กำไรสุทธิ", np_c, np_p, np_b, "รายได้ทั้งหมด − ค่าใช้จ่ายรวม",
+            ("net_profit", "line.net_profit", np_c, np_p, np_b, W("formula.net_profit"),
              ("revenue", "other_income", "total_expenses"))):
-        add_line(key, label, cur, pri, bud, formula, of(parts, "cite"), of(parts, "cite_prior"), of(parts, "cite_budget"))
+        add_line(key, name, cur, pri, bud, formula, of(parts, "cite"), of(parts, "cite_prior"), of(parts, "cite_budget"))
 
     rev_c, rev_p = L("revenue"), (L("revenue", "prior") if has_prior else None)
 
-    def ratio(key, label, num_key, formula):
+    def ratio(key, name, num_key, formula):
+        label = _printed(name)
         cur = pct(L(num_key), rev_c) if rev_c else None
         pri = pct(L(num_key, "prior"), rev_p) if has_prior and rev_p else None
-        cid = cites.derived(label, cur, [line_cite[num_key], line_cite["revenue"]], formula, unit="pct")
+        cid = cites.derived(lambda: W(name), cur, [line_cite[num_key], line_cite["revenue"]], formula, unit="pct")
         out = {"key": key, "label": label, "current": s(cur), "prior": s(pri),
                "change_points": s(q2(cur - pri)) if cur is not None and pri is not None else None, "cite": cid}
         if pri is not None:
-            out["cite_prior"] = cites.derived(f"{label} งวดก่อน", pri, of((num_key, "revenue"), "cite_prior"), formula,
+            out["cite_prior"] = cites.derived(lambda: W("cite.prior", label=W(name)), pri, of((num_key, "revenue"), "cite_prior"), formula,
                                               unit="pct")
             if cur is not None:
-                out["cite_change_points"] = cites.derived(f"{label} เปลี่ยนแปลง (จุด)", q2(cur - pri),
-                                                          [cid, out["cite_prior"]], "งวดนี้ − งวดก่อน (จุดร้อยละ)",
+                out["cite_change_points"] = cites.derived(lambda: W("cite.change_points", label=W(name)), q2(cur - pri),
+                                                          [cid, out["cite_prior"]], W("formula.change_points"),
                                                           unit="points")
         return out
 
     ratios = [
-        ratio("gross_margin", "อัตรากำไรขั้นต้น", "gross_profit", "กำไรขั้นต้น ÷ รายได้จากการขายและบริการ × 100"),
-        ratio("net_margin", "อัตรากำไรสุทธิ", "net_profit", "กำไรสุทธิ ÷ รายได้จากการขายและบริการ × 100"),
-        ratio("opex_ratio", "ค่าใช้จ่ายขายและบริหารต่อรายได้", "operating_expenses",
-              "ค่าใช้จ่ายในการขายและบริหาร ÷ รายได้จากการขายและบริการ × 100"),
+        ratio("gross_margin", "line.gross_margin", "gross_profit", W("formula.gross_margin")),
+        ratio("net_margin", "line.net_margin", "net_profit", W("formula.net_margin")),
+        ratio("opex_ratio", "line.opex_ratio", "operating_expenses",
+              W("formula.opex_ratio")),
     ]
 
     # Materiality for exceptions: install value, else 1% of revenue (at least 10,000).
@@ -468,8 +508,8 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
     rest = sum((Decimal(a["current"]) for a in exp_accounts[8:]), ZERO)
     if rest:
         composition.append({"code": "", "name": "อื่น ๆ", "amount": s(q2(rest)),
-                            "cite": cites.derived("ค่าใช้จ่ายอื่น ๆ (นอก 8 บัญชีที่ใหญ่ที่สุด)", q2(rest),
-                                                  [a["cite"] for a in exp_accounts[8:]], "ผลรวมบัญชีค่าใช้จ่ายที่เหลือ")})
+                            "cite": cites.derived(lambda: W("cite.other_expenses"), q2(rest),
+                                                  [a["cite"] for a in exp_accounts[8:]], W("formula.other_expenses"))})
 
     # Trend: history months from the export, the prior file, and this period.
     series_rows: dict[str, list[LedgerRow]] = defaultdict(list)
@@ -495,19 +535,19 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
         trend["revenue"].append(s(q2(rev)))
         trend["total_expenses"].append(s(q2(exp)))
         trend["net_profit"].append(s(q2(rev + oth - exp)))
-        c_rev = cites.add(f"รายได้ {label}", q2(rev), [r for r in rows_m if group_of(r.account_code, chart) == "revenue"],
-                          "ผลรวมบัญชีรายได้ของเดือน (รายได้แสดงเป็นบวก)")
-        c_oth = cites.add(f"รายได้อื่น {label}", q2(oth),
-                          [r for r in rows_m if group_of(r.account_code, chart) == "other_income"], "ผลรวมบัญชีรายได้อื่นของเดือน")
-        c_exp = cites.add(f"ค่าใช้จ่ายรวม {label}", q2(exp),
+        c_rev = cites.add(lambda: W("cite.trend.revenue", month=_month(m)), q2(rev), [r for r in rows_m if group_of(r.account_code, chart) == "revenue"],
+                          W("formula.trend.revenue"))
+        c_oth = cites.add(lambda: W("cite.trend.other_income", month=_month(m)), q2(oth),
+                          [r for r in rows_m if group_of(r.account_code, chart) == "other_income"], W("formula.trend.other_income"))
+        c_exp = cites.add(lambda: W("cite.trend.expenses", month=_month(m)), q2(exp),
                           [r for r in rows_m if group_of(r.account_code, chart) not in (None, "revenue", "other_income")],
-                          "ผลรวมบัญชีค่าใช้จ่ายของเดือน")
+                          W("formula.trend.expenses"))
         trend["cites"]["revenue"].append(c_rev)
         trend["cites"]["total_expenses"].append(c_exp)
-        trend["cites"]["net_profit"].append(cites.derived(f"กำไรสุทธิ {label}", q2(rev + oth - exp), [c_rev, c_oth, c_exp],
-                                                          "รายได้ + รายได้อื่น − ค่าใช้จ่ายรวม ของเดือน"))
-    trend["cite"] = cites.derived("แนวโน้มรายเดือน", None, [c for v in trend["cites"].values() for c in v],
-                                  "ผลรวมรายเดือนจากไฟล์เดียวกันและไฟล์งวดก่อน")
+        trend["cites"]["net_profit"].append(cites.derived(lambda: W("cite.trend.net_profit", month=_month(m)), q2(rev + oth - exp), [c_rev, c_oth, c_exp],
+                                                          W("formula.trend.net_profit")))
+    trend["cite"] = cites.derived(lambda: W("cite.trend"), None, [c for v in trend["cites"].values() for c in v],
+                                  W("formula.trend"))
 
     # Balance of the period (GL / TB).
     primary = prep["primary"]
@@ -515,8 +555,8 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
     csum = q2(sum((r.credit for r in cur_rows), ZERO))
     balance = {"applicable": primary.doc_type in ("gl", "tb"), "debit": s(dsum), "credit": s(csum),
                "diff": s(q2(dsum - csum)),
-               "cite_debit": cites.add("ยอดรวมเดบิตของงวด", dsum, cur_rows, "ผลรวมคอลัมน์เดบิตของรายการในงวด"),
-               "cite_credit": cites.add("ยอดรวมเครดิตของงวด", csum, cur_rows, "ผลรวมคอลัมน์เครดิตของรายการในงวด")}
+               "cite_debit": cites.add(lambda: W("cite.side_total", side=W("word.dr")), dsum, cur_rows, W("formula.side_total", side=W("word.dr"))),
+               "cite_credit": cites.add(lambda: W("cite.side_total", side=W("word.cr")), csum, cur_rows, W("formula.side_total", side=W("word.cr")))}
 
     # Rule-flagged exceptions: reason codes + source rows, never buried in prose.
     exceptions = []
@@ -635,8 +675,8 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
             addq(f"exc_{e['code']}_{e.get('account') or 'x'}", e["amount"], cite=e.get("cite"),
                  label=f"{EXC_TH.get(e['code'], e['code'])}: {by_code.get(e.get('account'), {}).get('name') or e.get('account') or ''}".strip())
     quotable["rows_used"] = f"{len(cur_rows):,}"
-    figures["rows_used"] = {"text": quotable["rows_used"], "label": "จำนวนรายการที่ใช้คำนวณ",
-                            "cite": cites.add("จำนวนรายการที่ใช้คำนวณ", len(cur_rows), cur_rows, "นับรายการของงวดที่ใช้คำนวณ")}
+    figures["rows_used"] = {"text": quotable["rows_used"], "label": _printed("cite.rows_used"),
+                            "cite": cites.add(lambda: W("cite.rows_used"), len(cur_rows), cur_rows, W("formula.rows_used"))}
     # Account codes in the tables the model sees are identifiers it may cite
     # ("บัญชี 5300-01"), not figures; the guard skips exactly these.
     quotable_ids = sorted({m["code"] for m in top_movements} | {a["code"] for a in accounts}

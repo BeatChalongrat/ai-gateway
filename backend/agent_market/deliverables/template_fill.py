@@ -47,6 +47,7 @@ from pptx import Presentation
 import docx_generator as dg  # /sandbox/scripts — shared
 import excel_executor as ex  # /sandbox/scripts — shared
 
+from ..engine.words import SHARED as S
 from . import form_regions as fr  # AM12: the rows of a table of items, a blank drawn as a line
 
 KINDS = {".docx": "docx", ".xlsx": "xlsx", ".xlsm": "xlsx", ".pptx": "pptx", ".pdf": "pdf"}  # AM12: a PDF with fields (pdf_form)
@@ -779,7 +780,7 @@ def cut_off(src: str, out: str) -> list[str]:
                                 size = r.font.size.pt
                     lines = sum(wrap_lines(p.text, "Sarabun", size, max(width_pt - 10.8, 10)) for p in ca.paragraphs if p.text)
                     if lines * size * LINE > height_pt * 1.02:
-                        found.append(f"ตาราง {ti + 1} แถว {ri + 1} ช่อง {ci + 1}")
+                        found.append(S("form.cut.cell", table=ti + 1, row=ri + 1, cell=ci + 1))
     elif kind == "pptx":
         before, after = Presentation(src), Presentation(out)
         for si, (sb, sa) in enumerate(zip(before.slides, after.slides), start=1):
@@ -790,7 +791,7 @@ def cut_off(src: str, out: str) -> list[str]:
                 if _squash(old.get(sh.shape_id)) == _squash(sh.text_frame.text) or sh.width is None or sh.height is None:
                     continue
                 if frame_overflow(sh.text_frame, sh.width, sh.height, "Sarabun") > 1.02:
-                    found.append(f"สไลด์ {si} “{(sh.name or '').strip()}”")
+                    found.append(S("form.cut.shape", slide=si, name=(sh.name or "").strip()))
     return found
 
 
@@ -831,7 +832,7 @@ def inspect(path: str, reads: tuple | list = ()) -> dict[str, Any]:
     # AM8: refused before work starts, each with its reason — never silently left in the delivered file
     out["refused"] = [{"key": f"{part}:{k}", "label": k, "reason": "unsupported_location", "where": part}
                       for k, part, _ in found if not part.startswith(supported)]
-    out["refused"] += [{"key": c, "label": f"กราฟ {i}", "reason": "chart_not_updated", "where": c}
+    out["refused"] += [{"key": c, "label": S("form.chart.n", i=i), "reason": "chart_not_updated", "where": c}
                        for i, c in enumerate(chart_parts(path), start=1)]
     if kind == "docx":
         doc = Document(path)

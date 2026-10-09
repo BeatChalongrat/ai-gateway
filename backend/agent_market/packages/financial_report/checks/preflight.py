@@ -17,20 +17,23 @@ import datetime as _dt
 from collections import Counter
 from decimal import Decimal
 
+from ....engine import words as _words
 from ....engine.findings import FORBIDDEN_WORDS, Finding, finding
-from ....engine.headers import FIELD_LABEL_TH
+from ....engine.headers import FIELD_LABEL
 from ....engine.ledger import ParsedFile, apply_convention, indicator_guess
 from ....engine.thai import (
-    MONTHS_TH_ABBR, find_period_in_text, fmt_int, fmt_money, parse_date, period_bounds, period_label_th,
-    prev_period, year_style,
+    find_period_in_text, fmt_int, fmt_money, parse_date, period_bounds, prev_period, year_style,
 )
 from ..scripts.rules import (
     GROUP_LABEL, NOT_PL, Chart, apply_date_orders, chart_for, date_order_answer, group_of, range_default,
 )
+from ..words import W
+from ..words import columns as _columns
 
 LEDGER_TYPES = ("gl", "tb", "pl")
-DOC_TYPE_TH = {"gl": "บัญชีแยกประเภท", "tb": "งบทดลอง", "pl": "งบกำไรขาดทุน", "budget": "งบประมาณ",
-               "unknown": "ไม่ใช่ไฟล์บัญชี", "unreadable": "เปิดไม่ได้"}
+# what a file was read as, said when it is read (a table keeps keys: engine/words.py)
+DOC_TYPE = W.table({"gl": "doc.gl", "tb": "doc.tb", "pl": "doc.pl", "budget": "doc.budget",
+               "unknown": "doc.unknown", "unreadable": "doc.unreadable"})
 
 
 # ── roles ──────────────────────────────────────────────────────────────────
@@ -97,15 +100,14 @@ def check_files(files, roles) -> list[Finding]:
     for pf in files:
         if roles.get(pf.name) != "unknown":
             continue
-        what = DOC_TYPE_TH.get(pf.doc_type, "ไม่ใช่ไฟล์บัญชี")
+        what = DOC_TYPE.get(pf.doc_type, DOC_TYPE["unknown"])
         cols = [h for h in (pf.header.headers if pf.header else []) if h][:6]
         out.append(finding(
-            "wrong_document_type", "blocking", "preflight", "ไฟล์ผิดชนิด",
-            f"ไฟล์ “{pf.name}” ดูไม่ใช่บัญชีแยกประเภท งบทดลอง หรืองบกำไรขาดทุน"
-            + (" (เปิดไฟล์ไม่ได้)" if pf.doc_type == "unreadable" else "")
-            + " จะให้ทำอย่างไรกับไฟล์นี้ครับ",
-            [("ไม่ใช้ไฟล์นี้ในรอบนี้", "ignore", "ข้ามไฟล์นี้ แล้วทำต่อด้วยไฟล์อื่น"),
-             ("ส่งไฟล์ที่ถูกต้องแทน", "replace", "ผมจะรอไฟล์ใหม่ก่อนเริ่มคำนวณ")],
+            "wrong_document_type", "blocking", "preflight", W("card.wrong_file.header"),
+            (W("card.wrong_file.question.unreadable", name=pf.name) if pf.doc_type == "unreadable"
+             else W("card.wrong_file.question", name=pf.name)),
+            [(W("card.wrong_file.ignore"), "ignore", W("card.wrong_file.ignore.d")),
+             (W("card.wrong_file.replace"), "replace", W("card.wrong_file.replace.d"))],
             "ignore",
             evidence={"file": pf.name, "columns": cols, "rows": pf.data_rows, "detected": what,
                       "error": pf.error},
@@ -122,25 +124,24 @@ def check_missing(files, roles, message: str, answers: dict | None = None) -> li
         wants_budget = any(w in low for w in ("งบประมาณ", "budget")) and answers.get("missing_file") != "proceed_without"
         if wants_budget and not any(r == "budget" for r in roles.values()):
             out.append(finding(
-                "missing_file", "blocking", "preflight", "ขาดไฟล์",
-                "คุณขอให้เทียบกับงบประมาณ แต่ยังไม่มีไฟล์งบประมาณครับ",
-                [("ไม่มีไฟล์นี้ ทำเท่าที่มี", "proceed_without", "รายงานจะระบุว่าไม่ได้เทียบกับงบประมาณ"),
-                 ("รอก่อน จะอัปโหลดให้", "wait", "ผมจะรอไฟล์ แล้วทำต่อจากจุดนี้")],
+                "missing_file", "blocking", "preflight", W("card.missing.header"),
+                W("card.missing.budget.question"),
+                [(W("card.missing.budget.without"), "proceed_without", W("card.missing.budget.without.d")),
+                 (W("card.missing.wait"), "wait", W("card.missing.wait.d"))],
                 "wait", kind="request_files", subject="budget",
-                request=[{"role": "budget", "label": "ไฟล์งบประมาณของงวดนี้",
-                          "why": "ใช้เทียบค่าใช้จ่ายจริงกับงบ", "required": False, "accept": [".xlsx", ".csv"]}],
+                request=[{"role": "budget", "label": W("ask.budget.label"),
+                          "why": W("ask.budget.why"), "required": False, "accept": [".xlsx", ".csv"]}],
                 facts={"missing": "budget"},
             ))
         return out
     return [finding(
-        "missing_file", "blocking", "preflight", "ขาดไฟล์",
-        "ยังไม่มีบัญชีแยกประเภท (GL) งบทดลอง หรืองบกำไรขาดทุนของเดือนที่จะปิดครับ "
-        "ผมต้องใช้ไฟล์นี้ก่อนจึงจะเริ่มได้",
-        [("รอก่อน จะอัปโหลดให้", "wait", "ผมจะรอไฟล์ แล้วทำต่อจากจุดนี้"),
-         ("ยกเลิกรอบนี้", "cancel", "ปิดรอบนี้ไว้ก่อน")],
+        "missing_file", "blocking", "preflight", W("card.missing.header"),
+        W("card.missing.primary.question"),
+        [(W("card.missing.wait"), "wait", W("card.missing.wait.d")),
+         (W("card.missing.cancel"), "cancel", W("card.missing.cancel.d"))],
         "wait", kind="request_files", subject="primary",
-        request=[{"role": "primary", "label": "บัญชีแยกประเภท (GL) ของเดือนที่จะปิด",
-                  "why": "ตัวเลขทั้งรายงานคำนวณจากไฟล์นี้", "required": True, "accept": [".xlsx", ".csv"]}],
+        request=[{"role": "primary", "label": W("ask.primary.label"),
+                  "why": W("ask.primary.why"), "required": True, "accept": [".xlsx", ".csv"]}],
         facts={"missing": "primary"},
     )]
 
@@ -164,19 +165,17 @@ def check_mapping(primary: ParsedFile, answers: dict) -> list[Finding]:
     if not inferred and not missing:
         return []
     proposal = {f: hm.headers[hm.fields[f]] for f in hm.fields if f in required or hm.source.get(f) == "inferred"}
-    guessed = ", ".join(f"{FIELD_LABEL_TH.get(f, f)} = “{hm.headers[hm.fields[f]]}”"
+    guessed = ", ".join(f"{FIELD_LABEL.get(f, f)} = “{hm.headers[hm.fields[f]]}”"
                         for f in required if hm.source.get(f) == "inferred")
-    q = (f"ผมไม่รู้จักชื่อคอลัมน์บางตัวในไฟล์ “{primary.name}” จึงเดาจากค่าที่อยู่ในคอลัมน์: {guessed} "
-         "ถูกต้องไหมครับ")
+    q = (W("card.columns.guessed", name=primary.name, guessed=guessed))
     if missing:
-        q = (f"ในไฟล์ “{primary.name}” ผมหาคอลัมน์ "
-             + ", ".join(f"“{FIELD_LABEL_TH.get(f, f)}”" for f in missing)
-             + " ไม่เจอ ช่วยบอกผมว่าอยู่คอลัมน์ไหนครับ")
-    options = [("ถูกต้อง ใช้ตามนี้", "accept", "จำการจับคู่นี้ไว้ใช้รอบหน้า")] if not missing else []
-    options += [("ขอเลือกคอลัมน์เอง", "manual", "เปิดหน้าจับคู่คอลัมน์ เลือกด้วยการคลิก"),
-                ("ส่งไฟล์ใหม่แทน", "replace", "ส่งออกไฟล์จากโปรแกรมบัญชีใหม่ แล้วส่งมาแทน")]
+        q = (W("card.columns.missing", name=primary.name,
+              columns=", ".join(f"“{FIELD_LABEL.get(f, f)}”" for f in missing)))
+    options = [(W("card.columns.accept"), "accept", W("card.columns.accept.d"))] if not missing else []
+    options += [(W("card.columns.manual"), "manual", W("card.columns.manual.d")),
+                (W("card.columns.replace"), "replace", W("card.columns.replace.d"))]
     return [finding(
-        "unmapped_column", "blocking", "preflight", "จับคู่คอลัมน์",
+        "unmapped_column", "blocking", "preflight", W("card.columns.header"),
         q, options, options[0][1],
         evidence={"file": primary.name, "sheet": primary.sheet, "header_row": hm.header_row + 1,
                   "proposal": proposal, "headers": [h for h in hm.headers if h],
@@ -201,29 +200,26 @@ def check_unreadable_dates(files, roles, answers: dict) -> tuple[list[Finding], 
         if key in answers:
             if answers[key] == "exclude":
                 assumptions.append({"code": "unreadable_dates", "source": "answer", "value": "exclude",
-                                    "text": f"ไม่นับ {fmt_int(n)} แถวใน “{pf.name}” ที่อ่านวันที่ไม่ได้ "
-                                            f"(รวม {fmt_money(amount)} บาท)"})
+                                    "text": W("assume.unreadable_dates", n=fmt_int(n), name=pf.name, amount=fmt_money(amount))})
             continue
         examples = []
         for s in pf.unreadable_date_samples:
             if s[1] not in examples:
                 examples.append(s[1])
         out.append(finding(
-            "unreadable_dates", "blocking", "preflight", "อ่านวันที่ไม่ได้",
-            f"ในไฟล์ “{pf.name}” มี {fmt_int(n)} แถวที่มีรหัสบัญชีและจำนวนเงิน แต่ผมอ่านวันที่ไม่ออก "
-            f"เช่น {', '.join('“' + e + '”' for e in examples[:3])} ถ้าคำนวณต่อ แถวเหล่านี้จะไม่ถูกนับ "
-            f"รวม {fmt_money(amount)} บาท จะให้ทำอย่างไรครับ",
-            [("ส่งไฟล์ใหม่ที่วันที่เป็น วัน/เดือน/ปี", "replace", "ส่งออกจากโปรแกรมบัญชีใหม่ แล้วผมตรวจใหม่ตั้งแต่ต้น"),
-             ("ไม่นับแถวเหล่านี้ คำนวณต่อ", "exclude", f"ตัวเลขจะขาดไป {fmt_money(amount)} บาท และรายงานจะบอกไว้")],
+            "unreadable_dates", "blocking", "preflight", W("card.unreadable_dates.header"),
+            W("card.unreadable_dates.question", name=pf.name, n=fmt_int(n), examples=", ".join(("“" + e + "”" for e in examples[:3])), amount=fmt_money(amount)),
+            [(W("card.unreadable_dates.replace"), "replace", W("card.unreadable_dates.replace.d")),
+             (W("card.unreadable_dates.exclude"), "exclude", W("card.unreadable_dates.exclude.d", amount=fmt_money(amount)))],
             "replace",
             evidence={"file": pf.name, "rows": pf.unreadable_date_samples[:20],
-                      "columns": ["แถว", "วันที่ในไฟล์", "บัญชี", "จำนวนเงิน"]},
+                      "columns": _columns("col.row", "col.date_in_file", "col.account", "col.amount")},
             subject=pf.name, facts={"file": pf.name, "rows": n, "amount": str(amount)},
         ))
     return out, assumptions
 
 
-_ORDER_TH = {"dmy": "วัน/เดือน/ปี", "mdy": "เดือน/วัน/ปี"}
+_ORDER = W.table({"dmy": "order.dmy", "mdy": "order.mdy"})
 
 
 def _quotable(text: str) -> bool:
@@ -231,10 +227,6 @@ def _quotable(text: str) -> bool:
     only when the card validator will accept them ('Shipping' holds 'pin');
     otherwise they stay in the evidence."""
     return bool(text) and not any(w in text.lower() for w in FORBIDDEN_WORDS)
-
-
-def _th_date(d: _dt.date) -> str:
-    return f"{d.day} {MONTHS_TH_ABBR[d.month - 1]} {d.year + 543}"
 
 
 def check_date_order(files, roles, answers: dict, defaults: dict, message: str,
@@ -250,12 +242,11 @@ def check_date_order(files, roles, answers: dict, defaults: dict, message: str,
         info = pf.date_order
         if not info or roles.get(pf.name) not in ("primary", "prior"):
             continue
-        column = info.get("column") or "วันที่"
+        column = info.get("column") or W("col.date")
         if info.get("source") == "sap":
             assumptions.append({
                 "code": "date_order", "source": "rule", "value": info["order"],
-                "text": f"อ่านวันที่ในคอลัมน์ “{column}” ของ “{pf.name}” เป็น{_ORDER_TH[info['order']]} "
-                        "ตามรูปแบบวันที่ของ SAP (ทุกวันที่มีวันและเดือนไม่เกิน 12 จึงดูจากตัวเลขอย่างเดียวไม่ได้)"})
+                "text": W("assume.date_order.sap", column=column, name=pf.name, order=_ORDER[info["order"]])})
             continue
         if info.get("source") != "undecided":
             continue
@@ -263,7 +254,7 @@ def check_date_order(files, roles, answers: dict, defaults: dict, message: str,
         if order:
             if src == "remembered":
                 assumptions.append({"code": "date_order", "source": "remembered", "value": order,
-                                    "text": f"ใช้ค่าที่จำไว้: อ่านวันที่ในคอลัมน์ “{column}” เป็น{_ORDER_TH[order]}"})
+                                    "text": W("assume.date_order.remembered", column=column, order=_ORDER[order])})
             continue
         applied = info.get("applied") or "dmy"
         readings: dict[str, Counter] = {"dmy": Counter(), "mdy": Counter()}
@@ -285,17 +276,15 @@ def check_date_order(files, roles, answers: dict, defaults: dict, message: str,
         options = []
         for o in (best, "mdy" if best == "dmy" else "dmy"):
             top = readings[o].most_common(1)
-            where = (f"รายการส่วนใหญ่อยู่ใน{period_label_th(top[0][0])} ({fmt_int(top[0][1])} จาก "
-                     f"{fmt_int(sum(readings[o].values()))} รายการ)") if top else ""
-            ex = f"“{example}” = {_th_date(parse_date(example, o))} · " if example else ""
-            options.append((_ORDER_TH[o], o, ex + where))
+            where = (W("card.date_order.where", month=_words.period(top[0][0]), n=fmt_int(top[0][1]), total=fmt_int(sum(readings[o].values())))) if top else ""
+            ex = f"“{example}” = {_words.date(parse_date(example, o))} · " if example else ""
+            options.append((_words.cap(_ORDER[o]), o, ex + where))
+        which = (W("card.date_order.which.column", column=column, name=pf.name) if _quotable(column)
+                 else W("card.date_order.which", name=pf.name))
         out.append(finding(
-            "date_order", "blocking", "preflight", "ลำดับวันที่",
-            "วันที่" + (f"ในคอลัมน์ “{column}” " if _quotable(column) else "")
-            + f"ของไฟล์ “{pf.name}” ทุกแถวมีวันและเดือนไม่เกิน 12 "
-            + (f"เช่น {', '.join('“' + s + '”' for s in samples)} " if samples else "")
-            + "จึงอ่านได้ทั้งแบบวัน/เดือน/ปี และเดือน/วัน/ปี และไฟล์ไม่ได้บอกว่าใช้แบบไหน "
-            "ถ้าอ่านผิด รายการจะไปอยู่ผิดเดือน ไฟล์นี้เขียนวันที่แบบไหนครับ",
+            "date_order", "blocking", "preflight", W("card.date_order.header"),
+            (W("card.date_order.question.samples", which=which, samples=", ".join("“" + s + "”" for s in samples)) if samples
+             else W("card.date_order.question", which=which)),
             options, best,
             evidence={"file": pf.name, "column": column, "samples": samples,
                       "months": {o: dict(sorted(c.items())) for o, c in readings.items()},
@@ -306,9 +295,9 @@ def check_date_order(files, roles, answers: dict, defaults: dict, message: str,
 
 
 # what each P&L line holds, for a person choosing one (AM3: the options had no description)
-GROUP_HINT = {"revenue": "รายได้หลักจากการขายสินค้าหรือให้บริการ", "other_income": "เช่น ดอกเบี้ยรับ กำไรจากอัตราแลกเปลี่ยน",
-              "cost_of_sales": "ต้นทุนของสินค้าหรือบริการที่ขาย", "operating_expenses": "เช่น เงินเดือน ค่าเช่า ค่าโฆษณา ค่าสาธารณูปโภค",
-              "finance_costs": "เช่น ดอกเบี้ยจ่าย ค่าธรรมเนียมเงินกู้", "income_tax": "ภาษีเงินได้นิติบุคคล"}
+GROUP_HINT = W.table({"revenue": "hint.revenue", "other_income": "hint.other_income",
+              "cost_of_sales": "hint.cost_of_sales", "operating_expenses": "hint.operating_expenses",
+              "finance_costs": "hint.finance_costs", "income_tax": "hint.income_tax"})
 
 _ACCOUNT_OPTIONS = {
     "income": ("other_income", "revenue"),
@@ -331,18 +320,18 @@ def check_accounts(chart: Chart) -> list[Finding]:
         if by_number and by_number not in cands:
             cands = cands[:2] + [by_number]
         options = [(GROUP_LABEL[g], g, GROUP_HINT.get(g, "")) for g in cands[:3]]
-        options.append(("ไม่ใช่บัญชีกำไรขาดทุน", NOT_PL, "ไม่นับในงบกำไรขาดทุน"))
-        why = ("ชื่อบัญชีกับเลขบัญชีบอกคนละหมวด" if by_number and p["family"]
-               else "ทั้งเลขบัญชีและชื่อบัญชีไม่พอจะบอกได้ว่าอยู่หมวดไหน")
+        options.append((W("card.account_group.not_pl"), NOT_PL, W("card.account_group.not_pl.d")))
+        account = (W("card.account_group.account.named", code=code, name=name) if _quotable(name)
+                   else W("card.account_group.account", code=code))
         out.append(finding(
-            "account_group", "blocking", "preflight", "หมวดบัญชี",
-            f"บัญชี {code}" + (f" “{name}”" if _quotable(name) else "") + " ไม่อยู่ในผังบัญชีมาตรฐานของไทย "
-            f"และ{why}ในงบกำไรขาดทุน (ในไฟล์มี {fmt_int(p['rows'])} รายการ รวม {fmt_money(p['amount'])} บาท) "
-            "จะให้นับเป็นหมวดไหนครับ",
+            "account_group", "blocking", "preflight", W("card.account_group.header"),
+            (W("card.account_group.question.conflict", account=account, rows=fmt_int(p["rows"]), amount=fmt_money(p["amount"]))
+             if by_number and p["family"] else
+             W("card.account_group.question.unknown", account=account, rows=fmt_int(p["rows"]), amount=fmt_money(p["amount"]))),
             options, options[0][1],
             evidence={"file": p["file"], "account": code, "name": name, "count": p["rows"],
                       "amount": str(p["amount"]), "rows": p["sample"],
-                      "columns": ["แถว", "วันที่", "คำอธิบาย", "จำนวนเงิน"]},
+                      "columns": _columns("col.row", "col.date", "col.description", "col.amount")},
             subject=code, facts={"account": code, "name": name},
         ))
     return out
@@ -355,11 +344,10 @@ def chart_assumptions(chart: Chart) -> list[dict]:
     by_name = [(code, chart.groups[d]) for d, code in sorted(chart.codes.items())
                if chart.why.get(d) == "name" and chart.groups.get(d)]
     named = ", ".join(f"{c} {chart.names.get(c, '')}".strip() + f" ({GROUP_LABEL[g]})" for c, g in by_name[:6])
-    text = ("ผังบัญชีในไฟล์ไม่ใช่ผังมาตรฐานของไทย ผมจัดหมวดตามเลขหลักแรก (4 รายได้ 5 ต้นทุนขาย "
-            "6 ค่าใช้จ่ายในการขายและบริหาร) และชื่อบัญชี" if chart.style == "extended"
-            else "บางบัญชีไม่อยู่ในผังบัญชีมาตรฐานของไทย ผมจัดหมวดบัญชีเหล่านั้นตามชื่อบัญชี")
+    text = (W("assume.chart.extended") if chart.style == "extended"
+            else W("assume.chart.by_name"))
     if named:
-        text += f" โดยใช้ชื่อบัญชีกับ {named}"
+        text = W("assume.chart.named", text=text, named=named)
     return [{"code": "chart_of_accounts", "source": "rule", "value": chart.style, "text": text}]
 
 
@@ -379,9 +367,8 @@ def _dc_example(pf: ParsedFile, chart: Chart | None) -> str:
     the credit side), so the question can be answered by looking at the file rather than by knowing the export."""
     for r in pf.rows:
         if r.raw_indicator and group_of(r.account_code, chart) == "revenue":
-            shown = {"+": "เป็นเลขบวก", "-": "เป็นเลขลบ"}.get(r.raw_indicator, f"มีค่า “{r.raw_indicator}”")
-            return (f" ตัวอย่างจากไฟล์ของคุณ: แถว {r.row} บัญชี {r.account_code} เป็นบัญชีรายได้ ซึ่งปกติบันทึกฝั่งเครดิต "
-                    f"และในไฟล์{shown}")
+            shown = {"+": W("card.dc.shown.plus"), "-": W("card.dc.shown.minus")}.get(r.raw_indicator, W("card.dc.shown.value", value=r.raw_indicator))
+            return (" " + W("card.dc.example", row=r.row, account=r.account_code, side=W("word.cr"), shown=shown))
     return ""
 
 
@@ -407,28 +394,26 @@ def check_dc(pf: ParsedFile, defaults: dict, answers: dict, chart: Chart | None 
             guess, flipped = flipped, guess
         deb = next((k for k, v in guess.items() if v == "debit"), "?")
         cre = next((k for k, v in guess.items() if v == "credit"), "?")
-        q = (f"คอลัมน์ “{header}” มีค่าเป็น {deb} กับ {cre} ผมเดาว่า {deb} = เดบิต และ {cre} = เครดิต "
-             "แต่ขอให้ยืนยันก่อน เพราะถ้าเดาผิด ตัวเลขทั้งรายงานจะกลับข้าง (รายได้จะกลายเป็นติดลบ)"
+        q = (W("card.dc.indicator.question", header=header, deb=deb, cre=cre)
              + _dc_example(pf, chart))
-        options = [(f"ใช่ {deb} คือเดบิต", guess, f"รายได้รวมจะเป็น {fmt_money(revenue_under(guess))}"),
-                   (f"ไม่ใช่ {deb} คือเครดิต", flipped, f"รายได้รวมจะเป็น {fmt_money(revenue_under(flipped))}")]
+        options = [(W("card.dc.indicator.yes", deb=deb), guess, W("card.dc.revenue", amount=fmt_money(revenue_under(guess)))),
+                   (W("card.dc.indicator.no", deb=deb, side=W("word.cr")), flipped, W("card.dc.revenue", amount=fmt_money(revenue_under(flipped))))]
         default = guess
     else:
         pos_d = revenue_under("positive_debit")
-        q = (f"คอลัมน์ “{header}” มีทั้งเลขบวกและเลขลบ ผมเดาว่าเลขบวก = เดบิต เลขลบ = เครดิต "
-             "ขอให้ยืนยันก่อนเริ่มคำนวณครับ ถ้าเดาผิด รายได้ในรายงานจะกลายเป็นติดลบ" + _dc_example(pf, chart))
+        q = (W("card.dc.signed.question", header=header) + _dc_example(pf, chart))
         a, b = ("positive_debit", "positive_credit") if pos_d >= 0 else ("positive_credit", "positive_debit")
-        label = {"positive_debit": "บวก = เดบิต", "positive_credit": "บวก = เครดิต"}
-        options = [(f"ใช่ {label[a]}", a, f"รายได้รวมจะเป็น {fmt_money(revenue_under(a))}"),
-                   (label[b], b, f"รายได้รวมจะเป็น {fmt_money(revenue_under(b))}")]
+        label = {"positive_debit": W("card.dc.signed.positive", side=W("word.dr")), "positive_credit": W("card.dc.signed.positive", side=W("word.cr"))}
+        options = [(W("card.dc.signed.yes", label=label[a]), a, W("card.dc.revenue", amount=fmt_money(revenue_under(a)))),
+                   (_words.cap(label[b]), b, W("card.dc.revenue", amount=fmt_money(revenue_under(b))))]
         default = a
     ev_rows = [[r.row, r.account_code, r.description[:40], str(r.debit + r.credit), r.raw_indicator]
                for r in pf.rows[:5]]
     return [finding(
-        "ambiguous_debit_credit", "blocking", "preflight", "เดบิต/เครดิต",
+        "ambiguous_debit_credit", "blocking", "preflight", W("card.dc.header"),
         q, options, default,
         evidence={"file": pf.name, "column": header, "values": pf.indicator_values[:4], "sample_rows": ev_rows,
-                  "sample_columns": ["แถว", "บัญชี", "คำอธิบาย", "จำนวนเงิน", header]},
+                  "sample_columns": [*_columns("col.row", "col.account", "col.description", "col.amount"), header]},
         rememberable=True, subject=header, facts={"column": header},
     )]
 
@@ -446,16 +431,16 @@ def check_period(primary: ParsedFile, period: str | None, source: str, answers: 
             opts_periods = sorted(months, reverse=True)[:3]
         if not opts_periods:
             opts_periods = []
-        options = [(period_label_th(p), p, f"{fmt_int(months.get(p, 0))} รายการ") for p in opts_periods]
+        options = [(_words.period(p), p, W("card.period.entries", n=fmt_int(months.get(p, 0)))) for p in opts_periods]
         if len(options) < 2:
             # Offer the neighbouring month so the card is always a real choice.
             base = opts_periods[0] if opts_periods else None
             if base:
-                options.append((period_label_th(prev_period(base)), prev_period(base), "เดือนก่อนหน้า"))
+                options.append((_words.period(prev_period(base)), prev_period(base), W("card.period.previous")))
         if len(options) >= 2:
             out.append(finding(
-                "period_undetermined", "blocking", "preflight", "งวดบัญชี",
-                f"ไฟล์ “{primary.name}” มีรายการหลายเดือน และผมไม่แน่ใจว่าจะให้ปิดงบเดือนไหนครับ",
+                "period_undetermined", "blocking", "preflight", W("card.period.header"),
+                W("card.period.question", name=primary.name),
                 options[:4], options[0][1],
                 evidence={"file": primary.name, "months": {p: n for p, n in sorted(months.items())}},
                 subject=primary.name, facts={"months": list(months)},
@@ -482,19 +467,18 @@ def check_period(primary: ParsedFile, period: str | None, source: str, answers: 
         return out, assumptions
     # AM4: never answered from an earlier round — September's "leave the October rows out" must not
     # quietly shape October. The question is about these rows, so it is not rememberable.
-    label = period_label_th(period).split(" ")[0]
-    others = ", ".join(period_label_th(p).split(" ")[0] for p in stray_months)
+    label = _words.period(period).split(" ")[0]
+    others = ", ".join(_words.period(p).split(" ")[0] for p in stray_months)
     out.append(finding(
-        "period_mixed", "blocking", "preflight", "รายการนอกงวด",
-        f"มี {fmt_int(len(stray))} รายการลงวันที่ {date_span} ({others}) ปนมาในไฟล์ "
-        f"รวมเป็นเงิน {fmt_money(total)} บาท (ฝั่งเดบิต) จะให้นับเข้างวด{label}หรือตัดออกครับ",
-        [(f"ตัดออก ใช้เฉพาะ {period_label_th(period).split(' ')[0]}", "exclude", "แนะนำ: ตัวเลขตรงกับงวดที่ปิด"),
-         ("นับรวมด้วย", "include", "รายการเหล่านี้จะถูกนับเป็นของงวดนี้")],
+        "period_mixed", "blocking", "preflight", W("card.period_mixed.header"),
+        W("card.period_mixed.question", n=fmt_int(len(stray)), date_span=date_span, others=others, total=fmt_money(total), month=label),
+        [(W("card.period_mixed.exclude", month=label), "exclude", W("card.period_mixed.exclude.d")),
+         (W("card.period_mixed.include"), "include", W("card.period_mixed.include.d"))],
         "exclude",
         evidence={"file": primary.name, "count": len(stray), "debit_total": str(total), "months": stray_months,
                   "rows": [[r.row, r.date.isoformat(), r.doc_no, r.account_code, r.description[:40],
                             str(r.debit), str(r.credit)] for r in stray[:50]],
-                  "columns": ["แถว", "วันที่", "เลขที่", "บัญชี", "คำอธิบาย", "เดบิต", "เครดิต"]},
+                  "columns": _columns("col.row", "col.date", "col.doc_no", "col.account", "col.description", "word.dr", "word.cr")},
         rememberable=False, subject="", facts={"count": len(stray), "total": str(total), "period": period},
     ))
     return out, assumptions
@@ -509,20 +493,19 @@ def check_currency(primary: ParsedFile, base: str, answers: dict, defaults: dict
     # rows out is asked again every round.
     if remembered == "amounts_in_base":
         return [], [{"code": "currency_mixed", "source": "remembered", "value": remembered,
-                     "text": "ใช้ค่าที่จำไว้: ยอดเงินของรายการสกุลอื่นในไฟล์เป็นบาทแล้ว"}]
+                     "text": W("assume.currency.remembered")}]
     rows = [r for r in primary.rows if r.currency != base]
-    names = ", ".join(f"{c} {fmt_int(n)} รายการ" for c, n in foreign.items())
+    names = ", ".join(W("card.currency.count", currency=c, n=fmt_int(n)) for c, n in foreign.items())
     return [finding(
-        "currency_mixed", "blocking", "preflight", "สกุลเงิน",
-        f"ในไฟล์มีรายการที่ระบุสกุลเงินอื่นปนอยู่ ({names}) "
-        f"ยอดเงินในคอลัมน์ของรายการเหล่านี้เป็นเงินบาทแล้วหรือยังครับ",
-        [("เป็นบาทแล้ว แค่ระบุสกุลของเอกสาร", "amounts_in_base", "ใช้ยอดตามไฟล์"),
-         ("ยังไม่ใช่บาท ตัดรายการเหล่านี้ออก", "exclude_foreign", f"ตัดออก {fmt_int(len(rows))} รายการ")],
+        "currency_mixed", "blocking", "preflight", W("card.currency.header"),
+        W("card.currency.question", names=names),
+        [(W("card.currency.in_base"), "amounts_in_base", W("card.currency.in_base.d")),
+         (W("card.currency.exclude"), "exclude_foreign", W("card.currency.exclude.d", n=fmt_int(len(rows))))],
         "amounts_in_base",
         evidence={"file": primary.name, "currencies": primary.currencies,
                   "rows": [[r.row, r.date.isoformat() if r.date else None, r.account_code, r.description[:40],
                             str(r.debit), str(r.credit), r.currency] for r in rows[:50]],
-                  "columns": ["แถว", "วันที่", "บัญชี", "คำอธิบาย", "เดบิต", "เครดิต", "สกุล"]},
+                  "columns": _columns("col.row", "col.date", "col.account", "col.description", "word.dr", "word.cr", "col.currency")},
         rememberable=True, facts={"foreign": foreign},
     )], []
 
@@ -532,10 +515,10 @@ def check_cosmetic(primary: ParsedFile, files, answers) -> list[Finding]:
     names_known = bool(primary.account_names) or any(f.account_names for f in files if f is not primary)
     if not names_known and "account_name_missing" not in answers:
         out.append(finding(
-            "account_name_missing", "cosmetic", "preflight", "ชื่อบัญชี",
-            "ไฟล์นี้มีแต่รหัสบัญชี ไม่มีชื่อบัญชี ในรายงานจะให้แสดงอย่างไรครับ",
-            [("แสดงรหัสบัญชีอย่างเดียว", "code_only", "เช่น 5300-01"),
-             ("ใช้ชื่อหมวดตามผังบัญชีมาตรฐาน", "standard_names", "เช่น 5300-01 ค่าใช้จ่ายในการบริหาร")],
+            "account_name_missing", "cosmetic", "preflight", W("card.account_name.header"),
+            W("card.account_name.question"),
+            [(W("card.account_name.code_only"), "code_only", W("card.account_name.code_only.d")),
+             (W("card.account_name.standard"), "standard_names", W("card.account_name.standard.d"))],
             "code_only", evidence={"file": primary.name, "accounts": sorted({r.account_code for r in primary.rows})[:20]},
             rememberable=True,
         ))
@@ -543,9 +526,9 @@ def check_cosmetic(primary: ParsedFile, files, answers) -> list[Finding]:
     if style == "mixed" and "year_convention_mixed" not in answers:
         be_n = sum(1 for t in primary.raw_date_texts if isinstance(t, str) and t.strip()[-4:].startswith("25"))
         out.append(finding(
-            "year_convention_mixed", "cosmetic", "preflight", "ปี พ.ศ./ค.ศ.",
-            "วันที่ในไฟล์ใช้ทั้งปี พ.ศ. และ ค.ศ. ปนกัน (ผมอ่านถูกทั้งสองแบบ) ในรายงานจะให้เขียนปีแบบไหนครับ",
-            [("พ.ศ. เช่น กันยายน 2569", "be", ""), ("ค.ศ. เช่น September 2026", "ce", "")],
+            "year_convention_mixed", "cosmetic", "preflight", W("card.year.header"),
+            W("card.year.question"),
+            [(W("card.year.be"), "be", ""), (W("card.year.ce"), "ce", "")],
             "be", evidence={"file": primary.name, "be_texts": be_n, "sample": primary.raw_date_texts[:6]},
             rememberable=True,
         ))

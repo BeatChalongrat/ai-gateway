@@ -16,17 +16,19 @@ from math import gcd
 
 from ....engine.ledger import LedgerRow, account_digits, apply_date_order
 from ....engine.thai import DATE_ORDERS
+from ..words import W
 
 RULES_VERSION = "rules.py@1.1.0"
 
 PL_GROUPS = (
-    # key, Thai label, predicate on the account digits, natural side (+1 credit, -1 debit)
-    ("revenue", "รายได้จากการขายและบริการ", lambda d: d.startswith("41"), 1),
-    ("other_income", "รายได้อื่น", lambda d: d.startswith("4") and not d.startswith("41"), 1),
-    ("cost_of_sales", "ต้นทุนขาย", lambda d: d.startswith("51"), -1),
-    ("operating_expenses", "ค่าใช้จ่ายในการขายและบริหาร", lambda d: d[:2] in ("52", "53", "54", "55", "56", "57"), -1),
-    ("finance_costs", "ต้นทุนทางการเงิน", lambda d: d.startswith("58"), -1),
-    ("income_tax", "ภาษีเงินได้", lambda d: d.startswith("59"), -1),
+    # key, the key of its name (words.py: said when it is read), predicate on the account digits,
+    # natural side (+1 credit, -1 debit)
+    ("revenue", "line.revenue", lambda d: d.startswith("41"), 1),
+    ("other_income", "line.other_income", lambda d: d.startswith("4") and not d.startswith("41"), 1),
+    ("cost_of_sales", "line.cost_of_sales", lambda d: d.startswith("51"), -1),
+    ("operating_expenses", "line.operating_expenses", lambda d: d[:2] in ("52", "53", "54", "55", "56", "57"), -1),
+    ("finance_costs", "line.finance_costs", lambda d: d.startswith("58"), -1),
+    ("income_tax", "line.income_tax", lambda d: d.startswith("59"), -1),
 )
 
 STANDARD_NAMES = {
@@ -37,7 +39,7 @@ STANDARD_NAMES = {
 }
 
 
-GROUP_LABEL = {key: label for key, label, _, _ in PL_GROUPS}
+GROUP_LABEL = W.table({key: name for key, name, _, _ in PL_GROUPS})
 GROUP_FAMILY = {"revenue": "income", "other_income": "income", "cost_of_sales": "expense",
                 "operating_expenses": "expense", "finance_costs": "expense", "income_tax": "expense"}
 NOT_PL = "not_pl"
