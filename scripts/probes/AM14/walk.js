@@ -260,7 +260,8 @@ const ASK = {
   financial_report: { en: "Prepare the September report", th: "ทำรายงานเดือนกันยายน" },
   invoice_processing: { en: "Record these purchase documents", th: "ลงทะเบียนเอกสารซื้อชุดนี้" },
   po_matching: { en: "Check these invoices against the purchase orders", th: "ตรวจใบกำกับภาษีกับใบสั่งซื้อชุดนี้" },
-  procurement: { en: "Buy 20 office chairs with armrests, budget not over 6,000 baht each", th: "ขอซื้อเก้าอี้สำนักงาน 20 ตัว มีที่วางแขน งบไม่เกิน 6,000 บาทต่อตัว" },
+  // (in English: the request the stand-in web has pages for — AM12's own English round; its search answers to these words)
+  procurement: { en: "We need one 48-port PoE network switch, delivered to the head office, 5th floor, Silom Road, Bangkok.", th: "ขอซื้อเก้าอี้สำนักงาน 20 ตัว มีที่วางแขน งบไม่เกิน 6,000 บาทต่อตัว" },
 };
 
 /**
