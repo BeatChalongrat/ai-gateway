@@ -67,8 +67,11 @@ func TestTheShippedPackagesReadInEnglishOnAnEnglishScreen(t *testing.T) {
 		if err := json.Unmarshal(ManifestIn(English, raw), &en); err != nil {
 			t.Fatalf("%s (English): %v", pkg, err)
 		}
-		// a Thai screen gets the manifest exactly as the package wrote it, without the English map
+		// a Thai screen gets the manifest exactly as the package wrote it, without the English map — and
+		// (AM14) without what the package's engine says while it runs, which no screen is sent
 		delete(original, "en")
+		delete(original, "strings")
+		delete(original, "en_by_key")
 		if !reflect.DeepEqual(th, original) {
 			t.Errorf("%s: a Thai screen's manifest is not the package's own", pkg)
 		}

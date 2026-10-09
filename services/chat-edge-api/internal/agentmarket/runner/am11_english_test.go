@@ -139,7 +139,7 @@ func TestAFailureAndACompletionAreWrittenInTheRunsLanguage(t *testing.T) {
 }
 
 const englishComputed = `{"citations":[
- {"id":"c1","label":"Revenue this period","value":"12480300.00","unit":"thb","formula":"the sum of accounts 4xxx",
+ {"id":"c1","label":"Revenue this period","value":"12480300.00","unit":"thb","formula":"the footing of nominals 4xxx",
   "sources":[{"file":"gl.xlsx","sheet":"GL","rows":1200,"cells":"A2:F1201"},{"file":"inv-001.pdf","row":12,"value":"1000.00","note":"credit note"}]},
  {"id":"c2","label":"Net profit margin","value":"22.0","unit":"pct","derived_from":["c1"]},
  {"id":"c3","label":"Documents","value":"12","unit":"count"}]}`
@@ -147,7 +147,7 @@ const englishComputed = `{"citations":[
 func TestAnAnswerFromTheRecordSaysMoneyAsItsLanguageDoes(t *testing.T) {
 	// asked in English of an English run: THB before the amount, the record's headings in English
 	ans, theirs := explainAnswer(am.English, "How is revenue calculated?", []byte(englishComputed))
-	want := "**Revenue this period = THB 12,480,300.00**\n\nHow it is calculated: the sum of accounts 4xxx\n\nSource:\n" +
+	want := "**Revenue this period = THB 12,480,300.00**\n\nHow it is calculated: the footing of nominals 4xxx\n\nSource:\n" +
 		"- File “gl.xlsx”, sheet GL, 1200 rows (A2:F1201)\n- “inv-001.pdf”, row 12: THB 1,000.00 — credit note\n\n" +
 		"This answer is built from this run's record of the source of figures, not by a model — see every row on the “Source of figures” page."
 	if ans != want || hasThai(ans) || len(theirs) == 0 {
@@ -159,13 +159,13 @@ func TestAnAnswerFromTheRecordSaysMoneyAsItsLanguageDoes(t *testing.T) {
 	if shown := am.FromPackage(ans, am.NoText, theirs...).In(am.English); !strings.Contains(shown, "How it is calculated: the … of …") {
 		t.Fatalf("a package's words nobody told the reader were shown: %s", shown)
 	}
-	am.AddEnglishWords("the sum of accounts")
+	am.AddEnglishWords("the footing of nominals")
 	if shown := am.FromPackage(ans, am.NoText, theirs...).In(am.English); shown != ans {
 		t.Fatalf("an English item shows:\n%s", shown)
 	}
 	// the same record, for a Thai run: exactly the lines of before AM11
 	th, _ := explainAnswer(am.Thai, "ทำไม Revenue this period ถึงเป็นแบบนี้", []byte(englishComputed))
-	wantTh := "**Revenue this period = 12,480,300.00 บาท**\n\nวิธีคิด: the sum of accounts 4xxx\n\nมาจาก:\n" +
+	wantTh := "**Revenue this period = 12,480,300.00 บาท**\n\nวิธีคิด: the footing of nominals 4xxx\n\nมาจาก:\n" +
 		"- ไฟล์ “gl.xlsx” ชีต GL 1200 แถว (A2:F1201)\n- “inv-001.pdf” แถว 12: 1,000.00 บาท — credit note\n\n" +
 		"คำตอบนี้สร้างจากบันทึกที่มาของตัวเลขในรอบนี้ ไม่ได้มาจากโมเดล — ดูทุกแถวได้ในหน้า “ที่มาของตัวเลข”"
 	if th != wantTh {
