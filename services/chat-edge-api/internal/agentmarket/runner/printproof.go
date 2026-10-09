@@ -17,8 +17,10 @@ import (
 // that does not trust settings: the finished workbook is printed — converted
 // to PDF by LibreOffice in the doc-converter service, the same renderer the
 // report's PDF comes from — and every row the package lists (its identity:
-// number and description; its amounts as printed) must be found together on
-// one rendered page. A description on page 5 and its amount on page 6 fails.
+// number and description; its amounts) must be found together on one
+// rendered page. A description on page 5 and its amount on page 6 fails.
+// An amount is found as a number among the numbers the page prints, not as
+// a piece of its text (AM14, printnumbers.go).
 
 // printRow is one row the package says carries an amount (workpaper.print_rows).
 type printRow struct {
@@ -26,6 +28,60 @@ type printRow struct {
 	Row      int      `json:"row"`
 	Identity []string `json:"identity"`
 	Amounts  []string `json:"amounts"`
+	// Values (AM14) are the amounts as numbers: plain decimals, at the two decimals a working paper
+	// prints, without the zeros it prints as a dash. An engine older than AM14 does not state them, and
+	// its amounts are read from the form it expected them printed in.
+	Values []string `json:"values"`
+}
+
+// needles are what a row is looked for by on a page: the words of its name, and its numbers. A number
+// is looked for as a number (printnumbers.go), whatever shape the page printed it in.
+func (r printRow) needles() (words []string, numbers []decimal) {
+	var amounts []decimal
+	if r.Values != nil {
+		for _, v := range r.Values {
+			if d, ok := stated(v); ok {
+				amounts = append(amounts, d)
+			} else {
+				words = append(words, thaiKey(v))
+			}
+		}
+	} else {
+		for _, a := range r.Amounts {
+			if strings.TrimSpace(a) == "-" {
+				continue // a zero, printed as a dash: there is no number to find
+			}
+			if d, ok := stated(a); ok {
+				amounts = append(amounts, d)
+			} else {
+				words = append(words, thaiKey(a))
+			}
+		}
+	}
+	for _, t := range r.Identity {
+		if plainNumber.MatchString(strings.TrimSpace(t)) {
+			d, _ := stated(t)
+			// a zero may be printed as a dash, and a 0 found somewhere on a page proves nothing
+			own := d.isZero()
+			// an engine older than AM14 named a summary row by its own amount as well, as the cell holds
+			// it (3600, 3852.004999): it is the amount, and is looked for once
+			for _, a := range amounts {
+				own = own || d.rounded(2) == a.rounded(2)
+			}
+			if !own {
+				numbers = append(numbers, d)
+			}
+			continue
+		}
+		k := []rune(thaiKey(t))
+		if len(k) > identityKeyRunes {
+			k = k[:identityKeyRunes]
+		}
+		if len(k) > 0 {
+			words = append(words, string(k))
+		}
+	}
+	return words, append(numbers, amounts...)
 }
 
 // identityKeyRunes is how much of an identity text is looked for: enough to
@@ -61,33 +117,30 @@ func (rc *runCtx) printProof(ctx context.Context, name, path string, rows []prin
 
 // checkPrinted is the proof itself, on what the converter read back: the
 // PDF's text layer page by page (pdftotext -raw separates pages with a form
-// feed), compared in thaiKey form.
+// feed). A row's words are compared in thaiKey form; its numbers are compared
+// as numbers, with the numbers read off the page (AM14).
 func checkPrinted(chk CheckResult, rows []printRow) gateCheck {
 	pages := strings.Split(chk.RawText, "\f")
 	keys := make([]string, len(pages))
+	printed := make([]map[string]bool, len(pages))
 	for i, p := range pages {
 		keys[i] = thaiKey(p)
+		printed[i] = printedNumbers(p)
 	}
 	var bad []printRow
 	for _, r := range rows {
-		var needles []string
-		for _, t := range r.Identity {
-			k := []rune(thaiKey(t))
-			if len(k) > identityKeyRunes {
-				k = k[:identityKeyRunes]
-			}
-			if len(k) > 0 {
-				needles = append(needles, string(k))
-			}
-		}
-		for _, a := range r.Amounts {
-			needles = append(needles, thaiKey(a))
-		}
+		words, numbers := r.needles()
 		found := false
-		for _, page := range keys {
+		for i, page := range keys {
 			all := true
-			for _, n := range needles {
-				if !strings.Contains(page, n) {
+			for _, w := range words {
+				if !strings.Contains(page, w) {
+					all = false
+					break
+				}
+			}
+			for _, n := range numbers {
+				if !all || !printed[i][n.canonical()] {
 					all = false
 					break
 				}

@@ -1,0 +1,99 @@
+{
+ "what": "A currency beside the number: a symbol before it, a symbol and a space, a code before it, the word after it. The amounts are the same numbers.",
+ "ok": true,
+ "bad": [],
+ "pages": [
+  "สรุปยอด หน้า 1 / 1\n1 ค่าเช่าสำนักงาน ฿3,600.00\n2 ค่าไฟฟ้า ฿ 1,250.50\n3 ค่าบริการอินเทอร์เน็ต THB 980.00\n4 ค่าทำความสะอาด 12,000.00 บาท\n5 Software licence $1,200.50\n6 ค่าปรับคืน (฿450.00)\n7 ส่วนลดรับ -฿75.25\n"
+ ],
+ "rows": [
+  {
+   "sheet": "สรุปยอด",
+   "row": 2,
+   "identity": [
+    "1",
+    "ค่าเช่าสำนักงาน"
+   ],
+   "amounts": [
+    "3,600.00"
+   ],
+   "values": [
+    "3600.00"
+   ]
+  },
+  {
+   "sheet": "สรุปยอด",
+   "row": 3,
+   "identity": [
+    "2",
+    "ค่าไฟฟ้า"
+   ],
+   "amounts": [
+    "1,250.50"
+   ],
+   "values": [
+    "1250.50"
+   ]
+  },
+  {
+   "sheet": "สรุปยอด",
+   "row": 4,
+   "identity": [
+    "3",
+    "ค่าบริการอินเทอร์เน็ต"
+   ],
+   "amounts": [
+    "980.00"
+   ]
+  },
+  {
+   "sheet": "สรุปยอด",
+   "row": 5,
+   "identity": [
+    "4",
+    "ค่าทำความสะอาด"
+   ],
+   "amounts": [
+    "12,000.00"
+   ]
+  },
+  {
+   "sheet": "สรุปยอด",
+   "row": 6,
+   "identity": [
+    "5",
+    "Software licence"
+   ],
+   "amounts": [
+    "1,200.50"
+   ],
+   "values": [
+    "1200.50"
+   ]
+  },
+  {
+   "sheet": "สรุปยอด",
+   "row": 7,
+   "identity": [
+    "6",
+    "ค่าปรับคืน"
+   ],
+   "amounts": [
+    "(450.00)"
+   ],
+   "values": [
+    "-450.00"
+   ]
+  },
+  {
+   "sheet": "สรุปยอด",
+   "row": 8,
+   "identity": [
+    "7",
+    "ส่วนลดรับ"
+   ],
+   "amounts": [
+    "(75.25)"
+   ]
+  }
+ ]
+}

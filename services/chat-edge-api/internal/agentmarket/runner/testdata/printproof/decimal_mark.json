@@ -1,0 +1,113 @@
+{
+ "what": "A renderer set to another locale: a comma for the decimal mark, and a point, a no-break space, a narrow no-break space, a thin space, a plain space or an apostrophe between the thousands. The amounts are the same numbers.",
+ "ok": true,
+ "bad": [],
+ "pages": [
+  "สรุปยอด หน้า 1 / 1\n1 ค่าเช่าสำนักงาน 3.600,00\n2 ค่าไฟฟ้า 1 250,50\n3 ค่าบริการอินเทอร์เน็ต 12 000,00\n4 ค่าทำความสะอาด 1 234 567,89\n5 ค่าขนส่ง 2 345 678,90\n6 ค่าที่ปรึกษา 1'250.50\n7 ค่าธรรมเนียม 12,5\n8 ค่าปรับคืน (1.234,50)\n"
+ ],
+ "rows": [
+  {
+   "sheet": "สรุปยอด",
+   "row": 2,
+   "identity": [
+    "1",
+    "ค่าเช่าสำนักงาน"
+   ],
+   "amounts": [
+    "3,600.00"
+   ],
+   "values": [
+    "3600.00"
+   ]
+  },
+  {
+   "sheet": "สรุปยอด",
+   "row": 3,
+   "identity": [
+    "2",
+    "ค่าไฟฟ้า"
+   ],
+   "amounts": [
+    "1,250.50"
+   ]
+  },
+  {
+   "sheet": "สรุปยอด",
+   "row": 4,
+   "identity": [
+    "3",
+    "ค่าบริการอินเทอร์เน็ต"
+   ],
+   "amounts": [
+    "12,000.00"
+   ],
+   "values": [
+    "12000.00"
+   ]
+  },
+  {
+   "sheet": "สรุปยอด",
+   "row": 5,
+   "identity": [
+    "4",
+    "ค่าทำความสะอาด"
+   ],
+   "amounts": [
+    "1,234,567.89"
+   ]
+  },
+  {
+   "sheet": "สรุปยอด",
+   "row": 6,
+   "identity": [
+    "5",
+    "ค่าขนส่ง"
+   ],
+   "amounts": [
+    "2,345,678.90"
+   ],
+   "values": [
+    "2345678.90"
+   ]
+  },
+  {
+   "sheet": "สรุปยอด",
+   "row": 7,
+   "identity": [
+    "6",
+    "ค่าที่ปรึกษา"
+   ],
+   "amounts": [
+    "1,250.50"
+   ]
+  },
+  {
+   "sheet": "สรุปยอด",
+   "row": 8,
+   "identity": [
+    "7",
+    "ค่าธรรมเนียม"
+   ],
+   "amounts": [
+    "12.50"
+   ],
+   "values": [
+    "12.50"
+   ]
+  },
+  {
+   "sheet": "สรุปยอด",
+   "row": 9,
+   "identity": [
+    "8",
+    "ค่าปรับคืน"
+   ],
+   "amounts": [
+    "(1,234.50)"
+   ],
+   "values": [
+    "-1234.50"
+   ]
+  }
+ ]
+}

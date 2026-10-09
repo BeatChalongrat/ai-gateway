@@ -288,6 +288,16 @@ def money_text(value) -> str:
     return f"({s})" if d < 0 else s
 
 
+def money_value(value) -> str | None:
+    """An amount as a number, at the two decimals the money format prints: ``3600.00`` · ``-1234.50``.
+    None for a zero (it prints as a dash: there is no number on the page) and for what is not a number."""
+    try:
+        d = Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        return None
+    return None if d == 0 else format(d, "f")
+
+
 def _identity_text(value) -> str | None:
     import datetime as _dt
 
@@ -301,9 +311,9 @@ def _identity_text(value) -> str | None:
 
 def print_rows(path: str, limit: int = 3000) -> list[dict]:
     """Every row of every sheet that carries an amount, as the print proof looks for it on the rendered
-    pages: the text of its identity columns (the repeated columns; the first column on the face) and
-    each of its amounts as printed. The runner prints the finished workbook and asserts that each row's
-    identity and amounts are on one page."""
+    pages: the words of its identity columns (the repeated columns; the first column on the face), each
+    of its amounts as a number (``values``) and as the money format prints it (``amounts``). The runner
+    prints the finished workbook and asserts that each row's identity and amounts are on one page."""
     from openpyxl import load_workbook
 
     wb = load_workbook(path)
@@ -312,13 +322,20 @@ def print_rows(path: str, limit: int = 3000) -> list[dict]:
         ident = title_cols(ws) or [1]
         top = (_header_row(ws) or 0) + 1
         for r in range(top, (ws.max_row or 0) + 1):
-            amounts = [money_text(c.value) for c in ws[r] if _money(c)]
-            if not amounts:
+            money = [c for c in ws[r] if _money(c)]
+            if not money:
                 continue
-            words = [t for t in (_identity_text(ws.cell(row=r, column=c).value) for c in ident) if t]
+            amounts = [money_text(c.value) for c in money]
+            # AM14: an amount is stated as a number. The runner reads the numbers a page prints and looks
+            # for these among them; the printed form above stays for a runner older than this engine.
+            values = [v for v in (money_value(c.value) for c in money) if v is not None]
+            # … and a row is named by its words: a summary row holds its amount in a repeated column, and
+            # naming the row by it (3600, as Python writes the cell) was looking for what no page prints
+            named = [ws.cell(row=r, column=c) for c in ident]
+            words = [t for t in (_identity_text(c.value) for c in named if not _money(c)) if t]
             if not words:
                 continue
-            out.append({"sheet": ws.title, "row": r, "identity": words, "amounts": amounts})
+            out.append({"sheet": ws.title, "row": r, "identity": words, "amounts": amounts, "values": values})
             if len(out) >= limit:
                 return out
     return out

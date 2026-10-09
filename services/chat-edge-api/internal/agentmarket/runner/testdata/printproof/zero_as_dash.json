@@ -1,0 +1,42 @@
+{
+ "what": "A zero. The working papers print it as a dash, so there is no number to find and a 0 anywhere would prove nothing: the row is held by its name and its other amounts. An engine older than AM14 also names the total row by its own amount, unrounded (3852.004999): that is the amount the page printed as 3,852.00, and it is looked for once.",
+ "ok": true,
+ "bad": [],
+ "pages": [
+  "ยอดสะสมตาม PO หน้า 1 / 1\nPO6909-008 10 ปากกาลูกลื่น สีน้ำเงิน 360.00 - - 3,852.00\nรวม - 3,852.00\n"
+ ],
+ "rows": [
+  {
+   "sheet": "ยอดสะสมตาม PO",
+   "row": 4,
+   "identity": [
+    "PO6909-008",
+    "10",
+    "ปากกาลูกลื่น สีน้ำเงิน"
+   ],
+   "amounts": [
+    "360.00",
+    "-",
+    "-",
+    "3,852.00"
+   ],
+   "values": [
+    "360.00",
+    "3852.00"
+   ]
+  },
+  {
+   "sheet": "ยอดสะสมตาม PO",
+   "row": 5,
+   "identity": [
+    "รวม",
+    "0",
+    "3852.004999"
+   ],
+   "amounts": [
+    "-",
+    "3,852.00"
+   ]
+  }
+ ]
+}
