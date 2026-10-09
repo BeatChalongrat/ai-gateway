@@ -180,7 +180,7 @@ func BuildProgress(run am.Run, steps []am.Step, now time.Time) am.Progress {
 			}
 			_ = json.Unmarshal(o.Theme, &th)
 			if th.Name != "" {
-				detail = am.Text("ธีม “%s”", am.Typed(th.Name, 60))
+				detail = am.Text("ธีม “%s”", themeName(th.Name))
 			}
 		}
 		add("render", am.Text("สร้างไฟล์ผลลัพธ์"), status(s.Status), detail)
@@ -216,6 +216,21 @@ func BuildProgress(run am.Run, steps []am.Step, now time.Time) am.Progress {
 		}
 	}
 	return p
+}
+
+// themeName is a theme's name as a line names it (AM14). The built-in themes are the product's own
+// (deliverables/theme.py) and are said in the reader's language; any other name is one an organisation
+// gave its own theme, and is shown as they wrote it.
+func themeName(name string) am.Fact {
+	switch name {
+	case "กรมท่า":
+		return am.Words(am.Text("กรมท่า"))
+	case "เขียวหยก":
+		return am.Words(am.Text("เขียวหยก"))
+	case "ถ่านหิน":
+		return am.Words(am.Text("ถ่านหิน"))
+	}
+	return am.Typed(name, 60)
 }
 
 // qualitySummary says what the gate asserted (AM8): how many files were opened again and how many
