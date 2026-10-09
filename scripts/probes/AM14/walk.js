@@ -7,11 +7,12 @@
 //             say is read from the agent's own manifest on disk; the name its row keeps is read from the
 //             database and shown beside it. (An agent the account has not got is installed first, from a
 //             Thai screen.)
-//   run <agent> [en|th] [dir]
+//   run <agent> [en|th] [fresh] [dir]
 //             one run of the agent on a screen in that language, from its page to the finished files (its
 //             own sample files, or the files of a folder that raises questions), and every piece of Thai
 //             the screen showed, sorted: the person's own data, the finished document's own wording, or
-//             neither — which on an English screen is the defect (results/…/thai.json)
+//             neither — which on an English screen is the defect (results/…/thai.json). `fresh`: from the
+//             install on — a new copy installed from that screen, its greeting read first
 //   cleanup   the installs this walk made, by id
 //
 //   SMOKE_TARGET=test node scripts/probes/AM14/walk.js intro
@@ -267,22 +268,41 @@ const ASK = {
  * the finished files — the agent's own sample files, or every file of `files dir` (a set that raises
  * questions) — and what Thai the screen showed, sorted.
  */
-async function run(which, lang = "en", filesDir = "") {
+async function run(which, lang = "en", filesDir = "", fresh = false) {
   const a = AGENTS.find((y) => y.dir === which);
   if (!a) throw new Error(`no agent ${which}: ${AGENTS.map((y) => y.dir).join(" | ")}`);
-  const tag = `run-${which}-${lang}${filesDir ? "-" + path.basename(filesDir) : ""}`;
+  const tag = `run-${which}-${lang}${fresh ? "-fresh" : ""}${filesDir ? "-" + path.basename(filesDir) : ""}`;
   const x = await W.session("web", tag);
   const { page } = x;
   await home(page);
-  await setLanguage(x, "th"); // (an agent the account has not got is installed from a Thai screen)
-  const mine = await installs(x, [a]);
-  const installId = mine[a.slug].id;
-  await home(page);
-  await setLanguage(x, lang);
+  let installId;
+  if (fresh) {
+    // from the install on: a new copy, installed from this screen, in this screen's language
+    await setLanguage(x, lang);
+    const had = ((await api(page, "/installs")).body?.installs || []).some((i) => i.slug === a.slug && i.status !== "removed");
+    installId = had ? await W.installAnother(x, a.slug, a[lang].card) : (await W.installFromMarket(x, a[lang].card)).installId;
+    state.installs = [...new Set([...(state.installs || []), installId])];
+    save();
+    const version = L.csql(`select d.version from agent_market.agent_installs i join agent_market.agent_definitions d on d.id = i.definition_id where i.id='${installId}'`).trim();
+    x.check(version === a.version, `${lang} · ${which}: installed from this screen, on the version of the checkout (${a.version})`, version);
+  } else {
+    await setLanguage(x, "th"); // (an agent the account has not got is installed from a Thai screen)
+    installId = (await installs(x, [a]))[a.slug].id;
+    await home(page);
+    await setLanguage(x, lang);
+  }
   await page.goto(`${WEB()}/chat/agents/i/${installId}`, { waitUntil: "load" });
   await page.waitForSelector('[data-testid="composer-root"]', { timeout: 90000 });
   await L.wait(1500);
   await x.shot("01-page");
+  if (fresh) {
+    // the first thing anyone sees: the greeting and its tick list, in this screen's language
+    const g = page.locator('[data-testid="am-greeting"]').first();
+    await g.waitFor({ state: "attached", timeout: 30000 }).catch(() => {});
+    const text = (await g.count()) ? squash(await g.innerText()) : "";
+    x.check(text.includes(squash(a[lang].greeting)), `${lang} · ${which}: the greeting is the manifest's own, in this language`, text.slice(0, 110));
+    if (lang === "en") x.check(!THAI.test(text), `en · ${which}: not one Thai letter in the greeting block`, thaiIn(text).join(" · ") || "none");
+  }
 
   const dir = path.join(PKG, a.dir);
   const st = JSON.parse(fs.readFileSync(path.join(dir, "self-test.json"), "utf8"));
@@ -390,7 +410,10 @@ async function cleanup() {
 const phase = process.argv[2];
 (async () => {
   if (phase === "intro") await intro();
-  else if (phase === "run") await run(process.argv[3], process.argv[4] || "en", process.argv[5] || "");
+  else if (phase === "run") {
+    const rest = process.argv.slice(5);
+    await run(process.argv[3], process.argv[4] || "en", rest.find((y) => y !== "fresh") || "", rest.includes("fresh"));
+  }
   else if (phase === "cleanup") await cleanup();
-  else throw new Error("intro | run <agent> [en|th] [files dir] | cleanup");
+  else throw new Error("intro | run <agent> [en|th] [fresh] [files dir] | cleanup");
 })().catch((e) => { console.error(e); process.exit(1); });

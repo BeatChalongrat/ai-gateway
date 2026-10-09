@@ -535,15 +535,13 @@ layer uses its terms.
   last carried, a failed run by the sentence a person is told for that reason —
   and the web has a sentence for a code it does not know ("A question the agent
   asks", "A step of the agent"), never the code.
-- **What is not in English yet.** What a package's *engine* writes while it
-  runs: a check's question, the labels of a run's figures, the lines of the
-  quality check on the files card, and every word inside a generated document
-  (about two thousand strings woven into the code that computes and re-reads
-  them). No package lists English in `languages`; an engine step is told the
-  run's language (`"lang"`) and does not act on it yet. On an English screen a
-  run therefore reads English around Thai — everything the platform and the
-  manifest say in English, the engine's own lines and its documents in Thai —
-  and an agent's page says so before a person installs it.
+- **What is not in English yet.** The words *inside a generated document* —
+  a sheet's name, a heading, a label in a file. No package lists English in
+  `languages`, a document is written in Thai whatever the run's language, and
+  an agent's page says so before a person installs it. Everything a package
+  says *to the person* while it runs — a question and its answers, a check's
+  line, why a run ended as it did, an exception, what was assumed — has been
+  in the run's language since AM14 (below: "An engine in two languages").
 
 ## A form with no marker in it (AM11)
 
@@ -949,4 +947,83 @@ Three things hold it in place: a unit test that the header is sent in exactly on
 that a silent gateway reads as "masked"; an integration test that runs the same agent egress-off,
 egress-on and against a gateway that does not comply (`am13b_masking_it_test.go`); and a test that no
 file of the runner calls the model client with a context of its own making.
+
+## An engine in two languages (AM14)
+
+Until AM14 a package's engine wrote Thai whatever the screen: its sentences were string literals in the
+Python that computes — 4,954 of them in 67 files. An engine step was told the run's language and did
+nothing with it. On an English screen a run read English around Thai, and the first thing a person saw —
+the agent's greeting — was Thai too, for a different reason.
+
+**What a row keeps in one language and a person reads in another** (`asread_am14.go`). Two things about an
+installed agent were written once: its name (`agent_installs.title`, set from the screen it was installed
+on, never updated — not even by an upgrade) and its greeting with the tick list (one thread item, in the
+language of the request that made it). Neither is the work of a run. Both are now read from the agent's
+own manifest when they are sent: the name from the newest registered version of the agent
+(`AgentNameIn`; applied by hand wherever an install is written to a person — a JSON writer on the type
+would be inherited by every response that embeds an install), the greeting's words from the version the
+install is on, in the thread and in its live stream (`greetingsAsRead`). Nothing is rewritten.
+
+**A sentence is not written in the code** (`backend/agent_market/engine/words.py`). It has a key; its Thai
+is in the package's manifest under `strings` and its English under `en`, found by the Thai — the place
+and the rule of what a manifest says before a run exists (AM11) and of every word of the procurement
+package (AM12). The shared engine's own sentences (a matching card, a question about a document, what a
+file read back showed) are in `engine/words.json`, by the same rule.
+
+- `use(lang)` — the step says the run's language once (`engine/step.py`); one step of one run is one
+  process. `W("key", place=value)` says a sentence in it. A package's `words.py` is
+  `W = words.of(__package__)`; a file of the shared engine takes `SHARED as S`.
+- A table of codes and their words is made when its module is imported — before the step has spoken — so
+  it keeps keys and says each when it is read (`W.table({code: key})`, `then=words.cap` for headings).
+- Thai sets short clauses side by side and joins names without a space; English does not. What differs is
+  a helper, not a sentence: `clauses`, `and_`, `cap`, `date` (“5 ก.ย. 2569” / “5 Sep 2026”), `period`.
+- One Thai string has one English (`en` is found by the Thai). Where the same Thai words are said two
+  ways in English — a field's name in a sentence, and the twelve characters of a card's heading — the
+  English of the one key that differs is in `en_by_key`. Words with no Thai in them (“VAT”) are said as
+  they are.
+- Text written when a file is *parsed* is read by every later step, so a parsed file keeps the key of a
+  sentence, never its words (`inputs.said`, `e2/cards.said`).
+- An engine never tests its own sentence as text; where it did (`"ไม่ใช่ 1% หรือ 15%" in note`), it now
+  compares with the sentence it would say.
+- A figure is asked about by name ("where does the adjusted bank balance come from?"). Its label and the
+  names a question finds it by are sentences too, and in a run that is not Thai a figure is also known by
+  the names its document gives it (`words.names`) — that paper is what the person is looking at.
+
+**The documents are not in two languages yet, and the table a run computes feeds both.** The same
+`computed.json` is what the screen reads (the verdict, the exceptions, what was left out) and what the
+working paper is written from. So a run that is not in the documents' language computes twice: as the
+screen reads it, and — under `document` — in Thai, for its files alone (`with_document`). `render` writes
+the file from `for_document(computed)` inside `speaking(DOCUMENT)`, and says what its gate found in the
+run's language. The file of an English run is cell for cell the one a Thai run writes, and a Thai run is
+byte for byte what it was (it computes once and carries one table). One exception is known: where a row
+of a PDF statement is ("หน้า 1 บรรทัด 4") is written when the file is parsed, in the run's language.
+When the documents get their own pass, `document` goes away and nothing else changes.
+
+**What the server does with it.** A package's English is learnt from its manifest (`AddPackageEnglish`:
+`en`, and the English kept by key); the shared engine's is told to the server by a list read from
+`engine/words.json` (`english_engine_words.go`, kept by a test that writes the list). In English a person
+is shown only words the product's own sentences use, so an English sentence this plane did not know would
+reach a person as "…": the rule is held on every finding, summary, gate, check and assumption of the
+packages' own eval sets run in English (`am14_packages_table_test.go`, written by
+`scripts/probes/AM14/dump_english_texts.sh`), each put through the thread's own door. A manifest on its
+way to a client loses `strings` and `en_by_key` as it always lost `en`: a screen is sent the sentences
+of the runs it reads, not the list of everything an engine can say.
+
+**What holds it.**
+
+- `test_package_words_ratchet.py` — every Thai string left in the code is recorded by fingerprint. A new
+  one fails; a recorded one that has left the code fails until the record is written again without it
+  (`--shrink`, which refuses to grow). What is left is what an engine *reads* from a person's Thai files
+  and what a document *says*.
+- `test_am14_words.py` — the code and the words are the same set: every sentence the code names is
+  there with exactly the places the code fills, in both languages; none is left that nothing asks for; a
+  heading fits in both. A package is held as soon as it has a `words.py`. And the rule itself, per
+  package (`EnglishRuns`): the package's whole eval set run in English beside the same set in Thai — no
+  Thai reaches a person but their own data and the paper's own words, the run is the same run (the same
+  questions by key, answers, figures and end), and the paper is the one a Thai run writes.
+- `scripts/probes/AM14/walk.js run <agent> en` — one run on the built clients, from the agent's page to
+  the finished files, with every piece of Thai on the screen sorted: the person's own data, the finished
+  document's own wording, or neither.
+- The tools the sentences were moved with (`scripts/probes/AM14/words_tool.py`, `manifest_edit.py`): the
+  Thai is read from the code and written to the manifest by a script, never retyped.
 

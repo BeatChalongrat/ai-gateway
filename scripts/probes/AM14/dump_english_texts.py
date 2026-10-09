@@ -49,6 +49,21 @@ def main():
                 for a in comp.get("assumptions") or []:
                     if isinstance(a, dict) and d.once("assumption", pkg, a):
                         d.assumptions.append({"package": pkg, "case": cid, "assumption": a})
+    # the financial report's kit has its own shape (as in the AM6 dump): its cards and assumptions, the
+    # compute summary, and — on the cases whose files are written — every line of the shared gate
+    from agent_market.packages import financial_report
+    from agent_market.tests import evalkit
+
+    rendered = {"clean_express_th", "clean_with_prior", "clean_with_budget"}
+    for c in evalkit.load_cases():
+        res = evalkit.run_case(c, lang="en", formats=("docx", "pptx", "xlsx") if c["id"] in rendered else ())
+        cid = "en/" + c["id"]
+        d.walk("financial_report", cid, {"findings": res["findings"], "assumptions": res["assumptions"],
+                                          "render": res.get("render") or {}})
+        if res.get("computed"):
+            s = financial_report.summarize(res["computed"])
+            if d.once("summary", "financial_report", s):
+                d.summaries.append({"package": "financial_report", "case": cid, "summary": d.cut(s, rows=12)})
     doc = {"findings": d.findings, "summaries": d.summaries, "checks": d.checks, "assumptions": d.assumptions}
     print(f"{len(d.findings)} findings, {len(d.summaries)} summaries and gates, {len(d.checks)} checks, {len(d.assumptions)} assumptions")
     body = json.dumps(doc, ensure_ascii=False, separators=(",", ":"))
