@@ -97,35 +97,56 @@ there is no fallback to another model. Its reading is only a proposal next to
 E2's; a person decides. Every run records `model_used` and
 `model_self_hosted`; the workbook lists which model saw which document.
 
-## Whether a run is masked (AM13b)
+## Where a run's documents go, and whether they are masked (AM16)
 
-Masking exists to stop data leaving the organisation, so it follows where a run's data can go — the
-same switch that already decides which models an agent may use and whether it may open the web:
+Two switches per agent in the admin app (Agent Market → Models), both **off by default**, each change
+of either in the audit log (`agent_market.agent.documents_may_leave`, `agent_market.agent.masked`):
 
-| the agent's "documents may leave" (the organisation's switch AND the agent's own) | the model | what the model is sent |
+| documents may leave (the organisation's switch AND the agent's own) | masked | what happens |
 |---|---|---|
-| **off** — only in-house models, no web: nothing of the run can leave | in-house | **as typed, not masked** |
-| **on** | in-house or outside | masked first, as before |
+| **off** (default) | **off** (default) | in-house models only, no web; sent **as typed** |
+| off | on | in-house models only; personal data in the text is masked first |
+| **on** | **off** | may go to a model outside the organisation, **as typed — not masked** |
+| on | on | text may go outside, masked first; **a page is read inside only** |
 
-The runner says so per model call (`X-Sran-Egress: closed`, only when both hold) and the gateway decides
-(`backend/app/services/dlp/in_house.py`; `docs/DLP_ARCHITECTURE.md`, "Masking follows where the data
-goes"). The gateway believes the header only from a project the operator named:
+Until AM16 there was one switch and masking followed it ("may leave" meant masked). A row that was
+open before the migration (`010_am16`) is kept masked, so nothing changed for any agent by deploying it.
+
+**What masking covers: text.** The image of a page — a scanned invoice read by a model — cannot be
+masked, on any path, and never was. That is why a masked agent's pages are read by an in-house model
+only, and why its model menu has no outside model.
+
+**What a run says.** A run whose documents went to a model outside the organisation as typed — text
+that was not masked, or a page — says so in one sentence on the face of its card, in the reader's
+language, as soon as it has happened and whatever the run then comes to
+(`progress.sent_out_unmasked`, `outputs.model.sent_out_unmasked`). It is noted from what happened to
+each model call, not from the switches. The older line (`outputs.model.masking` `off` / `on` / `mixed`)
+says what the gateway did with the text.
+
+The runner tells the gateway per model call (`X-Sran-Masking: off | on`; `X-Sran-Egress: closed` when
+the data may not leave), and the gateway decides (`backend/app/services/dlp/in_house.py`;
+`docs/DLP_ARCHITECTURE.md`, "A named caller's own word on masking"). The gateway believes these
+headers only from a project the operator named:
 
     DLP_IN_HOUSE_PROJECTS=<the id of the portal project "Agent Market runner">     # .env, then restart the backend
 
-Empty (the default) switches the whole rule off: every run is masked, whatever the runner sends. The id
-is not a secret; it is the `project_id` on any `request_logs` row the runner's key made.
+Empty (the default) switches the whole rule off: every run is masked, whatever the runner sends, and
+its card says "masked". The id is not a secret; it is the `project_id` on any `request_logs` row the
+runner's key made.
 
-What a person sees: each run's files card says which of the two was done — `outputs.model.masking`
-`off` / `on` / `mixed`, from the gateway's own answer to each call (`X-Gateway-Masking`), never from what
-the runner asked for; a run in which no model was called says nothing. An admin sees it where they
-decide it: the per-agent switch in the admin app says it also decides masking. In the request log a
-row whose findings reached the in-house model as typed has `dlp_input_action = 'in_house_unmasked'`;
-its `input_masked` / `output_raw` / `output_final` still hold the masked copy.
+In the request log: `dlp_input_action = 'in_house_unmasked'` on a row whose findings reached the
+in-house model as typed, `'sent_as_typed'` on a row whose findings reached a provider outside as typed;
+`input_masked` / `output_raw` / `output_final` hold the masked copy either way. To list what left:
 
-What does not change: a block still blocks; nothing unmasked is cached, logged or sent to moderation;
-no other model is tried with unmasked text. Ordinary chat is not part of this — it has no egress switch
-and is masked whichever model answers.
+    select created_at, model, provider, dlp_input_findings from request_logs
+    where dlp_input_action = 'sent_as_typed' order by created_at desc;
+
+(A page sent outside leaves no finding — the scan does not read images — so it is not in that list;
+the run's own steps carry `sent_out_unmasked`.)
+
+What does not change: a block still blocks; a request holding a key or a secret keeps its mask on the
+way out; nothing unmasked is cached, logged or sent to moderation; no other model is tried with typed
+text. Ordinary chat is not part of this — it has no such switches and is masked whichever model answers.
 
 ## What waits on a person (AM2)
 

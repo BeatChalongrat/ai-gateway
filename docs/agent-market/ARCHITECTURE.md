@@ -924,28 +924,55 @@ show no model their documents send those words — and only the words — to a
 model inside the organisation, and their data sheets now say so. A round
 with no words, or with only thanks, makes none.
 
-## Masking follows where the data goes (AM13b)
+## Where a run's data may go, and whether it is masked (AM16; AM13b before it)
 
-One rule, two parties. The **runner** knows whether a run's data can leave (the agent's egress switch,
-`egress.go`; `rc.docsMayLeave`) and which model it is calling; the **gateway** owns masking. So the runner
-states the fact and the gateway decides:
+Two switches of the admin's per agent (`egress.go`, table `agent_egress`), both off by default, each
+change of either in the audit log: **documents may leave** (`documents_may_leave`, under the
+organisation's own switch) and **masked** (`masked`). Until AM16 the second was not a switch: masking
+followed the first (AM13b — "may leave" meant masked, "stays inside" meant as typed). The owner
+separated them: reading a document correctly matters more than masking it on the way, so documents
+that leave are sent as typed unless an admin turns masking on for that agent.
 
-- `runner/masking.go` — every model call a step makes carries the round's egress state in its context
-  (`rc.step` wraps the step's context; `askModel`, which answers outside a step, does the same). The model
-  client (`model.go send`) adds `X-Sran-Egress: closed` only when the state is closed AND the model is
-  in-house. Nothing else about a call changes.
-- The gateway answers each call with what it DID (`X-Gateway-Masking: off | on`); the client notes that,
-  not the request. `rc.step` writes the result beside the step's own output (`"masking"` in
-  `agent_run_steps.output`), so a later pass over the same run — which reads the step back and calls no
-  model — still knows. No migration: the note lives in a column that was already free-form.
-- The files card: `OutputsModel.Masking` (`thread.go`, declared in `schema.go`) is every model step of the
-  round put together — `off`, `on`, `mixed`, or absent when no model was called. Web: one more line in the
-  card's "seen by" block (`workspace/OutputsCard.tsx`, strings in `i18n.am4.ts`). Admin app: one sentence
-  at the per-agent switch.
+One rule, two parties. The **runner** knows what the two switches say for the run's agent
+(`rc.docsMayLeave`, `rc.masked`, read on every pass — `choice.go switchesOf`) and which model it is
+calling; the **gateway** owns masking. So the runner states the facts and the gateway decides:
 
-Three things hold it in place: a unit test that the header is sent in exactly one of the four cases and
-that a silent gateway reads as "masked"; an integration test that runs the same agent egress-off,
-egress-on and against a gateway that does not comply (`am13b_masking_it_test.go`); and a test that no
+- `runner/masking.go` — every model call a step makes carries both in its context (`rc.step` wraps the
+  step's context; `askModel`, which answers outside a step, does the same). The model client
+  (`model.go send`) sends `X-Sran-Masking: off | on`, and `X-Sran-Egress: closed` only when masking is
+  off, the data may not leave AND the model is in-house — the one header an older gateway knows, sent
+  only where it means what it always meant.
+- The gateway answers each call with what it DID with the text (`X-Gateway-Masking: off | on`); the
+  client notes that, not the request. `rc.step` writes it beside the step's own output (`"masking"` in
+  `agent_run_steps.output`).
+- **What left as typed is noted separately** (`sent_out_unmasked` beside the step's output): a call that
+  went to a model outside the organisation with text the gateway did not mask, or with the image of a
+  page. A page image is never masked — the gateway masks text — so it counts whatever the gateway said.
+  A call that failed after the provider may have been sent it counts too (not one the gateway refused
+  before sending: 401, 402, 403, 404, 422), and so does an answer given by another model than the one
+  asked. It is written beside a failed step as well and kept when the step is run again.
+- **A page stays inside while the agent is masked** (`choice.go mayRead`, `Egress.PagesMayLeave`): an
+  image cannot be masked, so with masking on no outside model is given a page, and the model menu of an
+  agent that reads pages has none (`models.go MenuFor`, with the reason).
+- The cards: `Progress.SentOutUnmasked` — on the run's own card as soon as it has happened, whatever
+  the run then comes to (`progress.go syncProgress`) — and `OutputsModel.SentOutUnmasked` beside
+  `OutputsModel.Masking` on the card of the files (`thread.go`, declared in `schema.go`). Web: one
+  sentence on the face of both cards (`workspace/SentOut.tsx`, strings in `i18n.am16.ts`), and the
+  older line about the text in the "seen by" block. An answer to a question is not a step: when its
+  question and figures left as typed, a warning notice says so in the thread (`SentOutAnswerNotice`).
+- Admin app: two checkboxes per agent and what the two together mean now, in words
+  (`admin-ui/app/agent-market/_sections/AgentEgress.tsx`).
+
+One model call is made outside all of this and is therefore always masked and never counted: reading a
+person's typed answer to a card into one of its options (`clarify.go interpretCards`, called with the
+pipeline's own context). It sends no word about masking, and every gateway masks such a request.
+
+What holds it in place: unit tests of what the gateway is told in every combination, of what is noted
+as sent out (text, a page, a failed call, a refused one, another model's answer), and of the page rule;
+integration tests that run one agent through all four combinations and against a gateway that does not
+comply (`am13b_masking_it_test.go`), and a scan read by an outside model — said on the card, not read
+at all once masking is on, and still said when the model never answered (`am16_sent_out_it_test.go`);
+the gateway's own tests of the refusals (`backend/tests/test_dlp_in_house.py`); and a test that no
 file of the runner calls the model client with a context of its own making.
 
 ## An engine in two languages (AM14)
