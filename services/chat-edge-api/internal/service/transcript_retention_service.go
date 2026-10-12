@@ -453,10 +453,12 @@ func (s *TranscriptRetentionService) StartBackground(ctx context.Context) {
 	t := time.NewTicker(retentionClockLook)
 	defer t.Stop()
 	runRetentionSchedule(ctx, time.Now, t.C, func(due time.Time) {
+		// Said at every start, and after a sleep through the hour. A start cannot know whether
+		// the pass of that hour ran before it — so the line does not claim it was missed.
 		if late := time.Since(due); late > 2*retentionClockLook {
-			slog.Info("transcript retention: making good a pass that did not run at its hour",
+			slog.Info("transcript retention: running the pass of an hour already gone by (a start, or the machine slept through it) — it finds nothing left if that pass ran at its hour",
 				"due", due.Format(time.RFC3339),
-				"late_by", late.Round(time.Second).String())
+				"after_its_hour", late.Round(time.Second).String())
 		}
 		s.EnforceAsOf(ctx, due)
 	})
