@@ -20,13 +20,37 @@ const RUNNER = L.TARGET === "test"
   ? { name: "sran-test-agent-runner", health: "http://127.0.0.1:18095/healthz", model: "http://127.0.0.1:18095/model" }
   : { name: "sran-agent-runner", health: "http://127.0.0.1:28095/healthz", model: "http://127.0.0.1:28095/model" };
 
-// AM15 — the agent the smoke speaks to, and the sentence: an order its documents can be put in, so the
-// agent's model is asked to read it (words that are only thanks are not put to a model at all).
+// AM15 — the agent the smoke speaks to, and the sentence. It asks for the one thing this agent must
+// refuse — to post the entries into the accounting system (its manifest's `cannot`: "post"). The
+// agent's model has to read it to say so, so the check sees who read it AND that it was read right;
+// and nothing is made from it: no file and no new version, however many days the check runs. (An order
+// the agent CAN do would make a new file on every run; words that are only thanks reach no model.)
 const PACKAGES = path.join(L.ROOT, "backend", "agent_market", "packages");
 const TURN_AGENT = {
-  slug: "sran.bank-reconciliation", dir: "bank_reconciliation", ask: "เรียงตามวันที่",
+  slug: "sran.bank-reconciliation", dir: "bank_reconciliation", ask: "บันทึกรายการเข้าระบบบัญชีให้ด้วย", cannot: "post",
   files: ["sample-data/statement_2569-09.xlsx", "sample-data/สมุดบัญชีเงินฝาก_2569-09.xlsx"],
 };
+
+/**
+ * Who makes the agent's turn: {session, name} — or {problem}, which is a FAIL, never a skip.
+ *
+ * The smoke's own account is kept OFF the organisation's list on purpose: every day it proves that an
+ * account not on the list sees no agent at all (agent_market.not_allowlisted — the refusal is the
+ * test). So it cannot also be the account that speaks to an agent. On live the turn is made by the walk
+ * account (QA_USER_ID in the env file; on the organisation's list since 7 Oct 2026), signed in the way
+ * every walk signs it in — a short-lived token, never its password. On the test stack the seeded owner
+ * is on the list and is the session the suite already has.
+ */
+function turnAccount(session) {
+  if (L.TARGET !== "live") return session ? { session, name: L.TS_USER.email } : { problem: "no signed-in session in this run: the agent's turn cannot be made" };
+  const id = L.env("QA_USER_ID");
+  if (!id) return { problem: "no account that is let into Agent Market is named for this check (QA_USER_ID in the env file): the agent's turn cannot be made, and that is not a pass" };
+  try {
+    return { session: L.bearerSession(L.mintPortalToken({ id }, 900), "minted-walk"), name: L.env("QA_EMAIL") || "the walk account" };
+  } catch (e) {
+    return { problem: `the walk account could not be signed in for the agent's turn: ${L.errText(e)}` };
+  }
+}
 const AM = () => `${L.API_BASE.edge}/api/v1/agent-market`;
 
 /**
@@ -50,7 +74,7 @@ function modelWordVerdict(w, status = "200") {
  * read it. A reply that waits for its model, words that came back unread, or another model's reading
  * is the FAIL — said first, naming the model asked.
  */
-function agentTurnVerdict(ended, waitedMs) {
+function agentTurnVerdict(ended, waitedMs, cannot = TURN_AGENT.cannot) {
   const run = ended?.run;
   const step = (ended?.steps || []).filter((s) => s.name === "instructions").pop();
   const input = step?.input && typeof step.input === "object" ? step.input : {};
@@ -69,20 +93,26 @@ function agentTurnVerdict(ended, waitedMs) {
   if (step.status !== "succeeded") return { ok: false, turns, detail: `asked ${asked}, no answer: the reading ${step.status} — ${state}` };
   const who = L.whoAnswered({ asked, served, ms: took });
   if (!who.ok) return { ok: false, turns, detail: `${who.text} — ${state}` };
-  const read = Array.isArray(out.apply) ? out.apply.join(",") : "";
+  // … and read right: the sentence asks for what this agent cannot do, and for nothing it can
+  const applied = Array.isArray(out.apply) ? out.apply : [];
+  const refused = (Array.isArray(out.cannot) ? out.cannot : []).map((c) => c && c.id).filter(Boolean);
+  if (!refused.includes(cannot) || applied.length) {
+    return { ok: false, turns, detail: `${who.text}, but it read the sentence wrong: apply [${applied.join(",")}], cannot [${refused.join(",")}] — it asks only for what this agent cannot do ("${cannot}") — ${state}` };
+  }
   if (run.status !== "succeeded") return { ok: false, turns, detail: `${who.text}, but the reply did not finish — ${state}` };
-  return { ok: true, slow: who.slow, turns, detail: `${who.text}, read as "${read || "nothing to do"}" — ${state}` };
+  return { ok: true, slow: who.slow, turns, detail: `${who.text}, read as what this agent cannot do ("${cannot}") — ${state}` };
 }
 
 module.exports = async function agentMarket(R, session) {
   const on = String(L.env("AGENT_MARKET_ENABLED", "false")).toLowerCase() === "true";
   const edge = `${L.API_BASE.edge}/api/v1/agent-market/availability`;
-  // AM15: the routes a person's screen calls, with the smoke's session
-  const am = (method, p, body) => L.tryHttp(AM() + p, { method, timeoutMs: 60000, headers: { "Content-Type": "application/json", ...(session ? session.headers : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
+  // AM15: the routes a person's screen calls, as the account that makes the agent's turn (turnAccount)
+  let as = session;
+  const am = (method, p, body) => L.tryHttp(AM() + p, { method, timeoutMs: 60000, headers: { "Content-Type": "application/json", ...(as ? as.headers : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
   const upload = async (install, file) => {
     const form = new FormData();
     form.append("file", new Blob([fs.readFileSync(file)]), path.basename(file));
-    const r = await fetch(`${AM()}/installs/${install}/files`, { method: "POST", headers: session.headers, body: form, signal: AbortSignal.timeout(120000) });
+    const r = await fetch(`${AM()}/installs/${install}/files`, { method: "POST", headers: as.headers, body: form, signal: AbortSignal.timeout(120000) });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.file?.id) throw new Error(`upload ${path.basename(file)} → ${r.status}`);
     return j.file.id;
@@ -194,15 +224,27 @@ module.exports = async function agentMarket(R, session) {
 
   // AM15 — and one turn of an agent the way a person makes it: a sentence typed to an agent whose run
   // has finished, read by the agent's model into what its documents can be asked. The run's own record
-  // says which model read it. (An account the organisation has not let in can make no such turn: the
-  // check says so and skips — on such a target agent_market.model above is what watches the model.)
+  // says which model read it, and how. The turn is made by an account the organisation lets in
+  // (turnAccount); having no such account, or that account being refused, is a FAIL — this check
+  // skipped on live for exactly that, which is a check that cannot fail.
   await R.run("agent_market.turn", async () => {
     if (!on) return { skip: true, detail: "flag off (the flag check covers it)" };
-    if (!session) return { skip: true, detail: "no signed-in session in this run" };
     if (!L.containerRunning(RUNNER.name)) return { skip: true, detail: "profile agent-market not running" };
+    const who = turnAccount(session);
+    if (who.problem) return { ok: false, detail: who.problem };
+    as = who.session;
+    try {
+      const v = await agentTurn(who.name);
+      return { ...v, detail: `${v.detail} · as ${who.name}` };
+    } finally {
+      as = session;
+    }
+  });
+
+  async function agentTurn(name) {
     const a = await am("GET", "/availability");
     if (a.json?.available !== true) {
-      return { skip: true, detail: `this account is not let into Agent Market here (access=${a.json?.access} member=${a.json?.member}): it can make no agent turn — agent_market.model is the check of the agents' model on this target` };
+      return { ok: false, detail: `${name} is not let into Agent Market here (availability ${a.status}: access=${a.json?.access} member=${a.json?.member} admin=${a.json?.admin}): the agent's turn cannot be made` };
     }
     // one install, the same every run (the install's own idempotency key), with one finished run to speak to
     const made = await am("POST", "/installs", { slug: TURN_AGENT.slug, idempotency_key: "smoke-agent-turn-1" });
@@ -242,7 +284,8 @@ module.exports = async function agentMarket(R, session) {
     // a reply left waiting for a model that is away is cancelled: the suite leaves nothing waiting behind it
     if (ended?.run?.status === "awaiting_input") await am("POST", `/runs/${reply}/cancel`).catch(() => null);
     return verdict;
-  });
+  }
 };
 module.exports.modelWordVerdict = modelWordVerdict;
 module.exports.agentTurnVerdict = agentTurnVerdict;
+module.exports.turnAccount = turnAccount;
