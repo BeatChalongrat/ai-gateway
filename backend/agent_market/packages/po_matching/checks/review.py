@@ -199,7 +199,8 @@ def _documents(rv: Review, proposals: dict | None) -> None:
                       **dec.judge_kwargs(u.data["extraction"].get("fields") or {}))
         dtype = (out.get("document_type") or {}).get("normalized") or "unknown"
         if dec.excluded:
-            asked = E2C.findings_for(u.key, u.data["extraction"]) + E2C.findings_for(u.key, out)
+            who = E2C.reader_of(proposals, u.key)
+            asked = E2C.findings_for(u.key, u.data["extraction"], who) + E2C.findings_for(u.key, out, who)
             f = next((x for x in asked if x.key == dec.excluded["key"]), None)
             detail = (f.question if f else "") or ""
             if dec.excluded.get("reupload"):
@@ -212,7 +213,7 @@ def _documents(rv: Review, proposals: dict | None) -> None:
                 "code": "not_an_invoice", "decided_by": "rule", "restore": None,
                 "detail": W("unused.not_an_invoice")}))
             continue
-        fs = E2C.findings_for(u.key, out) + K.invalid_cards(u, out, dec)
+        fs = E2C.findings_for(u.key, out, E2C.reader_of(proposals, u.key)) + K.invalid_cards(u, out, dec)
         rv.docs.append(Doc(u, out, dec, "pending" if fs else "included", findings=fs))
 
 

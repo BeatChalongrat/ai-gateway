@@ -136,7 +136,7 @@ const thBase = {
   "cap.deliverable.table.xlsx": "สร้างตารางตัวเลข Excel",
   "cap.document.read.pdf": "อ่านไฟล์ PDF",
   "cap.document.extract.e2": "อ่านใบกำกับภาษีและใบเสร็จเป็นช่องข้อมูล พร้อมตำแหน่งและความมั่นใจ",
-  "cap.model.vision": "โมเดลอ่านภาพสแกนและรูปถ่ายซ้ำ (เฉพาะที่รันในองค์กร เสนอค่าได้ แต่ไม่กำหนดตัวเลข)",
+  "cap.model.vision": "โมเดลอ่านภาพสแกนและรูปถ่ายซ้ำ (เสนอค่าได้ แต่ไม่กำหนดตัวเลข)",
   "cap.deliverable.pdf": "ไฟล์ PDF แปลงจากรายงานด้วย LibreOffice และตรวจภาษาไทยทุกหน้า",
 
   // install wizard
@@ -919,7 +919,7 @@ const enBase = {
   "cap.deliverable.table.xlsx": "Produces an Excel table of figures",
   "cap.document.read.pdf": "Reads PDF files",
   "cap.document.extract.e2": "Reads tax invoices and receipts into data fields, with the position and confidence of each",
-  "cap.model.vision": "A model re-reads scans and photos (run inside the organisation only; it can propose a value but never sets a figure)",
+  "cap.model.vision": "A model re-reads scans and photos (it can propose a value but never sets a figure)",
   "cap.deliverable.pdf": "A PDF converted from the report with LibreOffice, with the Thai text checked on every page",
 
   // install wizard

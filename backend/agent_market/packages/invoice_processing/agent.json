@@ -1,7 +1,7 @@
 {
   "schema_version": "agent.market.v1",
   "id": "sran.invoice-processing",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "name": "อ่านใบกำกับภาษี / ใบเสร็จ ทำทะเบียนซื้อ",
   "name_en": "Invoice Processing",
   "short_name": "ทะเบียนเอกสารซื้อ",
@@ -65,7 +65,7 @@
     },
     "questions": "จะถามเมื่ออ่านค่าไหนไม่ชัด (เช่น ยอดรวมในสแกนที่ไม่คม) เมื่อกฎตรวจไม่ผ่าน (VAT ไม่เท่ากับ 7% เลขผู้เสียภาษีผิด เอกสารไม่ได้ออกในนามบริษัทคุณ) หรือเมื่อเจอเอกสารที่เคยส่งมาแล้ว กดเลือกคำตอบ หรือพิมพ์ค่าที่ถูกต้องตามที่เห็นในเอกสาร",
     "model_inputs": {
-      "model.vision": "เฉพาะภาพหน้าเอกสารที่เป็นสแกนหรือรูปถ่าย ส่งให้โมเดลที่รันในองค์กรอ่านซ้ำเพื่อเทียบกับการอ่านตัวอักษร (OCR) ค่าที่โมเดลอ่านเป็นเพียงคำแนะนำในการ์ดคำถาม ไม่ถูกบันทึกเองจนกว่าคนจะยืนยัน PDF ดิจิทัลและไฟล์ e-Tax อ่านด้วยกฎเท่านั้น ไม่มีโมเดลเห็น"
+      "model.vision": "เฉพาะภาพหน้าเอกสารที่เป็นสแกนหรือรูปถ่าย ส่งให้โมเดลที่เลือกไว้สำหรับ agent นี้อ่านซ้ำเพื่อเทียบกับการอ่านตัวอักษร (OCR) โดยปกติคือโมเดลที่รันในองค์กร ภาพจะออกนอกองค์กรก็ต่อเมื่อผู้ดูแลอนุญาตให้เอกสารของ agent นี้ออกนอกองค์กรและมีการเลือกโมเดลนอกองค์กร ซึ่งการ์ดของรอบนั้นจะบอกไว้ ค่าที่โมเดลอ่านเป็นเพียงคำแนะนำในการ์ดคำถาม ไม่ถูกบันทึกเองจนกว่าคนจะยืนยัน PDF ดิจิทัลและไฟล์ e-Tax อ่านด้วยกฎเท่านั้น ไม่มีโมเดลเห็น"
     },
     "never": [
       "ไม่บันทึกอะไรเข้าระบบบัญชี",
@@ -75,7 +75,7 @@
       "ไม่ให้โมเดลกำหนดตัวเลขในทะเบียน"
     ],
     "wrong_file": "ถ้าส่งไฟล์ที่ไม่ใช่เอกสารซื้อ agent จะแยกออกจากทะเบียนและบอกเหตุผล ไม่มีอะไรถูกบันทึกเข้าระบบบัญชี ส่งไฟล์ที่ถูกมาใหม่ได้ทันที",
-    "time_note": "PDF ดิจิทัลหรือ e-Tax ราว 10 วินาทีต่อฉบับ สแกนหรือรูปถ่ายราว 1 นาทีต่อฉบับ (อ่านตัวอักษรจากภาพและให้โมเดลในองค์กรอ่านซ้ำ)"
+    "time_note": "PDF ดิจิทัลหรือ e-Tax ราว 10 วินาทีต่อฉบับ สแกนหรือรูปถ่ายราว 1 นาทีต่อฉบับ (อ่านตัวอักษรจากภาพและให้โมเดลอ่านซ้ำ)"
   },
   "permissions": {
     "default": "read_only",
@@ -248,7 +248,7 @@
     "สมุดงานมีทะเบียนชุดเดียว การแยกชีตตามผู้ขายต้องมียอดรวมย่อยของแต่ละราย ซึ่ง agent นี้ยังไม่ทำ — ขอให้เรียงตามผู้ขายแทนได้": "the workbook has one register; a sheet for each seller would need a subtotal for each, which this agent does not make yet — ask for the register ordered by seller instead",
     "เอาเฉพาะเอกสารที่มีปัญหา": "Only the documents with a problem",
     "เอกสารที่บันทึกทุกฉบับต้องอยู่ในทะเบียนครบ เอกสารที่มีข้อสังเกตอยู่ในชีตข้อยกเว้นของสมุดงานแล้ว": "every recorded document has to be in the register; the ones with something to note are already on the workbook's exceptions sheet",
-    "PDF ดิจิทัลหรือ e-Tax ราว 10 วินาทีต่อฉบับ สแกนหรือรูปถ่ายราว 1 นาทีต่อฉบับ (อ่านตัวอักษรจากภาพและให้โมเดลในองค์กรอ่านซ้ำ)": "A digital PDF or e-Tax file takes about 10 seconds per document. A scan or photo takes about 1 minute per document (the text is read from the image and re-read by a model inside the organisation).",
+    "PDF ดิจิทัลหรือ e-Tax ราว 10 วินาทีต่อฉบับ สแกนหรือรูปถ่ายราว 1 นาทีต่อฉบับ (อ่านตัวอักษรจากภาพและให้โมเดลอ่านซ้ำ)": "A digital PDF or e-Tax file takes about 10 seconds per document. A scan or photo takes about 1 minute per document (the text is read from the image and re-read by a model).",
     "PDF ดิจิทัลหรือสแกน 200–300 DPI · XML ของ e-Tax · รูปถ่ายอ่านได้เท่าที่ภาพชัด": "Digital PDF or scan at 200–300 DPI · e-Tax XML · photos are read only as far as the image is clear",
     "PDF ที่ได้จากระบบของผู้ขาย (คัดลอกตัวหนังสือในไฟล์ได้) หรือไฟล์ XML ของ e-Tax อ่านได้แม่นที่สุด และไม่ต้องใช้โมเดลเลย": "A PDF from the seller's system (one whose text can be copied), or an e-Tax XML file. These read most accurately and need no model at all.",
     "VAT (บาท)": "VAT (THB)",
@@ -289,7 +289,7 @@
     "หัก ณ ที่จ่าย (บาท)": "Withholding tax (THB)",
     "อ่านอย่างเดียว · ตรวจด้วยกฎ · ค่าที่ไม่แน่ใจต้องมีคนยืนยัน": "Read-only · checks with rules · an uncertain value must be confirmed by a person",
     "อ่านใบกำกับภาษี / ใบเสร็จ ทำทะเบียนซื้อ": "Invoice Processing",
-    "เฉพาะภาพหน้าเอกสารที่เป็นสแกนหรือรูปถ่าย ส่งให้โมเดลที่รันในองค์กรอ่านซ้ำเพื่อเทียบกับการอ่านตัวอักษร (OCR) ค่าที่โมเดลอ่านเป็นเพียงคำแนะนำในการ์ดคำถาม ไม่ถูกบันทึกเองจนกว่าคนจะยืนยัน PDF ดิจิทัลและไฟล์ e-Tax อ่านด้วยกฎเท่านั้น ไม่มีโมเดลเห็น": "Only the page images of documents that are scans or photos. They are sent to a model that runs inside the organisation, which re-reads them to compare with the text recognition (OCR). What the model reads is only a suggestion on a question card. It is not recorded until a person confirms it. Digital PDFs and e-Tax files are read with rules only. No model sees them.",
+    "เฉพาะภาพหน้าเอกสารที่เป็นสแกนหรือรูปถ่าย ส่งให้โมเดลที่เลือกไว้สำหรับ agent นี้อ่านซ้ำเพื่อเทียบกับการอ่านตัวอักษร (OCR) โดยปกติคือโมเดลที่รันในองค์กร ภาพจะออกนอกองค์กรก็ต่อเมื่อผู้ดูแลอนุญาตให้เอกสารของ agent นี้ออกนอกองค์กรและมีการเลือกโมเดลนอกองค์กร ซึ่งการ์ดของรอบนั้นจะบอกไว้ ค่าที่โมเดลอ่านเป็นเพียงคำแนะนำในการ์ดคำถาม ไม่ถูกบันทึกเองจนกว่าคนจะยืนยัน PDF ดิจิทัลและไฟล์ e-Tax อ่านด้วยกฎเท่านั้น ไม่มีโมเดลเห็น": "Only the page images of documents that are scans or photos. They are sent to the model chosen for this agent, which re-reads them to compare with the text recognition (OCR). That is normally a model that runs inside the organisation. An image leaves the organisation only when an admin has allowed this agent's documents to leave and a model outside is chosen, and the run's card says so when it happens. What the model reads is only a suggestion on a question card. It is not recorded until a person confirms it. Digital PDFs and e-Tax files are read with rules only. No model sees them.",
     "เลขที่": "Number",
     "เลขผู้เสียภาษีบริษัท": "Company tax ID",
     "เลขผู้เสียภาษีผู้ขาย": "Seller tax ID",

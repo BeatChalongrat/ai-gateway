@@ -48,7 +48,7 @@ var engineEnglishWords = []string{
 	"made", "main", "many", "mapped", "marked", "marker", "match", "matching", "may", "me", "merged", "misprinted",
 	"misread", "missing", "model", "module", "money", "more", "most", "move", "must", "name", "named", "names",
 	"needs", "neither", "net", "no", "nobody", "none", "not", "note", "now", "number", "numbers", "of", "off",
-	"office", "old", "on", "once", "one", "only", "opened", "opens", "or", "ordered", "original", "other", "out",
+	"office", "old", "on", "once", "one", "only", "opened", "opens", "or", "ordered", "organisation", "original", "other", "out",
 	"outside", "outstanding", "overwritten", "own", "package", "page", "paged", "pages", "pair", "pairs", "panes",
 	"paper", "papers", "part", "partner", "pass", "past", "payable", "pdf", "per", "period", "person", "photo",
 	"pick", "picture", "pictures", "plain-text", "plan", "please", "possible", "price", "print", "printed", "prints",

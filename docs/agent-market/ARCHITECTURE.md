@@ -975,6 +975,34 @@ at all once masking is on, and still said when the model never answered (`am16_s
 the gateway's own tests of the refusals (`backend/tests/test_dlp_in_house.py`); and a test that no
 file of the runner calls the model client with a context of its own making.
 
+**Why the switches were separated — the reason as it stands.** The change was asked for on the ground
+that masking stopped the tax-invoice agent from reading a document. Measured before anything was
+changed (12 Oct 2026, one scanned tax invoice, five ways of sending it), that was not so: both tax ids
+came back right masked or not, because a scanned page is an image and no path of the gateway masks an
+image. The owner corrected the reason in writing and kept the decision. What decides how a scanned page
+is read is whether it may leave and which model reads it; the masking switch changes what happens to
+typed text.
+
+**A question says who read the page.** The engine's question beside a model's reading said "the
+in-house model read … from the image", and its label for that reading "the in-house model reading the
+image", whoever had read it — so a run whose page went to a model outside told its user two things at
+once: the card that the page had been sent out, the question that an in-house model had read it. The
+runner writes the model and whether it runs in the organisation beside every reading
+(`runner/documents.go`, `proposals.json`); the three packages that read pages hand that to every
+question they ask (`cards.reader_of`), and the sentence is chosen from it (`cards._reader`): in-house
+only on the runner's word (the flag `true`, nothing that looks like it), a model outside named in
+quotes — “google/gemini-2.5-flash” — and neither when nothing was said. A question's key does not move
+with the reader. The same claim stood in the three agents' guides ("sent to a model that runs inside
+the organisation"), in their `AGENT.md`, and in the catalogue's label on the web client ("run inside
+the organisation only"); each now says what is true: the model chosen for the agent, normally in-house,
+outside only where an admin allowed it, and the run's card says when. A released version keeps the
+engine and the manifest it was registered with, so this reaches an install when it is upgraded to
+tax-invoice 1.10.0, expense audit 1.9.0, invoice ↔ PO matching 1.7.0. Held by
+`backend/agent_market/tests/test_am16_reader.py` (a real scan through the agent's steps, both
+languages, six ways of breaking it shown red) and `am16_reader_test.go` (the same cards through the
+thread's own door: the control plane reads a model's name inside its quotes and sends the sentence as
+written).
+
 ## An engine in two languages (AM14)
 
 Until AM14 a package's engine wrote Thai whatever the screen: its sentences were string literals in the

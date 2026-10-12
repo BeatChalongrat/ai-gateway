@@ -160,7 +160,9 @@ def run_case(case: dict, lang: str | None = None) -> dict:
         if case.get("proposals"):
             props = {}
             for fid, p in case["proposals"].items():
-                props[keys[fid]] = {"model": MODEL, "self_hosted": True, "fields": truth_fields(fid) if p == "truth" else p}
+                # AM16: ``reader`` — which model the runner says read the page (a test of a page read outside)
+                props[keys[fid]] = {**(case.get("reader") or {"model": MODEL, "self_hosted": True}),
+                                    "fields": truth_fields(fid) if p == "truth" else p}
             req["proposals"] = job.write("proposals.json", props)
         answers_in = {}
         for k, v in (case.get("answers") or {}).items():

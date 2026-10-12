@@ -144,6 +144,12 @@ in-house model as typed, `'sent_as_typed'` on a row whose findings reached a pro
 (A page sent outside leaves no finding — the scan does not read images — so it is not in that list;
 the run's own steps carry `sent_out_unmasked`.)
 
+**Before an agent that reads pages is opened to outside models, its installs must be on the version
+that names the reader:** tax-invoice 1.10.0, expense audit 1.9.0, invoice ↔ PO matching 1.7.0. An
+install on an older version still asks "the in-house model read … from the image" whoever read the
+page (a version keeps the engine it was registered with); the upgrade is offered in the agent's room
+as for any version. The catalogue shows the new guide to anyone who opens it after the deploy.
+
 What does not change: a block still blocks; a request holding a key or a secret keeps its mask on the
 way out; nothing unmasked is cached, logged or sent to moderation; no other model is tried with typed
 text. Ordinary chat is not part of this — it has no such switches and is masked whichever model answers.

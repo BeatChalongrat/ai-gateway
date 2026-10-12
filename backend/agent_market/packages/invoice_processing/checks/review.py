@@ -137,7 +137,8 @@ def review(docs: list[Doc], *, answers: dict | None, defaults: dict | None, toda
         out = rejudge(doc.extraction, org=org, history=hist, today=today, proposals=proposals_for(doc, proposals),
                       **dec.judge_kwargs(doc.extraction.get("fields") or {}))
         if dec.excluded:
-            asked = cards.findings_for(doc.key, doc.extraction) + cards.findings_for(doc.key, out)
+            who = cards.reader_of(proposals, doc.key)
+            asked = cards.findings_for(doc.key, doc.extraction, who) + cards.findings_for(doc.key, out, who)
             f = next((x for x in asked if x.key == dec.excluded["key"]), None)
             # the card's question as the person read it (evidence["question"] is the engine's English reason)
             detail = (f.question if f else "") or ""
@@ -148,7 +149,7 @@ def review(docs: list[Doc], *, answers: dict | None, defaults: dict | None, toda
                                  "detail": detail, "decided_by": "card", "subject": dec.excluded.get("subject"),
                                  "reupload": dec.excluded.get("reupload", False), "restore": D.restore_of(dec)}))
             continue
-        fs = cards.findings_for(doc.key, out) + _invalid_cards(doc, out, dec)
+        fs = cards.findings_for(doc.key, out, cards.reader_of(proposals, doc.key)) + _invalid_cards(doc, out, dec)
         res.append(Reviewed(doc, out, dec, "pending" if fs else "included", findings=fs))
         hist.append(index_entry(doc, out))
     return res

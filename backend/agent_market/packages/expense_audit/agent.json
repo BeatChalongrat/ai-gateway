@@ -1,7 +1,7 @@
 {
   "schema_version": "agent.market.v1",
   "id": "sran.expense-audit",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "name": "ตรวจการเบิกค่าใช้จ่ายตามนโยบายบริษัท",
   "name_en": "Expense Audit",
   "short_name": "ตรวจค่าใช้จ่าย",
@@ -97,7 +97,7 @@
     },
     "questions": "จะถามเรื่องที่ต้องใช้วิจารณญาณ เช่น รายการที่เบิกในวันหยุดเป็นงานของบริษัทหรือไม่ หรือรายละเอียดที่ยังไม่บอกว่าเบิกเพื่ออะไร และจะถามยอดในใบเสร็จที่อ่านไม่ชัด",
     "model_inputs": {
-      "model.vision": "เฉพาะภาพใบเสร็จที่เป็นสแกนหรือรูปถ่าย ส่งให้โมเดลที่รันในองค์กรอ่านซ้ำเพื่อเทียบยอดรวม ค่าที่โมเดลอ่านเป็นเพียงคำแนะนำในการ์ดคำถาม ใบเสร็จ PDF ดิจิทัลและไฟล์รายการเบิกอ่านด้วยกฎเท่านั้น ไม่มีโมเดลเห็น"
+      "model.vision": "เฉพาะภาพใบเสร็จที่เป็นสแกนหรือรูปถ่าย ส่งให้โมเดลที่เลือกไว้สำหรับ agent นี้อ่านซ้ำเพื่อเทียบยอดรวม โดยปกติคือโมเดลที่รันในองค์กร ภาพจะออกนอกองค์กรก็ต่อเมื่อผู้ดูแลอนุญาตให้เอกสารของ agent นี้ออกนอกองค์กรและมีการเลือกโมเดลนอกองค์กร ซึ่งการ์ดของรอบนั้นจะบอกไว้ ค่าที่โมเดลอ่านเป็นเพียงคำแนะนำในการ์ดคำถาม ใบเสร็จ PDF ดิจิทัลและไฟล์รายการเบิกอ่านด้วยกฎเท่านั้น ไม่มีโมเดลเห็น"
     },
     "never": [
       "ไม่อนุมัติหรือปฏิเสธการเบิกแทนคน",
@@ -442,7 +442,7 @@
     "หนึ่งแถวต่อหนึ่งรายการเบิก มีหัวคอลัมน์ เช่น เลขที่เบิก รหัสและชื่อพนักงาน วันที่ หมวด ร้านค้า จำนวนเงิน ใบเสร็จ และรายละเอียด": "One row per claim, with column headings such as claim number, employee code and name, date, category, merchant, amount, receipt and description",
     "หลายเดือนรวมในไฟล์เดียว": "Several months combined in one file",
     "อ่านอย่างเดียว · กฎให้ข้อเท็จจริง · คนเป็นผู้ตัดสิน": "Read-only · rules give the facts · a person decides",
-    "เฉพาะภาพใบเสร็จที่เป็นสแกนหรือรูปถ่าย ส่งให้โมเดลที่รันในองค์กรอ่านซ้ำเพื่อเทียบยอดรวม ค่าที่โมเดลอ่านเป็นเพียงคำแนะนำในการ์ดคำถาม ใบเสร็จ PDF ดิจิทัลและไฟล์รายการเบิกอ่านด้วยกฎเท่านั้น ไม่มีโมเดลเห็น": "Only the images of receipts that are scans or photos. They are sent to a model that runs inside the organisation, which re-reads them to compare the total. What the model reads is only a suggestion on a question card. Digital PDF receipts and the expense claims file are read with rules only. No model sees them.",
+    "เฉพาะภาพใบเสร็จที่เป็นสแกนหรือรูปถ่าย ส่งให้โมเดลที่เลือกไว้สำหรับ agent นี้อ่านซ้ำเพื่อเทียบยอดรวม โดยปกติคือโมเดลที่รันในองค์กร ภาพจะออกนอกองค์กรก็ต่อเมื่อผู้ดูแลอนุญาตให้เอกสารของ agent นี้ออกนอกองค์กรและมีการเลือกโมเดลนอกองค์กร ซึ่งการ์ดของรอบนั้นจะบอกไว้ ค่าที่โมเดลอ่านเป็นเพียงคำแนะนำในการ์ดคำถาม ใบเสร็จ PDF ดิจิทัลและไฟล์รายการเบิกอ่านด้วยกฎเท่านั้น ไม่มีโมเดลเห็น": "Only the images of receipts that are scans or photos. They are sent to the model chosen for this agent, which re-reads them to compare the total. That is normally a model that runs inside the organisation. An image leaves the organisation only when an admin has allowed this agent's documents to leave and a model outside is chosen, and the run's card says so when it happens. What the model reads is only a suggestion on a question card. Digital PDF receipts and the expense claims file are read with rules only. No model sees them.",
     "เอกสารระเบียบการเบิก (ถ้ามี)": "Expense policy document (if any)",
     "ใช้เป็นบริบทเท่านั้น วงเงินมาจากตารางนโยบายที่ตั้งไว้ใน agent เสมอ": "Used as context only. Limits always come from the policy table set in the agent.",
     "ใบเสร็จ / ใบกำกับภาษี": "Receipts / tax invoices",

@@ -43,7 +43,32 @@ DOC_TYPE_TH = S.table({k: f"e2.doc.{k}" for k in ("full_tax_invoice", "abbreviat
                                                   "credit_note", "debit_note")})
 # where a value came from, as a person would say it (a source_conflict card names both readings)
 SOURCE_TH = {"etax_xml": ("e2.source.etax", "e2.source.pdf_text")}
-SOURCE_DEFAULT = ("e2.source.text", "e2.source.model")
+
+
+
+def reader_of(proposals: dict | None, doc_key: str) -> dict | None:
+    """Which model read this document's page, and whether it runs in the organisation — as the runner
+    wrote it beside the reading. ``None`` when no model read it."""
+    p = (proposals or {}).get(doc_key)
+    if not isinstance(p, dict) or not p.get("model"):
+        return None
+    return {"model": str(p["model"]), "self_hosted": p.get("self_hosted")}
+
+
+def _reader(reader: dict | None) -> tuple[str, str]:
+    """Who read the page, as a person would say it: (the one who read it, where the value came from).
+
+    AM16: both said "the in-house model" whoever had read the page — also when an admin had let the
+    agent's documents leave and a model outside read it, while the run's own card said the page had
+    been sent out. The sentence says in-house only when the runner said so, names a model outside the
+    organisation, and says neither when it was not told."""
+    place = (reader or {}).get("self_hosted")
+    model = str((reader or {}).get("model") or "")
+    if place is True:
+        return S("e2.reader.inside"), S("e2.source.model")
+    if place is False and model:
+        return S("e2.reader.outside", model=model), S("e2.source.model_outside", model=model)
+    return S("e2.reader.unknown"), S("e2.source.model_unknown")
 MATCH_TH = S.table({"document number": "e2.field.document_number", "date and total": "e2.match.date_total"})
 
 
@@ -192,8 +217,9 @@ def _shown(kind: str, proposed):
     return proposed
 
 
-def findings_for(doc_key: str, doc: dict) -> list[Finding]:
-    """Findings for one E2 extraction (``doc`` is the e2.extraction.v1 dict)."""
+def findings_for(doc_key: str, doc: dict, reader: dict | None = None) -> list[Finding]:
+    """Findings for one E2 extraction (``doc`` is the e2.extraction.v1 dict). ``reader``: the model that
+    read the page (``reader_of``) — a question that shows a model's reading says which one it was."""
     out: list[Finding] = []
     label = _doc_label(doc)
     triage = doc.get("document", {}).get("triage_only")
@@ -212,7 +238,9 @@ def findings_for(doc_key: str, doc: dict) -> list[Finding]:
             this = S("e2.this.number") if kind in ("money", "tax_id", "rate", "bank_account") else S("e2.this.value")
             reason = str(q.get("reason") or "")
             other = _shown(kind, (q.get("evidence") or {}).get("other")) if code == "source_conflict" else None
-            first, second = (S(k) for k in SOURCE_TH.get(doc.get("method"), SOURCE_DEFAULT))
+            who, by_model = _reader(reader)
+            pair = SOURCE_TH.get(doc.get("method"))
+            first, second = (S(pair[0]), S(pair[1])) if pair else (S("e2.source.text"), by_model)
             where = _where(ev)
             if code == "source_conflict" and shown is not None and other is not None:
                 text = S("e2.q.conflict", label=label, what=what, first=first, shown=shown, second=second, other=other,
@@ -224,7 +252,7 @@ def findings_for(doc_key: str, doc: dict) -> list[Finding]:
             elif shown is None:
                 text = S("e2.q.unread", label=label, what=what, where=where, note=note)
             elif reason.startswith("only a model"):
-                text = (S("e2.q.model_only", label=label, what=what, shown=shown, where=where, note=note))
+                text = (S("e2.q.model_only", label=label, what=what, reader=who, shown=shown, where=where, note=note))
             elif reason.startswith("the numbers do not add up"):
                 why = CHECK_TH.get(str((q.get("evidence") or {}).get("check") or ""), ("", S("e2.check.default")))[1]
                 text = (S("e2.q.sums", label=label, what=what, shown=shown, why=why, where=where, note=note))

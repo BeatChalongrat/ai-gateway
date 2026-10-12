@@ -85,7 +85,8 @@ def review(receipts: list[Upload], *, vat_claimed: dict, aliases: dict, answers:
                                         exclusion={"code": dec.excluded["code"], "key": dec.excluded.get("key"),
                                                    "reupload": dec.excluded.get("reupload", False)})
             continue
-        fs = [f for f in E2C.findings_for(up.key, judged) + IR._invalid_cards(up, judged, dec) if relevant(f, judged, vat)]
+        fs = [f for f in E2C.findings_for(up.key, judged, E2C.reader_of(proposals, up.key)) + IR._invalid_cards(up, judged, dec)
+              if relevant(f, judged, vat)]
         out[up.key] = ReceiptReview(up, judged, dec, "pending" if fs else "read", findings=fs, vat_claimed=vat, names=names)
     return out
 
