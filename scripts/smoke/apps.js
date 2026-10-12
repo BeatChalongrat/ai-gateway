@@ -18,6 +18,25 @@ const L = require("./lib");
 
 const summarizeUser = (j) => j?.user?.email || j?.email || (j?.user ? JSON.stringify(j.user).slice(0, 60) : "");
 
+/**
+ * webchat.turn's verdict over the turns it made (lib.turn results with {id, deleted}). The last turn
+ * must have completed with content and its chat be deleted — and every turn that completed must have
+ * been answered by the model asked: an answer from another model is the FAIL, said first on the line.
+ */
+function webTurnVerdict(tries, asked) {
+  const last = tries[tries.length - 1];
+  const who = tries.map((t) => (t.terminal === "message_complete" ? L.whoAnswered({ asked, served: t.served, ms: t.total }) : null));
+  const turns = tries.map((t, i) => (who[i] ? who[i].turn : { asked, served: null, ms: Math.round(t.total), expect_ms: L.TURN_EXPECT_MS }));
+  const wrong = who.find((w) => w && !w.ok);
+  const lastWho = who[who.length - 1];
+  const each = tries.map((t) => `chat ${t.id.slice(0, 8)}: http=${t.http} terminal=${t.terminal || "none"}${t.code ? ` code=${t.code}` : ""} chars=${t.content.length} ttft=${t.ttft ?? "-"}ms total=${t.total}ms deleted=${t.deleted}${t.error ? ` ${t.error}` : ""}`).join(" | ");
+  const answer = `answer="${last.content.trim().slice(0, 30)}"`;
+  if (wrong) return { ok: false, turns, detail: `${wrong.text} — ${each} ${answer}` };
+  const done = last.terminal === "message_complete" && !!last.content.trim() && last.deleted < 300;
+  if (!done) return { ok: false, turns, detail: `asked ${asked}, no answer: ${each} ${answer}` };
+  return { ok: true, slow: lastWho.slow, turns, detail: `${lastWho.text} — ${each} ${answer}` };
+}
+
 /** The smoke session: {session, how} — how = login | mint | none. */
 async function signIn(R) {
   const base = L.API_BASE;
@@ -136,9 +155,7 @@ module.exports = async function apps(R) {
       tries.push({ id, ...t, deleted: del });
       if (t.terminal === "message_complete" && t.content.trim()) break;
     }
-    const last = tries[tries.length - 1];
-    const detail = tries.map((t) => `chat ${t.id.slice(0, 8)}: http=${t.http} terminal=${t.terminal || "none"}${t.code ? ` code=${t.code}` : ""} chars=${t.content.length} ttft=${t.ttft ?? "-"}ms total=${t.total}ms deleted=${t.deleted}${t.error ? ` ${t.error}` : ""}`).join(" | ");
-    return { ok: last.terminal === "message_complete" && !!last.content.trim() && last.deleted < 300, detail: `${L.FREE_MODEL} ${detail} answer="${last.content.trim().slice(0, 30)}"` };
+    return webTurnVerdict(tries, L.FREE_MODEL);
   });
 
   // ── admin-ui ────────────────────────────────────────────────────────────────
@@ -197,3 +214,4 @@ module.exports = async function apps(R) {
   return session;
 };
 module.exports.signIn = signIn;
+module.exports.webTurnVerdict = webTurnVerdict;

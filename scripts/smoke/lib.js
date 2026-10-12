@@ -18,8 +18,10 @@ const { execFileSync, spawnSync } = require("node:child_process");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const TARGET = process.env.SMOKE_TARGET || "live";
+// The model every turn of this suite asks, and the only one it accepts an answer from (whoAnswered
+// below). There is no second model: the suite once asked another one itself when this one failed, and
+// one API check in five that passed on live had been answered by a model that was not asked.
 const FREE_MODEL = process.env.SMOKE_MODEL || "qwen3.8-27b-fp8";
-const FALLBACK_MODEL = process.env.SMOKE_FALLBACK_MODEL || "deepseek-v4-flash"; // the card rule: qwen first, deepseek when qwen fails
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const TARGETS = {
@@ -254,34 +256,72 @@ async function turn(session, convId, content, { timeoutMs = 240000, extra = {} }
     if (ev) { let d = null; try { d = JSON.parse(data); } catch { /* keepalive or plain */ } frames.push({ ev, d }); }
   }
   const term = frames.filter((f) => ["message_complete", "error", "cancelled"].includes(f.ev)).pop();
+  // who answered: the terminal frame's own word, else the last model the stream said it resolved to
+  const resolved = frames.filter((f) => f.ev === "model_resolved" && f.d?.model).pop();
   return {
     http: r.status, ttft, total: Date.now() - t0,
-    terminal: term?.ev ?? null, code: term?.d?.code || term?.d?.error?.code || null, served: term?.d?.model_id || null,
+    terminal: term?.ev ?? null, code: term?.d?.code || term?.d?.error?.code || null,
+    served: term?.d?.model_id || resolved?.d?.model || null, fallbackFrom: term?.d?.fallback_from || null,
     content: frames.filter((f) => f.ev === "content_delta").map((f) => f.d?.delta || "").join(""),
     events: [...new Set(frames.map((f) => f.ev))],
   };
 }
 
+// ── who answered ─────────────────────────────────────────────────────────────
+// On 9 Oct 2026 the in-house model stopped answering: every turn asked of it waited thirty seconds and
+// was then answered by another model — and both live runs of this suite were green, because a check
+// counted a turn that ended and not who ended it. A rescue is right for a person in a hurry and wrong
+// for a check. So every turn this suite makes says which model was asked and which one answered, and:
+//   * an answer from another model is a FAIL naming both, with the wait;
+//   * an answer that does not say who gave it is a FAIL (a check that cannot see has not checked);
+//   * an answer from the model asked that took longer than expected is said with its number (SLOW),
+//     though it passed — the thirty seconds were in the logs and nowhere in the result.
+// The expected time is three times what nine in ten turns of this suite took on live (146 results to
+// 9 Oct 2026: web turn 4.4 s, API call 5.4 s); SMOKE_TURN_EXPECT_MS says otherwise.
+const TURN_EXPECT_MS = Number(process.env.SMOKE_TURN_EXPECT_MS) > 0 ? Number(process.env.SMOKE_TURN_EXPECT_MS) : 15000;
+/** A response's model is the one asked for (a gateway may put the provider first: "sranai/qwen3.8-27b-fp8"). */
+function sameModel(served, asked) {
+  const s = String(served || "").trim().toLowerCase();
+  const a = String(asked || "").trim().toLowerCase();
+  return !!s && !!a && (s === a || s.endsWith(`/${a}`));
+}
+const secondsText = (ms) => `${(ms / 1000).toFixed(1)} s`;
+/** One turn's verdict: {ok, slow, text, turn:{asked, served, ms, expect_ms}}. */
+function whoAnswered({ asked, served, ms, expectMs = TURN_EXPECT_MS }) {
+  asked = String(asked || "").trim();
+  served = String(served || "").trim();
+  const turn = { asked: asked || null, served: served || null, ms: Math.round(ms), expect_ms: expectMs };
+  if (!asked) return { ok: false, slow: false, turn, text: `the check did not say which model it asked (${secondsText(ms)})` };
+  if (!served) return { ok: false, slow: false, turn, text: `asked ${asked}, and the answer does not say which model gave it (${secondsText(ms)})` };
+  if (!sameModel(served, asked)) return { ok: false, slow: false, turn, text: `asked ${asked}, answered ${served}, waited ${secondsText(ms)}` };
+  const slow = ms > expectMs;
+  return { ok: true, slow, turn, text: `${served} answered in ${secondsText(ms)}${slow ? ` — expected within ${secondsText(expectMs)}` : ""}` };
+}
+
 // ── reporting ────────────────────────────────────────────────────────────────
 class Report {
   constructor() { this.checks = []; }
-  add(status, name, detail, ms) {
+  /** more: {turns: [{asked, served, ms, expect_ms}], slow: true} — what a check that made a turn knows about it. */
+  add(status, name, detail, ms, more = {}) {
     const row = { status, name, detail: String(detail ?? "").replace(/\s+/g, " ").trim(), ms: ms ?? null };
+    if (Array.isArray(more.turns) && more.turns.length) row.turns = more.turns;
+    // a turn that passed and took longer than expected: a pass in the count, SLOW on its line and in the summary
+    if (status === "PASS" && more.slow) row.slow = true;
     this.checks.push(row);
-    process.stdout.write(`${status.padEnd(4)} ${name.padEnd(30)} ${row.detail}\n`);
+    process.stdout.write(`${(row.slow ? "SLOW" : status).padEnd(4)} ${name.padEnd(30)} ${row.detail}\n`);
     return row;
   }
-  pass(name, detail, ms) { return this.add("PASS", name, detail, ms); }
-  fail(name, detail, ms) { return this.add("FAIL", name, detail, ms); }
+  pass(name, detail, ms, more) { return this.add("PASS", name, detail, ms, more); }
+  fail(name, detail, ms, more) { return this.add("FAIL", name, detail, ms, more); }
   skip(name, detail, ms) { return this.add("SKIP", name, detail, ms); }
-  /** fn returns {ok, detail} or {skip, detail}; a throw is a FAIL with the error text. */
+  /** fn returns {ok, detail} or {skip, detail}, with {turns, slow} when it made a turn; a throw is a FAIL with the error text. */
   async run(name, fn) {
     const t0 = Date.now();
     try {
       const r = await fn();
       const ms = Date.now() - t0;
       if (r && r.skip) return this.skip(name, r.detail, ms);
-      return r && r.ok ? this.pass(name, r.detail, ms) : this.fail(name, r?.detail ?? "no result", ms);
+      return r && r.ok ? this.pass(name, r.detail, ms, r) : this.fail(name, r?.detail ?? "no result", ms, r || {});
     } catch (e) {
       return this.fail(name, errText(e), Date.now() - t0);
     }
@@ -291,13 +331,16 @@ class Report {
     for (const r of this.checks) c[r.status.toLowerCase()]++;
     return c;
   }
+  /** The checks that passed and were slow. */
+  slow() { return this.checks.filter((r) => r.slow); }
 }
 
 const ageText = (s) => (s < 90 ? `${Math.round(s)} s` : s < 5400 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`);
 
 module.exports = {
-  ROOT, TARGET, T, API_BASE, FREE_MODEL, FALLBACK_MODEL, TS_USER, SMOKE_USER, wait, env, dotenv,
+  ROOT, TARGET, T, API_BASE, FREE_MODEL, TS_USER, SMOKE_USER, wait, env, dotenv,
   dockerExec, dockerLogs, dockerLabel, containerRunning, assertProject, gsql, csql,
   http, tryHttp, errText, cookieSession, bearerSession, mintPortalToken,
   edge, EDGE, newChat, deleteChat, forget, cleanup, turn, created, Report, ageText,
+  TURN_EXPECT_MS, sameModel, whoAnswered, secondsText,
 };

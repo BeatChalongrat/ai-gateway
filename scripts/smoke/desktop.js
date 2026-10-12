@@ -48,6 +48,22 @@ async function stopActive(page) {
   return buttons.some((label) => isStopButton({ label, inComposer: true }));
 }
 
+/**
+ * desktop.turn's verdict. `row` is the assistant row as the server keeps it — "status|terminal cause|
+ * the model that answered|the model it stood in for" — and `ended` the milliseconds until the composer
+ * stopped streaming (null: it never did). The turn must have ended, be kept as completed, show its
+ * answer on the page, and have been answered by the model the chat was made with.
+ */
+function turnVerdict({ chat, ended, row, text, asked }) {
+  const [status = "", cause = "", served = "", from = ""] = String(row || "").split("|");
+  const seen = `chat ${chat.slice(0, 8)}: stream ended ${ended === null ? "NOT within 180 s" : `in ${ended} ms`}, assistant row "${[status, cause].filter(Boolean).join("|")}", answer "${text.slice(-40)}"`;
+  const turns = [{ asked, served: served || null, ms: ended ?? 180000, expect_ms: L.TURN_EXPECT_MS }];
+  if (ended === null || !/completed/.test(`${status}|${cause}`) || !text.length) return { ok: false, turns, detail: `asked ${asked}, no answer: ${seen}` };
+  const who = L.whoAnswered({ asked, served, ms: ended });
+  if (!who.ok) return { ok: false, turns, detail: `${who.text}${from ? ` (the row says it stood in for ${from})` : ""} — ${seen}` };
+  return { ok: true, slow: who.slow, turns, detail: `${who.text} — ${seen}` };
+}
+
 const portOpen = (port) => new Promise((resolve) => {
   const s = net.connect({ host: "127.0.0.1", port, timeout: 1500 });
   s.once("connect", () => { s.destroy(); resolve(true); });
@@ -188,8 +204,9 @@ module.exports = async function desktop(R) {
         await L.wait(1500);
         const ended = await waitFor(async () => (!(await stopActive(page)) ? Date.now() - t0 : null), 180000);
         const text = await page.evaluate(() => { const r = [...document.querySelectorAll("[data-msg-index]")]; return (r[r.length - 1]?.innerText || "").replace(/\s+/g, " ").trim(); });
-        const row = L.csql(`select status, coalesce(terminal_cause,'') from chat.messages_masked where conversation_id='${mk.id}' and role='assistant' order by created_at desc limit 1`);
-        result = { ok: ended !== null && /completed/.test(row) && text.length > 0, detail: `chat ${mk.id.slice(0, 8)}: stream ended ${ended === null ? "NOT within 180 s" : `in ${ended} ms`}, assistant row "${row}", answer "${text.slice(-40)}"` };
+        // the assistant row as the server keeps it: how the turn ended, and the model that answered it
+        const row = L.csql(`select status, coalesce(terminal_cause,''), coalesce(model_id,''), coalesce(fallback_from,'') from chat.messages_masked where conversation_id='${mk.id}' and role='assistant' order by created_at desc limit 1`);
+        result = turnVerdict({ chat: mk.id, ended, row, text, asked: L.FREE_MODEL });
       } finally {
         const del = await page.evaluate(async ([edge, id]) => (await fetch(`${edge}/api/v1/conversations/${id}`, { method: "DELETE", credentials: "include" })).status, [chatEdgeUrl, mk.id]).catch(() => 0);
         result.detail += `, deleted=${del}`;
@@ -211,3 +228,4 @@ module.exports = async function desktop(R) {
 };
 
 module.exports.isStopButton = isStopButton;
+module.exports.turnVerdict = turnVerdict;

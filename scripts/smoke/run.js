@@ -60,15 +60,19 @@ async function main() {
 
   const counts = R.counts();
   const ok = counts.fail === 0 && !setupError;
+  // the turns that passed and took longer than expected: counted among the passes, and named here
+  const slow = R.slow().map((c) => c.name);
   const result = {
     schema: 1, target: L.TARGET, project: L.T.project, at: new Date().toISOString(), epoch: Math.floor(Date.now() / 1000),
-    host: os.hostname(), checkout: head, desktop: desktopOn, ok, counts, duration_s: Math.round((Date.now() - t0) / 1000), checks: R.checks,
+    host: os.hostname(), checkout: head, desktop: desktopOn, ok, counts, slow, model: L.FREE_MODEL, turn_expect_ms: L.TURN_EXPECT_MS,
+    duration_s: Math.round((Date.now() - t0) / 1000), checks: R.checks,
   };
   const out = process.env.SMOKE_RESULT || path.join(L.ROOT, "scripts", "probes", "FIX134", "results", "smoke", `smoke_${L.TARGET}_${result.at.replace(/[-:]/g, "").slice(0, 15)}Z.json`);
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, JSON.stringify(result, null, 1));
-  process.stdout.write(`\n${ok ? "GREEN" : "RED"} ${L.TARGET}: ${counts.pass} pass, ${counts.fail} fail, ${counts.skip} skip in ${result.duration_s} s → ${out}\n`);
+  process.stdout.write(`\n${ok ? "GREEN" : "RED"} ${L.TARGET}: ${counts.pass} pass${slow.length ? ` (${slow.length} slow)` : ""}, ${counts.fail} fail, ${counts.skip} skip in ${result.duration_s} s → ${out}\n`);
   if (counts.fail) process.stdout.write(`failed: ${R.checks.filter((c) => c.status === "FAIL").map((c) => c.name).join(", ")}\n`);
+  if (slow.length) process.stdout.write(`slow: ${slow.join(", ")} (a turn is expected within ${L.secondsText(L.TURN_EXPECT_MS)})\n`);
   return ok ? 0 : 1;
 }
 
