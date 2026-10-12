@@ -19,7 +19,7 @@ auditor should be pointed at.
 | Property | Value |
 |---|---|
 | Retention window | Admin-configurable per tenant; **minimum 30 days**; empty = keep forever |
-| Deletion time | **00:00 UTC daily** — a fixed hour, not "within 24 hours"; restarts do not move it |
+| Deletion time | **00:00 UTC daily** — a fixed hour, not "within 24 hours"; restarts do not move it. If the service is not running at that hour (the machine is off or asleep), the pass is run when it next starts or wakes, **as of that hour**: it erases what the pass at 00:00 UTC would have erased and nothing that fell due since, and a tenant whose settings were changed after that hour waits for the next pass |
 | User-deleted chats | Removed from the user's view **immediately**; permanently erased from the server after the configured purge window (default **30 days**) — **on for every tenant by default** since FIX132 (before, it only ran for tenants that had opted into transcript retention, so nothing was erased) |
 | Deleted accounts (FIX132) | Refused and hidden **immediately**; everything the user owns permanently erased or anonymised **30 days** later; credit ledger kept anonymised. See [ops/user-data.md](ops/user-data.md) |
 | Backups | Local copies roll off after **14 days**; off-site snapshots (when configured) keep up to 12 months — see [ops/user-data.md](ops/user-data.md#backups) |
@@ -125,7 +125,7 @@ first (their rows carry the paths). Triggered by two rules:
 
 Per-tenant settings live in `chat.tenant_retention_settings`
 (`transcript_retention_enabled` default **false**, `dry_run` default
-**true**, floor 30 — these govern `retention_expired` only). The sweep runs at 00:00 UTC, caps each tenant's
+**true**, floor 30 — these govern `retention_expired` only). The sweep runs for 00:00 UTC (late, as of that hour, if the service was not running then), caps each tenant's
 nightly work, and refuses windows below the floor even if a row
 somehow carries one.
 

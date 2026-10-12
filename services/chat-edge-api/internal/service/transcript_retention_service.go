@@ -31,9 +31,22 @@
 //     honored;
 //   - at most maxErasuresPerTenantPerRun per tenant per night.
 //
-// Runs at 00:00 UTC (the fixed deletion time the product documents),
-// never immediately on boot — a restart must not move the deletion
-// hour.
+// Runs for 00:00 UTC (the fixed deletion time the product documents),
+// and a pass is worked out AS OF that hour, whenever it is run.
+//
+// It used to sleep until the next 00:00 UTC and run nothing at a start,
+// so a machine that was off or asleep at that minute skipped the day's
+// pass and nothing made it good: the job quietly did not happen, and
+// what was due stayed until someone noticed. Now a start runs the pass
+// it finds owed (the latest 00:00 UTC), and the clock is looked at every
+// minute, so a machine that slept through the hour runs it on waking.
+//
+// A restart still does not move the deletion hour. Because a pass is as
+// of its hour, running it late erases exactly what running it on time
+// would have — nothing that was not yet due at a documented hour — and
+// a tenant whose settings were changed after that hour waits for the
+// next pass ("nothing happens at 14:00", docs/DATA_RETENTION_PLAN.md).
+// Run again for an hour whose pass already ran, it finds nothing left.
 package service
 
 import (
@@ -107,12 +120,25 @@ type SweepStats struct {
 	// is kept so nothing is hidden.
 	ConversationsSeenTestData int `json:"conversations_seen_test_data"`
 	TenantsLikelyTest         int `json:"tenants_likely_test"`
+	// TenantsWaiting — tenants this pass left alone because their
+	// settings were changed after the hour the pass is for: the change
+	// applies from the next pass, never from one being made good late.
+	TenantsWaiting int `json:"tenants_waiting"`
 }
 
-// EnforceOnce runs one pass: every tenant that opted into the
-// retention_expired rule, plus every tenant holding user-deleted
-// conversations (the user_request rule needs no opt-in since FIX132).
+// EnforceOnce runs one pass as of now.
 func (s *TranscriptRetentionService) EnforceOnce(ctx context.Context) SweepStats {
+	return s.EnforceAsOf(ctx, time.Now().UTC())
+}
+
+// EnforceAsOf runs the pass that was due at `due`, whenever it is
+// called: every tenant that opted into the retention_expired rule, plus
+// every tenant holding user-deleted conversations (the user_request rule
+// needs no opt-in since FIX132). Every window is measured back from
+// `due`, not from the clock, so a pass run hours late erases what the
+// pass at its hour would have erased and nothing that fell due since.
+func (s *TranscriptRetentionService) EnforceAsOf(ctx context.Context, due time.Time) SweepStats {
+	due = due.UTC()
 	stats := SweepStats{Counts: map[string]int{}}
 	enabled, err := s.settings.ListEnabled(ctx)
 	if err != nil {
@@ -125,7 +151,7 @@ func (s *TranscriptRetentionService) EnforceOnce(ctx context.Context) SweepStats
 		t := &enabled[i]
 		seen[t.TenantID] = true
 		stats.TenantsScanned++
-		s.enforceTenant(ctx, t, &stats)
+		s.enforceTenant(ctx, t, &stats, due)
 	}
 
 	// The deleted-data purge scans the DATA, not the settings table: a
@@ -134,7 +160,7 @@ func (s *TranscriptRetentionService) EnforceOnce(ctx context.Context) SweepStats
 	// each tenant's own window is applied in candidates().
 	if s.DeletedPurgeMode() != model.PurgeModeOff {
 		tenants, err := s.erase.ListTenantsWithDeletedBefore(
-			ctx, time.Now().UTC().AddDate(0, 0, -1))
+			ctx, due.AddDate(0, 0, -1))
 		if err != nil {
 			slog.Warn("transcript retention: list tenants with deleted chats failed", "err", err)
 			stats.Errors++
@@ -151,7 +177,7 @@ func (s *TranscriptRetentionService) EnforceOnce(ctx context.Context) SweepStats
 				continue
 			}
 			stats.TenantsScanned++
-			s.enforceTenant(ctx, t, &stats)
+			s.enforceTenant(ctx, t, &stats, due)
 		}
 	}
 
@@ -159,9 +185,12 @@ func (s *TranscriptRetentionService) EnforceOnce(ctx context.Context) SweepStats
 	// seen, so a day with nothing to erase left no line — and the check that looks for this line in the
 	// last 26 hours (the smoke's jobs.retention) could not tell "ran, nothing due" from "did not run":
 	// it was red on 11 Oct 2026 with nothing overdue, and would have been green on a day with a backlog
-	// only by luck. The line is the proof that the pass ran.
+	// only by luck. The line is the proof that the pass ran — and `due` says for which hour, so a
+	// reader can tell today's pass from yesterday's.
 	slog.Info("transcript retention: pass complete",
+		"due", due.Format(time.RFC3339),
 		"tenants", stats.TenantsScanned,
+		"tenants_waiting", stats.TenantsWaiting,
 		"seen", stats.ConversationsSeen,
 		"seen_test_data", stats.ConversationsSeenTestData,
 		"seen_real", stats.ConversationsSeen-stats.ConversationsSeenTestData,
@@ -198,7 +227,7 @@ func (s *TranscriptRetentionService) PreviewTenant(
 	}
 	// The preview counts both rules whatever their switches say — it is
 	// the "what would a live pass do" number an admin reads first.
-	expired, purgeable, err := s.candidates(ctx, settings, true, true)
+	expired, purgeable, err := s.candidates(ctx, settings, true, true, time.Now().UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -232,9 +261,9 @@ func (s *TranscriptRetentionService) PreviewTenant(
 }
 
 func (s *TranscriptRetentionService) candidates(
-	ctx context.Context, t *model.TenantRetentionSettings, withExpired, withDeleted bool,
+	ctx context.Context, t *model.TenantRetentionSettings, withExpired, withDeleted bool, asOf time.Time,
 ) (expired, purgeable []repository.EraseCandidate, err error) {
-	now := time.Now().UTC()
+	now := asOf.UTC()
 	if withExpired && t.TranscriptRetentionDays != nil {
 		if *t.TranscriptRetentionDays < model.TranscriptRetentionMinDays {
 			slog.Error("transcript retention: days below floor — tenant skipped",
@@ -266,14 +295,28 @@ func (s *TranscriptRetentionService) candidates(
 }
 
 func (s *TranscriptRetentionService) enforceTenant(
-	ctx context.Context, t *model.TenantRetentionSettings, stats *SweepStats,
+	ctx context.Context, t *model.TenantRetentionSettings, stats *SweepStats, due time.Time,
 ) {
 	retentionMode, purgeMode := s.ruleModes(t)
 	if retentionMode == model.PurgeModeOff && purgeMode == model.PurgeModeOff {
 		return
 	}
+	// A change to a tenant's settings applies from the next pass at the
+	// documented hour, never sooner. A pass that is being made good late
+	// reads today's settings row, so without this it would be the thing
+	// that applied a change early — a shorter window, a dry run switched
+	// to live. Such a tenant waits one pass. (No settings row = the
+	// defaults, which were never changed.)
+	if t.UpdatedAt.After(due) {
+		stats.TenantsWaiting++
+		slog.Info("transcript retention: settings changed after this pass's hour — the tenant waits for the next pass",
+			"tenant", t.TenantID.String(),
+			"due", due.Format(time.RFC3339),
+			"settings_changed", t.UpdatedAt.UTC().Format(time.RFC3339))
+		return
+	}
 	expired, purgeable, err := s.candidates(ctx, t,
-		retentionMode != model.PurgeModeOff, purgeMode != model.PurgeModeOff)
+		retentionMode != model.PurgeModeOff, purgeMode != model.PurgeModeOff, due)
 	if err != nil {
 		slog.Warn("transcript retention: candidate scan failed",
 			"tenant", t.TenantID.String(), "err", err)
@@ -367,26 +410,54 @@ func (s *TranscriptRetentionService) enforceTenant(
 	}
 }
 
-// secondsUntilNextMidnightUTC — the fixed run time. Exported-ish for
-// tests via the service package.
-func secondsUntilNextMidnightUTC(now time.Time) time.Duration {
+// retentionClockLook — how often the schedule looks at the clock. A
+// pass is owed from 00:00 UTC; it starts within this long of that, or
+// of the machine waking.
+const retentionClockLook = time.Minute
+
+// lastScheduledPass — the latest 00:00 UTC at or before now: the hour
+// the newest pass is for.
+func lastScheduledPass(now time.Time) time.Time {
 	now = now.UTC()
-	next := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).
-		AddDate(0, 0, 1)
-	return next.Sub(now)
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 }
 
-// StartBackground sleeps to the next 00:00 UTC, runs a pass, and
-// repeats daily. No boot-time pass: the deletion hour is a
-// documented, fixed time — restarts must not move it.
-func (s *TranscriptRetentionService) StartBackground(ctx context.Context) {
+// runRetentionSchedule calls pass(due) once for every scheduled hour it
+// sees go by, starting with the one it finds already gone by when it is
+// called — the pass a start makes good. It reads the wall clock on every
+// tick instead of sleeping until the next hour: a single long sleep does
+// not count the time a machine is asleep, so it fired hours late or not
+// at all on a machine that sleeps at night. Hours that went by unseen
+// (two days asleep) are made good by one pass for the latest of them —
+// a pass as of an hour covers everything due before it.
+func runRetentionSchedule(
+	ctx context.Context, now func() time.Time, ticks <-chan time.Time, pass func(due time.Time),
+) {
+	var ranFor time.Time // the hour the last pass was for; zero = none since this start
 	for {
-		wait := secondsUntilNextMidnightUTC(time.Now())
+		if due := lastScheduledPass(now()); due.After(ranFor) {
+			pass(due)
+			ranFor = due
+		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(wait):
-			s.EnforceOnce(ctx)
+		case <-ticks:
 		}
 	}
+}
+
+// StartBackground runs the pass the start finds owed, then one for every
+// 00:00 UTC that goes by — each as of its hour (see the file header).
+func (s *TranscriptRetentionService) StartBackground(ctx context.Context) {
+	t := time.NewTicker(retentionClockLook)
+	defer t.Stop()
+	runRetentionSchedule(ctx, time.Now, t.C, func(due time.Time) {
+		if late := time.Since(due); late > 2*retentionClockLook {
+			slog.Info("transcript retention: making good a pass that did not run at its hour",
+				"due", due.Format(time.RFC3339),
+				"late_by", late.Round(time.Second).String())
+		}
+		s.EnforceAsOf(ctx, due)
+	})
 }
