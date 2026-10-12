@@ -125,7 +125,7 @@ func TestWhoReadTheFormIsRecordedEvenWhenNothingWasProposed(t *testing.T) {
 	pkg := &Package{}
 	pkg.Manifest.Capabilities.Required = []string{"model.text"}
 	pkg.Manifest.Templates = json.RawMessage(am11Spec)
-	rc := &runCtx{r: &Runner{Model: m, CreditsPerUSD: 1}, pkg: pkg, docsMayLeave: true}
+	rc := &runCtx{r: &Runner{Model: m, CreditsPerUSD: 1}, pkg: pkg, docsMayLeave: true, recipients: named(m, "deepseek-v4-flash")}
 	res := mustJSON(map[string]any{"slots": blanks("เลขที่ใบขอซื้อ", "ผู้ขอซื้อ", "แผนก"), "proposal": map[string]string{}})
 
 	out, _, _ := rc.proposeMapping(context.Background(), res)

@@ -614,7 +614,7 @@ func (r *Runner) askModel(ctx context.Context, rc *runCtx, models []string, syst
 	var calls *modelCalls
 	if rc != nil {
 		// AM13b (masking.go): an answer about a round is made from that round's data — the same rule
-		ctx, calls = withModelCalls(ctx, !rc.docsMayLeave, rc.masked)
+		ctx, calls = withModelCalls(withRecipients(ctx, rc.recipients), !rc.docsMayLeave, rc.masked)
 		// AM16: an answer is not a step, so what it sent out as typed is said in the thread, beside it
 		defer func() {
 			if calls.wentOut() {

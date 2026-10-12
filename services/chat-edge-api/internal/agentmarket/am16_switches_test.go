@@ -116,13 +116,13 @@ func TestAM16AnAgentThatReadsPagesHasNoOutsideModelWhileItIsMasked(t *testing.T)
 		return false
 	}
 
-	open := EgressOf(true, reads, &yes).WithMasked(false)
+	open := everyoneNamed(EgressOf(true, reads, &yes).WithMasked(false), &rm)
 	p := MenuFor(Install{ModelChoice: ModelAuto}, reads, open, rm)
 	if !has(p, "google/gemini-2.5-flash") || !open.PagesMayLeave {
 		t.Fatalf("may leave, not masked: an outside model that reads images is in the menu: %+v", p.Models)
 	}
 
-	masked := EgressOf(true, reads, &yes).WithMasked(true)
+	masked := everyoneNamed(EgressOf(true, reads, &yes).WithMasked(true), &rm)
 	p = MenuFor(Install{ModelChoice: "google/gemini-2.5-flash"}, reads, masked, rm)
 	if has(p, "google/gemini-2.5-flash") || !has(p, "qwen3.8-27b-fp8") || masked.PagesMayLeave {
 		t.Fatalf("may leave, masked: a page stays inside — the menu is %+v", p.Models)
@@ -141,7 +141,7 @@ func TestAM16AnAgentThatReadsPagesHasNoOutsideModelWhileItIsMasked(t *testing.T)
 	}
 
 	// text: masked or not, the outside model stays — what it is sent is masked text
-	p = MenuFor(Install{ModelChoice: ModelAuto}, writes, EgressOf(true, writes, &yes).WithMasked(true), rm)
+	p = MenuFor(Install{ModelChoice: ModelAuto}, writes, everyoneNamed(EgressOf(true, writes, &yes).WithMasked(true), &rm), rm)
 	if !has(p, "deepseek-v4-flash") {
 		t.Fatalf("an agent whose model writes from figures keeps its outside model while masked: %+v", p.Models)
 	}

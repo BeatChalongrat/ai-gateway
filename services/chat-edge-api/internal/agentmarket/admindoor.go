@@ -192,6 +192,7 @@ func (a *API) AdminRoutes(r chi.Router) {
 	r.Post("/runs/{id}/remove-evidence", a.adminRemoveEvidence)
 	// phase 5: the organisation's mail relay (mail.go)
 	r.Get("/egress", a.adminEgress)
+	r.Put("/egress/recipients", a.adminPutOrgRecipients) // (AM16: the organisation's own list; no agent has this slug)
 	r.Put("/egress/{slug}", a.adminPutEgress)
 	a.adminWebRoutes(r) // AM12: agents that work on the web (web.go)
 	r.Get("/mail", a.adminMail)

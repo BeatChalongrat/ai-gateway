@@ -162,7 +162,9 @@ func TestAPageIsReadInsideWhileTheAgentIsMasked(t *testing.T) {
 		{true, false, true, true},
 		{true, true, true, false},
 	} {
-		rc := &runCtx{r: &Runner{Model: m}, docsMayLeave: c.leave, masked: c.masked}
+		// (the outside model's recipient is named throughout: what this holds is the two switches — who
+		// may be reached at all is am16_recipients_test.go)
+		rc := &runCtx{r: &Runner{Model: m}, docsMayLeave: c.leave, masked: c.masked, recipients: named(m, outside)}
 		if got := rc.mayUse(outside); got != c.wantText {
 			t.Errorf("leave=%v masked=%v: text to an outside model allowed = %v, want %v", c.leave, c.masked, got, c.wantText)
 		}

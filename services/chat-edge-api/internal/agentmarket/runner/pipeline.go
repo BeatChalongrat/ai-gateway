@@ -41,6 +41,10 @@ type runCtx struct {
 	// model is masked first. Off by default; it no longer follows docsMayLeave (masking.go). A page
 	// image cannot be masked, so while this is on pages are read by an in-house model only (choice.go).
 	masked bool
+	// recipients (AM16): who outside the organisation this agent's documents may reach — the admin's
+	// ticks for the agent that the organisation's own list also holds. Never nil; empty is nobody, also
+	// while docsMayLeave is on (choice.go mayUse). Every model call of the round carries it (masking.go).
+	recipients []string
 	// modelAway (AM15): this job has just found no model reachable to read a person's typed words
 	// (jobs.go replyToAsked) — a second question of the same model in the same job is not put.
 	modelAway bool
@@ -322,7 +326,7 @@ func (r *Runner) load(ctx context.Context, run am.Run, log *slog.Logger) (*runCt
 	// the defaults of the manifest of the version the run is pinned to
 	engineDefaults, remembered := am.EngineDefaults(pkg.Manifest, defs)
 	rc := &runCtx{ctx: ctx, r: r, run: run, install: in, engine: eng, pkg: pkg, defaults: engineDefaults, remembered: remembered, log: log}
-	rc.docsMayLeave, rc.masked = r.switchesOf(ctx, in.OrgID, in.Slug, pkg.Manifest)
+	rc.docsMayLeave, rc.masked, rc.recipients = r.switchesOf(ctx, in.OrgID, in.Slug, pkg.Manifest)
 	rc.selfTestSettings()
 	return rc, rc.reloadAnswers(ctx)
 }
@@ -455,7 +459,7 @@ func (rc *runCtx) step(ctx context.Context, name, kind, key string, input any, c
 	// written beside a FAILED step too — the page left, whatever became of the step — and what an
 	// earlier attempt of the same step sent is kept when the step is run again.
 	sentBefore := sentOutStamped(st.Output)
-	stepCtx, calls := withModelCalls(ctx, !rc.docsMayLeave, rc.masked)
+	stepCtx, calls := withModelCalls(withRecipients(ctx, rc.recipients), !rc.docsMayLeave, rc.masked)
 	out, credits, script, model, err := fn(stepCtx)
 	if err != nil {
 		msg := err.Error()

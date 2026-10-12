@@ -345,7 +345,7 @@ func TestExtractionAgentsSendTypedWordsOnlyInsideTheOrganisation(t *testing.T) {
 	if got := rcFin.textModels(); len(got) != 1 || got[0] != "qwen" {
 		t.Fatalf("documents stay inside: the financial report uses the in-house model only: %v", got)
 	}
-	rcFinOut := &runCtx{r: &Runner{Model: m}, pkg: fin, docsMayLeave: true}
+	rcFinOut := &runCtx{r: &Runner{Model: m}, pkg: fin, docsMayLeave: true, recipients: named(m, "deepseek")}
 	if got := rcFinOut.textModels(); len(got) != 2 || got[1] != "deepseek" {
 		t.Fatalf("documents may leave: its primary then its fallback: %v", got)
 	}
@@ -398,7 +398,7 @@ func TestTheRoundsChoiceReadsTheScansAsTheOrganisationAllows(t *testing.T) {
 	pkg := &Package{}
 	pkg.Manifest.Capabilities.Optional = []string{"model.vision"}
 	choose := func(c string, leave bool) (string, bool) {
-		rc := &runCtx{r: &Runner{Model: m}, pkg: pkg, docsMayLeave: leave}
+		rc := &runCtx{r: &Runner{Model: m}, pkg: pkg, docsMayLeave: leave, recipients: named(m, "gpt-vision", "deepseek")}
 		rc.run.ModelChoice = &c
 		return rc.visionModel()
 	}

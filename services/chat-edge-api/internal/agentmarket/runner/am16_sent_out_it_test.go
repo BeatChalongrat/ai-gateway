@@ -20,7 +20,9 @@ import (
 // image — which nothing masks — while the run's card said "masked".
 
 const (
-	am16Scan = "s01_scan300_full_tax_invoice.pdf"
+	// the recipient the stand-in gateway's catalogue names for the outside model: a route and a company
+	am16Recipient = "standin:vision-co"
+	am16Scan      = "s01_scan300_full_tax_invoice.pdf"
 	// the name the stand-in gateway answers a page-reading call under; these tests do NOT hold it as
 	// in-house (am15's do), so here it is a model outside the organisation
 	am16Outside = "fake-vision"
@@ -60,6 +62,25 @@ func (e *itEnv) am16Switches(slug string, leave, masked bool) {
 	}
 }
 
+// nameRecipients names who outside the organisation may be sent documents (AM16): for one agent (slug),
+// or — with no slug — on the organisation's own list, which is the ceiling for every agent.
+func (e *itEnv) nameRecipients(slug string, keys ...string) {
+	e.t.Helper()
+	ctx := context.Background()
+	for _, k := range keys {
+		var err error
+		if slug == "" {
+			_, err = e.store.Pool.Exec(ctx, `INSERT INTO agent_market.org_recipients (org_id, recipient) VALUES ($1, $2) ON CONFLICT DO NOTHING`, am.DefaultOrg, k)
+		} else {
+			_, err = e.store.Pool.Exec(ctx, `INSERT INTO agent_market.agent_recipients (org_id, slug, recipient) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+				am.DefaultOrg, slug, k)
+		}
+		if err != nil {
+			e.t.Fatal(err)
+		}
+	}
+}
+
 // visionStep is the step that read the scan by eye, or nil.
 func (e *itEnv) visionStep(run uuid.UUID) *am.Step {
 	for _, s := range e.steps(run) {
@@ -82,6 +103,8 @@ func TestAScanReadByAModelOutsideIsSaidOnTheFaceOfTheRunsCard(t *testing.T) {
 		return
 	}
 	in := e.setupInvoiceInstall()
+	// (the stand-in gateway's catalogue says who runs the outside model, as the real one does)
+	e.recipients = map[string][]string{am16Outside: {am16Recipient}}
 	r := e.runner("r1")
 	// the only model that reads images is one the runner does not hold as in-house
 	r.Model.VisionModel = am16Outside
@@ -98,8 +121,28 @@ func TestAScanReadByAModelOutsideIsSaidOnTheFaceOfTheRunsCard(t *testing.T) {
 		t.Fatalf("nothing left, and the card says it did: %v", p)
 	}
 
-	// 2. may leave, not masked: the page is read by the outside model — and the run says so
+	// 2a. AM16, the recipients: may leave, not masked — and nobody named. "May leave" with nothing ticked
+	//     is nobody: the page is not given to the outside model, and nothing is said to have left.
 	e.am16Switches(in.Slug, true, false)
+	run = e.invoiceRun(am16Scan)
+	e.drive(r, run.ID, 6*time.Minute, parkedOrTerminal)
+	if s := e.visionStep(run.ID); s != nil {
+		t.Fatalf("documents may leave but nobody was named, and a page went to a model anyway: step %q %s %s", s.Name, s.Status, s.Output)
+	}
+	if p := e.progressOf(run.ID); p["sent_out_unmasked"] == true {
+		t.Fatalf("nobody was named, the page stayed, and the card says it left: %v", p)
+	}
+	// … named for the organisation only: the agent's own list is still empty — still nobody
+	e.nameRecipients("", am16Recipient)
+	run = e.invoiceRun(am16Scan)
+	e.drive(r, run.ID, 6*time.Minute, parkedOrTerminal)
+	if s := e.visionStep(run.ID); s != nil {
+		t.Fatalf("named for the organisation, not for this agent, and a page went out: step %q %s", s.Name, s.Status)
+	}
+
+	// 2. may leave, not masked, and the company that runs the model named for this agent: the page is
+	//    read by the outside model — and the run says so
+	e.nameRecipients(in.Slug, am16Recipient)
 	run = e.invoiceRun(am16Scan)
 	got := e.drive(r, run.ID, 6*time.Minute, parkedOrTerminal)
 	s := e.visionStep(run.ID)
@@ -116,6 +159,22 @@ func TestAScanReadByAModelOutsideIsSaidOnTheFaceOfTheRunsCard(t *testing.T) {
 	}
 	if p := e.progressOf(run.ID); p["sent_out_unmasked"] != true {
 		t.Fatalf("the run's own card does not say its documents were sent outside unmasked (run %s %s): %v", got.Status, got.StatusReason, p)
+	}
+	// every model call of these rounds told the gateway who it may be sent to — none left with no list,
+	// and the gateway had nothing to refuse (the runner never asked for what was not named)
+	e.egressMu.Lock()
+	saidAll := append([]string{}, e.recipientsSaid...)
+	e.egressMu.Unlock()
+	if len(saidAll) == 0 {
+		t.Fatal("no model call was seen by the stand-in gateway")
+	}
+	for _, said := range saidAll {
+		if strings.HasSuffix(said, " -") || strings.HasSuffix(said, " null") {
+			t.Fatalf("a model call of a round left with no list of recipients: %q (all: %v)", said, saidAll)
+		}
+	}
+	if n := e.refusedCalls.Load(); n != 0 {
+		t.Fatalf("the runner asked the gateway %d time(s) for a recipient that was not named", n)
 	}
 
 	// 3. the refusal: masking on. An image cannot be masked, so the page is not given to the outside
@@ -141,10 +200,13 @@ func TestAPageSentToAModelThatDidNotAnswerStillLeft(t *testing.T) {
 	}
 	in := e.setupInvoiceInstall()
 	ctx := context.Background()
+	e.recipients = map[string][]string{am16Outside: {am16Recipient}}
 	r := e.runner("r1")
 	r.Model.VisionModel = am16Outside
 	e.gatewayHonours.Store(true)
 	e.am16Switches(in.Slug, true, false)
+	e.nameRecipients("", am16Recipient)
+	e.nameRecipients(in.Slug, am16Recipient)
 
 	run := e.invoiceRun(am16Scan)
 	e.away.Store(true)

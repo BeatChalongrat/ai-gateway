@@ -73,6 +73,8 @@ func (m *ModelClient) Catalog(ctx context.Context) []am.CatalogModel {
 			Capabilities *struct {
 				Vision bool `json:"vision"`
 			} `json:"capabilities"`
+			// AM16: who reads what is sent to this model (the gateway's own word; none for an in-house one)
+			Recipients []string `json:"recipients"`
 		} `json:"data"`
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&out) != nil {
@@ -81,7 +83,7 @@ func (m *ModelClient) Catalog(ctx context.Context) []am.CatalogModel {
 	models := make([]am.CatalogModel, 0, len(out.Data))
 	for _, d := range out.Data {
 		models = append(models, am.CatalogModel{ID: d.ID, SelfHosted: d.SelfHosted, InPrice: d.InputPrice, OutPrice: d.OutputPrice,
-			Context: d.Context, Vision: d.Capabilities != nil && d.Capabilities.Vision})
+			Context: d.Context, Vision: d.Capabilities != nil && d.Capabilities.Vision, Recipients: d.Recipients})
 	}
 	m.catalog.models = models
 	return models
@@ -180,16 +182,43 @@ func (m *ModelClient) windowTooSmall(id string) bool {
 	return false
 }
 
-// mayUse: the organisation lets this model see the round's data.
+// reaches (AM16): a company that can run this model is among the recipients named for the agent. An
+// in-house model is not asked — nothing leaves.
+func (m *ModelClient) reaches(model string, allowed []string) bool {
+	if m == nil || len(allowed) == 0 {
+		return false
+	}
+	named := map[string]bool{}
+	for _, k := range allowed {
+		named[k] = true
+	}
+	m.catalog.mu.Lock()
+	defer m.catalog.mu.Unlock()
+	for _, c := range m.catalog.models {
+		if c.ID != model {
+			continue
+		}
+		for _, k := range c.Recipients {
+			if named[k] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// mayUse: the organisation lets this model see the round's data — an in-house model always; a model
+// outside only while the agent's documents may leave AND a company that runs it has been named for
+// the agent (AM16: "may leave" with nobody named reaches nobody).
 func (rc *runCtx) mayUse(model string) bool {
-	return model != "" && (rc.r.Model.IsSelfHosted(model) || rc.docsMayLeave)
+	return model != "" && (rc.r.Model.IsSelfHosted(model) || (rc.docsMayLeave && rc.r.Model.reaches(model, rc.recipients)))
 }
 
 // mayRead: this model may be given the image of a page of the round's documents. An image cannot be
 // masked (the gateway masks text), so while the admin's masking switch for the agent is on a page is
 // read inside the organisation only — whatever the other switch says (AM16).
 func (rc *runCtx) mayRead(model string) bool {
-	return model != "" && (rc.r.Model.IsSelfHosted(model) || (rc.docsMayLeave && !rc.masked))
+	return model != "" && (rc.r.Model.IsSelfHosted(model) || (rc.docsMayLeave && !rc.masked && rc.r.Model.reaches(model, rc.recipients)))
 }
 
 // visionModel is the model that reads this round's scans and photos, and
@@ -251,19 +280,22 @@ func (rc *runCtx) chosenModel() string {
 // organisation — the organisation's switch and, under it, the agent's own
 // (AM9: off by default for an agent that touches accounting).
 func (r *Runner) docsMayLeave(ctx context.Context, org, slug string, m am.Manifest) bool {
-	leave, _ := r.switchesOf(ctx, org, slug, m)
+	leave, _, _ := r.switchesOf(ctx, org, slug, m)
 	return leave
 }
 
 // switchesOf is what the admin's two switches say for this agent's rounds (AM16): whether its
 // documents may leave, and whether personal data is masked before a model reads it. A setting that
 // cannot be read is the careful one of each: nothing leaves, and what is sent is masked.
-func (r *Runner) switchesOf(ctx context.Context, org, slug string, m am.Manifest) (mayLeave, masked bool) {
+func (r *Runner) switchesOf(ctx context.Context, org, slug string, m am.Manifest) (mayLeave, masked bool, recipients []string) {
 	e, err := r.Store.EgressFor(ctx, orgOrDefault(org), slug, m)
 	if err != nil {
-		return false, true
+		return false, true, []string{}
 	}
-	return e.Effective, e.Masked
+	if e.Recipients == nil {
+		return e.Effective, e.Masked, []string{}
+	}
+	return e.Effective, e.Masked, e.Recipients
 }
 
 func orgOrDefault(org string) string {

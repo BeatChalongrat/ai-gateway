@@ -312,7 +312,7 @@ func TestModelPickerOffersOutsideModelsOnlyWhenDocumentsMayLeave(t *testing.T) {
 	caps["model.text"] = Binding{Capability: "model.text", Impl: "gateway", Version: "qwen|deepseek"}
 	rm, _ := json.Marshal(RunnerModels{Primary: "qwen", Fallback: "deepseek", Vision: "qwen", SelfHosted: map[string]bool{"qwen": true},
 		Catalog: []CatalogModel{{ID: "qwen", SelfHosted: true, Vision: true, InPrice: 0.1, OutPrice: 0.1},
-			{ID: "deepseek", InPrice: 0.3, OutPrice: 0.5}}})
+			{ID: "deepseek", InPrice: 0.3, OutPrice: 0.5, Recipients: []string{"deepseek"}}}})
 	caps["platform.models"] = Binding{Capability: "platform.models", Impl: "gateway", Detail: rm}
 	e.heartbeat(caps)
 	_, _ = e.store.Pool.Exec(ctx, `INSERT INTO agent_market.org_settings (org_id) VALUES ('default') ON CONFLICT DO NOTHING`)
@@ -343,6 +343,20 @@ func TestModelPickerOffersOutsideModelsOnlyWhenDocumentsMayLeave(t *testing.T) {
 	}
 	if code, body := e.do("PUT", "/admin/egress/sran.financial-report", map[string]any{"documents_may_leave": true}); code != 200 {
 		t.Fatalf("admin, the agent's own switch: %d %v", code, body)
+	}
+	// AM16: both switches on and nobody named — still nobody. Then the organisation names the recipient,
+	// then the agent does: only now can the model be picked
+	if code, _ := e.do("PUT", "/installs/"+id+"/model", map[string]any{"choice": "deepseek"}); code != http.StatusConflict {
+		t.Fatalf("both switches on, nobody named: the outside model was picked: %d", code)
+	}
+	if code, body := e.do("PUT", "/admin/egress/recipients", map[string]any{"recipients": []string{"deepseek"}}); code != 200 {
+		t.Fatalf("admin, the organisation's list: %d %v", code, body)
+	}
+	if code, _ := e.do("PUT", "/installs/"+id+"/model", map[string]any{"choice": "deepseek"}); code != http.StatusConflict {
+		t.Fatalf("named for the organisation only: the agent's own list is still empty, and it was picked: %d", code)
+	}
+	if code, body := e.do("PUT", "/admin/egress/sran.financial-report", map[string]any{"recipients": []string{"deepseek"}}); code != 200 {
+		t.Fatalf("admin, the agent's own list: %d %v", code, body)
 	}
 	code, p = e.do("PUT", "/installs/"+id+"/model", map[string]any{"choice": "deepseek"})
 	if code != 200 || p["choice"] != "deepseek" {

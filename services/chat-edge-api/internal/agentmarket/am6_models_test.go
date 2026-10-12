@@ -24,8 +24,9 @@ const scanManifest = `{"schema_version":"agent.market.v1","id":"sran.invoice-pro
 "install":{"defaults":{"formats":["xlsx"]}},"permissions":{"default":"read_only"},"cannot":"อ่านอย่างเดียว"}`
 
 var menuModels = RunnerModels{Primary: "qwen", Fallback: "deepseek", Vision: "qwen", SelfHosted: map[string]bool{"qwen": true},
-	Catalog: []CatalogModel{{ID: "typhoon", SelfHosted: true}, {ID: "qwen", SelfHosted: true, Vision: true}, {ID: "gpt-4o", Vision: true},
-		{ID: "deepseek", InPrice: 0.3, OutPrice: 0.5}}}
+	Catalog: []CatalogModel{{ID: "typhoon", SelfHosted: true}, {ID: "qwen", SelfHosted: true, Vision: true},
+		{ID: "gpt-4o", Vision: true, Recipients: []string{"openrouter:openai", "openrouter:microsoft"}},
+		{ID: "deepseek", InPrice: 0.3, OutPrice: 0.5, Recipients: []string{"deepseek"}}}}
 
 // menuEnv installs an agent with the given manifest next to a runner that has menuModels.
 func menuEnv(t *testing.T, slug, manifest string) (*testEnv, string) {
@@ -110,6 +111,19 @@ func TestModelMenuListsEveryModelThatCanDoTheJob(t *testing.T) {
 	}
 	if code, body := e.do("PUT", "/admin/egress/sran.financial-report", map[string]any{"documents_may_leave": true}); code != 200 {
 		t.Fatalf("admin, the agent's own switch: %d %v", code, body)
+	}
+	// AM16: both switches on and nobody named is nobody — the menu is as short as before, and says why
+	_, p = e.do("GET", "/installs/"+id+"/models", nil)
+	if got := menuOf(t, p); got != "qwen=allowed typhoon=allowed" || !strings.Contains(p["blocked_reason"].(string), "ยังไม่ได้ระบุผู้ให้บริการ") {
+		t.Fatalf("may leave, nobody named: %s, reason %q", got, p["blocked_reason"])
+	}
+	// Microsoft named (it runs gpt-4o behind the router) and DeepSeek: for the organisation, then the agent
+	named := map[string]any{"recipients": []string{"deepseek", "openrouter:microsoft"}}
+	if code, body := e.do("PUT", "/admin/egress/recipients", named); code != 200 {
+		t.Fatalf("admin, the organisation's list: %d %v", code, body)
+	}
+	if code, body := e.do("PUT", "/admin/egress/sran.financial-report", named); code != 200 {
+		t.Fatalf("admin, the agent's own list: %d %v", code, body)
 	}
 	_, p = e.do("GET", "/installs/"+id+"/models", nil)
 	if got := menuOf(t, p); got != "deepseek=allowed gpt-4o=allowed qwen=allowed typhoon=allowed" || p["blocked_reason"] != "" {

@@ -53,6 +53,12 @@ type Egress struct {
 	// PagesMayLeave (AM16): the image of a page of this agent's documents may be read by a model
 	// outside the organisation. An image cannot be masked, so this needs Effective AND masking off.
 	PagesMayLeave bool `json:"pages_may_leave"`
+	// Recipients (AM16, recipients.go): who outside the organisation this agent's documents may reach —
+	// its own ticks (AgentRecipients) that the organisation's list (OrgRecipients) also holds, and only
+	// while Effective. Empty is nobody: "may leave" with nothing ticked opens nothing.
+	Recipients      []string `json:"recipients"`
+	AgentRecipients []string `json:"agent_recipients"`
+	OrgRecipients   []string `json:"org_recipients"`
 }
 
 // WithMasked puts the admin's masking switch beside the leave switch.
@@ -146,7 +152,15 @@ func (s *Store) EgressFor(ctx context.Context, org, slug string, m Manifest) (Eg
 	if err != nil {
 		return Egress{}, err
 	}
-	return EgressOf(o.DocumentsMayLeave, m, set).WithMasked(masked), nil
+	orgList, err := s.OrgRecipients(ctx, s.Pool, org)
+	if err != nil {
+		return Egress{}, err
+	}
+	own, err := s.AgentRecipients(ctx, s.Pool, org, slug)
+	if err != nil {
+		return Egress{}, err
+	}
+	return EgressOf(o.DocumentsMayLeave, m, set).WithMasked(masked).WithRecipients(orgList, own), nil
 }
 
 // ── the admin door ───────────────────────────────────────────────────────
@@ -174,6 +188,11 @@ func (a *API) adminEgress(w http.ResponseWriter, r *http.Request) {
 		Egress
 	}
 	out := []row{}
+	orgList, err := a.store.OrgRecipients(ctx, a.store.Pool, acc.OrgID)
+	if err != nil {
+		a.fail(w, err, "egress")
+		return
+	}
 	for _, d := range defs {
 		m, err := ParseManifest(d.Manifest)
 		if err != nil {
@@ -184,10 +203,17 @@ func (a *API) adminEgress(w http.ResponseWriter, r *http.Request) {
 			a.fail(w, err, "egress")
 			return
 		}
-		out = append(out, row{Slug: d.Slug, Name: d.Name, Egress: EgressOf(o.DocumentsMayLeave, m, set).WithMasked(masked)})
+		own, err := a.store.AgentRecipients(ctx, a.store.Pool, acc.OrgID, d.Slug)
+		if err != nil {
+			a.fail(w, err, "egress")
+			return
+		}
+		out = append(out, row{Slug: d.Slug, Name: d.Name, Egress: EgressOf(o.DocumentsMayLeave, m, set).WithMasked(masked).WithRecipients(orgList, own)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	writeJSON(w, http.StatusOK, map[string]any{"org": o.DocumentsMayLeave, "agents": out})
+	// AM16: who can be ticked at all — every recipient the gateway's catalogue names, route and company
+	writeJSON(w, http.StatusOK, map[string]any{"org": o.DocumentsMayLeave, "agents": out,
+		"org_recipients": orgList, "available": a.runnerModels(ctx).RecipientOptions()})
 }
 
 // adminPutEgress sets one agent's own settings: whether its documents may leave (it can be set either
@@ -200,8 +226,11 @@ func (a *API) adminPutEgress(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		DocumentsMayLeave *bool `json:"documents_may_leave"`
 		Masked            *bool `json:"masked"`
+		// AM16: the agent's own list of recipients, whole (recipients.go)
+		Recipients *[]string `json:"recipients"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<12)).Decode(&body); err != nil || (body.DocumentsMayLeave == nil && body.Masked == nil) {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<14)).Decode(&body); err != nil ||
+		(body.DocumentsMayLeave == nil && body.Masked == nil && body.Recipients == nil) {
 		badRequest(w, "BAD_JSON")
 		return
 	}
@@ -238,14 +267,43 @@ func (a *API) adminPutEgress(w http.ResponseWriter, r *http.Request) {
 		if body.Masked != nil {
 			masked = *body.Masked
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO agent_market.agent_egress (org_id, slug, documents_may_leave, leave_set, masked, updated_by)
-			VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (org_id, slug) DO UPDATE SET documents_may_leave = EXCLUDED.documents_may_leave,
-			leave_set = EXCLUDED.leave_set, masked = EXCLUDED.masked,
-			updated_by = EXCLUDED.updated_by, updated_at = now()`, orgOr(acc.OrgID), slug, leave, leaveSet, masked,
-			normEmail(c.Email)); err != nil {
-			return nil, err
+		if body.DocumentsMayLeave != nil || body.Masked != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO agent_market.agent_egress (org_id, slug, documents_may_leave, leave_set, masked, updated_by)
+				VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (org_id, slug) DO UPDATE SET documents_may_leave = EXCLUDED.documents_may_leave,
+				leave_set = EXCLUDED.leave_set, masked = EXCLUDED.masked,
+				updated_by = EXCLUDED.updated_by, updated_at = now()`, orgOr(acc.OrgID), slug, leave, leaveSet, masked,
+				normEmail(c.Email)); err != nil {
+				return nil, err
+			}
 		}
 		var entries []AuditEntry
+		if body.Recipients != nil {
+			// an agent's list may only narrow the organisation's, never widen it: a recipient the
+			// organisation has not named cannot be ticked here (one ticked before, and since taken off
+			// the organisation's list, may be left as it is or unticked — it counts for nothing)
+			ceiling, err := a.store.OrgRecipients(ctx, tx, acc.OrgID)
+			if err != nil {
+				return nil, err
+			}
+			had, err := a.store.AgentRecipients(ctx, tx, acc.OrgID, slug)
+			if err != nil {
+				return nil, err
+			}
+			ok := map[string]bool{}
+			for _, k := range append(ceiling, had...) {
+				ok[k] = true
+			}
+			for _, k := range cleanRecipients(*body.Recipients) {
+				if !ok[k] {
+					return nil, refusal{status: http.StatusConflict, code: "BAD_REQUEST", vars: []string{"code", "RECIPIENT_NOT_ON_THE_ORGANISATIONS_LIST"}}
+				}
+			}
+			added, removed, err := a.store.setAgentRecipients(ctx, tx, acc.OrgID, slug, *body.Recipients, normEmail(c.Email))
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, recipientEntries(r, "agent", "agent_market_agent", slug, added, removed, map[string]any{"agent": def.Name})...)
+		}
 		if body.DocumentsMayLeave != nil && (from.Agent != *body.DocumentsMayLeave || from.AgentDefault) {
 			entries = append(entries, entry(r, "agent_market.agent.documents_may_leave", "agent_market_agent", slug, map[string]any{
 				"setting": "documents_may_leave", "label": T(LangOf(r.Context()), "เอกสารของ agent นี้ส่งไปโมเดลนอกองค์กรได้"), "agent": def.Name,

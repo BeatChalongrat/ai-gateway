@@ -59,6 +59,25 @@ func withModelCalls(ctx context.Context, closed, masked bool) (context.Context, 
 	return context.WithValue(ctx, modelCallsKey{}, c), c
 }
 
+type recipientsKey struct{}
+
+// withRecipients (AM16) marks ctx with the recipients named for the run's agent: every model call made
+// under it tells the gateway that list, and the gateway refuses to send the call to anyone else. The
+// list is never nil here — an agent nobody named a recipient for has the empty list, which is nobody.
+func withRecipients(ctx context.Context, recipients []string) context.Context {
+	if recipients == nil {
+		recipients = []string{}
+	}
+	return context.WithValue(ctx, recipientsKey{}, recipients)
+}
+
+// recipientsOf is the list a call must carry, and whether it carries one at all (a call of the runner's
+// own, outside any run, does not — the health check of its model, which is in-house).
+func recipientsOf(ctx context.Context) ([]string, bool) {
+	l, ok := ctx.Value(recipientsKey{}).([]string)
+	return l, ok
+}
+
 func modelCallsOf(ctx context.Context) *modelCalls {
 	c, _ := ctx.Value(modelCallsKey{}).(*modelCalls)
 	return c

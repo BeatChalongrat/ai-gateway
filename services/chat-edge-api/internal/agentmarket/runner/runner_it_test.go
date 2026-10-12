@@ -72,6 +72,13 @@ type itEnv struct {
 	egressMark     string
 	rounds         int
 	gatewayHonours atomic.Bool
+	// AM16 (recipients): who runs each model outside the organisation, as this stand-in's catalogue
+	// says it (nil: it serves no catalogue, as before AM16) — and it then refuses, as the real gateway
+	// does, a call for such a model that does not name one of them. recipientsSaid is what every model
+	// call said about recipients: the list as it was sent, or "-" when the call sent none.
+	recipients     map[string][]string
+	recipientsSaid []string
+	refusedCalls   atomic.Int64
 }
 
 func newIT(t *testing.T) *itEnv {
@@ -127,6 +134,50 @@ func (e *itEnv) fakeModel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	body, _ := io.ReadAll(r.Body)
+	if e.recipients != nil && r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/models") {
+		// the catalogue, as the gateway gives it: an in-house model has no recipients
+		data := []map[string]any{{"id": "fake-self-hosted", "provider": "sranai", "self_hosted": true}}
+		for id, keys := range e.recipients {
+			data = append(data, map[string]any{"id": id, "provider": "standin", "capabilities": map[string]any{"vision": true}, "recipients": keys})
+		}
+		b, _ := json.Marshal(map[string]any{"data": data})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(b)
+		return
+	}
+	if e.recipients != nil && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/chat/completions") {
+		var asked struct {
+			Model    string                     `json:"model"`
+			Metadata map[string]json.RawMessage `json:"metadata"`
+		}
+		_ = json.Unmarshal(body, &asked)
+		raw, has := asked.Metadata["allowed_recipients"]
+		said := "-"
+		var list []string
+		if has {
+			said = string(raw)
+			_ = json.Unmarshal(raw, &list)
+		}
+		e.egressMu.Lock()
+		e.recipientsSaid = append(e.recipientsSaid, asked.Model+" "+said)
+		e.egressMu.Unlock()
+		if runs, outside := e.recipients[asked.Model]; outside && has {
+			named := false
+			for _, k := range list {
+				for _, x := range runs {
+					named = named || k == x
+				}
+			}
+			if !named {
+				// (backend app/services/providers/recipients.py: refused before anything is sent)
+				e.refusedCalls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":{"code":"no_allowed_provider","message":"Nothing was sent to any provider.","details":{"reason":"recipient_not_allowed"}}}`))
+				return
+			}
+		}
+	}
 	if e.away.Load() && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/chat/completions") {
 		e.awayCalls.Add(1)
 		if strings.Contains(string(body), "ข้อความของผู้ใช้:") {

@@ -103,6 +103,9 @@ type chatReq struct {
 	Reasoning   *struct {
 		Mode string `json:"mode"`
 	} `json:"reasoning,omitempty"`
+	// AM16: who this call may be sent to (the gateway's metadata.allowed_recipients). The list, when
+	// there is one, is written even when empty — empty is "nobody outside", absent is "did not ask".
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 type chatMsg struct {
@@ -292,6 +295,9 @@ func (m *ModelClient) send(ctx context.Context, model string, messages any, temp
 	body.Reasoning = &struct {
 		Mode string `json:"mode"`
 	}{Mode: "off"}
+	if named, ok := recipientsOf(ctx); ok {
+		body.Metadata = map[string]any{"allowed_recipients": named}
+	}
 	b, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(m.BaseURL, "/")+"/chat/completions", bytes.NewReader(b))
 	if err != nil {

@@ -86,7 +86,7 @@ func TestAM11bTheMenuListsOnlyWhatCanRun(t *testing.T) {
 		t.Fatalf("picking it is refused with the reason it is absent: %v %q", ok, why)
 	}
 	// its data may leave: every model that can do the job is a row, nothing is absent, the pick stands
-	open := MenuFor(Install{ModelChoice: "deepseek"}, text, Egress{Org: true, Agent: true, Effective: true}, rm)
+	open := MenuFor(Install{ModelChoice: "deepseek"}, text, everyoneNamed(Egress{Org: true, Agent: true, Effective: true}, &rm), rm)
 	if got := ids(open); got != "deepseek gpt-4o qwen typhoon" || open.OutsideAbsent || !open.BlockedReason.Empty() || open.Choice != "deepseek" {
 		t.Fatalf("open: %q outside_absent=%v reason=%q choice=%q", got, open.OutsideAbsent, open.BlockedReason, open.Choice)
 	}

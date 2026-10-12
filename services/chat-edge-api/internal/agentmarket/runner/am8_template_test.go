@@ -48,7 +48,7 @@ func TestTheModelProposesTheMappingAndOnlyValidPairsAreKept(t *testing.T) {
 	pkg := &Package{}
 	pkg.Manifest.Capabilities.Required = []string{"model.text"}
 	pkg.Manifest.Templates = json.RawMessage(am8Spec)
-	rc := &runCtx{r: &Runner{Model: m, CreditsPerUSD: 1}, pkg: pkg, docsMayLeave: true}
+	rc := &runCtx{r: &Runner{Model: m, CreditsPerUSD: 1}, pkg: pkg, docsMayLeave: true, recipients: named(m, "deepseek-v4-flash")}
 	res := mustJSON(map[string]any{"slots": am8Slots(), "proposal": map[string]string{"revenue": "revenue"}})
 	out, _, model := rc.proposeMapping(context.Background(), res)
 	if model != "deepseek-v4-flash" {

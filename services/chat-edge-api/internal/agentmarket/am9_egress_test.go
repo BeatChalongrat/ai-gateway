@@ -57,7 +57,7 @@ func TestAM9TheModelMenuSaysBothLevelsAndLocksOutsideModelsForAnAccountingAgent(
 		t.Fatalf("choosing the outside model is refused with the reason shown: %v %q", ok, why.String())
 	}
 	yes := true
-	p = MenuFor(Install{ModelChoice: ModelAuto}, m, EgressOf(true, m, &yes), rm)
+	p = MenuFor(Install{ModelChoice: ModelAuto}, m, everyoneNamed(EgressOf(true, m, &yes), &rm), rm)
 	if ok, _ := p.ChoiceAllowed("deepseek-v4-flash"); !ok {
 		t.Fatal("an admin opened this agent: the outside model may be chosen")
 	}

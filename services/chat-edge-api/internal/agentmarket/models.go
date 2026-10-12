@@ -44,6 +44,10 @@ type CatalogModel struct {
 	OutPrice   float64 `json:"output_price_per_1m"`
 	// Context is the model's context window in tokens, as the gateway states it (0: not stated).
 	Context int `json:"context_window,omitempty"`
+	// Recipients (AM16): who reads what is sent to this model, as the gateway names it — the route, and
+	// behind a router each company that can run the model. None for an in-house model, and for one
+	// nobody can be said to run (which can therefore never be allowed).
+	Recipients []string `json:"recipients,omitempty"`
 }
 
 // MinAgentContext is the smallest context window a model needs to do an
@@ -104,6 +108,8 @@ const (
 	// AM16: masking is on for the agent, and the image of a page cannot be masked
 	reasonMaskedPages = "ผู้ดูแลตั้งให้ปิดบังข้อมูลของ agent นี้ก่อนส่งให้โมเดล ภาพของหน้าเอกสารปิดบังไม่ได้ จึงให้โมเดลในองค์กรอ่านเท่านั้น"
 	reasonNotListed   = "โมเดลนี้ไม่อยู่ในรายการโมเดลที่ agent นี้ใช้ได้"
+	// AM16: documents may leave, but no company that runs this model has been named for this agent
+	reasonRecipient = "เอกสารของ agent นี้ส่งออกนอกองค์กรได้ แต่ผู้ดูแลยังไม่ได้ระบุผู้ให้บริการที่รับเอกสารได้สำหรับโมเดลนี้ — ผู้ดูแลเลือกผู้ให้บริการได้ที่แอปผู้ดูแลระบบ"
 )
 
 // ModelUse is what a model does for this agent: read scans (vision), write
@@ -205,13 +211,17 @@ func (rm RunnerModels) all() []string {
 	return out
 }
 
-// lock is why a model may not be given this agent's documents now ("" = it may).
-func (rm RunnerModels) lock(use, id string, docsMayLeave bool) string {
+// lock is why a model may not be given this agent's documents now ("" = it may). allowed (AM16): the
+// recipients named for this agent — a model outside is given nothing unless a company that runs it is
+// one of them.
+func (rm RunnerModels) lock(use, id string, docsMayLeave bool, allowed []string) string {
 	switch {
 	case !rm.canRead(use, id):
 		return reasonNoVision
 	case !rm.SelfHosted[id] && !docsMayLeave:
 		return reasonOutside
+	case !rm.SelfHosted[id] && !rm.reaches(id, allowed):
+		return reasonRecipient
 	}
 	return ""
 }
@@ -238,6 +248,7 @@ func MenuFor(in Install, m Manifest, e Egress, rm RunnerModels) ModelPicker {
 		return p
 	}
 	p.AutoModel = rm.autoModel(use)
+	unnamed := false // AM16: a model is left out only because nobody who runs it was named for this agent
 	for _, id := range rm.all() {
 		if !rm.canRead(use, id) {
 			p.cannot[id] = true
@@ -249,11 +260,14 @@ func MenuFor(in Install, m Manifest, e Egress, rm RunnerModels) ModelPicker {
 		if use == "vision" {
 			mayLeave = e.PagesMayLeave
 		}
-		if rm.lock(use, id, mayLeave) != "" {
+		if why := rm.lock(use, id, mayLeave, e.Recipients); why != "" {
 			// AM11b: a model that may not be given this agent's data is not in the list at all — it is
 			// never offered and then quietly swapped. The menu says so in one line (OutsideAbsent).
 			p.outside[id] = true
 			p.OutsideAbsent = true
+			if why == reasonRecipient {
+				unnamed = true
+			}
 			continue
 		}
 		p.Models = append(p.Models, MenuModel{ID: id, Allowed: true})
@@ -266,6 +280,8 @@ func MenuFor(in Install, m Manifest, e Egress, rm RunnerModels) ModelPicker {
 		}
 		if use == "vision" && e.Effective && e.Masked {
 			p.BlockedReason = Text(reasonMaskedPages)
+		} else if unnamed {
+			p.BlockedReason = Text(reasonRecipient)
 		}
 	}
 	// a choice made while a model could be used, which may not be used now, is no choice: the menu shows
