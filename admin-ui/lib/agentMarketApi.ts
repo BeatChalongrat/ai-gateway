@@ -299,6 +299,11 @@ export interface AgentEgressRow {
   words: string;
   /** AM16: the admin's own masking switch for the agent — off unless turned on; it does not follow `agent` */
   masked?: boolean;
+  /** AM16: who outside the organisation this agent's documents reach — its own ticks that the organisation's list also holds, while `effective`. Empty is nobody. */
+  recipients?: string[];
+  /** AM16: the agent's own ticks, whether or not the organisation's list still holds them */
+  agent_recipients?: string[];
+  org_recipients?: string[];
   /** AM16: a page image may be read by an outside model — needs `effective` and masking off (an image cannot be masked) */
   pages_may_leave?: boolean;
 }
@@ -373,6 +378,14 @@ export interface WebRunRow {
   search_credits: number;
 }
 
+/** AM16: one recipient an admin can tick — the route, and the company that runs the model behind it. */
+export interface RecipientOption {
+  key: string;
+  route: string;
+  company: string;
+  models: string[];
+}
+
 // ── calls ────────────────────────────────────────────────────────────────
 
 export const amAdmin = {
@@ -380,7 +393,13 @@ export const amAdmin = {
   org: (): Promise<AdminOrg> => chatEdge.get(`${AM}/org`),
   putOrg: (body: OrgPatch): Promise<{ org: OrgSettings; resumed: number }> => chatEdge.put(`${AM}/org`, body),
   // AM9 — per-agent egress under the organisation's switch
-  egress: (): Promise<{ org: boolean; agents: AgentEgressRow[] }> => chatEdge.get(`${AM}/egress`),
+  egress: (): Promise<{ org: boolean; agents: AgentEgressRow[]; org_recipients?: string[]; available?: RecipientOption[] }> =>
+    chatEdge.get(`${AM}/egress`),
+  // AM16 — to whom: the organisation's own list (the ceiling), and one agent's under it. The whole list
+  // is sent each time; each recipient added or removed is its own line in the audit log.
+  putOrgRecipients: (recipients: string[]): Promise<{ org_recipients: string[] }> => chatEdge.put(`${AM}/egress/recipients`, { recipients }),
+  putRecipients: (slug: string, recipients: string[]): Promise<{ slug: string; egress: AgentEgressRow }> =>
+    chatEdge.put(`${AM}/egress/${seg(slug)}`, { recipients }),
   putEgress: (slug: string, documentsMayLeave: boolean): Promise<{ slug: string; egress: AgentEgressRow }> =>
     chatEdge.put(`${AM}/egress/${seg(slug)}`, { documents_may_leave: documentsMayLeave }),
   // AM16 — the agent's masking switch: its own request, and its own line in the audit log

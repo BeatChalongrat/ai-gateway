@@ -1003,6 +1003,53 @@ languages, six ways of breaking it shown red) and `am16_reader_test.go` (the sam
 thread's own door: the control plane reads a model's name inside its quotes and sends the sentence as
 written).
 
+## To whom an agent's documents may go (AM16)
+
+"Documents may leave" said yes or no. It did not say to whom: with it on, every model of the catalogue
+was open — and behind a router a model's name does not say who runs it (asked of OpenRouter on 13 Oct
+2026 with this deployment's key: Claude was answered by Amazon Bedrock, GPT by Azure, DeepSeek's and
+Meta's models by whoever hosted them that day; only Google's by Google). The owner: the admin chooses
+which outside providers an agent may reach; both the route and the company are named, because both
+read what is sent; "may leave" on with nothing ticked means nobody; the organisation has its own list,
+the ceiling, and an agent's list may only narrow it; nothing goes to a provider that is not ticked.
+
+**A recipient** is a key the gateway gives for each model of its catalogue (`GET /v1/models`,
+`recipients`; `backend/app/services/providers/recipients.py`): `<route>` for a provider reached
+directly, `<route>:<company>` behind a router — once for each company that can **run** the model
+there. Nobody types a key. A model nobody can be said to run has none, and can never be allowed.
+
+**Two lists** (`recipients.go`, migration `011_am16b`): `org_recipients`, the organisation's own, and
+`agent_recipients`, one agent's. What counts for an agent (`Egress.Recipients`) is what both hold, and
+only while its documents may leave at all — so the list opens nothing by itself, and neither does the
+switch. The admin door (`GET /admin/egress`: `available`, `org_recipients`, each agent's
+`agent_recipients` and `recipients`; `PUT /admin/egress/recipients`; `PUT /admin/egress/{slug}` with
+`recipients`) refuses a recipient the catalogue does not name and a tick for an agent that the
+organisation's list does not hold, and writes one audit line for each recipient added or removed
+(`agent_market.org.recipient_allowed|removed`, `agent_market.agent.recipient_allowed|removed`, with
+route and company). Taking a recipient off the organisation's list takes it from every agent at once;
+the agent's own tick stays where it is and counts for nothing.
+
+**Three places hold it**, the last being the one that counts:
+
+- the menu (`models.go lock`) offers an outside model only when a company that runs it is named for the
+  agent, and says why it is shorter (`reasonRecipient`);
+- the runner (`runner/choice.go mayUse`, `mayRead`) uses an outside model only under the same rule;
+- every model call of a round carries the agent's list (`runner/masking.go withRecipients`,
+  `model.go`: `metadata.allowed_recipients` — nobody is the empty list, never nothing and never
+  `null`), and the gateway refuses, before anything is sent, a call to anyone not on it: the first
+  attempt, a second route, a rescue by another model. Behind OpenRouter it pins the request to the
+  endpoints of the companies named, with no fallback to another host.
+
+A call the runner makes outside any round (the check of its own in-house model) carries no list and
+is unchanged. What the list does not cover: the search provider and the sites of an agent that works
+on the web — those are opened by the leave switch as before (`web.go`).
+
+Held by: `am16_recipients_test.go` (the two lists through the door, the audit lines, the menu, the
+migration and its down), `runner/am16_recipients_test.go` (who may be used; that every call of a round
+carries the list, said as an empty list when it is nobody), `runner/am16_sent_out_it_test.go` (a scan
+stays inside until the company that runs the model is named for the agent — on the real engine), and
+the gateway's own `backend/tests/test_recipients.py`.
+
 ## An engine in two languages (AM14)
 
 Until AM14 a package's engine wrote Thai whatever the screen: its sentences were string literals in the

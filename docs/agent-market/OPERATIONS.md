@@ -144,6 +144,26 @@ in-house model as typed, `'sent_as_typed'` on a row whose findings reached a pro
 (A page sent outside leaves no finding — the scan does not read images — so it is not in that list;
 the run's own steps carry `sent_out_unmasked`.)
 
+**To whom (AM16).** Under the two switches the admin names who may receive: admin app → Agent Market
+→ Models → "Who outside the organisation may receive documents" is the organisation's list, and each
+agent's row has its own ticks among them. Every recipient is shown with both names — "Google via
+OpenRouter", "Amazon Bedrock via OpenRouter", "DeepSeek (direct)" — the company being the one that
+runs the model, which is not always the one that made it. **An agent whose documents may leave and
+that has nobody ticked reaches nobody**, and its row says so. To open an agent to one company:
+tick the organisation's switch, the agent's "Allowed", the company in the organisation's list, and the
+same company in the agent's row — four ticks, each its own audit line. To stop everything going to one
+company at once, untick it in the organisation's list.
+
+What can be ticked comes from the gateway's catalogue. Behind OpenRouter that is, today: Google (its
+own models, and Claude on Vertex), Amazon Bedrock and Anthropic (Claude), Microsoft Azure and OpenAI
+(GPT). The OpenRouter account in use lets only endpoints that keep nothing through (its "ZDR"
+guardrail), so **ticking "Anthropic via OpenRouter" or "OpenAI via OpenRouter" gives a run that fails
+at the router** — it is not sent to Amazon or Microsoft instead; tick those if that is who should read
+it, or give the gateway a direct key. DeepSeek's and Meta's models behind OpenRouter, and OpenRouter's
+own "auto", are run by whoever hosts them that day: they have no recipient and cannot be opened.
+Who really answers is asked of OpenRouter with `scripts/probes/AM16/openrouter_pin.py`; the gateway's
+rule is asked with `scripts/probes/AM16/recipients_probe.py`.
+
 **Before an agent that reads pages is opened to outside models, its installs must be on the version
 that names the reader:** tax-invoice 1.10.0, expense audit 1.9.0, invoice ↔ PO matching 1.7.0. An
 install on an older version still asks "the in-house model read … from the image" whoever read the
