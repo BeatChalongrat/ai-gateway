@@ -71,7 +71,9 @@ def sql(q: str) -> str:
 def leg(model: str, allowed, want: int) -> dict:
     meta = {} if allowed is ABSENT else {"allowed_recipients": allowed}
     body = json.dumps({"model": model, "stream": False, "max_tokens": 400, "reasoning": {"mode": "off"}, "metadata": meta,
-                       "messages": [{"role": "user", "content": "Reply with the one word: ok"}]}).encode("utf-8")
+                       # (a sentence of its own for every leg: the gateway keeps answers for an hour, and a kept
+                       # answer is no answer to "was this provider called")
+                       "messages": [{"role": "user", "content": f"Reply with the one word: ok ({time.time_ns()})"}]}).encode("utf-8")
     req = urllib.request.Request(GATEWAY + "/v1/chat/completions", data=body, headers={
         "Authorization": "Bearer " + KEY, "Content-Type": "application/json", "X-Sran-Fallback": "off"})
     out = {"model": model, "list": "-" if allowed is ABSENT else json.dumps(allowed), "want": want}
