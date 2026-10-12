@@ -555,6 +555,11 @@ async def chat_completions(
 
     if _in_house.header_says_closed(request.headers.get(_in_house.HEADER)):
         _in_house.mark_request()
+    # ``X-Sran-Masking: off|on`` — the caller's own word on masking, believed for the same callers and
+    # decided in the same place
+    _masking_word = _in_house.header_masking(request.headers.get(_in_house.MASKING_HEADER))
+    if _masking_word is not None:
+        _in_house.mark_masking(_masking_word)
 
     reg = inflight_registry()
     hard_s = float(settings.request_hard_timeout_seconds)

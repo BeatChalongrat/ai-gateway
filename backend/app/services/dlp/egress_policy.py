@@ -56,8 +56,18 @@ logger = structlog.get_logger(__name__)
 # credential-block + per-tenant-PII + audit gate as search/media. Like a
 # masked query, a masked embedding of "<PERSON_1>" or masked audio is
 # useless — so these channels send raw, but never the credential class.
+#
+# 12 Oct 2026 added ``agent_documents``: a chat completion of a caller the
+# operator named (DLP_IN_HOUSE_PROJECTS) that says its data may leave
+# and is not to be masked. The owner's decision:
+# reading a document correctly matters more than masking it on the way,
+# and masking is the admin's own switch per agent, off by default. Its
+# gate is app/services/dlp/in_house.py ``decide`` (not the scans below):
+# the same credential class is held back — a request with such a finding
+# keeps its mask — and the request's own log row is the audit record
+# (``dlp_input_action = 'sent_as_typed'``, findings counted by category).
 RAW_EGRESS_ALLOWED: frozenset[str] = frozenset(
-    {"web_search", "media_gen", "embeddings", "voice"}
+    {"web_search", "media_gen", "embeddings", "voice", "agent_documents"}
 )
 
 # Marker written into request_logs.policy_action / dlp_input_action for

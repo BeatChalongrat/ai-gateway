@@ -56,6 +56,8 @@ APP_DIR = pathlib.Path(__file__).resolve().parents[1] / "app"
 EGRESS_CLASSIFICATION: dict[str, str] = {
     # Chat completions — messages are masked by the orchestrator before
     # any adapter sees them (mask → guardrail → moderation → dispatch).
+    # The one exception is the raw channel "agent_documents": a caller the
+    # operator named, by its own setting (app/services/dlp/in_house.py).
     "services/providers/http_client.py": "masked",
     "services/providers/anthropic_adapter.py": "masked",
     "services/providers/google_adapter.py": "masked",
@@ -130,13 +132,16 @@ IDENTITY_FIXTURES = [PII_NAME, PII_PHONE, PII_EMAIL, PII_THAI_ID]
 # ---------------------------------------------------------------------------
 
 
-def test_raw_egress_whitelist_is_exactly_the_four_channels():
+def test_raw_egress_whitelist_is_exactly_the_five_channels():
     """Adding a channel here is a CONSCIOUS product/compliance decision —
     update RAW_EGRESS_ALLOWED, this test, and the disclosure doc together.
     FIX 2 added embeddings + voice (gateway-fronted; chat-edge no longer
-    calls OpenAI directly)."""
+    calls OpenAI directly). 12 Oct 2026 added agent_documents: a chat
+    completion of a caller the operator named that says its data may leave
+    and is not to be masked — the owner's decision; its gate is
+    app/services/dlp/in_house.py (tests/test_dlp_in_house.py)."""
     assert RAW_EGRESS_ALLOWED == frozenset(
-        {"web_search", "media_gen", "embeddings", "voice"}
+        {"web_search", "media_gen", "embeddings", "voice", "agent_documents"}
     )
 
 

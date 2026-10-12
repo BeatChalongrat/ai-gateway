@@ -158,7 +158,7 @@ This pass-through is deliberate and bounded:
 2. **Per-tenant control.** `tenants.search_pii_egress`, `media_pii_egress`, `kb_pii_egress` (embeddings), and `voice_pii_egress` (`allow` | `block`, default `allow`). Under `block`, ANY identity PII in that channel's content fails the request closed — for compliance-strict tenants (e.g. healthcare). **Deploy note:** the default is `allow` (preserves today's behaviour); a compliance-strict tenant must be switched to `block` per channel.
 3. **Audited.** Every allowed raw egress that actually carried identity PII (or, for STT, any allowed raw-audio egress) writes a `request_logs` row with `policy_action = raw_egress_allow`, the channel, and detection **category counts only** — never the query/prompt/transcript text or matched values. A tenant's compliance view can answer "which searches/prompts/KB-indexing/voice left unmasked."
 4. **No raw text in our own stores.** The search credit-ledger row carries a query hash, not the query.
-5. **Machine-checked.** The whitelist is a single constant (`app/services/dlp/egress_policy.py::RAW_EGRESS_ALLOWED = {"web_search", "media_gen", "embeddings", "voice"}`) and `tests/test_dlp_egress_invariant.py` fails CI if any new outbound-HTTP module is added without being classified as masked, whitelisted, or user-content-free — and additionally pins that chat-edge's embeddings/voice Go paths route through the gateway (not OpenAI directly), so the bypass cannot silently return.
+5. **Machine-checked.** The whitelist is a single constant (`app/services/dlp/egress_policy.py::RAW_EGRESS_ALLOWED = {"web_search", "media_gen", "embeddings", "voice", "agent_documents"}` — the fifth is described two sections below) and `tests/test_dlp_egress_invariant.py` fails CI if any new outbound-HTTP module is added without being classified as masked, whitelisted, or user-content-free — and additionally pins that chat-edge's embeddings/voice Go paths route through the gateway (not OpenAI directly), so the bypass cannot silently return.
 
 Enterprise/PDPA customers should be shown this section as the disclosure they consent to.
 
@@ -182,7 +182,34 @@ What does not change for such a request:
 3. **No other provider gets it.** The request switches fallback off for itself, and the dispatcher holds the rule on its own (`dispatch_with_fallback(in_house_only=True)`): a primary that is not in-house is refused before anything is sent, a hop outside is never a candidate. If a turn is rescued by another provider after all, that provider is handed the masked copy and the answer is restored the usual way.
 4. **The record says what happened.** The caller is told by `X-Gateway-Masking: off | on` — what was done, not what it asked for — and the log row carries `dlp_input_action = 'in_house_unmasked'` (`'mask'` keeps meaning "the provider saw placeholders").
 
-Today the one caller that sends the header is Agent Market's runner, which holds each agent's egress switch (documents may leave: off → no outside model, no web, and now no masking; on → masked as before). Ordinary chat never sends it: a chat has no egress switch — its tools, connectors and web search can carry what the model read out of the organisation — so chat is masked whichever model answers. Tests: `tests/test_dlp_in_house.py`, `tests/test_dlp_in_house_dispatcher.py`.
+Today the one caller that sends the header is Agent Market's runner, which holds each agent's egress switch. Since 12 Oct 2026 masking is that caller's own, separate setting (next section); a caller that sends only this header is read as described here. Ordinary chat never sends it: a chat has no egress switch — its tools, connectors and web search can carry what the model read out of the organisation — so chat is masked whichever model answers. Tests: `tests/test_dlp_in_house.py`, `tests/test_dlp_in_house_dispatcher.py`.
+
+## A named caller's own word on masking — the fifth raw channel (`agent_documents`)
+
+On 12 Oct 2026 the owner separated masking from where the data may go. Whether an agent's documents may leave the organisation is one choice of the admin's; whether personal data in them is masked before a model reads it is another, off by default. So a request whose data **may** leave, and whose caller says it is not to be masked, is sent to a provider **outside** the organisation as it was typed. That is a raw channel like the four above, and it is on the same list (`agent_documents`).
+
+The caller says it per request: `X-Sran-Masking: off` or `on`. The gate is `app/services/dlp/in_house.py::decide`:
+
+| the request says | the provider is | what is sent |
+| --- | --- | --- |
+| `X-Sran-Masking: on` (with or without `X-Sran-Egress: closed`) | any | masked |
+| `X-Sran-Masking: off` and `X-Sran-Egress: closed` | in-house | as typed, held to in-house providers |
+| `X-Sran-Masking: off` and `X-Sran-Egress: closed` | outside | masked — the data may not leave as typed |
+| `X-Sran-Masking: off`, no `closed` | in-house | as typed |
+| `X-Sran-Masking: off`, no `closed` | outside | **as typed** — `agent_documents` |
+| neither header | any | masked, as always |
+
+What bounds it:
+
+1. **Only a caller the operator named.** The same list as above (`DLP_IN_HOUSE_PROJECTS`, empty by default). For anyone else the header means nothing.
+2. **The credential/secret class is still withheld.** A request in which the scan found a key, a password or a secret keeps its mask on the way out, whatever the caller asked (`credential_found`). Identity, network and financial findings pass as typed — an accounting document is made of them.
+3. **A block still blocks**, the request log, the guardrail and moderation keep the masked copy, the response cache is not used, and no other model is tried with the typed text.
+4. **Audited by its own row.** The request's log row says `dlp_input_action = 'sent_as_typed'` with the findings counted by category; the caller is told `X-Gateway-Masking: off`.
+5. **Each change of the setting is in the admin audit log** (Agent Market: `agent_market.agent.masked`, `agent_market.agent.documents_may_leave`), and each run whose documents left as typed says so on the face of its card.
+
+**What the gateway masks is text.** The image of a page — a scanned invoice read by a model — is sent to the model named as it is, on every path, and always was: no detector reads an image. `X-Gateway-Masking: on` says what was done with the text of a request and nothing about an image in it. Agent Market therefore keeps a page inside the organisation while an agent's masking switch is on, and counts a page read by an outside model as "sent outside, not masked" whatever the header said.
+
+Enterprise/PDPA customers should be shown this section with the one on intentional raw egress. Tests: `tests/test_dlp_in_house.py` (the refusals: a caller nobody named, data that may not leave, the word `on`, a key in the text, the channel taken off the list).
 
 ## Code interpreter sandbox (Phase 13) — an internal trust boundary
 

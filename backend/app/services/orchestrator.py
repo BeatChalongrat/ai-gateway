@@ -1022,10 +1022,20 @@ class GatewayOrchestrator:
             responses_scanned=bool(
                 settings.dlp_enabled and settings.dlp_scan_responses and profile.scan_responses
             ),
+            masking=_in_house.masking_asked(),
+            credential_found=_in_house.has_credential_class(input_enforcement.match_actions),
         )
         _in_house_unmasked = bool(settings.dlp_enabled and _in_house_decision.unmasked)
+        # the request goes as typed to a provider OUTSIDE the organisation: the caller's own setting
+        # (in_house.py), and a raw channel of the gateway like the four others — it is on the list or
+        # it is not sent
+        _sent_out_as_typed = bool(_in_house_unmasked and _in_house_decision.outside)
+        if _sent_out_as_typed:
+            from app.services.dlp.egress_policy import assert_egress_allowed as _assert_raw_channel
+
+            _assert_raw_channel(_in_house.CHANNEL)
         _provider_messages = list(payload.messages) if _in_house_unmasked else messages_to_send
-        if _in_house.asked():
+        if _in_house.asked() or _in_house.masking_asked() is not None:
             log.info(
                 "dlp_in_house_decision",
                 unmasked=_in_house_unmasked,
@@ -1307,7 +1317,7 @@ class GatewayOrchestrator:
                         api_key=provider_api_key,
                         key_resolver=_resolve_fallback_key,
                         invalidate_key=_invalidate_key,
-                        **({"in_house_only": True} if _in_house_unmasked else {}),
+                        **({"in_house_only": True} if (_in_house_unmasked and not _sent_out_as_typed) else {}),
                     )
                     if _primary_wait_s is None:
                         (provider_response, used_provider, used_model) = await _dispatch
@@ -1603,7 +1613,7 @@ class GatewayOrchestrator:
         _in_house_answered = bool(
             _in_house_unmasked
             and fallback_result is None
-            and _in_house.is_in_house(route.provider_name)
+            and (_sent_out_as_typed or _in_house.is_in_house(route.provider_name))
         )
         _in_house_answer = response_content if _in_house_answered else None
         # DLP trace snapshot 3/4: provider response BEFORE any output DLP
@@ -2243,7 +2253,7 @@ class GatewayOrchestrator:
             all_reasons = ["No sensitive content detected."]
         if _in_house_answered:
             # the findings above were NOT masked for this request: it stayed in the organisation
-            all_reasons.append(_in_house.REASON)
+            all_reasons.append(_in_house.SENT_AS_TYPED if _sent_out_as_typed else _in_house.REASON)
 
         # 10. Audit success + persist request log
         total_ms = int((time.perf_counter() - t_start) * 1000)
@@ -2329,7 +2339,7 @@ class GatewayOrchestrator:
                 # in_house.py — 'mask' keeps meaning "the provider saw placeholders": a row whose
                 # findings reached an in-house model as typed says so
                 dlp_input_action=(
-                    _in_house.LOG_ACTION
+                    (_in_house.SENT_AS_TYPED if _sent_out_as_typed else _in_house.LOG_ACTION)
                     if (_in_house_answered and input_enforcement.requires_transformation)
                     else input_enforcement.overall_action.name.lower()
                 ),
