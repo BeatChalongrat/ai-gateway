@@ -33,11 +33,26 @@ import urllib.request
 
 sys.stdout.reconfigure(encoding="utf-8")
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-if os.environ.get("PROBE_TARGET", "test") != "test":
-    sys.exit("recipients_probe.py runs on the test stack only")
-KEY = io.open(os.path.join(ROOT, "scripts/probes/AM1/results/runner_key.test"), encoding="utf-8").read().strip()
-GATEWAY = os.environ.get("PROBE_GATEWAY", "http://localhost:18080")
-PG = os.environ.get("PROBE_PG", "sran-test-postgres-1")
+# PROBE_TARGET=live: only the legs that send nothing outside — the refusals, and the in-house model — asked of
+# LIVE's gateway with live's own runner key (read from the settings file by name, never printed).
+LIVE = os.environ.get("PROBE_TARGET", "test") == "live"
+SSL = None
+if LIVE:
+    import ssl
+
+    KEY = ""
+    with io.open(os.path.join(ROOT, ".env"), encoding="utf-8") as _f:
+        for _line in _f:
+            if _line.startswith("AGENT_RUNNER_GATEWAY_API_KEY="):
+                KEY = _line.split("=", 1)[1].strip().strip('"')
+    if not KEY:
+        sys.exit("the runner's gateway key is not set")
+    GATEWAY = os.environ.get("PROBE_GATEWAY", "https://localhost:8080")
+    SSL = ssl.create_default_context(cafile=os.path.join(ROOT, "infra", "caddy", "certs", "rootCA.pem"))
+else:
+    KEY = io.open(os.path.join(ROOT, "scripts/probes/AM1/results/runner_key.test"), encoding="utf-8").read().strip()
+    GATEWAY = os.environ.get("PROBE_GATEWAY", "http://localhost:18080")
+PG = os.environ.get("PROBE_PG", "ai-gateway-postgres-1" if LIVE else "sran-test-postgres-1")
 ABSENT = object()
 
 LEGS = [
@@ -79,7 +94,7 @@ def leg(model: str, allowed, want: int) -> dict:
     out = {"model": model, "list": "-" if allowed is ABSENT else json.dumps(allowed), "want": want}
     started = time.time()
     try:
-        with urllib.request.urlopen(req, timeout=240) as r:
+        with urllib.request.urlopen(req, timeout=240, context=SSL) as r:
             j = json.loads(r.read().decode("utf-8"))
             out["status"] = r.status
             out["answer"] = " ".join(((j["choices"][0]["message"].get("content")) or "").split())[:20]
@@ -104,7 +119,7 @@ def leg(model: str, allowed, want: int) -> dict:
 def models() -> int:
     """`recipients_probe.py models` — what the gateway's catalogue says of each model: its recipient."""
     req = urllib.request.Request(GATEWAY + "/v1/models", headers={"Authorization": "Bearer " + KEY, "X-Client-Name": "agent-runner"})
-    with urllib.request.urlopen(req, timeout=30) as r:
+    with urllib.request.urlopen(req, timeout=30, context=SSL) as r:
         data = json.loads(r.read().decode("utf-8"))["data"]
     for m in data:
         vision = bool((m.get("capabilities") or {}).get("vision"))
@@ -118,7 +133,9 @@ def main() -> int:
         return models()
     bad = 0
     rows = []
-    for model, allowed, want in LEGS:
+    # on live: nothing is asked of a provider outside — only what must be refused, and the in-house model
+    legs = [l for l in LEGS if l[2] == 400 or l[0] == "qwen3.8-27b-fp8"] if LIVE else LEGS
+    for model, allowed, want in legs:
         r = leg(model, allowed, want)
         rows.append(r)
         bad += 0 if r["ok"] else 1
@@ -128,7 +145,7 @@ def main() -> int:
         time.sleep(1.5)
     out = os.path.join(ROOT, "scripts", "probes", "AM16", "results", "recipients")
     os.makedirs(out, exist_ok=True)
-    with io.open(os.path.join(out, "gateway_probe_test.json"), "w", encoding="utf-8") as f:
+    with io.open(os.path.join(out, f"gateway_probe_{'live' if LIVE else 'test'}.json"), "w", encoding="utf-8") as f:
         json.dump(rows, f, ensure_ascii=False, indent=1)
     refused = [r for r in rows if r["status"] == 400]
     held = [r for r in rows if r["status"] == 502]
