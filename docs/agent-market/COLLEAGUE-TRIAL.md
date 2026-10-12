@@ -1,5 +1,9 @@
 # Agent Market — the unassisted colleague trial (AM3)
 
+> 13 Oct 2026: since AM7 the admin pages named below are in the **admin app** (Agent Market → Access,
+> Departments & budgets, Catalog, Spend), not in the chat. What to watch and where to read a run
+> afterwards is in `TRIAL-WATCH.md`; the script for staying silent and the three questions below stand.
+
 The one test that decides whether Agent Market is self-serve: **a colleague
 who did not build it installs an agent and produces a correct deliverable
 from their own real file, with no help from anyone, while you watch and say
