@@ -181,10 +181,51 @@ async function admin(slug) {
   }
 }
 
-const [cmd, a, b] = process.argv.slice(2);
+// question <install> <name> <model id> [th|en]: the question card of a run whose page that model read,
+// as a person reads it on the built web client, on a screen in the language the run was started in (a run
+// keeps its language). It must name the model that read the page and never an in-house one.
+async function question(install, name, model, runLang) {
+  const { chromium } = playwright();
+  const browser = await chromium.launch();
+  try {
+    const ctx = await browser.newContext({ viewport: { width: 1360, height: 1000 }, locale: "th-TH" });
+    await ctx.addCookies([{ name: "portal_access_token", value: L.mintPortalToken(L.TS_USER, 1800), domain: "localhost", path: "/", httpOnly: true, sameSite: "Lax", secure: false }]);
+    const page = await ctx.newPage();
+    await page.goto(`${WEB}/chat/agents/i/${install}`, { waitUntil: "load" });
+    await page.locator('[data-testid="am-question-card"]').last().waitFor({ state: "visible", timeout: 90000 });
+    await L.wait(2500);
+    const startLang = await page.evaluate(() => document.documentElement.lang);
+    if (runLang === "en") { await setLanguage(page, "en"); await L.wait(1500); }
+    const got = await page.evaluate(() => ({
+      lang: document.documentElement.lang,
+      cards: [...document.querySelectorAll('[data-testid="am-question-card"]')].map((el) => el.innerText.replace(/\s+/g, " ").trim()),
+    }));
+    const text = got.cards.join(" ¦ ");
+    const named = `“${model}”`;
+    await page.locator('[data-testid="am-question-card"]').last().scrollIntoViewIfNeeded().catch(() => {});
+    await page.screenshot({ path: path.join(OUT, `${name}.png`), fullPage: false });
+    if (runLang === "en") {
+      check(got.lang === "en" && text.includes(`the model outside the organisation ${named} read`), "English screen, a run started in English: the question names the model outside the organisation that read the page", text.slice(0, 300));
+      check(!/in-house|inside the organisation/.test(text), "… and nowhere says an in-house model read it");
+    } else {
+      check(got.cards.length > 0 && text.includes(`โมเดลนอกองค์กร ${named} อ่านจากภาพได้`), "Thai screen: the question names the model outside the organisation that read the page", text.slice(0, 300));
+      check(!text.includes("โมเดลในองค์กร"), "… and nowhere says an in-house model read it");
+    }
+    // (a sentence the control plane could not read reaches a person as a lone "…")
+    check(!/(^|\s)…(\s|$)/.test(text), "… and no sentence was withheld", (text.match(/.{0,40}(^|\s)…(\s|$)/) || [""])[0]);
+    await setLanguage(page, startLang || "th");
+    check((await page.evaluate(() => document.documentElement.lang)) === (startLang || "th"), "the screen's language is put back", startLang);
+    finish(name, { install, model, run_language: runLang || "th", screen: got });
+  } finally {
+    await browser.close();
+  }
+}
+
+const [cmd, a, b, c, d] = process.argv.slice(2);
 (async () => {
   if (cmd === "card" && a) return card(a, b || "card");
+  if (cmd === "question" && a && c) return question(a, b || "question", c, d === "en" ? "en" : "th");
   if (cmd === "admin" && a) return admin(a);
-  console.error("usage: SMOKE_TARGET=test node scripts/probes/AM16/walk.js card <install id> <name> | admin <slug>");
+  console.error("usage: SMOKE_TARGET=test node scripts/probes/AM16/walk.js card <install id> <name> | question <install id> <name> <model id> [th|en] | admin <slug>");
   process.exit(2);
 })().catch((e) => { console.error(`walk: ${String((e && e.message) || e)}`); process.exit(1); });

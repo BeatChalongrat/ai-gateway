@@ -6,7 +6,7 @@
 // them — in the admin table, by SQL, because this probe measures the gateway and the runner, not the
 // admin page (the page has its own walk).
 //
-//   run <tag> [--leave on|off] [--masked on|off] [--model <id>] [--file <path>] [--agent <dir>] [--say <words>]
+//   run <tag> [--leave on|off] [--masked on|off] [--model <id>] [--file <path>] [--agent <dir>] [--say <words>] [--lang en]
 //       a new copy of the agent, the scan, one run; prints, for every step that asked a model: the model,
 //       what the gateway said it did (masking), and what came back for the fields a tax invoice is read
 //       for; then the questions the run asks the person, and the gateway's own rows for those calls
@@ -183,10 +183,12 @@ async function cleanup() {
   const [cmd, tag, ...rest] = process.argv.slice(2);
   session = L.bearerSession(L.mintPortalToken(L.TS_USER, 3600), "minted");
   if (cmd === "cleanup") return cleanup();
-  if (cmd !== "run" || !tag) { console.error("usage: scan.js run <tag> [--leave on|off] [--masked on|off] [--model <id>] [--file <path>] [--agent <dir>] [--say <words>] | cleanup"); process.exit(2); }
+  if (cmd !== "run" || !tag) { console.error("usage: scan.js run <tag> [--leave on|off] [--masked on|off] [--model <id>] [--file <path>] [--agent <dir>] [--say <words>] [--lang en] | cleanup"); process.exit(2); }
   const opt = {};
   for (let i = 0; i < rest.length; i += 2) opt[rest[i].replace(/^--/, "")] = rest[i + 1];
   if (!["on", "off"].includes(opt.leave || "off")) throw new Error("--leave on|off");
   opt.leave = opt.leave || "off";
+  // --lang en: the run is started from an English screen (the one language tag this product's clients send)
+  if (opt.lang) session.headers = { ...session.headers, "Accept-Language": opt.lang };
   await run(tag, opt);
 })().catch((e) => { console.error(`scan: ${L.errText(e)}`); process.exit(1); });
