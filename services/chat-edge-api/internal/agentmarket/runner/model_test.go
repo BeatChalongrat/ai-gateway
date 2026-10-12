@@ -350,8 +350,9 @@ func TestExtractionAgentsSendTypedWordsOnlyInsideTheOrganisation(t *testing.T) {
 		t.Fatalf("documents may leave: its primary then its fallback: %v", got)
 	}
 	q := am.Question{Key: "k", Question: "ผู้ซื้อไม่ตรง", Options: []am.Option{{Label: "ใช้ตามเอกสาร"}, {Label: "ตัดออก"}}}
-	if _, ok := rcInv.classify(context.Background(), q, "ใช้ได้"); ok {
-		t.Fatal("the self-hosted model failed: no answer, and the external one is never asked")
+	// AM15: the self-hosted model could not be reached, which is said as that (the run waits for it)
+	if _, ok, away := rcInv.classify(context.Background(), q, "ใช้ได้"); ok || away != ErrModelUnreachable {
+		t.Fatalf("the self-hosted model could not be reached: no answer, said as that, and the external one is never asked (ok=%v, %v)", ok, away)
 	}
 	if seen["deepseek"] != 0 || seen["qwen"] == 0 {
 		t.Fatalf("calls: %v", seen)
@@ -360,7 +361,7 @@ func TestExtractionAgentsSendTypedWordsOnlyInsideTheOrganisation(t *testing.T) {
 	m2 := &ModelClient{BaseURL: s.URL, APIKey: "k", Primary: "deepseek", Fallback: "gpt", Timeout: 5 * time.Second, HTTP: http.DefaultClient}
 	rc2 := &runCtx{r: &Runner{Model: m2}, pkg: invoice}
 	before := seen["deepseek"]
-	if _, ok := rc2.classify(context.Background(), q, "ใช้ได้"); ok || seen["deepseek"] != before {
+	if _, ok, away := rc2.classify(context.Background(), q, "ใช้ได้"); ok || away != nil || seen["deepseek"] != before {
 		t.Fatalf("an extraction agent with no self-hosted model sends nothing: %v", seen)
 	}
 }

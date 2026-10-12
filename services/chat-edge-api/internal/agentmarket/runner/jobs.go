@@ -338,6 +338,14 @@ func (r *Runner) replyToAsked(ctx context.Context, rc *runCtx, job am.Run, paren
 		return false, nil
 	}
 	asked, err := rc.asked(ctx, text, false)
+	if question && errors.Is(err, ErrModelUnreachable) && ctx.Err() == nil {
+		// AM15: words worded as a question, and no model to be reached to say whether they ask something
+		// of the documents. They are answered as the question they read as — from the round's own record
+		// where it can answer, and saying that the model is away where only a model could (answerWith).
+		// (Words that are not a question wait for the model, like any step: stepFailed.)
+		rc.modelAway = true
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
@@ -527,7 +535,11 @@ func (r *Runner) answerWith(ctx context.Context, rc *runCtx, parent am.Run, text
 		quotable = knowledgeGuard(l, cv.Quotable, k)
 	}
 	user += questionHeading + text
-	said, ok := r.askModel(ctx, rc, models, system, user, func(answer string) error {
+	if rc.modelAway {
+		// AM15: the model was found away a moment ago, reading these same words
+		return am.AgentText{Text: am.ModelAwayAnswer()}
+	}
+	said, ok, away := r.askModel(ctx, rc, models, system, user, func(answer string) error {
 		if err := GuardNumbersIn(l, answer, quotable, cv.QuotableIDs); err != nil {
 			return err
 		}
@@ -536,6 +548,10 @@ func (r *Runner) answerWith(ctx context.Context, rc *runCtx, parent am.Run, text
 		}
 		return nil
 	})
+	if away {
+		// AM15: nobody answered — which is not the agent being unsure of the figures
+		return am.AgentText{Text: am.ModelAwayAnswer()}
+	}
 	if !ok {
 		return am.AgentText{Text: am.Text("ผมยังตอบคำถามนี้จากตัวเลขที่มีได้ไม่มั่นใจครับ ดูรายละเอียดได้ในหน้า “ขั้นตอนและที่มาของตัวเลข”")}
 	}
@@ -552,9 +568,15 @@ func (r *Runner) answerFromKnowledge(ctx context.Context, rc *runCtx, text strin
 	}
 	system := rc.pkg.Instructions + knowledgeQuestionRules + answerIn(am.LangOf(ctx))
 	quotable := knowledgeGuard(am.LangOf(ctx), nil, k)
-	said, ok := r.askModel(ctx, rc, models, system, k.Text+questionHeading+text, func(answer string) error {
+	if rc.modelAway {
+		return withoutModel(am.ModelAwayAnswer(), k) // AM15: found away a moment ago
+	}
+	said, ok, away := r.askModel(ctx, rc, models, system, k.Text+questionHeading+text, func(answer string) error {
 		return GuardNumbersIn(am.LangOf(ctx), answer, quotable, nil)
 	})
+	if away {
+		return withoutModel(am.ModelAwayAnswer(), k) // AM15
+	}
 	if !ok {
 		return withoutModel(am.Text("ผมยังตอบคำถามนี้จากฐานความรู้ได้ไม่มั่นใจครับ"), k)
 	}
@@ -585,7 +607,9 @@ func knowledgeGuard(l am.Lang, quotable map[string]string, k *am.KnowledgeContex
 // person is shown of it, and whether there is one. A call that gave no usable
 // answer is a cost of the platform's, not a charge (AM6): the person got the
 // sentence that says so, not an answer.
-func (r *Runner) askModel(ctx context.Context, rc *runCtx, models []string, system, user string, check func(string) error) (am.PersonText, bool) {
+//
+// AM15: away says there is none because no model the question may be sent to could be reached at all.
+func (r *Runner) askModel(ctx context.Context, rc *runCtx, models []string, system, user string, check func(string) error) (said am.PersonText, ok, away bool) {
 	var answer string
 	if rc != nil {
 		// AM13b (masking.go): an answer about a round is made from that round's data — the same rule
@@ -604,7 +628,7 @@ func (r *Runner) askModel(ctx context.Context, rc *runCtx, models []string, syst
 		answer = v.Answer
 		return nil
 	})
-	said := am.NoText
+	said = am.NoText
 	if err == nil {
 		said = am.FromModel(answer, am.NoText)
 	}
@@ -619,7 +643,7 @@ func (r *Runner) askModel(ctx context.Context, rc *runCtx, models []string, syst
 	default:
 		_ = r.Store.Charge(ctx, rc.install.ID, rc.run.ID, "reply", credits, c.Model, nil)
 	}
-	return said, !none
+	return said, !none, errors.Is(err, ErrModelUnreachable) && ctx.Err() == nil
 }
 
 // previewJob reads a sample export for the install wizard's column mapping.

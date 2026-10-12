@@ -50,6 +50,8 @@ type Runner struct {
 	Now            func() time.Time
 	// Retention (AM2; AM4): 0 means the default (30 days, 7 days, 30 days).
 	StagedTTL, ScratchTTL, RemovedTTL time.Duration
+	// ModelRetry (AM15): how often the model is asked a word while a run waits for it; 0 = two minutes.
+	ModelRetry time.Duration
 	// Reaper removes the sandbox containers a killed runner left behind; nil
 	// means the default one built from Exec's sandbox (always on).
 	Reaper *Reaper
@@ -245,6 +247,7 @@ func (r *Runner) Start(ctx context.Context) error {
 	go r.housekeeping(ctx)
 	go r.reminders(ctx)     // AM6: reminders open rounds that wait for files; nothing runs without a person
 	go r.ensureSamples(ctx) // AM3: every released version's sample for the catalog
+	go r.modelWatch(ctx)    // AM15: a run that waits for its model goes on when the model answers
 	go r.watchSandbox(ctx, func() { r.heartbeat(ctx) })
 	go func() {
 		t := time.NewTicker(10 * time.Second)

@@ -59,6 +59,10 @@ type itEnv struct {
 	// many readings were asked for (am13_asked_it_test.go)
 	askedSilent atomic.Int32
 	askedCalls  atomic.Int32
+	// AM15: the model is away — every call for a completion gets what the test stack's gateway said with
+	// the in-house model taken away (12 Oct 2026); and how many calls found it so (am15_model_down_it_test.go)
+	away      atomic.Bool
+	awayCalls atomic.Int32
 	// AM13b (masking): what each model call said about egress, and whether the stand-in gateway is one
 	// that knows this runner — it then answers "off" to a call that said closed and "on" to any other,
 	// as the real one does; unset, it says nothing at all (a gateway older than the rule)
@@ -120,6 +124,16 @@ func (e *itEnv) fakeModel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	body, _ := io.ReadAll(r.Body)
+	if e.away.Load() && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/chat/completions") {
+		e.awayCalls.Add(1)
+		if strings.Contains(string(body), "ข้อความของผู้ใช้:") {
+			e.askedCalls.Add(1) // a reading of a person's words that found the model away
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusGatewayTimeout)
+		_, _ = w.Write([]byte(`{"error":{"code":"provider_timeout","message":"Provider 'sranai' gave no answer for 'fake-self-hosted' within 30 s."}}`))
+		return
+	}
 	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/chat/completions") {
 		// (the runner also reads the model catalogue from here: that is not a model call; and a call is
 		// counted for the round whose words it carries — a job of the round before may still be running)

@@ -351,7 +351,8 @@ func splitPrompt(raw []byte) (system, ask string) {
 // refused: no model answered because the gateway's content guardrail refused
 // the question for every model it was put to.
 func (rc *runCtx) askJSON(ctx context.Context, system, user string) (answer json.RawMessage, c Completion, refused bool) {
-	return rc.askJSONWith(ctx, rc.writingModels(), system, user, true)
+	answer, c, refused, _ = rc.askJSONWith(ctx, rc.writingModels(), system, user, true)
+	return answer, c, refused
 }
 
 // askJSONWith is askJSON put to the models given. With record false the
@@ -359,9 +360,12 @@ func (rc *runCtx) askJSON(ctx context.Context, system, user string) (answer json
 // the round's data, and a question that shows a model none of it — the words
 // a person typed about the documents (AM11b, asked.go) — must not put a name
 // there: an audit of receipts that no model read still says no model saw them.
-func (rc *runCtx) askJSONWith(ctx context.Context, models []string, system, user string, record bool) (answer json.RawMessage, c Completion, refused bool) {
+//
+// AM15: away says there is no answer because no model the call may use could be reached at all
+// (ErrModelUnreachable) — which is not a model that answered something unusable.
+func (rc *runCtx) askJSONWith(ctx context.Context, models []string, system, user string, record bool) (answer json.RawMessage, c Completion, refused, away bool) {
 	if rc.r.Model == nil || !rc.r.Model.Available() || len(models) == 0 {
-		return nil, Completion{}, false
+		return nil, Completion{}, false, false
 	}
 	var got json.RawMessage
 	c, tried, err := rc.r.Model.CompleteWith(ctx, models, system, user, func(s string) error {
@@ -373,13 +377,13 @@ func (rc *runCtx) askJSONWith(ctx context.Context, models []string, system, user
 		return nil
 	})
 	if err != nil {
-		return nil, c, refusedByGuardrail(tried)
+		return nil, c, refusedByGuardrail(tried), errors.Is(err, ErrModelUnreachable) && ctx.Err() == nil
 	}
 	if self := rc.r.Model.IsSelfHosted(c.Model); c.Model != "" && record {
 		model := c.Model
 		_ = rc.r.Store.SetRunFields(ctx, rc.run.ID, nil, &model, &self)
 	}
-	return got, c, false
+	return got, c, false, false
 }
 
 // refusedByGuardrail reads what each model's attempt came to (CompleteWith's

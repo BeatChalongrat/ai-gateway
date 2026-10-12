@@ -211,6 +211,7 @@ func run(log *slog.Logger) error {
 		StagedTTL:               time.Duration(am.EnvInt("AGENT_MARKET_STAGED_UPLOAD_HOURS", 720)) * time.Hour,
 		ScratchTTL:              time.Duration(am.EnvInt("AGENT_MARKET_FAILED_SCRATCH_DAYS", 7)) * 24 * time.Hour,
 		RemovedTTL:              time.Duration(am.EnvInt("AGENT_MARKET_REMOVED_INSTALL_DAYS", 30)) * 24 * time.Hour,
+		ModelRetry:              time.Duration(am.EnvInt("AGENT_MARKET_MODEL_RETRY_SECONDS", 120)) * time.Second,
 		SandboxCreditsPerSecond: float64(am.EnvInt("AGENT_MARKET_SANDBOX_CREDITS_PER_SECOND", 100)),
 		StorageBackend:          am.EnvString("STORAGE_BACKEND", "local"),
 	}

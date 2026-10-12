@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -297,7 +298,13 @@ func (rc *runCtx) interpretCards(ctx context.Context) (bool, error) {
 					Cosmetic: q.Severity == "cosmetic", Code: q.Code}
 				continue
 			}
-			if o, ok := rc.classify(ctx, q, text); ok {
+			o, ok, away := rc.classify(ctx, q, text)
+			if away != nil {
+				// AM15: no model could be reached to read the sentence. The card stays as it is — not
+				// asked again, not answered by its default — and the run waits for the model (pipeline.go).
+				return false, away
+			}
+			if ok {
 				answers[q.Key] = am.Answer{Value: o.Value, Label: o.Label, Moment: c.Moment, CardID: c.ID.String(), Via: "text",
 					Cosmetic: q.Severity == "cosmetic", Code: q.Code}
 				continue
@@ -366,10 +373,13 @@ func (rc *runCtx) interpretCards(ctx context.Context) (bool, error) {
 // classify asks the model to pick one of a question's own options for a
 // sentence the user typed. It can only return an option; it cannot invent
 // one, and it never decides what to ask.
-func (rc *runCtx) classify(ctx context.Context, q am.Question, text string) (am.Option, bool) {
+//
+// AM15: the error is ErrModelUnreachable and nothing else — no model that may read the sentence could
+// be reached. "No option" is a model's reading; this is nobody having read.
+func (rc *runCtx) classify(ctx context.Context, q am.Question, text string) (am.Option, bool, error) {
 	models := rc.textModels()
 	if !rc.r.Model.Available() || len(models) == 0 {
-		return am.Option{}, false
+		return am.Option{}, false, nil
 	}
 	var opts strings.Builder
 	for i, o := range q.Options {
@@ -395,10 +405,13 @@ func (rc *runCtx) classify(ctx context.Context, q am.Question, text string) (am.
 	if c.CostUSD > 0 { // paid whether or not an answer was usable
 		_ = rc.r.Store.Charge(ctx, rc.install.ID, rc.run.ID, "classify:"+q.Key+":"+trim(text, 40), c.CostUSD*rc.r.CreditsPerUSD, c.Model, nil)
 	}
-	if err != nil || choice == nil {
-		return am.Option{}, false
+	if errors.Is(err, ErrModelUnreachable) && ctx.Err() == nil {
+		return am.Option{}, false, ErrModelUnreachable
 	}
-	return q.Options[*choice-1], true
+	if err != nil || choice == nil {
+		return am.Option{}, false, nil
+	}
+	return q.Options[*choice-1], true, nil
 }
 
 func extractJSON(s string) string {

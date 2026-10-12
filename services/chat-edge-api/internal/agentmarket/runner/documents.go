@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -154,6 +155,11 @@ func (rc *runCtx) readDocuments(ctx context.Context, parsed []parsedFile) (map[s
 				})
 				reading.Tokens, reading.CostUSD = c.Tokens, c.CostUSD
 				credits := c.CostUSD * rc.r.CreditsPerUSD
+				if errors.Is(err, ErrModelUnreachable) && ctx.Err() == nil {
+					// AM15: the model that reads the scan cannot be reached. Until now the round went on
+					// from OCR alone and this step still named the model: the run waits for it instead.
+					return nil, credits, "", model, err
+				}
 				if err != nil {
 					reading.Model, reading.Error = "", trim(err.Error(), 300)
 					return reading, credits, "", model, nil

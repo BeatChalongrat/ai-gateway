@@ -261,7 +261,11 @@ func TestProcurementOrdersByPriceWhenAskedAndIsNeverTalkedIntoAVerdict(t *testin
 
 // AM13b — on live the in-house model gave no answer in time for "เรียงจากยอดมาก" once and read the same words
 // the next time; the person had to type them again. A reading that comes back as no answer is now asked
-// once more before anyone is told. A second silence is still said, plainly: the words were not read.
+// once more before anyone is told.
+//
+// AM15: a second silence used to be said as "the words were not read" and the reply ended there. Two
+// silences in a row are the model not answering: the reply waits for it, and reads the words when it is
+// back (am15_model_down_it_test.go is the fixture of a round; this is a message typed after one).
 func TestWordsThatCameBackUnreadAreReadOnceMoreBeforeAPersonIsTold(t *testing.T) {
 	e := newIT(t)
 	if e == nil {
@@ -301,19 +305,33 @@ func TestWordsThatCameBackUnreadAreReadOnceMoreBeforeAPersonIsTold(t *testing.T)
 		t.Fatalf("the file is in the order asked: %+v", arts)
 	}
 
-	// two silences in a row: now the person is told, and nothing is made
+	// two silences in a row: the model is not answering — the reply waits for it, and nothing is made
 	e.askedSilent.Store(2)
 	job := e.say(got, "เรียงจากยอดมาก แทน")
-	if j := e.drive(r, job.ID, 3*time.Minute, terminal); j.Status != am.RunSucceeded {
-		t.Fatalf("the reply: %s %s", j.Status, j.StatusReason)
+	j := e.drive(r, job.ID, 3*time.Minute, func(x am.Run) bool { return parked(x) || terminal(x) })
+	if j.Status != am.RunAwaitingInput || j.StatusReason != am.ReasonModelUnreachable {
+		t.Fatalf("the reply waits for the model: %s %s", j.Status, j.StatusReason)
 	}
 	if n := e.askedCalls.Load(); n != 4 {
 		t.Fatalf("after two more silences the question had been put %d times in all, want 4 — once more, not for ever", n)
 	}
-	if thread = e.visibleThread(); !has(thread, "อ่านข้อความที่พิมพ์มาไม่สำเร็จ") {
-		t.Fatalf("a second silence is said:\n%s", strings.Join(thread, "\n"))
+	if thread = e.visibleThread(); has(thread, "อ่านข้อความที่พิมพ์มาไม่สำเร็จ") {
+		t.Fatalf("the model did not answer: that is not said as words that could not be read:\n%s", strings.Join(thread, "\n"))
+	}
+	if own := e.threadOf(job.ID); !has(own, "ตอนนี้ติดต่อโมเดลที่ agent นี้ใช้ไม่ได้") {
+		t.Fatalf("the thread says the model cannot be reached:\n%s", strings.Join(own, "\n"))
 	}
 	if jobs := e.renderJobs(run.ID); len(jobs) != 0 {
 		t.Fatalf("words nobody read made a file: %d render jobs", len(jobs))
+	}
+	// the model answers again: the reply goes on by itself and the file is made in the order asked
+	if n := r.resumeModelParked(ctx); n < 1 {
+		t.Fatalf("the model is back: %d resumed", n)
+	}
+	if j = e.drive(r, job.ID, 3*time.Minute, terminal); j.Status != am.RunSucceeded {
+		t.Fatalf("the reply that waited: %s %s", j.Status, j.StatusReason)
+	}
+	if jobs := e.renderJobs(run.ID); len(jobs) != 1 {
+		t.Fatalf("the words were read once the model was back: %d render jobs, want 1", len(jobs))
 	}
 }

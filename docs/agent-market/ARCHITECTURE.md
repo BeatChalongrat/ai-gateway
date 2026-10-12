@@ -1027,3 +1027,54 @@ of the runs it reads, not the list of everything an engine can say.
 - The tools the sentences were moved with (`scripts/probes/AM14/words_tool.py`, `manifest_edit.py`): the
   Thai is read from the code and written to the manifest by a script, never retyped.
 
+
+## A run that cannot reach its model waits (AM15)
+
+What was found (test stack, 12 Oct 2026, the in-house model taken away — `scripts/smoke/primary.js
+down`): every one of the five accounting agents went on regardless. Their documents may not leave the
+organisation, so no outside model may stand in — and none did; the run simply did without. The words
+typed with the files came back "unread" and the documents were made the usual way; a scan was read by
+OCR alone, with the step still naming the model; the report's commentary was written by rules. Each
+run delivered its files and was charged for them (1,316 to 2,733 credits), and none said the model was
+away. The gateway had answered each call `504 provider_timeout`.
+
+The rule now: **a run that cannot reach a model it is allowed to use stops, says so, and goes on by
+itself when the model is back.**
+
+- **Two different things** (`runner/model.go`). `ErrNoModel`: a model answered and the answer could
+  not be used — empty, cut off, refused by the caller's check. The caller's rules stand in for it, as
+  always. `ErrModelUnreachable` (a kind of `ErrNoModel`): *no* model the call may use was reached — no
+  response, the call's own time ran out, a 5xx or 429 from the gateway, or an answer from another
+  model than the one asked. The gateway's refusal of an answer the model did give
+  (`output_limit_reached`, `empty_completion`) is the model having been reached. A run whose own
+  context ended (shutdown, lost lease) has not found its model away.
+- **Where a run stops** (`runner/modeldown.go`, `pipeline.go stepFailed`): the reading of the words
+  typed with the files, the reading of a scan, the report's commentary, and a card answered in words
+  that no model could be reached to read. The step fails as a step — the first unfinished one — and
+  the run is parked: `awaiting_input`, reason `model_unreachable`, a warning notice in its thread in
+  the run's language. Nothing after that step has run: nothing is rendered, nothing published.
+- **How it goes on**: while any run waits, the runner asks its primary model one word every two
+  minutes (`AGENT_MARKET_MODEL_RETRY_SECONDS`) and, on any answer, puts every waiting run back in the
+  queue with a line in its thread. Steps already done are read back; the unfinished one asks again.
+- **Not for ever**: a run goes on only after the model answered that word, so one that finds it away
+  again each time is asking something the model does not answer in time. After three waits
+  (`MaxModelWaits`) it ends failed with reason `model_unreachable`, said in words, and can be tried
+  again with its files.
+- **What it costs a person**: a run that waits has delivered nothing. Cancelled, or ended after its
+  three waits, it is charged nothing (what its finished steps had been charged is voided, like any
+  run that ends without delivering). If it goes on and delivers, it is charged like any run.
+- **A message typed after a run**: words that are not a question wait for the model like a step; a
+  question is answered from the run's own record where the record can, and where only a model could
+  the answer says the model cannot be reached — it used to read "I cannot answer this with
+  confidence". A form's mapping still goes to the person to map by hand, as before.
+- **On screen**: the run's card is titled "รอโมเดล / Waiting for the model", not "Waiting for your
+  answer" — nothing is asked of the person.
+- **Held by** `runner/am15_model_test.go` (which answers of a gateway are which of the two) and
+  `runner/am15_model_down_it_test.go`, both directions: down — the run waits, nothing made, the thread
+  says so in Thai and in English; back — the same run finishes from the step that could not ask, the
+  words read, the steps before it not run again; and a cancelled wait, the three-wait bound, a scan,
+  the report's commentary. `scripts/probes/AM15/model_down.js` is the same reading on the test stack
+  through the routes a person's screen calls.
+- **The integration lane is a list of names**: a sandbox test no chunk names runs nowhere, and a
+  renamed test leaves a chunk that matches nothing and passes. `runner/am15_lane_test.go`, in the unit
+  lane, fails for either.

@@ -37,6 +37,9 @@ type runCtx struct {
 	// docsMayLeave (AM4): the organisation lets this round's data go to a
 	// model outside it. Off by default: only in-house models see anything.
 	docsMayLeave bool
+	// modelAway (AM15): this job has just found no model reachable to read a person's typed words
+	// (jobs.go replyToAsked) — a second question of the same model in the same job is not put.
+	modelAway bool
 	// formOnly (AM10): this render job fills the round's own form and makes
 	// no other file.
 	formOnly bool
@@ -92,7 +95,11 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if parked, err := rc.interpretCards(ctx); err != nil {
+		if parked, err := rc.interpretCards(ctx); errors.Is(err, ErrModelUnreachable) && ctx.Err() == nil {
+			// AM15: an answer typed in words that no model could be reached to read is not a
+			// question asked again, and not the default — the run waits for the model
+			return r.parkForModel(rc)
+		} else if err != nil {
 			return r.fail(ctx, run, "interpret", err)
 		} else if parked {
 			return r.park(rc, "reask")
@@ -878,6 +885,10 @@ func (rc *runCtx) stepFailed(step string, err error) error {
 	var bp *errBudgetPark
 	if errors.As(err, &bp) {
 		return rc.r.parkForBudget(rc, bp)
+	}
+	// So is a model that cannot be reached (AM15): the run waits for it.
+	if errors.Is(err, ErrModelUnreachable) && rc.ctx.Err() == nil {
+		return rc.r.parkForModel(rc)
 	}
 	if rc.runCtxCancelled(err) {
 		return err

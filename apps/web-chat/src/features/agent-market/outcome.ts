@@ -35,9 +35,14 @@ const KEYS: Record<string, AmKey> = {
   cancelled: "progress.title.cancelled",
 };
 
+/** AM15: the reason of a run that waits for a model it may use to be reachable again. */
+export const MODEL_UNREACHABLE = "model_unreachable";
+
 /** The words for an outcome; `reason` is the run's reason code (never shown itself). */
 export function outcomeKey(outcome: string, reason?: string | null): AmKey | null {
   if (outcome === COMPLETED_OPEN) return reason === NOT_TIED ? "outcome.open.notTied" : "outcome.open.gate";
+  // a run that waits for its model asks nothing of the person: it is not "waiting for your answer"
+  if (outcome === "awaiting_input" && reason === MODEL_UNREACHABLE) return "progress.title.waiting_model";
   return KEYS[outcome] ?? null;
 }
 

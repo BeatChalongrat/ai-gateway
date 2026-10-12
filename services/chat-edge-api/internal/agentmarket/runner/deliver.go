@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -99,6 +100,11 @@ func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey st
 				parsed = v
 				return nil
 			})
+			if errors.Is(err, ErrModelUnreachable) && ctx.Err() == nil {
+				// AM15: no model that may see the table could be reached. The rules stand in for a model
+				// whose answer could not be used — not for one that is away: the run waits for it.
+				return nil, c.CostUSD * rc.r.CreditsPerUSD, "", "", err
+			}
 			if err != nil {
 				// No model answered: the rules write it. The report says so.
 				fb := map[string]any{} // a package without a fallback narrative: never a nil map

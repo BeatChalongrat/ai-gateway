@@ -62,18 +62,24 @@ func (rc *runCtx) asked(ctx context.Context, text string, request bool) (am.Aske
 		func(ctx context.Context) (any, float64, string, string, error) {
 			system, user := am.AskedPrompt(spec, text, request)
 			// (the model is shown the person's words and the package's list — nothing of the round's data)
-			ans, c, refused := rc.askJSONWith(ctx, models, system, user, false)
+			ans, c, refused, away := rc.askJSONWith(ctx, models, system, user, false)
 			cost, tries := c.CostUSD, 1
 			if ans == nil && !refused {
 				// The in-house model sometimes returns nothing for a question it answers the next time
 				// (its thinking takes the whole answer). A person is not told to type their words again
 				// for that: the same question is put once more, and only a second silence is "unread".
 				// (Not when the gateway's guardrail refused it: the same question would be refused again.)
-				again, c2, _ := rc.askJSONWith(ctx, models, system, user, false)
-				cost, tries = cost+c2.CostUSD, 2
+				again, c2, _, away2 := rc.askJSONWith(ctx, models, system, user, false)
+				cost, tries, away = cost+c2.CostUSD, 2, away2
 				if again != nil {
 					ans, c = again, c2
 				}
+			}
+			if ans == nil && away {
+				// AM15: nobody could be reached to read the words. That is not "unread" — until now the
+				// documents were then made the usual way, delivered and charged, with a line saying the
+				// words could not be read. The step fails as a step and the run waits for the model.
+				return nil, cost * rc.r.CreditsPerUSD, "", "", ErrModelUnreachable
 			}
 			out := am.Asked{Text: text, Apply: []string{}, Unread: true}
 			if ans != nil {

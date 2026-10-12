@@ -110,6 +110,44 @@ type chatMsg struct {
 // ErrNoModel means no model answered (the caller falls back to rules).
 var ErrNoModel = errors.New("no model answered")
 
+// ErrModelUnreachable (AM15) is the part of ErrNoModel that is not an answer at all: every model the
+// call was allowed to use could not be reached — the gateway did not respond, gave up waiting for the
+// provider, or said it is away. A model that answered something unusable (empty, cut off, refused by
+// the caller's check) was reached, and stays ErrNoModel.
+//
+// The difference is what a run does next. An unusable answer has the caller's rules stand in for it, as
+// always. With no model to reach, a run of an agent whose documents may not leave the organisation has
+// nothing that may stand in: until AM15 it went on regardless — the words typed with the files unread,
+// a scan read by OCR alone, the commentary written by rules — delivered its files and was charged for
+// them. Now it stops and waits (modeldown.go), and goes on by itself when the model is back.
+var ErrModelUnreachable = fmt.Errorf("%w: no model it may use could be reached", ErrNoModel)
+
+// unreachable is one call's failure to reach its model at all.
+type unreachable struct{ why error }
+
+func (e *unreachable) Error() string        { return e.why.Error() }
+func (e *unreachable) Unwrap() error        { return e.why }
+func (e *unreachable) Is(target error) bool { return target == ErrModelUnreachable }
+
+// The gateway's own refusals of an answer the model DID give (it passes no empty answer on): the model
+// was reached. Its thinking shares the answer's budget, and running out of it is the model's outcome.
+var answeredCodes = map[string]bool{"output_limit_reached": true, "empty_completion": true}
+
+// awayStatus: a response of the gateway that means the model itself gave no answer — it timed out,
+// is away, or the gateway could not get to it (5xx), or would not let the call through now (429).
+func awayStatus(status int, body []byte) bool {
+	if status < 500 && status != http.StatusTooManyRequests {
+		return false
+	}
+	var e struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(body, &e)
+	return !answeredCodes[e.Error.Code]
+}
+
 // Available reports whether a model call can be attempted at all.
 func (m *ModelClient) Available() bool {
 	return m != nil && m.BaseURL != "" && m.APIKey != "" && m.Primary != ""
@@ -161,6 +199,7 @@ func (m *ModelClient) CompleteWith(ctx context.Context, models []string, system,
 	// paid for); the budget is charged this, success or not.
 	var spent float64
 	var tokens int
+	reached := false // AM15: some model gave some answer, usable or not
 	for _, model := range models {
 		for attempt := 0; attempt < 2; attempt++ {
 			m.yield(ctx)
@@ -169,9 +208,11 @@ func (m *ModelClient) CompleteWith(ctx context.Context, models []string, system,
 			tokens += c.Tokens
 			note := model
 			if err != nil {
+				reached = reached || !errors.Is(err, ErrModelUnreachable)
 				tried = append(tried, note+": "+trim(err.Error(), 160))
 				break // a transport/model failure: go to the next model
 			}
+			reached = true
 			if validate != nil {
 				if verr := validate(c.Content); verr != nil {
 					tried = append(tried, note+": "+trim(verr.Error(), 160))
@@ -183,6 +224,10 @@ func (m *ModelClient) CompleteWith(ctx context.Context, models []string, system,
 			c.CostUSD, c.Tokens = spent, tokens
 			return c, tried, nil
 		}
+	}
+	if !reached {
+		// AM15: not one of them could be reached — nothing answered, so nothing may stand in
+		return Completion{CostUSD: spent, Tokens: tokens}, tried, ErrModelUnreachable
 	}
 	return Completion{CostUSD: spent, Tokens: tokens}, tried, ErrNoModel
 }
@@ -232,6 +277,7 @@ func (m *ModelClient) call(ctx context.Context, model, system, user string) (Com
 }
 
 func (m *ModelClient) send(ctx context.Context, model string, messages any, temperature float64, maxTokens int) (Completion, error) {
+	run := ctx // the caller's own context: stopped means the runner is stopping, not that the model is away
 	ctx, cancel := context.WithTimeout(ctx, m.Timeout)
 	defer cancel()
 	body := chatReq{Model: model, Temperature: temperature, MaxTokens: maxTokens, Messages: messages}
@@ -256,12 +302,20 @@ func (m *ModelClient) send(ctx context.Context, model string, messages any, temp
 	start := time.Now()
 	resp, err := m.HTTP.Do(req)
 	if err != nil {
-		return Completion{}, err
+		if run.Err() != nil {
+			return Completion{}, err
+		}
+		// AM15: no response at all — refused, reset, or nothing within the call's own time
+		return Completion{}, &unreachable{why: err}
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode >= 400 {
-		return Completion{}, fmt.Errorf("gateway %d: %s", resp.StatusCode, trim(string(raw), 200))
+		refused := fmt.Errorf("gateway %d: %s", resp.StatusCode, trim(string(raw), 200))
+		if awayStatus(resp.StatusCode, raw) {
+			return Completion{}, &unreachable{why: refused}
+		}
+		return Completion{}, refused
 	}
 	// what the gateway DID with the text, in its own words; no word from it means masked
 	calls.note(resp.Header.Get(MaskingHeader) == maskingOff)
@@ -318,8 +372,9 @@ func (m *ModelClient) send(ctx context.Context, model string, messages any, temp
 	}
 	if !sameModel(used, model) {
 		// AM4: an answer from a model other than the one asked for is never
-		// used — the organisation allowed that model, not this one.
-		return spent, fmt.Errorf("answered by %s instead of %s", used, model)
+		// used — the organisation allowed that model, not this one. (AM15: and
+		// the model asked for gave no answer at all.)
+		return spent, &unreachable{why: fmt.Errorf("answered by %s instead of %s", used, model)}
 	}
 	return Completion{Model: used, Content: content, CostUSD: cost, Tokens: out.Usage.TotalTokens, Cached: out.Cached,
 		FinishedBy: out.Choices[0].FinishReason, Elapsed: time.Since(start)}, nil
