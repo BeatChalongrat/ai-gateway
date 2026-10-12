@@ -9,12 +9,15 @@ Verifies:
 - Response scanning respects global dlp_scan_responses flag
 """
 
+import re
 from unittest.mock import patch
 
 import pytest
 
 from app.core.config import Settings
+from app.domain.providers import ProviderResponse
 from app.services.dlp.detectors.registry import get_default_registry, DetectorRegistry
+from app.services.provider_dispatcher import ProviderDispatcher
 from fastapi.testclient import TestClient
 from app.main import app
 
@@ -78,6 +81,11 @@ _ALL_DETECTOR_NAMES = [
     "presidio_ner",
     # Thai-market contact identifier.
     "line_id",
+    # Labelled address / salary detectors.
+    "address", "income",
+    # Regex Thai-name fallback (always registered) and the Thai NER layer
+    # (registered while ``dlp_thai_ner_enabled`` is on, the shipped default).
+    "thai_name_no_prefix", "thai_ner",
 ]
 
 
@@ -118,10 +126,21 @@ class TestRegistryDisabledDetectors:
 
 
 class TestDLPEnabledToggle:
-    def test_dlp_enabled_blocks_critical_secret_in_default(self):
-        """Default profile blocks CRITICAL-severity secrets inbound.
-        The severity_threshold_block=CRITICAL means credentials are
-        stopped before reaching the LLM — returns 403."""
+    def test_dlp_enabled_masks_critical_secret_in_default(self, monkeypatch):
+        """Default profile MASKS a CRITICAL-severity secret inbound: the
+        explicit ``credential``/``secret`` → MASK category action wins over
+        severity_threshold_block=CRITICAL, so the request proceeds (200) and
+        the provider is sent a placeholder, never the key. STRICT is the
+        profile that blocks — see
+        test_dlp_p0_fixes.TestDefaultPolicyCriticalCredentials."""
+        captured: dict[str, str] = {}
+
+        async def _capture_dispatch(self, route, payload, messages, api_key=None):
+            captured["content"] = "\n".join(str(m.content) for m in messages)
+            return ProviderResponse(content="ok", model=route.model_name)
+
+        monkeypatch.setattr(ProviderDispatcher, "dispatch", _capture_dispatch)
+
         resp = client.post(
             "/v1/chat/completions",
             headers=_HEADERS,
@@ -131,8 +150,10 @@ class TestDLPEnabledToggle:
                 "metadata": {},
             },
         )
-        assert resp.status_code == 403
-        assert resp.json()["error"]["code"] == "dlp_violation"
+        assert resp.status_code == 200
+        assert resp.json()["policy_action"] == "mask"
+        assert "AKIAIOSFODNN7EXAMPLE" not in captured["content"]
+        assert re.search(r"key: <r\d+>", captured["content"])
 
     @patch("app.services.orchestrator.settings")
     def test_dlp_disabled_allows_secret(self, mock_settings):

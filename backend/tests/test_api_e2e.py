@@ -11,9 +11,13 @@ Full lifecycle coverage through the public API boundary:
 - Request-id propagation
 """
 
+import uuid
+
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.models.provider_key import ProviderKeyORM
+from tests.conftest import _IntegrationSession
 
 client = TestClient(app, raise_server_exceptions=False)
 _HEADERS = {"Authorization": "Bearer demo-key"}
@@ -112,16 +116,26 @@ class TestE2EDLPMasking:
 
 
 class TestE2EDLPBlock:
+    """The block path end to end. A credential is BLOCKED under the strict
+    profile (selected here by the per-request ``policy_profile_id``); the
+    default profile masks it and the request proceeds — that half is
+    test_dlp_config.TestDLPEnabledToggle and test_dlp_policy_runtime_privacy."""
+
     def test_aws_key_blocked(self):
-        resp = _chat("My AWS key: AKIAIOSFODNN7EXAMPLE")
+        resp = _chat("My AWS key: AKIAIOSFODNN7EXAMPLE", policy_profile_id="strict")
         assert resp.status_code == 403
         body = resp.json()
         assert body["error"]["code"] == "dlp_violation"
+        assert "SECRET" in body["error"]["categories"]
 
     def test_bearer_token_blocked(self):
-        resp = _chat("Use Bearer sk-proj-12345678901234567890abcdefghijklm")
+        resp = _chat(
+            "Use Bearer sk-proj-12345678901234567890abcdefghijklm",
+            policy_profile_id="strict",
+        )
         assert resp.status_code == 403
         assert resp.json()["error"]["code"] == "dlp_violation"
+        assert "SECRET" in resp.json()["error"]["categories"]
 
 
 # ---------------------------------------------------------------------------
@@ -214,11 +228,32 @@ class TestE2EResponseContract:
 
 class TestE2EModelsEndpoint:
     def test_returns_models(self):
-        resp = client.get("/v1/models")
+        # The listing is ``auto`` plus the models of providers that hold an
+        # active, validated key (a keyless provider's models cannot be
+        # called, so they are not offered) — seed one such key for openai.
+        session = _IntegrationSession()
+        key = ProviderKeyORM(
+            id=str(uuid.uuid4()),
+            provider_name="openai",
+            label="e2e-models-listing",
+            api_key_encrypted="not-a-real-key",
+            is_active=True,
+            last_test_status="valid",
+        )
+        session.add(key)
+        session.commit()
+        try:
+            resp = client.get("/v1/models")
+        finally:
+            session.delete(key)
+            session.commit()
+            session.close()
         assert resp.status_code == 200
         data = resp.json()["data"]
         assert len(data) > 3
         assert data[0]["id"] == "auto"
+        openai_ids = {m["id"] for m in data if m["provider"] == "openai"}
+        assert {"gpt-4o", "gpt-4o-mini"} <= openai_ids
 
     def test_no_auth_required(self):
         resp = client.get("/v1/models")
@@ -230,8 +265,4 @@ class TestE2EModelsEndpoint:
 # ---------------------------------------------------------------------------
 
 
-class TestE2EHealth:
-    def test_health_returns_ok(self):
-        resp = client.get("/health")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "ok"
+# AM15: removed — TestE2EHealth::test_health_returns_ok asserted 200 "ok" from /health with nothing behind the process; /health is a component check that answers 503 "unhealthy" when the database is unreachable (by design, FIX126-O8-5), each component state is tested in tests/test_health.py::test_health_is_200_ok_when_every_component_answers / ::test_health_is_503_unhealthy_when_the_database_is_down / ::test_health_is_200_degraded_when_only_redis_is_down, and the live-stack 200 "ok" is tests/test_health.py::test_health_is_ok_on_the_live_stack.

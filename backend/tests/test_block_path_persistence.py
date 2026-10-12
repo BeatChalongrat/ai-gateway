@@ -30,11 +30,11 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
+from app.core.dlp_audit_crypto import decrypt as decrypt_audit_blob
 from app.domain.providers import ProviderResponse as _PR
 from app.main import app
 from app.models.request_log import RequestLogORM
 from app.services.moderation_service import ModerationResult, ModerationService
-from app.services.policy.profiles import STRICT_PROFILE
 from app.services.provider_dispatcher import ProviderDispatcher
 from tests.conftest import _integration_engine
 
@@ -43,16 +43,16 @@ client = TestClient(app, raise_server_exceptions=False)
 _HEADERS = {"Authorization": "Bearer demo-key"}
 
 
-def _chat(content: str):
-    return client.post(
-        "/v1/chat/completions",
-        headers=_HEADERS,
-        json={
-            "model": "auto",
-            "messages": [{"role": "user", "content": content}],
-            "metadata": {},
-        },
-    )
+def _chat(content: str, policy_profile_id: str | None = None):
+    body = {
+        "model": "auto",
+        "messages": [{"role": "user", "content": content}],
+        "metadata": {},
+    }
+    if policy_profile_id is not None:
+        # Per-request profile override (ChatCompletionsRequest.policy_profile_id).
+        body["policy_profile_id"] = policy_profile_id
+    return client.post("/v1/chat/completions", headers=_HEADERS, json=body)
 
 
 def _install_capture(monkeypatch, response_text: str | None = None) -> dict:
@@ -92,6 +92,11 @@ def _latest_blocked_row_by_error(
     that might already exist (e.g. ``'sk-ant-api03'``,
     ``'Ignore all previous'``).
 
+    The marker is looked for in the decrypted ``input_raw_encrypted``
+    audit blob: the plaintext ``input_raw`` column of a block row holds
+    only a placeholder (``[BLOCKED_BY_DLP]`` / ``[MASKED_BY_DLP]`` /
+    ``[NOT_PERSISTED_SEE_ENCRYPTED]``), never what was typed.
+
     Timestamp filtering does NOT work as a substitute: SQLite's
     ``CURRENT_TIMESTAMP`` has 1-second precision while ``datetime.now()``
     in Python is microsecond-precision, so ``created_at >= start``
@@ -100,13 +105,16 @@ def _latest_blocked_row_by_error(
     Session = sessionmaker(bind=_integration_engine)
     s = Session()
     try:
-        return (
+        rows = (
             s.query(RequestLogORM)
             .filter(RequestLogORM.error_code == error_code)
-            .filter(RequestLogORM.input_raw.like(f"%{input_marker}%"))
             .order_by(RequestLogORM.created_at.desc())
-            .first()
+            .all()
         )
+        for row in rows:
+            if input_marker in decrypt_audit_blob(row.input_raw_encrypted or ""):
+                return row
+        return None
     finally:
         s.close()
 
@@ -117,9 +125,10 @@ def _latest_blocked_row_by_error(
 
 
 class TestDlpInboundBlockPersists:
-    """A CRITICAL-severity finding (e.g. an API key in the user's input)
-    triggers the inbound DLP block path. Must persist a BLOCKED row
-    before the orchestrator raises ``DLPViolationError``.
+    """A credential (e.g. an API key in the user's input) under a profile
+    that blocks it — the strict profile — triggers the inbound DLP block
+    path. Must persist a BLOCKED row before the orchestrator raises
+    ``DLPViolationError``.
 
     Pre-fix the inbound block path only emitted a structlog warning via
     ``audit_service.record_blocked_request`` — no row landed in
@@ -130,11 +139,13 @@ class TestDlpInboundBlockPersists:
     def test_dlp_inbound_block_persists(self, monkeypatch):
         captured = _install_capture(monkeypatch)
 
-        # api_key_secret detector + default profile → BLOCKED at
-        # severity threshold CRITICAL (profiles.py).
+        # api_key_secret detector + strict profile → BLOCKED (category
+        # ``credential`` → BLOCK, profiles.py). The default profile masks
+        # the key and lets the request proceed, so the block path is
+        # reached through the per-request strict override.
         marker = "dlp-inbound-block-test-marker"
         key = "sk-ant-api03-" + ("a" * 40)
-        resp = _chat(f"my api key is {key} ({marker})")
+        resp = _chat(f"my api key is {key} ({marker})", policy_profile_id="strict")
 
         assert resp.status_code == 403
         body = resp.json()
@@ -148,6 +159,8 @@ class TestDlpInboundBlockPersists:
         assert row.policy_action == "block"
         assert row.error_code == "dlp_violation"
         assert row.dlp_findings_json is not None
+        # The typed text (with the key) is not in the plaintext column.
+        assert row.input_raw == "[BLOCKED_BY_DLP]"
         # Inbound block runs before the mask step → input_masked is None.
         assert row.input_masked is None
 
@@ -168,12 +181,6 @@ class TestDlpOutboundBlockPersists:
     """
 
     def test_dlp_outbound_block_persists(self, monkeypatch):
-        # Force strict profile so credential category → BLOCK both
-        # directions, and severity_threshold_block=CRITICAL applies.
-        monkeypatch.setattr(
-            "app.services.orchestrator.get_profile",
-            lambda _pid: STRICT_PROFILE,
-        )
         # Provider returns text containing an API-key-shaped string —
         # the outbound DLP scan should classify it as CRITICAL and
         # block. Use an Anthropic-shaped key (matches the api_key_secret
@@ -183,13 +190,15 @@ class TestDlpOutboundBlockPersists:
 
         # Unique input phrase so the test's row is distinguishable from
         # other ``dlp_violation`` rows produced by sibling tests in the
-        # shared integration DB.
+        # shared integration DB. Strict profile (per-request override) so
+        # the credential category → BLOCK in both directions.
         unique_input = "what is the OUTBOUND weather today (test_dlp_outbound_block_persists)"
-        resp = _chat(unique_input)
+        resp = _chat(unique_input, policy_profile_id="strict")
 
         assert resp.status_code == 403
         body = resp.json()
         assert body["error"]["code"] == "dlp_violation"
+        assert body["error"]["details"]["direction"] == "output"
 
         row = _latest_blocked_row_by_error(
             "dlp_violation", input_marker="OUTBOUND weather"
@@ -198,10 +207,12 @@ class TestDlpOutboundBlockPersists:
         assert row.status == "blocked"
         assert row.policy_action == "block"
         assert row.error_code == "dlp_violation"
-        # Outbound block has the full provider context — ``output_raw``
-        # captures what the provider returned.
-        assert row.output_raw is not None
-        assert leaked_key in (row.output_raw or "")
+        # Outbound block has the provider context (provider + model on the
+        # row), but what the provider returned is NOT persisted:
+        # ``output_raw`` holds the block placeholder, never the leaked key.
+        assert row.provider
+        assert row.output_raw == "[BLOCKED_BY_DLP]"
+        assert leaked_key not in (row.dlp_findings_json or "")
 
 
 # ---------------------------------------------------------------------------
@@ -253,12 +264,6 @@ class TestModerationNonStreamingBlockPersists:
     """
 
     def test_moderation_non_streaming_block_persists(self, monkeypatch):
-        # Strict profile has moderation_enabled=True (profiles.py:71).
-        monkeypatch.setattr(
-            "app.services.orchestrator.get_profile",
-            lambda _pid: STRICT_PROFILE,
-        )
-
         captured: dict = {"called": False}
 
         async def _flagged_stub(self, text: str, api_key: str) -> ModerationResult:
@@ -272,8 +277,13 @@ class TestModerationNonStreamingBlockPersists:
         monkeypatch.setattr(ModerationService, "check", _flagged_stub)
         provider_spy = _install_capture(monkeypatch)
 
+        # Strict profile (per-request override) has moderation_enabled=True
+        # (profiles.py); the default profile does not run moderation.
         marker = "moderation-non-stream-test-marker"
-        resp = _chat(f"benign text ({marker}) — moderation stub forces flagged")
+        resp = _chat(
+            f"benign text ({marker}) — moderation stub forces flagged",
+            policy_profile_id="strict",
+        )
 
         assert resp.status_code == 403
         body = resp.json()

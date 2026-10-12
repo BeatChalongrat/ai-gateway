@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete
 from sqlalchemy import select
 
+from app.core.dlp_audit_crypto import decrypt as decrypt_audit_blob
 from app.domain.dlp import (
     DetectionMatch,
     EnforcementAction,
@@ -64,15 +65,25 @@ def _request_log(request_id: str) -> RequestLogORM:
         session.close()
 
 
-def _latest_dlp_block_log() -> RequestLogORM:
+def _latest_dlp_block_log(prompt: str) -> RequestLogORM:
+    """The newest ``dlp_violation`` row written for ``prompt``.
+
+    The integration DB is shared and SQLite's ``created_at`` has one-second
+    precision, so "the newest block row" alone can be another test's (an
+    outbound block's row carries a different ``input_raw`` placeholder).
+    The row is identified by its encrypted audit copy of the prompt.
+    """
     session = _IntegrationSession()
     try:
-        row = session.execute(
+        rows = session.execute(
             select(RequestLogORM)
             .where(RequestLogORM.error_code == "dlp_violation")
             .order_by(RequestLogORM.created_at.desc())
-            .limit(1)
-        ).scalar_one()
+        ).scalars().all()
+        row = next(
+            r for r in rows
+            if decrypt_audit_blob(r.input_raw_encrypted or "") == prompt
+        )
         session.expunge(row)
         return row
     finally:
@@ -139,25 +150,31 @@ def test_secret_mask_policy_masks_provider_input_and_request_log(monkeypatch):
 
     assert resp.status_code == 200, resp.text
     body_text = resp.text
+    # The provider is sent a placeholder in the secret's place ...
     assert secret not in captured["content"]
-    assert secret in body_text
-    assert "BEARER_TOKEN" in captured["content"]
+    assert re.fullmatch(r"API Key: <r\d+>", captured["content"])
+    # ... and a secret is never restored on the way back: the provider's
+    # echo of the placeholder reaches the caller with the placeholder
+    # stripped, not with the key put back.
+    assert secret not in body_text
+    assert resp.json()["choices"][0]["message"]["content"] == "API Key:"
 
     row = _request_log(resp.json()["id"])
-    # ``output_final`` deliberately stores the post-restore plaintext
-    # the user received, which echoes the original secret — exclude
-    # it from the no-leak check. Stage 1 / 2 / 3 + findings JSON must
-    # still be free of the raw value.
+    # All four stages + findings JSON must be free of the raw value
+    # (``output_final`` holds the provider-safe masked text, never a
+    # restored reply).
     serialized_row = "\n".join(
         str(v or "")
         for v in (
             row.input_raw,
             row.input_masked,
             row.output_raw,
+            row.output_final,
             row.dlp_findings_json,
         )
     )
     assert secret not in serialized_row
+    assert re.search(r"API Key: <r\d+>", row.input_masked)
     assert '"matched_text"' not in (row.dlp_findings_json or "")
 
 
@@ -173,7 +190,7 @@ def test_dlp_blocked_request_uses_placeholder_input_raw():
             json={"model": "auto", "messages": [{"role": "user", "content": prompt}]},
         )
         assert resp.status_code == 403
-        row = _latest_dlp_block_log()
+        row = _latest_dlp_block_log(prompt)
         assert row.input_raw == "[BLOCKED_BY_DLP]"
         assert row.input_raw != prompt
         assert secret not in (row.dlp_findings_json or "")
@@ -187,24 +204,30 @@ def test_outbound_restore_returns_all_original_token_values_without_persisting(
     _reset_policy_override()
     captured: dict[str, str] = {}
 
-    raw_values = [
+    # Restored to the caller when the provider echoes their placeholder.
+    restored_values = [
         "john.smith@example.com",
         "+66 81-234-5678",
         "1101700203451",
         "4111 1111 1111 1111",
-        "P@ssw0rd123!",
-        "sk-test-1234567890abcdef",
         "99/88 Sukhumvit Road, Bangkok 10110",
         "diabetes",
         "85,000 THB/month",
     ]
+    # Secrets are masked on the way in like the rest, and NEVER restored.
+    secret_values = [
+        "P@ssw0rd123!",
+        "sk-test-1234567890abcdef",
+    ]
+    raw_values = restored_values + secret_values
 
     async def _echo_mask_tokens(self, route, payload, messages, api_key=None):
         provider_input = messages[-1].content
         captured["content"] = provider_input
-        tokens = re.findall(r"\[[A-Z][A-Z0-9_]*_[A-Za-z0-9_\-]+\]", provider_input)
+        tokens = re.findall(r"<r\d+>", provider_input)
+        captured["reply"] = "Summary: " + " ".join(tokens)
         return ProviderResponse(
-            content="Summary: " + " ".join(tokens),
+            content=captured["reply"],
             model=route.model_name,
         )
 
@@ -237,31 +260,39 @@ def test_outbound_restore_returns_all_original_token_values_without_persisting(
 
     for raw in raw_values:
         assert raw not in provider_input
+    for raw in restored_values:
         assert raw in body_text
+    for raw in secret_values:
+        assert raw not in body_text
+    # No placeholder reaches the caller either: restored or stripped.
+    assert not re.search(r"<r\d+>", body_text)
 
-    for token_name in (
-        "EMAIL",
-        "PHONE_NUMBER",
-        "THAI_ID",
-        "CREDIT_CARD",
-        "PASSWORD",
-        "BEARER_TOKEN",
-        "ADDRESS",
-        "HEALTH_CONDITION",
-        "INCOME",
-    ):
-        assert f"[{token_name}_" in provider_input
+    # Every labelled value went to the provider as one ``<rN>`` token.
+    labels = (
+        "Email",
+        "Phone",
+        "Thai ID",
+        "Credit Card",
+        "Password",
+        "API Key",
+        "Address",
+        "Medical",
+        "Salary",
+    )
+    for label in labels:
+        assert re.search(rf"^{label}: <r\d+>$", provider_input, re.M), label
 
     row = _request_log(resp.json()["id"])
-    # Stages 1-3 + findings JSON must not contain raw PII — those
-    # columns are written as either fixed placeholders or token-only
-    # masked text by construction.
+    # No stage and no findings JSON may contain raw PII — the columns
+    # are written as either fixed placeholders or token-only masked
+    # text by construction.
     pii_safe_columns = "\n".join(
         str(v or "")
         for v in (
             row.input_raw,
             row.input_masked,
             row.output_raw,
+            row.output_final,
             row.dlp_findings_json,
         )
     )
@@ -273,19 +304,16 @@ def test_outbound_restore_returns_all_original_token_values_without_persisting(
     assert row.input_raw == "[MASKED_BY_DLP]"
 
     # Stages 2 (Service → AI) and 3 (AI → Service) carry only mask
-    # tokens (e.g. [EMAIL_0], [THAI_ID_3]) by construction, so we
-    # persist the actual masked text to make the Safe Trace UI useful.
+    # tokens (``<rN>``) by construction, so we persist the actual
+    # masked text to make the Safe Trace UI useful.
     assert row.input_masked and row.input_masked != "[MASKED_BY_DLP]"
-    assert "[EMAIL_" in row.input_masked
-    assert "[PHONE_NUMBER_" in row.input_masked
-    assert "[THAI_ID_" in row.input_masked
-    assert row.output_raw and row.output_raw != "[MASKED_BY_DLP]"
+    for label in ("Email", "Phone", "Thai ID"):
+        assert re.search(rf"^{label}: <r\d+>$", row.input_masked, re.M), label
+    assert row.output_raw == captured["reply"]
 
-    # Stage 4 (Service → User) deliberately persists the post-restore
-    # plaintext the user received, gated behind Role.ADMIN at the API
-    # layer and NULLed by the retention job after the configured
-    # window. We only assert it is no longer the legacy placeholder.
-    assert row.output_final is not None
-    assert row.output_final != "[MASKED_BY_DLP]"
+    # Stage 4 (Service → User) persists the same provider-safe masked
+    # text as stage 3 — never the post-restore reply the user received
+    # (that was checked above, with the other columns).
+    assert row.output_final == captured["reply"]
 
     assert '"matched_text"' not in (row.dlp_findings_json or "")

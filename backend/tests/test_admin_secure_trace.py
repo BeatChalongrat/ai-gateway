@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from fastapi.testclient import TestClient
 
@@ -125,13 +126,15 @@ def test_admin_secure_trace_shows_raw_and_masked_stages():
     ai_to_service = stages["ai_to_service"]["content"]
     for value in _PROVIDER_MASKED_VALUES:
         assert value not in service_to_ai
-    assert "[EMAIL_" in service_to_ai
-    assert "[PASSWORD_" in service_to_ai
-    assert "[BEARER_TOKEN_" in service_to_ai
-    assert "[ADDRESS_" in service_to_ai
-    assert "[HEALTH_CONDITION_" in service_to_ai
-    assert "[INCOME_" in service_to_ai
-    assert "[EMAIL_" in ai_to_service
+    # Each of these labelled values went to the provider as one ``<rN>``
+    # token (the shape the suite pins — conftest
+    # ``_pseudonym_mode_off_by_default``).
+    for label in ("Email", "Password", "API Key", "Address", "Medical", "Salary"):
+        assert re.search(rf"^{label}: <r\d+>$", service_to_ai, re.M), label
+    # The stub provider echoes the start of what it was sent, so the
+    # email's token — not the email — is what came back.
+    assert re.search(r"^Email: <r\d+>$", ai_to_service, re.M)
+    assert "somchai.jaidee@example.com" not in ai_to_service
 
 
 def test_secure_trace_requires_admin_permission():

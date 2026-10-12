@@ -165,8 +165,9 @@ class TestNonStreamingDlpTrace:
     def test_non_stream_request_logs_dlp_trace(self):
         # Send PII through the gateway. The stub dispatcher echoes the
         # *masked* last message back as the response content, so the
-        # captured output_raw contains [EMAIL_n] and the post-restore
-        # output_final has the original email back.
+        # captured output_raw contains the ``<rN>`` token; restore puts
+        # the original email back in the reply the caller gets, and
+        # nothing persisted holds it.
         resp = client.post(
             "/v1/chat/completions",
             headers=_HEADERS,
@@ -180,28 +181,30 @@ class TestNonStreamingDlpTrace:
         )
         assert resp.status_code == 200, resp.text
         request_id = _request_id_from(resp.json())
+        # The caller gets their own email back (restore).
+        assert "alice@example.com" in resp.json()["choices"][0]["message"]["content"]
 
         detail = client.get(f"/admin/requests/{request_id}", headers=_HEADERS)
         assert detail.status_code == 200, detail.text
         body = detail.json()
 
-        # Snapshot 1: raw input still has the address.
-        assert body["input_raw"] is not None
-        assert "alice@example.com" in body["input_raw"]
+        # Snapshot 1: the raw input is not persisted in clear — a fixed
+        # placeholder (the verbatim lives in ``input_raw_encrypted``).
+        assert body["input_raw"] == "[MASKED_BY_DLP]"
 
         # Snapshot 2: masked input swaps the email for an indexed token.
         assert body["input_masked"] is not None
         assert "alice@example.com" not in body["input_masked"]
-        assert re.search(r"\[EMAIL_\d+\]", body["input_masked"])
+        assert re.search(r"Email me at <r\d+> please", body["input_masked"])
 
-        # Snapshot 3 & 4: output_raw was scanned/captured BEFORE restore,
-        # so the indexed token survives there. output_final is the
-        # post-restore body the user actually saw — restore swaps the
-        # token back so the original email reappears.
-        assert body["output_raw"] is not None
-        assert body["output_final"] is not None
-        assert body["output_raw"] != body["output_final"]
-        assert "alice@example.com" in body["output_final"]
+        # Snapshot 3 & 4: output_raw is captured BEFORE restore, so the
+        # indexed token survives there. output_final holds the same
+        # provider-safe (masked) text — never the restored reply the
+        # caller saw.
+        assert re.search(r"<r\d+>", body["output_raw"])
+        assert "alice@example.com" not in body["output_raw"]
+        assert re.search(r"<r\d+>", body["output_final"])
+        assert "alice@example.com" not in body["output_final"]
 
         # At least one email finding in the parsed JSON list.
         findings = body["dlp_findings"]
@@ -221,8 +224,8 @@ class TestStreamingDlpTrace:
         # never reaches output_raw and there's nothing for restore to
         # swap. Override OpenAIAdapter.stream_chat for this test to
         # echo the (already-masked) last user message — that way the
-        # restore step actually does work and ``output_final`` ends up
-        # with the original PII back.
+        # restore step actually does work and the streamed answer ends
+        # up with the original PII back.
         from app.domain.providers import ProviderStreamChunk
         from app.services.providers.openai_adapter import OpenAIAdapter
 
@@ -254,28 +257,38 @@ class TestStreamingDlpTrace:
         )
         assert resp.status_code == 200, resp.text
 
-        # Parse the SSE body — the first event carries the gateway
-        # request id. Reading resp.content also drains the generator,
-        # so the persist block at the end of event_generator runs.
+        # Parse the SSE body. Reading resp.content also drains the
+        # generator, so the persist block at the end of event_generator
+        # runs. Typed frames (``dlp_notice``, ``model_resolved``) come
+        # first and carry no id; the ``chat.completion.chunk`` frames
+        # carry the gateway request id.
         events = _parse_sse_events(resp.content)
         assert events, "no SSE events in stream response"
-        request_id = events[0]["id"]
+        chunks = [e for e in events if e.get("object") == "chat.completion.chunk"]
+        assert chunks, "no content chunk in stream response"
+        request_id = chunks[0]["id"]
+        # Stream restore must put the original email back into the answer
+        # the caller reads.
+        streamed = "".join(
+            c["choices"][0]["delta"].get("content") or "" for c in chunks if c.get("choices")
+        )
+        assert "bob@example.org" in streamed
 
         detail = client.get(f"/admin/requests/{request_id}", headers=_HEADERS)
         assert detail.status_code == 200, detail.text
         body = detail.json()
 
-        assert body["input_raw"] is not None
-        assert "bob@example.org" in body["input_raw"]
+        # Persisted: a placeholder for the raw input, token-only text for
+        # the other three stages — the email itself in none of them.
+        assert body["input_raw"] == "[MASKED_BY_DLP]"
         assert body["input_masked"] is not None
         assert "bob@example.org" not in body["input_masked"]
-        assert re.search(r"\[EMAIL_\d+\]", body["input_masked"])
+        assert re.search(r"ping <r\d+> for status", body["input_masked"])
 
-        assert body["output_raw"] is not None
-        assert body["output_final"] is not None
-        # Stream restore must put the original email back into output_final.
-        assert "bob@example.org" in body["output_final"]
-        assert body["output_raw"] != body["output_final"]
+        assert re.search(r"<r\d+>", body["output_raw"])
+        assert "bob@example.org" not in body["output_raw"]
+        assert re.search(r"<r\d+>", body["output_final"])
+        assert "bob@example.org" not in body["output_final"]
 
         findings = body["dlp_findings"]
         assert findings is not None
@@ -305,8 +318,11 @@ class TestCleanRequestTrace:
         assert detail.status_code == 200
         body = detail.json()
 
-        # Trace columns are present and equal — nothing was masked.
-        assert body["input_raw"] == body["input_masked"]
+        # Nothing was masked, so stage 2 (what the provider was sent) is
+        # the question as typed; stage 1 holds only the marker that points
+        # at the encrypted copy, never the text.
+        assert body["input_masked"] == "what is the capital of france?"
+        assert body["input_raw"] == "[NOT_PERSISTED_SEE_ENCRYPTED]"
         # No findings either way: parsed list is None when the JSON
         # blob was None on the row.
         assert body["dlp_findings"] in (None, [])

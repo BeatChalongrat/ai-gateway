@@ -227,9 +227,11 @@ class TestThaiTaxIdDetector:
 
     # --- Heavy-scenario regression coverage -------------------------------
     # Heavy multi-detector live test used "1234567890123" with
-    # "เลขผู้เสียภาษี" context. Regex matched, context fired, but the
-    # checksum correctly rejected (same invalid digit run as the
-    # thai_national_id case). Lock that contract.
+    # "เลขผู้เสียภาษี" context. Regex matched, context fired, and the
+    # checksum rejected it (same invalid digit run as the
+    # thai_national_id case) — until a strong tax-ID label directly
+    # before the number was made to relax the checksum (2069bd5c). The
+    # contract locked here is the one the detector has today.
 
     HEAVY_SCENARIO_VALID_TAX_ID = "5011000234569"  # checksum-validated
 
@@ -255,20 +257,28 @@ class TestThaiTaxIdDetector:
         matches = self.det.detect(text)
         assert len(matches) == 1
 
-    def test_heavy_scenario_invalid_checksum_rejected(self):
+    def test_heavy_scenario_invalid_checksum_detected_after_strong_label(self):
         # Exact heavy-scenario shape: short Thai keyword + 13-digit run
-        # with invalid checksum. Regex + context gate both fire; the
-        # checksum is the only thing keeping this out.
+        # with invalid checksum. "เลขผู้เสียภาษี" is a strong tax-ID label:
+        # directly before the number it relaxes the checksum gate, so a
+        # labelled fake / typo'd ID is still redacted (2069bd5c, E2E
+        # audit T16).
         text = "เลขผู้เสียภาษี 1234567890123"
         matches = self.det.detect(text)
-        assert matches == []
+        assert len(matches) == 1
+        assert matches[0].matched_text == "1234567890123"
+        # A keyword that is not a strong label ("เลขภาษี") does not relax
+        # it: there the checksum still keeps the same digits out.
+        assert self.det.detect("เลขภาษี 1234567890123") == []
 
-    def test_heavy_scenario_hyphenated_invalid_rejected(self):
-        # Same digits, hyphenated form. Same outcome — checksum
-        # operates on the stripped digits.
+    def test_heavy_scenario_hyphenated_invalid_detected_after_strong_label(self):
+        # Same digits, hyphenated form. Same outcome — the checksum and
+        # its strong-label relaxation operate on the stripped digits.
         text = "เลขผู้เสียภาษี 1-2345-67890-12-3"
         matches = self.det.detect(text)
-        assert matches == []
+        assert len(matches) == 1
+        assert matches[0].matched_text == "1-2345-67890-12-3"
+        assert self.det.detect("เลขภาษี 1-2345-67890-12-3") == []
 
     def test_no_match_when_only_nid_keyword_present(self):
         # If the surrounding context names the number as a national ID
@@ -574,13 +584,14 @@ class TestSyntheticProfileCoverage:
         assert "99/88 Sukhumvit Road" not in masked
         assert "diabetes and high blood pressure" not in masked
         assert "85,000 THB/month" not in masked
-        assert "[ADDRESS_" in masked
-        assert "[HEALTH_CONDITION_" in masked
-        assert "[INCOME_" in masked
-        assert set(span_map.values()) == {
-            "99/88 Sukhumvit Road, Bangkok 10110",
-            "diabetes and high blood pressure",
-            "Salary: 85,000 THB/month",
+        # Each value is replaced by one ``<rN>`` token (the shape the suite
+        # pins, conftest ``_pseudonym_mode_off_by_default``); the labels stay.
+        assert masked == "Address: <r0>\nMedical: <r1>\nSalary: <r2>\n"
+        # The income detector masks the value only — ``Salary:`` stays.
+        assert span_map == {
+            "<r0>": "99/88 Sukhumvit Road, Bangkok 10110",
+            "<r1>": "diabetes and high blood pressure",
+            "<r2>": "85,000 THB/month",
         }
 
     def test_rejects_too_short(self):

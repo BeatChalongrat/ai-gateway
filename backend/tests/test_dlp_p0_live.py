@@ -14,7 +14,7 @@ from app.main import app
 from app.services.dlp.classifier import SensitivityClassifier
 from app.services.dlp.detectors.registry import get_default_registry
 from app.services.policy.evaluator import PolicyEvaluator
-from app.services.policy.profiles import DEFAULT_PROFILE
+from app.services.policy.profiles import DEFAULT_PROFILE, STRICT_PROFILE
 
 client = TestClient(app, raise_server_exceptions=False)
 _HEADERS = {"Authorization": "Bearer demo-key"}
@@ -37,7 +37,7 @@ def _call_dlp_test(text: str) -> dict:
     return resp.json()
 
 
-def _full_pipeline(text: str) -> dict:
+def _full_pipeline(text: str, profile=DEFAULT_PROFILE) -> dict:
     """Run detector -> classifier -> evaluator locally for policy decisions."""
     registry = get_default_registry(disabled_detectors=[])
     matches = registry.scan_text(text)
@@ -45,7 +45,7 @@ def _full_pipeline(text: str) -> dict:
     classified = classifier.classify(matches)
     result = DetectionResult(matches=classified)
     evaluator = PolicyEvaluator()
-    decision = evaluator.evaluate(result, DEFAULT_PROFILE)
+    decision = evaluator.evaluate(result, profile)
     return {
         "overall_action": decision.overall_action.name.lower(),
         "is_blocked": decision.is_blocked,
@@ -257,10 +257,19 @@ class TestDlpP0LiveMsg2Encoding:
         assert "CRITICAL" in severities
 
     def test_msg2_blocked_by_policy(self):
-        """CRITICAL findings -> blocked by DEFAULT_PROFILE."""
+        """CRITICAL credential findings -> masked (request proceeds) by
+        DEFAULT_PROFILE, blocked by STRICT_PROFILE."""
         pipeline = _full_pipeline(MSG2_ENCODING)
-        assert pipeline["is_blocked"]
-        assert pipeline["overall_action"] == "block"
+        critical = [ma for ma in pipeline["match_actions"] if ma["severity"] == "CRITICAL"]
+        assert critical and all(ma["action"] == "mask" for ma in critical)
+        assert not pipeline["is_blocked"]
+        assert pipeline["overall_action"] == "mask"
+
+        strict = _full_pipeline(MSG2_ENCODING, STRICT_PROFILE)
+        critical = [ma for ma in strict["match_actions"] if ma["severity"] == "CRITICAL"]
+        assert critical and all(ma["action"] == "block" for ma in critical)
+        assert strict["is_blocked"]
+        assert strict["overall_action"] == "block"
 
 
 class TestDlpP0LiveMsg3English:
@@ -295,16 +304,30 @@ class TestDlpP0LiveMsg3English:
         assert "passport" in detectors
 
     def test_msg3_blocked_by_policy(self):
-        """Private key is CRITICAL -> blocked by DEFAULT_PROFILE."""
+        """Private key is CRITICAL -> the message is masked, not blocked, by
+        DEFAULT_PROFILE and blocked by STRICT_PROFILE."""
         pipeline = _full_pipeline(MSG3_ENGLISH)
-        assert pipeline["is_blocked"]
-        assert pipeline["overall_action"] == "block"
+        assert not pipeline["is_blocked"]
+        assert pipeline["overall_action"] == "mask"
+
+        strict = _full_pipeline(MSG3_ENGLISH, STRICT_PROFILE)
+        assert strict["is_blocked"]
+        assert strict["overall_action"] == "block"
 
     def test_msg3_private_key_action_is_block(self):
-        """The private_key match specifically should have action=block."""
+        """The private_key match specifically: action=mask under
+        DEFAULT_PROFILE, action=block under STRICT_PROFILE."""
         pipeline = _full_pipeline(MSG3_ENGLISH)
         pk_actions = [
             ma for ma in pipeline["match_actions"]
+            if ma["detector"] == "private_key"
+        ]
+        assert len(pk_actions) > 0
+        assert pk_actions[0]["action"] == "mask"
+
+        strict = _full_pipeline(MSG3_ENGLISH, STRICT_PROFILE)
+        pk_actions = [
+            ma for ma in strict["match_actions"]
             if ma["detector"] == "private_key"
         ]
         assert len(pk_actions) > 0
