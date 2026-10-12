@@ -147,7 +147,7 @@ case "$phase" in
     lane go_vet 600 bash -c 'cd services/chat-edge-api && go vet ./...'
     lane gofmt 120 bash -c 'cd services/chat-edge-api && test -z "$(gofmt -l internal/agentmarket cmd/agent-runner)"'
     # AM15: the suite, not a list of its files — and the tests marked integration, by name
-    lane backend_lane 1500 bash scripts/backend-test-lane.sh -q -p no:cacheprovider -m "not integration" -rf
+    lane backend_lane 1500 bash scripts/backend-test-lane.sh -q -p no:cacheprovider -m "not integration" -rfEsx
     want backend_lane && say "backend_lane: $(grep -a -E '^(=+ )?[0-9]+ (passed|failed)' "$RESULTS/backend_lane.txt" | tail -1 | tr -d '=' | cut -c1-120)"
     if want backend_marked; then ran+=(backend_marked); room; backend_marked || rc=1; else left+=(backend_marked); fi
     lane host_tests 600 python -m unittest discover -s scripts/tests -p 'test_*.py'
