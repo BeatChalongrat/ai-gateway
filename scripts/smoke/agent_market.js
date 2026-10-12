@@ -220,11 +220,27 @@ module.exports = async function agentMarket(R, session) {
     const t0 = Date.now();
     const words = `[SMOKE ${crypto.randomUUID().slice(0, 6)}] ${TURN_AGENT.ask}`;
     const sent = await am("POST", `/installs/${install}/messages`, { text: words });
-    if (!sent.json?.run_id) return { ok: false, detail: `the sentence was not taken: ${sent.status} ${sent.json?.error?.code || sent.text.slice(0, 120)}` };
-    const ended = await runEnds(sent.json.run_id, 180000);
+    let reply = sent.json?.run_id || null;
+    if (!reply && sent.json?.route === "intent") {
+      // A sentence typed after a finished run is never guessed at: the screen asks whether it is about
+      // that run or starts a new one. The person's second click — it is about the run that finished.
+      const item = sent.json.item?.id;
+      const chips = ((await am("GET", `/installs/${install}/thread`)).json?.items || []).filter((i) => i.kind === "intent" && i.payload?.item_id === item);
+      const chip = chips[chips.length - 1];
+      if (!chip) return { ok: false, detail: "the screen was to ask what the sentence is about, and the thread holds no such question" };
+      const chosen = await am("POST", `/intents/${chip.id}`, { choice: "about_last" });
+      reply = chosen.json?.run_id || null;
+      if (!reply) {
+        const typed = ((await am("GET", `/installs/${install}/thread`)).json?.items || []).find((i) => i.id === item);
+        reply = typed?.payload?.run_id || typed?.run_id || null;
+      }
+      if (!reply) return { ok: false, detail: `"about the run that finished" started no reply: ${chosen.status} ${chosen.json?.error?.code || chosen.text.slice(0, 120)}` };
+    }
+    if (!reply) return { ok: false, detail: `the sentence was not taken: ${sent.status} route=${sent.json?.route || "-"} ${sent.json?.error?.code || ""}` };
+    const ended = await runEnds(reply, 180000);
     const verdict = agentTurnVerdict(ended, Date.now() - t0);
     // a reply left waiting for a model that is away is cancelled: the suite leaves nothing waiting behind it
-    if (ended?.run?.status === "awaiting_input") await am("POST", `/runs/${sent.json.run_id}/cancel`).catch(() => null);
+    if (ended?.run?.status === "awaiting_input") await am("POST", `/runs/${reply}/cancel`).catch(() => null);
     return verdict;
   });
 };
