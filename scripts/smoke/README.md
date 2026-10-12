@@ -93,7 +93,7 @@ connection and never answers — the outage's own shape) and puts it back exactl
 | `api.idempotency` | the same request twice with one `Idempotency-Key` → `Idempotent-Replayed: true`, same id; the first call is a turn like any other | key |
 | `api.rate_limit_429` | chat-edge's send limit: empty bodies on a chat id that does not exist → 4xx until 429 `RATE_LIMIT_EXCEEDED` (nothing reaches a model; the smoke user is limited for up to a minute afterwards, so this runs last among the sends) | session |
 | `jobs.backup` | `/backups/last_success.json`: < 26 h, drill pass, off-site pass or not configured | backup container |
-| `jobs.retention` | chat-edge's `transcript retention: pass complete` in the last 26 h, errors 0 | — |
+| `jobs.retention` | chat-edge's newest `transcript retention: pass complete` is for the latest 00:00 UTC (its `due`), errors 0. A start runs the pass it finds owed, so there is always a line: no line, a line naming no hour, or a newest line for an earlier hour is a FAIL (five minutes' grace after the hour). It no longer skips for a chat-edge up less than 26 h | — |
 | `jobs.sweep` | chat-edge's `interrupted_turn_sweep` in the last 10 min | — |
 | `jobs.ops_watch` | ops-watch's tick in the last 2 min | live |
 | `jobs.maintenance` | no maintenance window left on (`python -m app.ops.maintenance status`) | — |

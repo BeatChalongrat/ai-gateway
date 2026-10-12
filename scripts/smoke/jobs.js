@@ -2,7 +2,7 @@
 //
 // backup       /backups/last_success.json in the backup container: newer than 26 h, drill pass,
 //              off-site copy pass (or not configured — the detail says which)
-// retention    chat-edge's "transcript retention: pass complete" in the last 26 h
+// retention    chat-edge's newest "transcript retention: pass complete" is for the latest 00:00 UTC, errors 0
 // sweep        chat-edge's interrupted_turn_sweep in the last 10 min
 // ops_watch    ops-watch's tick in the last 2 min (the watcher is alive)
 // maintenance  no maintenance window left on (python -m app.ops.maintenance status)
@@ -21,6 +21,38 @@ function timeOf(line) {
   return Number.isNaN(t) ? null : t;
 }
 const agoText = (ms) => (ms === null ? "time unknown" : `${L.ageText((Date.now() - ms) / 1000)} ago`);
+
+// The pass starts within a minute of its hour (or of a start, or of the machine waking); for this long
+// after 00:00 UTC the newest line may still be the one for the hour before.
+const PASS_GRACE_MS = 5 * 60 * 1000;
+const DAY_MS = 86_400_000;
+/**
+ * The retention job's last word, judged. chat-edge runs the pass it finds owed at every start and looks
+ * at the clock every minute, and each pass says which 00:00 UTC it was for (`due`) — so a running
+ * chat-edge always has a line, and its newest one is for the latest hour.
+ *
+ * Until 12 Oct 2026 this check passed on ANY line of the last 26 h and SKIPPED for a chat-edge up less
+ * than 26 h: one restarted every day was never checked at all, and a pass that stopped running went
+ * unseen for a day. Now: no line, a line that names no hour, or a newest line for an earlier hour is red.
+ */
+function retentionVerdict(line, nowMs = Date.now(), upText = "") {
+  if (!line) return { ok: false, detail: `no "transcript retention: pass complete" in the chat-edge log of the last ${MAX_BACKUP_AGE_H} h${upText} — a start runs the pass it finds owed, so a running chat-edge always has one` };
+  const due = Date.parse((/"due"\s*:\s*"([^"]+)"/.exec(line) || [])[1] || "");
+  if (Number.isNaN(due)) return { ok: false, detail: `the newest pass does not say which hour it was for (a chat-edge from before 12 Oct 2026?)${upText}` };
+  const d = new Date(nowMs);
+  const latest = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const owed = nowMs - latest < PASS_GRACE_MS ? latest - DAY_MS : latest;
+  const hour = (ms) => `${new Date(ms).toISOString().slice(0, 16)}Z`;
+  if (due < owed) return { ok: false, detail: `the newest pass was for ${hour(due)}; the one for ${hour(latest)} has not run, ${L.ageText((nowMs - latest) / 1000)} after its hour${upText}` };
+  const m = /"erased"\s*:\s*(\d+)/.exec(line);
+  const e = /"errors"\s*:\s*(\d+)/.exec(line);
+  const w = /"tenants_waiting"\s*:\s*(\d+)/.exec(line);
+  const ran = timeOf(line);
+  return {
+    ok: !e || e[1] === "0",
+    detail: `pass for ${hour(due)} ran ${ran === null ? "(time unknown)" : `${L.ageText((nowMs - ran) / 1000)} ago`}${m ? `, erased ${m[1]}` : ""}${e ? `, errors ${e[1]}` : ""}${w && w[1] !== "0" ? `, ${w[1]} tenant(s) waiting for the next pass` : ""}`,
+  };
+}
 
 module.exports = async function jobs(R) {
   const C = L.T.containers;
@@ -41,22 +73,12 @@ module.exports = async function jobs(R) {
 
   await R.run("jobs.retention", async () => {
     const line = lastLine(L.dockerLogs(C.chatEdge, `${MAX_BACKUP_AGE_H}h`), /transcript retention: pass complete/);
-    if (!line) {
-      // The pass runs once a day: a chat-edge that started less than the window ago
-      // (a fresh test stack, a deploy) has not had its first pass yet — that is not red.
-      let upH = null;
-      try {
-        const started = require("node:child_process").execFileSync("docker", ["inspect", C.chatEdge, "--format", "{{.State.StartedAt}}"], { encoding: "utf8" }).trim();
-        upH = (Date.now() - Date.parse(started)) / 3_600_000;
-      } catch { /* unknown uptime: treat as old enough */ }
-      if (upH !== null && upH < MAX_BACKUP_AGE_H) {
-        return { skip: true, detail: `${C.chatEdge} is up ${upH.toFixed(1)} h (< ${MAX_BACKUP_AGE_H} h); the daily pass has not been due yet` };
-      }
-      return { ok: false, detail: `no "transcript retention: pass complete" in ${C.chatEdge} logs of the last ${MAX_BACKUP_AGE_H} h (up ${upH === null ? "?" : upH.toFixed(1)} h)` };
-    }
-    const m = /"erased"\s*:\s*(\d+)/.exec(line);
-    const e = /"errors"\s*:\s*(\d+)/.exec(line);
-    return { ok: !e || e[1] === "0", detail: `last pass ${agoText(timeOf(line))}${m ? `, erased ${m[1]}` : ""}${e ? `, errors ${e[1]}` : ""}` };
+    let up = "";
+    try {
+      const started = require("node:child_process").execFileSync("docker", ["inspect", C.chatEdge, "--format", "{{.State.StartedAt}}"], { encoding: "utf8" }).trim();
+      up = ` (${C.chatEdge} up ${((Date.now() - Date.parse(started)) / 3_600_000).toFixed(1)} h)`;
+    } catch { /* uptime unknown: the verdict does not depend on it */ }
+    return retentionVerdict(line, Date.now(), up);
   });
 
   await R.run("jobs.sweep", async () => {
@@ -85,3 +107,4 @@ module.exports = async function jobs(R) {
     return { ok: false, detail: `maintenance window left on: ${m[1].slice(0, 140)}` };
   });
 };
+module.exports.retentionVerdict = retentionVerdict;
