@@ -21,8 +21,9 @@ if [ "${1:-all}" != "new" ]; then
   bash "$ROOT/scripts/probes/AM13/it_lane.sh" asked | sed 's/^lane_exit=/am13_lane_exit=/' | tee /dev/stderr | grep -q '^am13_lane_exit=0$' || rc=1
 fi
 CHUNKS=(
-  '^(TestARunWaitsForAModelThatCannotBeReachedAndGoesOnWhenItIsBack|TestARunThatWaitsForItsModelAndIsCancelledIsChargedNothing)$'
-  '^(TestARunThatFindsItsModelAwayEveryTimeItGoesOnEndsSayingSo|TestAScanWaitsForTheModelThatReadsIt|TestTheReportsCommentaryWaitsForAModelThatIsAwayAndIsNotWrittenByRules)$'
+  '^(TestARunWaitsForAModelThatCannotBeReachedAndGoesOnWhenItIsBack)$'
+  '^(TestARunThatWaitsForItsModelAndIsCancelledIsChargedNothing|TestARunThatFindsItsModelAwayEveryTimeItGoesOnEndsSayingSo)$'
+  '^(TestAScanWaitsForTheModelThatReadsIt|TestTheReportsCommentaryWaitsForAModelThatIsAwayAndIsNotWrittenByRules)$'
 )
 for c in "${CHUNKS[@]}"; do
   echo "== chunk $c"

@@ -66,6 +66,13 @@ func (e *itEnv) am15Waiting(t *testing.T, run am.Run, failedStep string) {
 	if run.DeliveredAt != nil || run.FinishedAt != nil {
 		t.Fatalf("the run has neither delivered nor ended: %+v %+v", run.DeliveredAt, run.FinishedAt)
 	}
+	// and it is charged nothing while it waits: what its finished steps cost is held, not charged
+	if c := e.charged(run.ID); c != 0 || run.CreditsSpent != 0 {
+		t.Fatalf("a run that waits for its model is charged nothing: ledger %v, the run's own row %v", c, run.CreditsSpent)
+	}
+	if held := e.count(`SELECT count(*) FROM agent_market.agent_budget_ledger WHERE run_id = $1 AND void_reason = 'waiting_model'`, run.ID); held == 0 && run.CreditsCost > 0 {
+		t.Fatalf("what its steps cost (%v) is held with the wait as the reason: %d rows", run.CreditsCost, held)
+	}
 }
 
 func TestARunWaitsForAModelThatCannotBeReachedAndGoesOnWhenItIsBack(t *testing.T) {
@@ -164,8 +171,12 @@ func TestARunWaitsForAModelThatCannotBeReachedAndGoesOnWhenItIsBack(t *testing.T
 		if lang == am.Thai && !has(e.threadOf(run.ID), am15Back) {
 			t.Fatalf("the thread says the run goes on:\n%s", strings.Join(e.threadOf(run.ID), "\n"))
 		}
-		if e.charged(run.ID) <= 0 {
-			t.Fatal("a run that delivered is charged like any other")
+		// charged like any run that delivers — for every step, the ones done before the wait too
+		if c := e.charged(run.ID); c <= 0 || c != got.CreditsSpent || got.CreditsSpent != got.CreditsCost {
+			t.Fatalf("a run that delivered is charged for all its steps: ledger %v, charged %v, cost %v", c, got.CreditsSpent, got.CreditsCost)
+		}
+		if held := e.count(`SELECT count(*) FROM agent_market.agent_budget_ledger WHERE run_id = $1 AND void_reason = 'waiting_model'`, run.ID); held != 0 {
+			t.Fatalf("nothing is still held once the run went on: %d rows", held)
 		}
 	}
 }

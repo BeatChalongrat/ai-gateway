@@ -588,6 +588,10 @@ func (s *Store) Resume(ctx context.Context, q Querier, run uuid.UUID) (bool, err
 				THEN (extract(epoch FROM now() - awaiting_since) * 1000)::bigint ELSE 0 END,
 			awaiting_since = NULL, updated_at = now()
 		WHERE id = $1 AND status IN ('awaiting_input', 'succeeded') AND NOT cancel_requested`, run)
+	if err == nil && tag.RowsAffected() > 0 {
+		// AM15: a run that waited for its model goes on with what its steps had been charged (modeldown.go)
+		_ = s.ChargeAgain(ctx, q, run)
+	}
 	return tag.RowsAffected() > 0, err
 }
 

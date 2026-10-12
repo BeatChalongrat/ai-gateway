@@ -10,8 +10,10 @@
 
 export const am15Th = {
   "progress.title.waiting_model": "รอโมเดล",
+  "progress.waitedModel": "รอโมเดลมาแล้ว {d}",
 } as const;
 
 export const am15En: Record<keyof typeof am15Th, string> = {
   "progress.title.waiting_model": "Waiting for the model",
+  "progress.waitedModel": "Waiting for the model for {d}",
 };

@@ -31,6 +31,10 @@ func (r *Runner) parkForModel(rc *runCtx) error {
 	if err := r.Store.Park(bg, rc.run.ID, r.ID, am.ReasonModelUnreachable); err != nil {
 		return err
 	}
+	// it has delivered nothing: what its finished steps were charged is held while it waits (am.Store.HoldCharges)
+	if err := r.Store.HoldCharges(bg, r.Store.Pool, rc.run.ID); err != nil {
+		rc.log.Warn("the charges of a run that waits for its model were not held", "err", err)
+	}
 	_ = r.Store.AddNotice(bg, r.Store.Pool, rc.run, am.Notice{Text: am.ModelAwayNotice(), Tone: "warning", Reason: am.ReasonModelUnreachable})
 	r.syncProgress(bg, rc.run.ID)
 	rc.log.Info("run waits for its model")

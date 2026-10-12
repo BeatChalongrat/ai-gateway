@@ -1,6 +1,10 @@
 package agentmarket
 
-import "context"
+import (
+	"context"
+
+	"github.com/google/uuid"
+)
 
 // AM15 — a run that cannot reach a model it is allowed to use stops and waits.
 //
@@ -91,4 +95,37 @@ func (s *Store) ResumeModelParked(ctx context.Context) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+// heldForModel is the void reason of what a run's finished steps had been charged, while it waits for
+// its model.
+const heldForModel = "waiting_model"
+
+// HoldCharges: a run that waits for its model has delivered nothing, so what its finished steps were
+// charged is not charged while it waits — the rows are voided with the wait as their reason (a voided
+// row is the platform's cost, not a person's charge, and does not count against anybody's month).
+// Until this, a waiting run held its steps' charge for as long as it waited.
+func (s *Store) HoldCharges(ctx context.Context, q Querier, run uuid.UUID) error {
+	_, err := q.Exec(ctx, `
+		WITH held AS (
+			UPDATE agent_market.agent_budget_ledger SET voided_at = now(), void_reason = $2
+			WHERE run_id = $1 AND voided_at IS NULL RETURNING credits
+		)
+		UPDATE agent_market.agent_runs SET credits_spent = GREATEST(credits_spent - COALESCE((SELECT sum(credits) FROM held), 0), 0)
+		WHERE id = $1`, run, heldForModel)
+	return err
+}
+
+// ChargeAgain puts back what HoldCharges held, when the run goes on (Store.Resume calls it, whichever
+// way the run was resumed): a run that then delivers is charged for all its steps, and one that ends
+// without delivering has them voided like any other (Settle).
+func (s *Store) ChargeAgain(ctx context.Context, q Querier, run uuid.UUID) error {
+	_, err := q.Exec(ctx, `
+		WITH back AS (
+			UPDATE agent_market.agent_budget_ledger SET voided_at = NULL, void_reason = ''
+			WHERE run_id = $1 AND void_reason = $2 RETURNING credits
+		)
+		UPDATE agent_market.agent_runs SET credits_spent = credits_spent + COALESCE((SELECT sum(credits) FROM back), 0)
+		WHERE id = $1`, run, heldForModel)
+	return err
 }

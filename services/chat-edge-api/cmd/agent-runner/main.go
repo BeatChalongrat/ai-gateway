@@ -249,13 +249,13 @@ func run(log *slog.Logger) error {
 	})
 	// AM15: who answers the runner's model calls. /healthz says a model is configured, and said so
 	// through the hours the in-house model answered nobody; this asks it one word, through the client,
-	// key and gateway every step uses, and says who answered (the word of the last half minute is given
+	// key and gateway every step uses, and says who answered (the word of the last ten seconds is given
 	// again, so a caller that loops asks the model nothing more).
 	mux.HandleFunc("/model", func(w http.ResponseWriter, req *http.Request) {
 		cctx, cancel := context.WithTimeout(req.Context(), 90*time.Second)
 		defer cancel()
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(model.WordWithin(cctx, 30*time.Second))
+		_ = json.NewEncoder(w).Encode(model.WordWithin(cctx, 10*time.Second))
 	})
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")

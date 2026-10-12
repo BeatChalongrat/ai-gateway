@@ -1060,9 +1060,14 @@ itself when the model is back.**
   again each time is asking something the model does not answer in time. After three waits
   (`MaxModelWaits`) it ends failed with reason `model_unreachable`, said in words, and can be tried
   again with its files.
-- **What it costs a person**: a run that waits has delivered nothing. Cancelled, or ended after its
-  three waits, it is charged nothing (what its finished steps had been charged is voided, like any
-  run that ends without delivering). If it goes on and delivers, it is charged like any run.
+- **What it costs a person**: nothing while it waits. A run that waits has delivered nothing, so
+  what its finished steps had been charged is held — voided with the wait as its reason
+  (`Store.HoldCharges`), which is the platform's cost and counts against nobody's month. When the run
+  goes on the rows are put back (`Store.Resume` → `ChargeAgain`, whichever way it was resumed): one
+  that delivers is charged for every step, the ones before the wait too; one that is cancelled, or
+  ends after its three waits, is charged nothing.
+- **In the sidebar**: the count beside an agent ("รอคำตอบของคุณ") and a chat's "รอคำตอบ" are of
+  runs that wait for the person; a run that waits for its model is in neither.
 - **A message typed after a run**: words that are not a question wait for the model like a step; a
   question is answered from the run's own record where the record can, and where only a model could
   the answer says the model cannot be reached — it used to read "I cannot answer this with

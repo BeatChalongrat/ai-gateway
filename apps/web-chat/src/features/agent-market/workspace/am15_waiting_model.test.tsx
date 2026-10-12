@@ -69,4 +69,14 @@ describe("a run that waits for its model", () => {
     render(<ProgressCard progress={waiting("waiting_preflight")} />);
     expect(title()).toBe("รอคำตอบของคุณ");
   });
+
+  it("says how long it has waited for the model — not for an answer", () => {
+    render(<ProgressCard progress={{ ...waiting("model_unreachable"), awaiting_ms: 125_000 }} />);
+    const card = screen.getByTestId("am-progress");
+    expect(card.textContent).toContain("รอโมเดลมาแล้ว");
+    expect(card.textContent).not.toContain("รอคำตอบ");
+    cleanup();
+    render(<ProgressCard progress={{ ...waiting("waiting_preflight"), awaiting_ms: 125_000 }} />);
+    expect(screen.getByTestId("am-progress").textContent).toContain("รอคำตอบมาแล้ว");
+  });
 });

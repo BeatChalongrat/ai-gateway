@@ -39,7 +39,8 @@ func (a *API) rail(w http.ResponseWriter, r *http.Request) {
 			GREATEST(i.last_opened_at, (SELECT max(r.created_at) FROM agent_market.agent_runs r
 				WHERE r.install_id = i.id AND r.kind IN ('run', 'self_test'))),
 			(SELECT count(*) FROM agent_market.agent_runs r
-				WHERE r.install_id = i.id AND r.kind IN ('run', 'self_test') AND r.status = 'awaiting_input')::int,
+				WHERE r.install_id = i.id AND r.kind IN ('run', 'self_test') AND r.status = 'awaiting_input'
+				  AND r.status_reason <> 'model_unreachable')::int, -- AM15: not a run that waits for its model
 			COALESCE(cs.status, '') = 'disabled', `+lookSQL+`
 		FROM agent_market.agent_installs i
 		JOIN agent_market.agent_definitions d ON d.id = i.definition_id

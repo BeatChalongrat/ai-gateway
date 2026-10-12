@@ -174,7 +174,8 @@ func (s *Store) ListThreads(ctx context.Context, in Install) ([]Thread, error) {
 					WHERE r.install_id = $1 AND r.kind = 'run' AND r.thread_id IS NOT DISTINCT FROM t.id AND r.period IS NOT NULL
 					ORDER BY r.created_at DESC LIMIT 1),
 				EXISTS (SELECT 1 FROM agent_market.agent_runs r
-					WHERE r.install_id = $1 AND r.thread_id IS NOT DISTINCT FROM t.id AND r.status = 'awaiting_input'),
+					WHERE r.install_id = $1 AND r.thread_id IS NOT DISTINCT FROM t.id AND r.status = 'awaiting_input'
+					  AND r.status_reason <> 'model_unreachable'), -- AM15: a run that waits for its model asks nothing of the person
 				(SELECT i.payload->>'text' FROM agent_market.agent_thread_items i
 					WHERE i.install_id = $1 AND i.thread_id IS NOT DISTINCT FROM t.id AND i.kind = 'user_text'
 					  AND i.payload->>'handled_as' IN ('new_run', 'web_closed') ORDER BY i.created_at LIMIT 1),

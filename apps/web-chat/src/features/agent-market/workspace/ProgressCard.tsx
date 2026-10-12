@@ -19,7 +19,7 @@ import { Button, ButtonLink } from "@/components/ui/Button";
 import { amApi, errorMessage } from "../api";
 import { useAmT, type AmKey } from "../i18n";
 import { elapsedBetween, formatDuration } from "../format";
-import { outcomeKey, outcomeOf } from "../outcome";
+import { MODEL_UNREACHABLE, outcomeKey, outcomeOf } from "../outcome";
 import type { ProgressPayload, ProgressStepStatus } from "../types";
 import { cls } from "../ui";
 import { runHref } from "./context";
@@ -195,7 +195,10 @@ export function ProgressCard({
 
       {reason ? <p className="mt-2 text-xs text-text-secondary">{t(reason)}</p> : null}
       {status === "awaiting_input" && progress.awaiting_ms ? (
-        <p className="mt-2 text-xs text-text-muted">{t("progress.waited", { d: formatDuration(progress.awaiting_ms, t) })}</p>
+        <p className="mt-2 text-xs text-text-muted">
+          {/* AM15: a run that waits for its model has waited for the model, not for an answer of the person's */}
+          {t(progress.reason === MODEL_UNREACHABLE ? "progress.waitedModel" : "progress.waited", { d: formatDuration(progress.awaiting_ms, t) })}
+        </p>
       ) : null}
       {error ? (
         <p role="alert" className="mt-2 text-xs text-status-danger">
