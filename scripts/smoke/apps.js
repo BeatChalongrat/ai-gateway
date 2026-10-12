@@ -85,13 +85,17 @@ module.exports = async function apps(R) {
   const base = L.API_BASE;
   const { session } = await signIn(R);
   const noSession = { skip: true, detail: "no session (sign-in did not produce one)" };
+  // The account the suite signed in as. A check that asks "who am I" is held to this name: a 200 that
+  // names nobody, or somebody else, is not the right answer.
+  const account = String(L.TARGET === "test" ? L.TS_USER.email : L.env("SMOKE_EMAIL")).toLowerCase();
+  const isAccount = (who) => !!account && String(who || "").toLowerCase() === account;
 
   // ── Portal ──────────────────────────────────────────────────────────────────
   await R.run("portal.me", async () => {
     if (!session) return noSession;
     const r = await L.tryHttp(`${base.gw}/portal/me`, { headers: session.headers });
     const who = r.json?.email || r.json?.user?.email || "";
-    return { ok: r.status === 200, detail: `${base.gw}/portal/me → ${r.status || r.error} ${who}` };
+    return { ok: r.status === 200 && isAccount(who), detail: `${base.gw}/portal/me → ${r.status || r.error} ${who || "(names nobody)"}${r.status === 200 && !isAccount(who) ? ` — not the account that signed in (${account})` : ""}` };
   });
   await R.run("portal.billing_api", async () => {
     if (!session) return noSession;
@@ -115,7 +119,8 @@ module.exports = async function apps(R) {
     await R.run("portal.proxy_me_auth", async () => {
       if (!session) return noSession;
       const r = await L.tryHttp(`${P}/api/portal/me`, { headers: session.cookieHeaders });
-      return { ok: r.status === 200, detail: `${P}/api/portal/me (session cookie) → ${r.status || r.error} ${r.json?.email || ""}` };
+      const who = r.json?.email || r.json?.user?.email || "";
+      return { ok: r.status === 200 && isAccount(who), detail: `${P}/api/portal/me (session cookie) → ${r.status || r.error} ${who || "(names nobody)"}${r.status === 200 && !isAccount(who) ? ` — not the account that signed in (${account})` : ""}` };
     });
     await R.run("portal.proxy_static", async () => {
       const r = await L.tryHttp(`${P}/static/smoke-does-not-exist.txt`);
@@ -208,7 +213,8 @@ module.exports = async function apps(R) {
     if (good.status === 502) { await L.wait(3000); good = await L.tryHttp(url, { method: "POST", headers: { ...hdr, Authorization: `Bearer ${session.accessToken}` }, body, timeoutMs: 15000 }); } // the child server needs a few seconds after the gateway starts
     const bogus = await L.tryHttp(url, { method: "POST", headers: { ...hdr, Authorization: `Bearer ${crypto.randomBytes(24).toString("base64url")}` }, body, timeoutMs: 15000 });
     const tools = Array.isArray(good.json?.result?.tools) ? good.json.result.tools.length : null;
-    return { ok: good.status !== 401 && good.status !== 0 && bogus.status === 401, detail: `${url.replace("http://127.0.0.1:3200", "")}: smoke token → ${good.status || good.error}${tools !== null ? ` (${tools} tools)` : ""}; bogus token → ${bogus.status || bogus.error} (want 401)` };
+    // (the smoke's token must be ACCEPTED — 200 — not merely "not refused": a gateway answering 500 to everyone passed)
+    return { ok: good.status === 200 && bogus.status === 401, detail: `${url.replace("http://127.0.0.1:3200", "")}: smoke token → ${good.status || good.error}${tools !== null ? ` (${tools} tools)` : ""}; bogus token → ${bogus.status || bogus.error} (want 401)` };
   });
 
   return session;

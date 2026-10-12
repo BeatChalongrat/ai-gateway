@@ -82,13 +82,13 @@ connection and never answers — the outage's own shape) and puts it back exactl
 | `tls.debug_doors` | the loopback doors 23000/23001/23002/24000/28080 answer | front door |
 | `tls.docs_off` | `/docs` and `/openapi.json` are 404 on the gateway | — |
 | `portal.login` | `POST /portal/auth/login` with the smoke account → 200 + session cookies (403 `password_login_disabled` until the FIX134 allowlist is deployed) | SMOKE_EMAIL/PASSWORD |
-| `portal.me`, `portal.billing_api` | `/portal/me`, `/portal/billing/packs` with the session | session |
+| `portal.me`, `portal.billing_api` | `/portal/me` with the session — answering 200 and naming the account that signed in; `/portal/billing/packs` → 200 | session |
 | `portal.proxy_health`, `portal.proxy_me_unauth`, `portal.proxy_me_auth`, `portal.proxy_static`, `portal.proxy_billing`, `portal.billing_page` | the portal's proxied paths through https://localhost:3001 (`/api/*` → backend, `/static/*`) and the billing page — the rows the audit found broken (500/503 until FIX134 A2) | front door, session |
 | `webchat.session` | chat-edge's session heartbeat: 204 with the portal token, 401 without | session |
 | `webchat.turn` | a `[SMOKE]` chat, memory off, one turn on the free model → `message_complete` with content, **answered by that model**, deleted by id (one retry on the same model) | session |
 | `admin.login` | admin sign-in + `/admin/requests?limit=1` with the admin session | SMOKE_ADMIN_* |
 | `admin.requests_unauth` | `/admin/requests` is 401 without a session | — |
-| `mcp.token` | `POST :3200/mcp/servers/filesystem/mcp` accepts the smoke token (not 401; one retry on 502 while the child starts) and refuses a bogus one | mcp-gateway (profile desktop), session |
+| `mcp.token` | `POST :3200/mcp/servers/filesystem/mcp` accepts the smoke token (200; one retry on 502 while the child starts) and refuses a bogus one (401) | mcp-gateway (profile desktop), session |
 | `api.completion` | one non-stream `/v1/chat/completions` on the free model with the API key → 200 with an id and content, **answered now by that model** (not another one, not the cache); a call that ran out of its output budget is asked once more of the same model | key (the test stack: one made for the run and revoked) |
 | `api.idempotency` | the same request twice with one `Idempotency-Key` → `Idempotent-Replayed: true`, same id; the first call is a turn like any other | key |
 | `api.rate_limit_429` | chat-edge's send limit: empty bodies on a chat id that does not exist → 4xx until 429 `RATE_LIMIT_EXCEEDED` (nothing reaches a model; the smoke user is limited for up to a minute afterwards, so this runs last among the sends) | session |
