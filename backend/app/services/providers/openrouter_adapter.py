@@ -128,6 +128,16 @@ class OpenRouterAdapter(BaseProviderAdapter):
                 )
                 body["reasoning"] = {"effort": effort}
 
+        # A caller that named its recipients: OpenRouter is told to use the
+        # company's own endpoints only, not to fall back to another host,
+        # and to skip endpoints that keep what they are sent
+        # (services/providers/recipients.py). Absent, the body is unchanged.
+        from app.services.providers.recipients import router_pin
+
+        pin = router_pin("openrouter", model, getattr(payload, "metadata", None))
+        if pin is not None:
+            body["provider"] = pin
+
         return body
 
     def _request_headers(self, api_key: str | None) -> dict[str, str]:

@@ -543,6 +543,17 @@ async def enforce_provider_boundary(route: RouteDecision, payload, tenant_id: st
     the primary route. Raises :class:`NoAllowedProviderError`; nothing is
     dispatched.
     """
+    # A caller that named its recipients (metadata.allowed_recipients): the
+    # primary is refused here, before a stream begins, and a second route it
+    # may not reach is dropped (services/providers/recipients.py — the same
+    # check is made again where the adapter is called).
+    from app.services.providers import recipients as _recipients
+
+    _meta = getattr(payload, "metadata", None)
+    _recipients.require(route.provider_name, route.model_name, _meta)
+    if route.fallbacks:
+        route.fallbacks = [(p, m) for (p, m) in route.fallbacks if _recipients.allowed(p, m, _meta)]
+
     allowed = await effective_provider_boundary(payload, tenant_id)
     if allowed is None:
         return

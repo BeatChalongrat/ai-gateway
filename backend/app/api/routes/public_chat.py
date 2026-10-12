@@ -2825,6 +2825,12 @@ async def _chat_completions_impl(
                     _attempt_messages = inject_model_identity(
                         messages_to_send, route.model_name, route.provider_name
                     )
+                    # A caller that named its recipients is held to them on
+                    # the streaming path too — this attempt and any swap
+                    # after it (services/providers/recipients.py).
+                    from app.services.providers import recipients as _recipients
+
+                    _recipients.require(route.provider_name, route.model_name, payload.metadata)
                     async for chunk in _guarded_stream(
                         route.provider_name,
                         lambda: stream_adapter.stream_chat(

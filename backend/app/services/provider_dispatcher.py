@@ -101,6 +101,14 @@ class ProviderDispatcher:
         # can't be acquired in time.
         from app.services.providers.concurrency import provider_slot
 
+        # A caller that named its recipients (metadata.allowed_recipients) is
+        # held to them here — the one place a non-stream call leaves from, so
+        # the first attempt, a second route and a rescue are all refused by
+        # this line before a byte is sent (services/providers/recipients.py).
+        from app.services.providers import recipients as _recipients
+
+        _recipients.require(route.provider_name, route.model_name, getattr(payload, "metadata", None))
+
         # FIX27 Part 2: the gateway states the model's identity on the prompt
         # for THIS attempt (fallback hops re-enter here with their own route).
         from app.services.model_identity import inject_model_identity

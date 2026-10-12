@@ -64,6 +64,45 @@ Pass constraints via `metadata`:
 }
 ```
 
+### Naming the recipients (`metadata.allowed_recipients`)
+
+`allowed_providers` names routes. A route is not always the company that reads
+the request: behind a router (OpenRouter) a model is run by its maker or by a
+hosting company, and unless told otherwise the router picks one per request.
+A caller that must reach named recipients only sends a list of recipient keys
+— `<route>` for a direct provider, `<route>:<company>` behind a router:
+
+```json
+{
+  "model": "google/gemini-2.5-flash",
+  "metadata": { "allowed_recipients": ["openrouter:google", "deepseek"] }
+}
+```
+
+With the key present (`app/services/providers/recipients.py`):
+
+- an in-house provider is not a recipient and is always reached;
+- any other call whose recipient is not on the list is refused before anything
+  is sent — `400 no_allowed_provider`, `details.reason` =
+  `recipient_not_allowed`. The check is made at the boundary (before a stream
+  begins) and again where the provider's adapter is called, so a second route
+  and a rescue by another model are held by the same line;
+- `openrouter:google` is not `google`: the company reached directly and the
+  company reached through the router are two recipients;
+- a model whose company cannot be named — the router's own `auto`, a maker
+  that is not in the table — has no key, so it can be on no list
+  (`recipient_cannot_be_named`);
+- an empty list, `null`, or a value that is not a list means **nobody
+  outside**. Only the key being absent means the caller did not ask;
+- the request to OpenRouter is pinned: `provider: {only: [the company's own
+  endpoints], allow_fallbacks: false, data_collection: "deny"}`. With none of
+  them up the request fails there; it is not re-routed to another host.
+
+`GET /v1/models` says each model's `recipient` and `recipient_company`, so a
+caller builds its list from the catalogue and types no names. Both are absent
+for an in-house model, and `recipient` is absent where the company cannot be
+named. `backend/tests/test_recipients.py` holds the refusals.
+
 ## Cost/Latency Scoring
 
 Each model has `cost_tier` and `latency_tier` metadata:
