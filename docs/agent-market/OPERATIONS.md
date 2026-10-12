@@ -400,9 +400,30 @@ Every phase:
   restarted since (`scripts/ops/live_memory.py`);
 - writes one file under `GATE_RESULTS` and prints one verdict line.
 
-A card sets `GATE_RESULTS`, `GATE_BACKEND_TESTS` (the backend lane's files) and `GATE_IT` (its own
-integration lane, run after the two standing chunks). `scripts/tests/test_am11b_gate.py` holds the
-lock and the stop, without Docker.
+A card sets `GATE_RESULTS` and `GATE_IT` (its own integration lane, run after the two standing
+chunks; the default is the newest card's, `scripts/probes/AM15/it_lane.sh`).
+`scripts/tests/test_am11b_gate.py` holds the lock and the stop, without Docker.
+
+**The backend lane is the suite, not a list (AM15).** A card used to name the backend files its lane
+ran (`GATE_BACKEND_TESTS`); a test in any other file could fail for months with no lane to say so.
+That setting is gone. `lanes` runs every backend test not marked `integration` (`backend_lane`), then
+every one that is (`backend_marked`) — 661 tests no lane had run, 91 of them failing on 12 Oct 2026.
+The ones that still fail are not hidden and not green: they are on a list by name with why
+(`scripts/gate/backend_marked_failing.txt`), and `scripts/gate/marked.py` holds each run to it — a
+failure not on the list is red, a name on the list that no longer fails is red (the list only gets
+shorter; `--write` takes names off and refuses to add one), an unfinished run is red, and what
+stands on the list and what the lane skipped is printed in the gate's own output on every run. The
+lanes' last line does not say "ALL GREEN" while a name is on it. `lanes` also runs what only its
+author ran before: `scripts/tests/test_*.py` (`host_tests`), `scripts/smoke/*.test.js`
+(`smoke_units`) and the alert rules' own tests (`alert_rules`).
+
+**The integration lane is a list of names too** (`scripts/probes/*/it_lane.sh`, in chunks): a
+sandbox test that no chunk names runs nowhere, and a renamed one leaves a chunk that matches nothing
+and passes. `runner/am15_lane_test.go`, in the unit lane, fails for either.
+
+**The smoke can fail, and the gate proves it each time**: `gate.sh smoke` takes the model away on
+the test stack (`scripts/smoke/dead_primary.js red`) and demands a RED suite in which every turn
+names the model it asked, then puts it back and demands GREEN (`green`).
 
 What the gate starts gives way to live: the test stack's services have no floor and turn 500 (the
 generator), the test project's runner, converter and fetcher are put at 500 by

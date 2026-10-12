@@ -1,0 +1,96 @@
+# Backend tests marked `integration` that still fail — by name. NOT green, and in no other lane.
+#
+# The gate runs every backend test marked `integration` (scripts/gate.sh lanes → backend_marked) and
+# holds the result to this list (scripts/gate/marked.py): a failing test that is not here is red, and so
+# is a name here that no longer fails. So this list only gets shorter: fix a test or delete it, then
+#   python scripts/gate/marked.py <the lane's output> --write
+# takes its name off. A name is never added to turn the gate green.
+#
+# Written on 12 Oct 2026 (AM15), when these tests were run for the first time in months: 661 marked,
+# 91 failing. AM15 fixed or deleted the 26 its card named; what is below is the rest, under why each
+# fails (read from its first assertion — a starting point for whoever takes one, not a verdict).
+
+## expects a credential to be BLOCKED under the default profile; it is masked since 10 Jun 2026 (the owner's decision — test_dlp_p0_fixes.py::TestDefaultPolicyCriticalCredentials holds today's rule)
+tests/integration/test_dlp_roundtrip_live.py::test_RT_03_credential_blocks_request
+tests/test_dlp_integration.py::TestEveryDetectorE2E::test_aws_key_blocked
+tests/test_dlp_integration.py::TestEveryDetectorE2E::test_bearer_token_blocked
+tests/test_dlp_integration.py::TestEveryDetectorE2E::test_github_token_blocked
+tests/test_dlp_integration.py::TestEveryDetectorE2E::test_openai_key_blocked
+tests/test_dlp_integration.py::TestEveryDetectorE2E::test_private_key_blocked
+tests/test_dlp_integration.py::TestPipelineEdgeCases::test_blocked_response_shape
+tests/test_dlp_integration.py::TestPipelineEdgeCases::test_pii_and_secret_in_same_message_blocked
+tests/test_dlp_integration.py::TestStrictProfileIntegration::test_strict_blocks_on_critical_severity
+tests/test_dlp_pipeline.py::TestSecretInMessageBlocked::test_aws_key_returns_403_blocked
+tests/test_dlp_pipeline.py::TestSecretInMessageBlocked::test_block_has_details
+tests/test_dlp_pipeline.py::TestSecretInMessageBlocked::test_private_key_returns_403_blocked
+tests/test_e2e_gateway_dlp.py::TestE2EGatewayDevSecretsBlock::test_error_code_dlp_violation
+tests/test_e2e_gateway_dlp.py::TestE2EGatewayDevSecretsBlock::test_provider_not_called
+tests/test_e2e_gateway_dlp.py::TestE2EGatewayDevSecretsBlock::test_returns_403
+tests/test_e2e_gateway_dlp.py::TestE2EGatewayEncodingBypassBlock::test_error_code_dlp_violation
+tests/test_e2e_gateway_dlp.py::TestE2EGatewayEncodingBypassBlock::test_returns_403
+tests/test_error_contracts.py::TestDLPBlockErrorContract::test_dlp_block_403
+
+## not looked at yet (its first assertion is beside each name)
+tests/integration/test_mock_video_e2e.py::test_unknown_provider_marks_no_adapter  # AssertionError: assert 'processing_error' == 'no_adapter'
+tests/test_dlp_domain.py::TestEnforcementAction::test_all_members_present  # AssertionError: assert {'ALLOW', 'BL...T', 'RESTORE'} == {'ALLOW', 'BL...SK', 'REDACT'}
+tests/test_e2e_dlp_flow.py::TestCredentialBlockedBeforeProvider::test_credential_blocked_before_provider
+tests/test_e2e_dlp_flow.py::TestProviderIntroducedPiiMaskedUnderDefault::test_provider_introduced_pii_is_masked_by_default
+tests/test_migrations.py::TestSchemaFromORM::test_request_logs_columns  # AssertionError: assert {'completion_...indings', ...} == {'completion_...indings', ...}
+tests/test_ner_detector.py::TestNerDisabledForTenantSkipsPresidio::test_ner_disabled_for_tenant_skips_presidio
+tests/test_ner_detector.py::TestNerEnabledForTenantRunsPresidio::test_ner_enabled_for_tenant_runs_presidio
+tests/test_ner_detector.py::TestNerEnabledViaOrgGlobal::test_ner_enabled_via_org_global  # assert 500 == 200
+tests/test_ner_detector.py::TestThaiTextUsesThLanguage::test_thai_text_uses_th_language  # assert None is not None
+tests/test_streaming_moderation.py::TestStreamingModerationBlocksFlaggedContent::test_streaming_moderation_blocks_flagged_content
+tests/test_streaming_moderation.py::TestStreamingModerationFailOpenOnError::test_streaming_moderation_fail_open_on_error
+tests/test_streaming_moderation.py::TestStreamingModerationPassesCleanContent::test_streaming_moderation_passes_clean_content
+tests/test_streaming_moderation.py::TestStreamingModerationSkippedWhenDisabled::test_streaming_moderation_skipped_when_disabled
+tests/test_streaming_routing.py::TestStreamingKeywordRuleApplied::test_streaming_keyword_rule_applied  # AssertionError: assert 'gpt-4o-mini' == 'gpt-4o'
+tests/test_streaming_routing.py::TestStreamingRouterChainRunsOnMaskedText::test_streaming_router_chain_runs_on_masked_text
+tests/test_streaming_routing.py::TestStreamingRoutingStatsUpdated::test_streaming_routing_stats_updated
+tests/test_streaming_routing.py::TestStreamingSemanticRouterApplied::test_streaming_semantic_router_applied
+tests/test_streaming_routing.py::TestStreamingServiceFallback::test_streaming_service_fallback  # AssertionError: assert 'explicit' == 'service'
+
+## needs a real Redis: the lane's stand-in has no EVAL and keeps a float where Redis keeps the decimal (the spend guard's script and its counters)
+tests/integration/test_daily_spend_cap.py::test_commit_increments_counter
+tests/integration/test_replicate_webhook.py::test_failed_refunds_session_budget
+tests/integration/test_replicate_webhook.py::test_idempotent_second_webhook_no_double_commit
+tests/integration/test_replicate_webhook.py::test_succeeded_finalizes_and_commits
+tests/integration/test_spend_guard.py::test_concurrent_reserve_is_atomic
+tests/integration/test_spend_guard.py::test_counter_has_ttl
+tests/integration/test_spend_guard.py::test_release_refunds_and_clamps
+tests/integration/test_spend_guard.py::test_reserve_over_budget_rejected_no_mutation
+tests/integration/test_spend_guard.py::test_reserve_within_budget
+
+## expects a seeded model catalogue / provider names of an older catalogue; the lane's registry holds `auto` only
+tests/test_dlp_pipeline.py::TestRegressionBasicChat::test_valid_response_shape
+tests/test_models_endpoint.py::TestModelsEndpoint::test_includes_anthropic_models
+tests/test_models_endpoint.py::TestModelsEndpoint::test_includes_openai_models
+tests/test_models_endpoint.py::TestModelsEndpoint::test_more_than_three_models
+tests/test_models_endpoint.py::TestModelsEndpoint::test_registry_models_included
+
+## opens a real Postgres connection, which the lane refuses — needs a lane with a throwaway database, or a rewrite onto the sqlite fixtures
+tests/test_auth_dependency.py::TestAuthDependency::test_expired_key_returns_401
+tests/test_auth_dependency.py::TestAuthDependency::test_revoked_key_returns_401
+tests/test_auth_dependency.py::TestAuthDependency::test_unknown_key_returns_401
+tests/test_auth_dependency.py::TestAuthDependency::test_valid_key_returns_resolved
+
+## asserts the health of a live stack (200 / ok, or its old shape); in the lane nothing is behind /health — test_health.py holds the aggregation with stubbed probes
+tests/test_health.py::test_health_is_ok_on_the_live_stack
+tests/test_response_contracts.py::TestHealthContract::test_returns_200
+tests/test_response_contracts.py::TestHealthContract::test_shape
+tests/test_response_contracts.py::TestHealthContract::test_values
+
+## expects the old mask-token shape ([EMAIL_1]) or raw text in the request log; tokens are <rN> / <<EMAIL_1>> and raw input is no longer kept in clear
+tests/integration/test_dlp_roundtrip_live.py::test_RT_06_multiturn_vault_resolves_orphan
+tests/test_privacy_rbac.py::test_admin_role_sees_raw_columns_and_matched_text
+tests/test_privacy_rbac.py::test_lower_admin_tier_does_not_see_raw_columns
+
+## compares the first migration's columns with today's models — the models have grown through later migrations
+tests/test_migrations.py::TestMigration001::test_migration_columns_match_orm
+tests/test_migrations.py::TestSchemaFromORM::test_projects_columns
+
+## asserts a default the lane's own environment overrides (APP_ENV=test)
+tests/test_config.py::TestSettingsDefaults::test_app_defaults
+
+## patches a name that has moved (get_profile is no longer where the test patches it)
+tests/test_e2e_dlp_flow.py::TestBlockStopsRequest::test_block_stops_request

@@ -15,25 +15,40 @@
 # every live container keeps its floor and its turn, so what a gate starts is the kernel's first choice.
 #
 #   bash scripts/gate.sh preflight            live's memory guard, free memory, what is running
-#   bash scripts/gate.sh lanes                engine · go units, vet, format · backend · web · admin · desktop
+#   bash scripts/gate.sh lanes                engine · go units, vet, format · the WHOLE backend suite · the host's
+#                                             own tests · the alert rules · web · admin · desktop
+#   bash scripts/gate.sh lanes <name…>        those lanes only, one piece in the foreground — says PARTIAL, never a verdict
 #   bash scripts/gate.sh it                   the integration lane, alone, each chunk's verdict as it ends
 #   bash scripts/gate.sh build <sha>          the five images, then the VM's cache handed back
 #   bash scripts/gate.sh stack <sha>          test stack + stand-in web + built clients (a walk needs them)
 #   bash scripts/gate.sh stack-stop           stop the test stack (nothing is removed)
 #   bash scripts/gate.sh walk -- <command…>   one walk, with the lock held
-#   bash scripts/gate.sh smoke <sha>          smoke on the test stack: flag on, flag off, back on
+#   bash scripts/gate.sh smoke <sha>          smoke on the test stack: flag on, the model taken away (must be RED,
+#                                             naming it) and put back (must be GREEN), flag off, back on
 #   bash scripts/gate.sh drill                removal drill + gitleaks on the unpushed commits
 #   bash scripts/gate.sh backup               a live backup with its restore drill (never recreates a dependency)
 #
-# A card says what is its own:  GATE_RESULTS (where the files go) · GATE_BACKEND_TESTS (the backend
-# lane's files) · GATE_IT (its integration lane, run after the AM10 and web chunks).
+# A card says what is its own:  GATE_RESULTS (where the files go) · GATE_IT (its integration lane, run
+# after the AM10 and web chunks).
+#
+# AM15 — the backend lane is the suite, not a list. Until then a card named the backend files its lane
+# ran (GATE_BACKEND_TESTS, ten of 418), and a test in any other file could fail for months with no lane
+# to say so: AM13b found 26 that did, and the suite's 661 tests marked `integration` — which every
+# lane deselected — held 91. Nothing ran the host's own tests (scripts/tests, the smoke's unit tests,
+# the alert rules' tests) but the person who wrote them. So `lanes` now runs:
+#   backend_lane     every backend test not marked integration (5,104 on 12 Oct 2026, four minutes)
+#   backend_marked   every one that is, held to scripts/gate/backend_marked_failing.txt by name
+#                    (scripts/gate/marked.py): what still fails there is said on every run, a failure
+#                    not on the list is red, and so is a name on the list that no longer fails
+#   host_tests       scripts/tests/test_*.py · smoke_units  scripts/smoke/*.test.js · alert_rules  promtool
+#   gateway_go · log_worker_go · portal · dlp_sidecar   the services' own tests, which no lane had
+# No list of files is left to fall off, and there is no setting that takes a file out.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 RESULTS="${GATE_RESULTS:-scripts/probes/gate/results}"
 MIN_FREE="${GATE_MIN_FREE_MB:-3000}"
 WAIT_S="${GATE_WAIT_S:-600}"
-BACKEND_TESTS="${GATE_BACKEND_TESTS:-tests/test_memory_guard_compose.py tests/test_am11b_instructions_echo.py tests/test_am12_prompt_echo.py tests/test_am1b_smoke_bulkhead.py tests/test_am1c_agent_market_pager.py tests/test_am7_admin_audit.py tests/test_am9_admin_accounts.py tests/test_am9_mail_connector.py tests/test_dlp_in_house.py tests/test_dlp_in_house_dispatcher.py}"
 LOCK="${GATE_LOCK:-${TMP:-/tmp}/sran-gate.lock}"
 mkdir -p "$RESULTS"
 
@@ -88,6 +103,15 @@ cache_back() { # hand the VM's free memory back to Windows
     sh -c 'echo 1 > /proc/sys/vm/drop_caches; echo 1 > /proc/sys/vm/compact_memory' > /dev/null 2>&1 || true
   sleep 20 # (the pages reach Windows a few seconds after)
 }
+backend_marked() { # AM15: the backend tests marked integration — run, and held to the list of the ones that still fail
+  local out="$RESULTS/backend_marked.txt" start=$SECONDS rc
+  timeout 900 bash scripts/backend-test-lane.sh -q -p no:cacheprovider -m integration -rfEs > "$out" 2>&1
+  python scripts/gate/marked.py "$out" > "$RESULTS/backend_marked_verdict.txt" 2>&1; rc=$?
+  say "backend_marked: $([ "$rc" = "0" ] && echo 'nothing moved' || echo "RED (exit $rc)") in $((SECONDS - start)) s → $RESULTS/backend_marked_verdict.txt"
+  # what still fails and what cannot run is said here, on every run — it is never a silent exclusion
+  grep -a -E '^(pytest:|marked tests that fail|STILL FAILING|SKIPPED IN THIS LANE|RED|  [+-] )' "$RESULTS/backend_marked_verdict.txt" | cut -c1-600 | sed 's/^/    /'
+  return "$rc"
+}
 one() { # one <name> <timeout s> <command…> → a file and a verdict line
   local name="$1" t="$2"; shift 2
   local out="$RESULTS/$name.txt" start=$SECONDS
@@ -104,19 +128,49 @@ case "$phase" in
     say "host free: $(free_mb) MB · test containers up: $(test_containers | wc -l | tr -d ' ') · lock: $([ -d "$LOCK" ] && cat "$LOCK/what" || echo free)"
     ;;
   lanes)
+    # lanes [name…] — the named lanes only: one piece, in the foreground (the whole run is over an hour,
+    # and a long run in the background is stopped on this host when memory is short, with no verdict).
+    # A run of pieces says PARTIAL and names what it did not run: it is never a gate's verdict.
+    LANES="python_lane go_units go_vet gofmt backend_lane backend_marked host_tests smoke_units alert_rules gateway_go log_worker_go portal dlp_sidecar web_tsc web_vitest web_lints admin desktop"
+    only=" $* "; ran=(); left=()
+    for name in "$@"; do # (a name that is no lane is refused before anything is touched)
+      case " $LANES " in *" $name "*) ;; *) say "REFUSED: no such lane: $name (the lanes are: $LANES)"; exit 2 ;; esac
+    done
+    want() { [ "$only" = "  " ] && return 0; case "$only" in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+    lane() { # lane <name> <timeout s> <command…>
+      case " $LANES " in *" $1 "*) ;; *) say "STOPPED: lane $1 is not in the list of lanes — add it to LANES"; exit 5 ;; esac
+      if want "$1"; then ran+=("$1"); room; one "$@" || rc=1; else left+=("$1"); fi
+    }
     lock lanes; stack_stop; room; guard; rc=0
-    one python_lane 3000 bash scripts/agent-market/python-lane.sh || rc=1
-    room; one go_units 2700 bash scripts/probes/AM7/go_test.sh ./... -count=1 || rc=1
-    one go_vet 600 bash -c 'cd services/chat-edge-api && go vet ./...' || rc=1
-    one gofmt 120 bash -c 'cd services/chat-edge-api && test -z "$(gofmt -l internal/agentmarket cmd/agent-runner)"' || rc=1
-    # shellcheck disable=SC2086
-    room; one backend_lane 900 bash scripts/backend-test-lane.sh $BACKEND_TESTS -q -p no:cacheprovider || rc=1
-    room; one web_tsc 900 bash -c 'cd apps/web-chat && npx tsc --noEmit -p .' || rc=1
-    one web_vitest 1500 bash -c 'cd apps/web-chat && npx vitest run' || rc=1
-    one web_lints 600 bash -c 'cd apps/web-chat && npm run -s lint:i18n && npm run -s check:classes && npm run -s lint:theme' || rc=1
-    room; one admin 900 bash -c 'cd admin-ui && npx tsc --noEmit -p . && npx vitest run' || rc=1
-    one desktop 900 bash -c 'cd apps/desktop && npm run -s typecheck && npx vitest run' || rc=1
-    say "lanes: $([ $rc = 0 ] && echo ALL GREEN || echo RED)"; exit $rc
+    lane python_lane 3000 bash scripts/agent-market/python-lane.sh
+    lane go_units 2700 bash scripts/probes/AM7/go_test.sh ./... -count=1
+    lane go_vet 600 bash -c 'cd services/chat-edge-api && go vet ./...'
+    lane gofmt 120 bash -c 'cd services/chat-edge-api && test -z "$(gofmt -l internal/agentmarket cmd/agent-runner)"'
+    # AM15: the suite, not a list of its files — and the tests marked integration, by name
+    lane backend_lane 1500 bash scripts/backend-test-lane.sh -q -p no:cacheprovider -m "not integration" -rf
+    want backend_lane && say "backend_lane: $(grep -a -E '^(=+ )?[0-9]+ (passed|failed)' "$RESULTS/backend_lane.txt" | tail -1 | tr -d '=' | cut -c1-120)"
+    if want backend_marked; then ran+=(backend_marked); room; backend_marked || rc=1; else left+=(backend_marked); fi
+    lane host_tests 600 python -m unittest discover -s scripts/tests -p 'test_*.py'
+    lane smoke_units 300 bash -c 'node --test scripts/smoke/*.test.js'
+    lane alert_rules 300 env MSYS_NO_PATHCONV=1 docker run --rm --network none --entrypoint promtool -v "$(pwd -W 2>/dev/null || pwd)/infra/prometheus:/p:ro" -w /p prom/prometheus:v2.53.0 test rules tests/agent_market_test.yml
+    # … and the test trees of the services no lane had: the Go gateway, the log worker, the portal, and
+    # the privacy sidecar's own (Rust, in its builder image — no network, nothing built into an image)
+    lane gateway_go 600 bash -c 'cd services/gateway && go test ./... -count=1'
+    lane log_worker_go 600 bash -c 'cd log-worker && go test ./... -count=1'
+    lane portal 600 bash -c 'cd portal && npx vitest run'
+    lane dlp_sidecar 2400 env MSYS_NO_PATHCONV=1 docker run --rm --network none -v "$(pwd -W 2>/dev/null || pwd)/dlp-sidecar/src:/src/src:ro" -v "$(pwd -W 2>/dev/null || pwd)/dlp-sidecar/tests:/src/tests:ro" -v "$(pwd -W 2>/dev/null || pwd)/dlp-sidecar/data:/src/data:ro" "${GATE_SIDECAR_BUILDER:-dlp-sidecar-builder:fix103}" cargo test --locked --offline --release
+    lane web_tsc 900 bash -c 'cd apps/web-chat && npx tsc --noEmit -p .'
+    lane web_vitest 1500 bash -c 'cd apps/web-chat && npx vitest run'
+    lane web_lints 600 bash -c 'cd apps/web-chat && npm run -s lint:i18n && npm run -s check:classes && npm run -s lint:theme'
+    lane admin 900 bash -c 'cd admin-ui && npx tsc --noEmit -p . && npx vitest run'
+    lane desktop 900 bash -c 'cd apps/desktop && npm run -s typecheck && npx vitest run'
+    if [ "${#left[@]}" -gt 0 ]; then
+      say "lanes: PARTIAL — ran ${ran[*]}: $([ $rc = 0 ] && echo ok || echo RED) · NOT run: ${left[*]} · a run of pieces is not a gate's verdict"
+      exit $rc
+    fi
+    # (not "all green" while backend tests stand on the list of the ones that still fail)
+    standing=$(grep -a -o -E 'on the list: [0-9]+' "$RESULTS/backend_marked_verdict.txt" 2>/dev/null | grep -o '[0-9]*$' || echo '?')
+    say "lanes: $([ $rc = 0 ] && { [ "$standing" = 0 ] && echo ALL GREEN || echo "GREEN, with $standing backend test(s) still failing by name (above) — not green until that list is empty"; } || echo RED)"; exit $rc
     ;;
   it)
     lock it; stack_stop; room; guard
@@ -163,6 +217,11 @@ case "$phase" in
     sha="${1:?the commit the test stack runs}"
     lock smoke; guard; rc=0
     one smoke_test_on 600 env SMOKE_TARGET=test SMOKE_DESKTOP=0 bash scripts/smoke.sh || rc=1
+    # AM15: the proof that the smoke can fail. The model is taken away on the test stack and the suite
+    # must come out RED with every turn naming the model it asked; put back, it must come out GREEN
+    # with every turn answered by it (scripts/smoke/dead_primary.js waits out the send limit itself).
+    one smoke_dead_primary_red 900 env SMOKE_TARGET=test DEAD_PRIMARY_OUT="$(pwd -W 2>/dev/null || pwd)/$RESULTS" node scripts/smoke/dead_primary.js red || rc=1
+    one smoke_dead_primary_green 600 env SMOKE_TARGET=test DEAD_PRIMARY_OUT="$(pwd -W 2>/dev/null || pwd)/$RESULTS" node scripts/smoke/dead_primary.js green || rc=1
     sleep 95 # (the gateway's rate limit: 90 s of quiet between two runs)
     bash scripts/probes/AM7/test_stack.sh edge "$sha" off > /dev/null 2>&1; docker stop sran-test-agent-runner > /dev/null 2>&1
     one smoke_test_off 600 env AGENT_MARKET_ENABLED=false SMOKE_TARGET=test SMOKE_DESKTOP=0 bash scripts/smoke.sh || rc=1
@@ -183,7 +242,7 @@ case "$phase" in
     say "backup: $(grep -a -E 'summary:' "$RESULTS/backup.txt" | tail -1 | cut -c1-170)"
     ;;
   *)
-    sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,/^set -uo pipefail/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac
