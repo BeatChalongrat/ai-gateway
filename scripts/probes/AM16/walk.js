@@ -221,11 +221,113 @@ async function question(install, name, model, runLang) {
   }
 }
 
+// recipients <slug>: who an agent's documents may reach, read and ticked on the built admin app the way
+// an admin does — the organisation's list, the agent's own under it, and what the agent's row says after
+// every click: nobody named reaches nobody; named for the organisation only is still nobody; both names
+// of whoever it does reach. Then the audit log page. Everything is left as it was found.
+async function recipients(slug) {
+  const accounts = JSON.parse(fs.readFileSync(path.join(L.ROOT, "scripts", "probes", "AM7", "results", "ts_admins.json"), "utf8"));
+  const email = "am7-admin@fix128.test";
+  const cli = 'redis-cli --no-auth-warning ${REDIS_PASSWORD:+-a "$REDIS_PASSWORD"}';
+  try { execFileSync("docker", ["exec", "sran-test-redis-1", "sh", "-c", `${cli} --scan --pattern "admin_login_ip:*" | xargs -r ${cli} del`], { encoding: "utf8" }); } catch { /* the limit stays */ }
+  const KEY = process.env.AM16_RECIPIENT || "openrouter:google";
+  const { chromium } = playwright();
+  const browser = await chromium.launch();
+  try {
+    const page = await (await browser.newContext({ viewport: { width: 1440, height: 1200 } })).newPage();
+    await page.goto(`${ADMIN}/login`, { waitUntil: "load" });
+    await page.waitForFunction(() => { const f = document.querySelector("form"); return !!f && Object.keys(f).some((k) => k.startsWith("__reactProps") || k.startsWith("__reactFiber")); }, null, { timeout: 90000 });
+    await page.locator('input[autocomplete="username"]').fill(email);
+    await page.locator('input[type="password"]').fill(accounts[email].password);
+    const answered = page.waitForResponse((r) => r.url().includes("/auth/session/login"), { timeout: 60000 });
+    await page.locator('button[type="submit"]').click();
+    if ((await answered).status() !== 200) throw new Error("the admin sign-in was refused");
+    await page.waitForURL((u) => !String(u).includes("/login"), { timeout: 60000 });
+    await page.goto(`${ADMIN}/agent-market?section=models`, { waitUntil: "load" });
+    await page.getByTestId(`am-egress-${slug}`).waitFor({ timeout: 60000 });
+    await L.wait(1500);
+    if (!(await page.getByTestId("am-leave-on").isChecked())) {
+      await page.getByTestId("am-leave-on").click();
+      await page.getByTestId("am-models-save").click();
+      await L.wait(2500);
+    }
+    const leave = page.getByTestId(`am-egress-toggle-${slug}`);
+    const now = page.getByTestId(`am-egress-now-${slug}`);
+    const orgBox = page.getByTestId(`am-recipient-org-${KEY}`);
+    const agentBox = page.getByTestId(`am-recipient-${slug}-${KEY}`);
+    const read = async () => {
+      const offered = (await agentBox.count()) > 0;
+      return { leave: await leave.isChecked(), org: await orgBox.isChecked(), offered, agent: offered ? await agentBox.isChecked() : false,
+        reaches: (await now.getAttribute("data-reaches")) || "", says: squash(await now.innerText()), cell: squash(await page.getByTestId(`am-recipients-${slug}`).innerText()) };
+    };
+    // (a tick that no longer counts leaves the row when it is removed: a box that is gone is not ticked)
+    const ticked = async (el) => ((await el.count()) > 0 ? el.isChecked() : false);
+    const click = async (el, what, want) => {
+      await el.click();
+      for (let i = 0; i < 40; i++) { if ((await ticked(el)) === want) break; await L.wait(250); }
+      await L.wait(1500); // (a change of the organisation's list reads every agent's row again)
+      const s = await read();
+      log(`${what}: org=${s.org} agent=${s.offered ? s.agent : "(not offered)"} reaches="${s.reaches}" — "${s.says}"`);
+      return s;
+    };
+    const before = await read();
+    log(`as found: leave=${before.leave} org=${before.org} agent=${before.offered ? before.agent : "(not offered)"} reaches="${before.reaches}"`);
+    // start from: documents may leave, nobody named
+    if (before.offered && before.agent) await click(agentBox, "(the agent's tick off, to start)", false);
+    if (before.org) await click(orgBox, "(the organisation's tick off, to start)", false);
+    if (!before.leave) await click(leave, "(documents may leave, to start)", true);
+
+    const list = squash(await page.getByTestId("am-recipients-org").innerText());
+    check(/Google (via|ผ่าน) OpenRouter/.test(list) && /Amazon Bedrock (via|ผ่าน) OpenRouter/.test(list) && /DeepSeek \((direct|ตรง)\)/.test(list),
+      "the organisation's list offers every recipient with both its names: the company that runs the model, and the route", list.slice(0, 320));
+    check(!/openrouter\/auto|llama|deepseek\/deepseek/.test(list), "a model nobody can be said to run is listed under no recipient");
+    await page.getByTestId("am-recipients-org").screenshot({ path: path.join(OUT, "admin-recipients-org.png") });
+
+    const s1 = await read();
+    check(s1.leave && s1.reaches === "" && /nobody named|ไม่ส่งถึงใครนอกองค์กร/.test(s1.says), "documents may leave and nobody is named: the row says it reaches nobody outside", s1.says);
+    check(!s1.offered && /named nobody yet|ยังไม่ได้เลือกผู้รับ/.test(s1.cell), "… and the agent has nothing to tick until the organisation names somebody", s1.cell);
+
+    const s2 = await click(orgBox, "the organisation names it", true);
+    check(s2.org && s2.offered && !s2.agent && s2.reaches === "", "named for the organisation only: the agent may now tick it — and until it does, it still reaches nobody", s2.says);
+
+    const s3 = await click(agentBox, "the agent ticks it", true);
+    check(s3.agent && s3.reaches === KEY && /Google (via|ผ่าน) OpenRouter/.test(s3.says), "ticked for the agent too: the row says whom it reaches, both names", s3.says);
+    await page.getByTestId("am-egress").screenshot({ path: path.join(OUT, `admin-recipients-${slug}-open.png`) });
+
+    const s4 = await click(orgBox, "the organisation takes it off its list", false);
+    check(!s4.org && s4.reaches === "" && /nobody named|ไม่ส่งถึงใครนอกองค์กร/.test(s4.says) && /does not count|ไม่นับ/.test(s4.cell),
+      "off the organisation's list: the agent reaches nobody at once, and its own tick is shown as not counting", `${s4.says} | ${s4.cell}`);
+
+    // as it was found: the agent's tick first (it is offered while it is ticked), then the organisation's, then the switch
+    let cur = await read();
+    if (cur.offered && cur.agent !== (before.offered && before.agent)) cur = await click(agentBox, "(the agent's tick back)", before.offered && before.agent);
+    if (cur.org !== before.org) cur = await click(orgBox, "(the organisation's tick back)", before.org);
+    if (cur.leave !== before.leave) cur = await click(leave, "(the leave switch back)", before.leave);
+    const after = await read();
+    check(after.leave === before.leave && after.org === before.org && after.agent === (before.offered && before.agent), "everything is left as it was found",
+      `leave=${after.leave} org=${after.org} agent=${after.agent}`);
+
+    await page.goto(`${ADMIN}/audit-log`, { waitUntil: "load" });
+    await L.wait(2500);
+    const body = squash(await page.locator("main").innerText().catch(() => page.locator("body").innerText()));
+    const n = (re) => (body.match(re) || []).length;
+    const orgOn = n(/agent[ _]market\.org\.recipient[ _]allowed/gi), orgOff = n(/agent[ _]market\.org\.recipient[ _]removed/gi);
+    const agentOn = n(/agent[ _]market\.agent\.recipient[ _]allowed/gi), agentOff = n(/agent[ _]market\.agent\.recipient[ _]removed/gi);
+    check(orgOn >= 1 && orgOff >= 1 && agentOn >= 1, "the audit log page shows each recipient named and removed, for the organisation and for the agent",
+      `organisation: allowed ${orgOn}, removed ${orgOff} · agent: allowed ${agentOn}, removed ${agentOff}`);
+    await page.screenshot({ path: path.join(OUT, "admin-recipients-audit-log.png"), fullPage: false });
+    finish(`admin-recipients-${slug}`, { slug, recipient: KEY, before, after });
+  } finally {
+    await browser.close();
+  }
+}
+
 const [cmd, a, b, c, d] = process.argv.slice(2);
 (async () => {
   if (cmd === "card" && a) return card(a, b || "card");
   if (cmd === "question" && a && c) return question(a, b || "question", c, d === "en" ? "en" : "th");
   if (cmd === "admin" && a) return admin(a);
-  console.error("usage: SMOKE_TARGET=test node scripts/probes/AM16/walk.js card <install id> <name> | question <install id> <name> <model id> [th|en] | admin <slug>");
+  if (cmd === "recipients" && a) return recipients(a);
+  console.error("usage: SMOKE_TARGET=test node scripts/probes/AM16/walk.js card <install id> <name> | question <install id> <name> <model id> [th|en] | admin <slug> | recipients <slug>");
   process.exit(2);
 })().catch((e) => { console.error(`walk: ${String((e && e.message) || e)}`); process.exit(1); });

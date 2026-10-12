@@ -7,6 +7,7 @@
 // admin page (the page has its own walk).
 //
 //   run <tag> [--leave on|off] [--masked on|off] [--model <id>] [--file <path>] [--agent <dir>] [--say <words>] [--lang en]
+//       [--recipients <key,key>|none]
 //       a new copy of the agent, the scan, one run; prints, for every step that asked a model: the model,
 //       what the gateway said it did (masking), and what came back for the fields a tax invoice is read
 //       for; then the questions the run asks the person, and the gateway's own rows for those calls
@@ -69,6 +70,25 @@ function setSwitches(slug, leave, masked) {
   return chat(`select row_to_json(e) from agent_market.agent_egress e where org_id=${lit(org)} and slug=${lit(slug)}`);
 }
 
+// --recipients "<key,key>" | none: who outside the organisation the agent's documents may reach — named
+// for the organisation and for the agent, as an admin's ticks would (rows marked as this probe's, and
+// only those are ever removed). Not given: the two lists are left as they are.
+const hasTable = (table) => chat(`select count(*) from information_schema.tables where table_schema='agent_market' and table_name=${lit(table)}`) === "1";
+function setRecipients(slug, keys) {
+  if (!hasTable("org_recipients")) throw new Error("this stack has no recipient lists yet (migration 011): --recipients cannot be set");
+  const org = chat("select org_id from agent_market.org_settings order by updated_at desc limit 1") || "default";
+  chat(`delete from agent_market.org_recipients where org_id=${lit(org)} and updated_by='am16-probe'`);
+  chat(`delete from agent_market.agent_recipients where org_id=${lit(org)} and slug=${lit(slug)} and updated_by='am16-probe'`);
+  for (const k of keys) {
+    chat(`insert into agent_market.org_recipients (org_id, recipient, updated_by) values (${lit(org)}, ${lit(k)}, 'am16-probe') on conflict do nothing`);
+    chat(`insert into agent_market.agent_recipients (org_id, slug, recipient, updated_by) values (${lit(org)}, ${lit(slug)}, ${lit(k)}, 'am16-probe') on conflict do nothing`);
+  }
+  state.recipients = true;
+  save();
+  return `organisation: [${chat(`select coalesce(string_agg(recipient, ', ' order by recipient), '') from agent_market.org_recipients where org_id=${lit(org)}`)}] · ` +
+    `agent: [${chat(`select coalesce(string_agg(recipient, ', ' order by recipient), '') from agent_market.agent_recipients where org_id=${lit(org)} and slug=${lit(slug)}`)}]`;
+}
+
 const FIELDS = ["seller_tax_id", "buyer_tax_id", "seller_name", "buyer_name", "seller_address", "buyer_address", "invoice_no", "total"];
 function fieldsOf(o) {
   // wherever the reading keeps them: a flat object, or under proposals / fields / pages[]
@@ -91,6 +111,9 @@ async function run(tag, opt) {
   const st = JSON.parse(fs.readFileSync(path.join(PKG, dir, "self-test.json"), "utf8"));
   const sw = setSwitches(m.id, opt.leave === "on", opt.masked === undefined ? undefined : opt.masked === "on");
   console.log(`switches for ${m.id}: ${sw}`);
+  if (opt.recipients !== undefined) {
+    console.log(`recipients for ${m.id}: ${setRecipients(m.id, opt.recipients === "none" ? [] : opt.recipients.split(",").map((k) => k.trim()).filter(Boolean))}`);
+  }
   const t0 = Date.now();
   const startedAt = new Date(Date.now() - 2000).toISOString();
   const made = await call("POST", "/installs", { slug: m.id, idempotency_key: `am16-${crypto.randomUUID()}`, settings: st.settings || {} });
@@ -176,6 +199,12 @@ async function cleanup() {
     console.log(`organisation's switch put back: ${s.org_leave}`);
     state.switches = null;
   }
+  if (state.recipients && hasTable("org_recipients")) {
+    chat("delete from agent_market.agent_recipients where updated_by='am16-probe'");
+    chat("delete from agent_market.org_recipients where updated_by='am16-probe'");
+    console.log(`recipients this probe named: removed (left: organisation ${chat("select count(*) from agent_market.org_recipients")}, agents ${chat("select count(*) from agent_market.agent_recipients")})`);
+    state.recipients = false;
+  }
   save();
 }
 
@@ -183,7 +212,7 @@ async function cleanup() {
   const [cmd, tag, ...rest] = process.argv.slice(2);
   session = L.bearerSession(L.mintPortalToken(L.TS_USER, 3600), "minted");
   if (cmd === "cleanup") return cleanup();
-  if (cmd !== "run" || !tag) { console.error("usage: scan.js run <tag> [--leave on|off] [--masked on|off] [--model <id>] [--file <path>] [--agent <dir>] [--say <words>] [--lang en] | cleanup"); process.exit(2); }
+  if (cmd !== "run" || !tag) { console.error("usage: scan.js run <tag> [--leave on|off] [--masked on|off] [--model <id>] [--file <path>] [--agent <dir>] [--say <words>] [--lang en] [--recipients <key,key>|none] | cleanup"); process.exit(2); }
   const opt = {};
   for (let i = 0; i < rest.length; i += 2) opt[rest[i].replace(/^--/, "")] = rest[i + 1];
   if (!["on", "off"].includes(opt.leave || "off")) throw new Error("--leave on|off");
