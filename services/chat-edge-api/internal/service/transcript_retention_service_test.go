@@ -14,7 +14,10 @@ package service
 // only; skip when the DB is unreachable).
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -221,5 +224,28 @@ func TestSecondsUntilNextMidnightUTC(t *testing.T) {
 	// Crossing into the next day lands exactly on 00:00 UTC.
 	if next := at.Add(d); next.Hour() != 0 || next.Minute() != 0 {
 		t.Fatalf("landing time = %v, want midnight", next)
+	}
+}
+
+// A pass that finds nothing due still says it ran. The line used to be written only when a pass saw a
+// conversation, so the smoke's check for it in the last 26 hours was red on 11 Oct 2026 with nothing
+// overdue — and nothing told "ran, nothing due" from "did not run".
+func TestSweep_APassWithNothingDueStillSaysItRan(t *testing.T) {
+	pool := retentionTestPool(t)
+	t.Cleanup(pool.Close)
+	ctx := context.Background()
+	var said bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&said, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	seedRetentionTenant(t, ctx, pool, false, false) // a tenant with the rule off: nothing is due
+	sweeper, _ := newSweeper(pool)
+	stats := sweeper.EnforceOnce(ctx)
+	if stats.ConversationsSeen != 0 || stats.Erased != 0 {
+		t.Fatalf("nothing was due: %+v", stats)
+	}
+	if !strings.Contains(said.String(), `"msg":"transcript retention: pass complete"`) || !strings.Contains(said.String(), `"seen":0`) {
+		t.Fatalf("a pass with nothing due left no line saying it ran:\n%s", said.String())
 	}
 }

@@ -155,17 +155,20 @@ func (s *TranscriptRetentionService) EnforceOnce(ctx context.Context) SweepStats
 		}
 	}
 
-	if stats.ConversationsSeen > 0 || stats.Errors > 0 {
-		slog.Info("transcript retention: pass complete",
-			"tenants", stats.TenantsScanned,
-			"seen", stats.ConversationsSeen,
-			"seen_test_data", stats.ConversationsSeenTestData,
-			"seen_real", stats.ConversationsSeen-stats.ConversationsSeenTestData,
-			"tenants_likely_test", stats.TenantsLikelyTest,
-			"erased", stats.Erased,
-			"errors", stats.Errors,
-			"deleted_purge_mode", s.DeletedPurgeMode())
-	}
+	// Said on every pass, also one that found nothing due. It used to be said only when something was
+	// seen, so a day with nothing to erase left no line — and the check that looks for this line in the
+	// last 26 hours (the smoke's jobs.retention) could not tell "ran, nothing due" from "did not run":
+	// it was red on 11 Oct 2026 with nothing overdue, and would have been green on a day with a backlog
+	// only by luck. The line is the proof that the pass ran.
+	slog.Info("transcript retention: pass complete",
+		"tenants", stats.TenantsScanned,
+		"seen", stats.ConversationsSeen,
+		"seen_test_data", stats.ConversationsSeenTestData,
+		"seen_real", stats.ConversationsSeen-stats.ConversationsSeenTestData,
+		"tenants_likely_test", stats.TenantsLikelyTest,
+		"erased", stats.Erased,
+		"errors", stats.Errors,
+		"deleted_purge_mode", s.DeletedPurgeMode())
 	return stats
 }
 
