@@ -25,6 +25,8 @@ type MetricsSnapshot struct {
 	// AM3: reports people filed that nobody has closed yet (the pager's
 	// "someone reported a problem"), and runs waiting for budget.
 	ProblemsOpen, BudgetWaiting int64
+	// ModelWaiting (AM15): runs that stopped because no model they may use could be reached
+	ModelWaiting int64
 }
 
 // CollectMetrics reads the snapshot with a handful of aggregate queries.
@@ -67,6 +69,8 @@ func CollectMetrics(ctx context.Context, pool *pgxpool.Pool, sandboxReady bool) 
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM agent_market.problem_reports WHERE status = 'open'`).Scan(&s.ProblemsOpen)
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM agent_market.agent_runs WHERE status = 'awaiting_input'
 		AND status_reason LIKE 'budget_%'`).Scan(&s.BudgetWaiting)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM agent_market.agent_runs WHERE status = 'awaiting_input'
+		AND status_reason = 'model_unreachable'`).Scan(&s.ModelWaiting)
 	st := pool.Stat()
 	s.PoolAcquired, s.PoolMax = st.AcquiredConns(), st.MaxConns()
 	return s
@@ -108,6 +112,8 @@ func RenderMetrics(s MetricsSnapshot) string {
 	w("agent_market_problem_reports_open %d", s.ProblemsOpen)
 	w("# TYPE agent_market_runs_waiting_budget gauge")
 	w("agent_market_runs_waiting_budget %d", s.BudgetWaiting)
+	w("# TYPE agent_market_runs_waiting_model gauge")
+	w("agent_market_runs_waiting_model %d", s.ModelWaiting)
 	w("# TYPE agent_market_sandbox_ready gauge")
 	w("agent_market_sandbox_ready %d", map[bool]int{true: 1, false: 0}[s.SandboxReady])
 	return b.String()

@@ -247,6 +247,16 @@ func run(log *slog.Logger) error {
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "sandbox": r.Sandbox(), "model": model.Available(),
 			"engine": engine.Checksum[:12], "version": version})
 	})
+	// AM15: who answers the runner's model calls. /healthz says a model is configured, and said so
+	// through the hours the in-house model answered nobody; this asks it one word, through the client,
+	// key and gateway every step uses, and says who answered (the word of the last half minute is given
+	// again, so a caller that loops asks the model nothing more).
+	mux.HandleFunc("/model", func(w http.ResponseWriter, req *http.Request) {
+		cctx, cancel := context.WithTimeout(req.Context(), 90*time.Second)
+		defer cancel()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(model.WordWithin(cctx, 30*time.Second))
+	})
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		fmt.Fprint(w, runner.RenderMetrics(runner.CollectMetrics(req.Context(), pool, r.Sandbox())))

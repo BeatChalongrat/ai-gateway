@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	am "github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/agentmarket"
@@ -36,6 +37,46 @@ func (r *Runner) parkForModel(rc *runCtx) error {
 	return nil
 }
 
+// ModelWord is what came of asking the primary model one word: who was asked, whether anything came
+// back from it, and — when another model answered in its place — which.
+type ModelWord struct {
+	Asked    string    `json:"asked"`
+	Answered bool      `json:"answered"`        // something came back from the model asked (an empty answer too)
+	Served   string    `json:"served"`          // the model that answered: the one asked, another, or "" for none
+	MS       int64     `json:"ms"`              // how long it took
+	At       time.Time `json:"at"`              // when it was asked
+	Error    string    `json:"error,omitempty"` // why there is no usable answer, as the gateway said it
+}
+
+// word asks the primary model one word through the same client, key and gateway every step uses.
+func (m *ModelClient) word(ctx context.Context) ModelWord {
+	w := ModelWord{Asked: m.Primary, At: time.Now().UTC()}
+	if !m.Available() {
+		w.Error = "no model is configured"
+		return w
+	}
+	start := time.Now()
+	// (a few characters no earlier call sent: the gateway keeps an answer for an hour under the same
+	// words, and an answer out of that cache says nothing about who answers now)
+	c, err := m.send(ctx, m.Primary, []chatMsg{{Role: "user", Content: fmt.Sprintf("Reply with the single word: ok [%x]", start.UnixNano())}}, 0, 16)
+	w.MS = time.Since(start).Milliseconds()
+	var away *unreachable
+	switch {
+	case err == nil && c.Cached:
+		w.Error = "answered out of the gateway's cache: nobody answered now"
+	case err == nil:
+		w.Answered, w.Served = true, c.Model
+	case errors.As(err, &away):
+		w.Served, w.Error = away.other, trim(err.Error(), 240)
+	case ctx.Err() != nil:
+		w.Error = "stopped before an answer"
+	default:
+		// the model asked answered, and what it said cannot be used (send checks who answered first)
+		w.Answered, w.Served, w.Error = true, m.Primary, trim(err.Error(), 240)
+	}
+	return w
+}
+
 // Reachable asks the primary model one word and says whether anything came back from it: an answer
 // of any kind — an empty one too — is the model being there. Like every model call of the runner it
 // waits its turn behind chat and behind the runner's other calls.
@@ -49,8 +90,21 @@ func (m *ModelClient) Reachable(ctx context.Context) bool {
 	}
 	defer release()
 	m.yield(ctx)
-	_, err = m.send(ctx, m.Primary, []chatMsg{{Role: "user", Content: "Reply with the single word: ok"}}, 0, 16)
-	return ctx.Err() == nil && !errors.Is(err, ErrModelUnreachable)
+	return m.word(ctx).Answered
+}
+
+// WordWithin is the word for whoever asks from outside (the runner's own /model page, read by the
+// smoke suite): the last one when it is younger than maxAge, else a new one. It does not wait behind
+// chat — one word is not a turn — and it is what makes "the runner has a model" something that can be
+// false: /healthz says only that a model is configured.
+func (m *ModelClient) WordWithin(ctx context.Context, maxAge time.Duration) ModelWord {
+	m.wordMu.Lock()
+	defer m.wordMu.Unlock()
+	if !m.lastWord.At.IsZero() && time.Since(m.lastWord.At) < maxAge {
+		return m.lastWord
+	}
+	m.lastWord = m.word(ctx)
+	return m.lastWord
 }
 
 // resumeModelParked: if a run waits for its model and the model answers, every such run goes on.

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -20,6 +21,7 @@ type am15Reply struct {
 	answer string        // the content of a 200
 	model  string        // the model a 200 names ("" = the one asked)
 	finish string        // finish_reason of a 200 ("" = stop)
+	cached bool          // a 200 the gateway says it took from its cache
 	wait   time.Duration // before answering
 }
 
@@ -28,10 +30,18 @@ func am15Gateway(t *testing.T, reply func(model string, n int) am15Reply) *httpt
 	counts := map[string]int{}
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Model string `json:"model"`
+			Model    string `json:"model"`
+			Messages []struct {
+				Content any `json:"content"`
+			} `json:"messages"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		counts[req.Model]++
+		if am15Said != nil && len(req.Messages) > 0 {
+			if s, ok := req.Messages[len(req.Messages)-1].Content.(string); ok {
+				am15Said(s)
+			}
+		}
 		rp := reply(req.Model, counts[req.Model])
 		if rp.wait > 0 {
 			select {
@@ -52,13 +62,17 @@ func am15Gateway(t *testing.T, reply func(model string, n int) am15Reply) *httpt
 		if finish == "" {
 			finish = "stop"
 		}
-		b, _ := json.Marshal(map[string]any{"model": model, "choices": []any{map[string]any{
+		b, _ := json.Marshal(map[string]any{"model": model, "cached": rp.cached, "choices": []any{map[string]any{
 			"message": map[string]any{"content": rp.answer}, "finish_reason": finish}}, "usage": map[string]any{"total_tokens": 10}})
 		_, _ = w.Write(b)
 	}))
 	t.Cleanup(s.Close)
+	t.Cleanup(func() { am15Said = nil })
 	return s
 }
+
+// am15Said, when set, is told the words of each call's last message.
+var am15Said func(string)
 
 func am15Client(url string) *ModelClient {
 	return &ModelClient{BaseURL: url, APIKey: "k", Primary: "qwen", Fallback: "deepseek", SelfHosted: map[string]bool{"qwen": true},
@@ -193,5 +207,53 @@ func TestTheModelIsAskedAWordToKnowItIsBack(t *testing.T) {
 	}
 	if (&ModelClient{}).Reachable(context.Background()) {
 		t.Fatal("no model configured is not a model that can be reached")
+	}
+}
+
+// The runner's /model page: who answers its model calls — asked now, of the model, in words no call
+// before it used. /healthz said "model: true" through the hours the in-house model answered nobody.
+func TestTheRunnersWordSaysWhoAnsweredAndIsNeverTheCachesAnswer(t *testing.T) {
+	reply := am15Reply{status: 200, answer: "ok"}
+	var said []string
+	s := am15Gateway(t, func(string, int) am15Reply { return reply })
+	am15Said = func(words string) { said = append(said, words) }
+	m := am15Client(s.URL)
+	ctx := context.Background()
+
+	w := m.word(ctx)
+	if !w.Answered || w.Served != "qwen" || w.Asked != "qwen" || w.Error != "" || w.At.IsZero() {
+		t.Fatalf("the model answers: %+v", w)
+	}
+	// the gateway keeps an answer for an hour under the same words: each word is asked in new ones
+	_ = m.word(ctx)
+	if len(said) != 2 || said[0] == said[1] {
+		t.Fatalf("two words, never the same sentence twice: %q", said)
+	}
+	reply = am15Reply{status: 200, answer: "ok", cached: true}
+	if w = m.word(ctx); w.Answered || w.Error == "" {
+		t.Fatalf("an answer out of the cache is nobody answering now: %+v", w)
+	}
+	reply = am15Reply{status: 504, body: `{"error":{"code":"provider_timeout","message":"Provider 'sranai' gave no answer for 'qwen' within 30 s."}}`}
+	if w = m.word(ctx); w.Answered || w.Served != "" || !strings.Contains(w.Error, "provider_timeout") {
+		t.Fatalf("the model is away, said in the gateway's own words: %+v", w)
+	}
+	reply = am15Reply{status: 200, answer: "ok", model: "deepseek-v4-flash"}
+	if w = m.word(ctx); w.Answered || w.Served != "deepseek-v4-flash" {
+		t.Fatalf("another model answered in its place: it is named, and the model asked did not answer: %+v", w)
+	}
+	reply = am15Reply{status: 200, answer: "  "}
+	if w = m.word(ctx); !w.Answered || w.Served != "qwen" || w.Error == "" {
+		t.Fatalf("an empty answer is the model asked being there: %+v", w)
+	}
+
+	// whoever asks from outside is given the last word while it is young: a caller that loops asks the model nothing more
+	reply = am15Reply{status: 200, answer: "ok"}
+	before := len(said)
+	first := m.WordWithin(ctx, time.Minute)
+	if again := m.WordWithin(ctx, time.Minute); again.At != first.At || len(said) != before+1 {
+		t.Fatalf("one word within the minute: %d call(s)", len(said)-before)
+	}
+	if _ = m.WordWithin(ctx, 0); len(said) != before+2 {
+		t.Fatalf("an old word is asked again: %d call(s)", len(said)-before)
 	}
 }

@@ -221,8 +221,13 @@ running their own engine, and settings offer the upgrade.
   `agent_market_oldest_queued_seconds`, `agent_market_step_seconds_{sum,count}{step}`,
   `agent_market_credits_spent_total`, `agent_market_pool_{acquired,max}_conns`,
   `agent_market_sandbox_ready`; AM3: `agent_market_problem_reports_open`,
-  `agent_market_runs_waiting_budget`. The run counts are read from the database, so a
-  runner restart does not reset them.
+  `agent_market_runs_waiting_budget`; AM15: `agent_market_runs_waiting_model`. The run counts are
+  read from the database, so a runner restart does not reset them.
+- **Who answers the runner's model calls (AM15)**: `GET /model` on the same port asks the primary
+  model one word — through the client, key and gateway every step uses, in words no call before it
+  sent — and says `asked`, `answered`, `served`, `ms`, `error`. `/healthz`'s `"model": true` says only
+  that a model is configured: it said so through the hours of 9 Oct 2026 when the in-house model
+  answered nobody. The smoke suite reads `/model` (`agent_market.model`).
 - **Dashboard**: Grafana → "Agent Market" (`infra/grafana/provisioning/dashboards/agent_market.json`).
 - **SLO and error budget**: 95 % of the agent runs that end, end succeeded
   (cancelled by the person excluded), rolling 14 days (Prometheus keeps 15).
@@ -233,7 +238,9 @@ running their own engine, and settings offer the upgrade.
 - **Alerts** (`infra/prometheus/agent_market.yml`, all `channel="agent-market"`):
   budget burning, budget spent, runner down, queue stuck > 10 min, sandbox not
   ready, pool saturated; AM3: a problem someone reported (at once, until it is
-  closed), runs waiting for budget over an hour. Tested with `promtool test rules infra/prometheus/tests/agent_market_test.yml`.
+  closed), runs waiting for budget over an hour; AM15: runs waiting for a model that cannot be
+  reached, after ten minutes. Tested with `promtool test rules infra/prometheus/tests/agent_market_test.yml`
+  (`scripts/gate.sh lanes` runs it).
 - **Its own pager topic (AM1c)**: Prometheus here has no Alertmanager, so
   ops-watch reads the firing `channel="agent-market"` alerts from Prometheus
   (`OPS_WATCH_PROMETHEUS_URL`) every tick and pages them on

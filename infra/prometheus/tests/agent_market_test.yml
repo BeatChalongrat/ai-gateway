@@ -87,3 +87,24 @@ tests:
               channel: agent-market
             exp_annotations:
               summary: "Agent Market: runs have waited over an hour for budget — raise a person's or department's budget, or tell them"
+  # AM15: a run waiting for its model pages after ten minutes — not at once (the runner asks the model
+  # a word every two minutes and puts the run back when it answers), and not never.
+  - interval: 1m
+    input_series:
+      - series: 'agent_market_runs_waiting_model'
+        values: '0x5 2x30 0x10'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: AgentMarketRunsWaitingForModel
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: AgentMarketRunsWaitingForModel
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              channel: agent-market
+            exp_annotations:
+              summary: "Agent Market: runs are waiting because the model the agents use cannot be reached — they go on by themselves when it answers; nothing was delivered meanwhile"
+      - eval_time: 45m
+        alertname: AgentMarketRunsWaitingForModel
+        exp_alerts: []

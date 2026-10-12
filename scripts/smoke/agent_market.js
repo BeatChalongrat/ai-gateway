@@ -7,6 +7,9 @@
 //   on   → availability answers 200 for the smoke account, and the runner's
 //          heartbeat is fresh (skip, not fail, when the profile is not running).
 "use strict";
+const fs = require("node:fs");
+const path = require("node:path");
+const crypto = require("node:crypto");
 const L = require("./lib");
 
 // The runner's container and health port per target (docker-compose.agent-market.yml
@@ -14,12 +17,89 @@ const L = require("./lib");
 // AM_RUNNER_PORT). The flag is read like every smoke setting: the shell's
 // environment first (the test stack is recreated with it exported), then .env.
 const RUNNER = L.TARGET === "test"
-  ? { name: "sran-test-agent-runner", health: "http://127.0.0.1:18095/healthz" }
-  : { name: "sran-agent-runner", health: "http://127.0.0.1:28095/healthz" };
+  ? { name: "sran-test-agent-runner", health: "http://127.0.0.1:18095/healthz", model: "http://127.0.0.1:18095/model" }
+  : { name: "sran-agent-runner", health: "http://127.0.0.1:28095/healthz", model: "http://127.0.0.1:28095/model" };
+
+// AM15 — the agent the smoke speaks to, and the sentence: an order its documents can be put in, so the
+// agent's model is asked to read it (words that are only thanks are not put to a model at all).
+const PACKAGES = path.join(L.ROOT, "backend", "agent_market", "packages");
+const TURN_AGENT = {
+  slug: "sran.bank-reconciliation", dir: "bank_reconciliation", ask: "เรียงตามวันที่",
+  files: ["sample-data/statement_2569-09.xlsx", "sample-data/สมุดบัญชีเงินฝาก_2569-09.xlsx"],
+};
+const AM = () => `${L.API_BASE.edge}/api/v1/agent-market`;
+
+/**
+ * agent_market.model's verdict over the runner's word ({asked, answered, served, ms, error}): the model
+ * asked answered — or the FAIL names it, and who answered in its place or that nobody did.
+ */
+function modelWordVerdict(w, status = "200") {
+  if (!w || !w.asked) return { ok: false, detail: `the runner's /model page → ${status}: no word` };
+  const turns = [{ asked: w.asked, served: w.served || null, ms: Math.round(w.ms || 0), expect_ms: L.TURN_EXPECT_MS }];
+  if (!w.answered) {
+    if (w.served) return { ok: false, turns, detail: `asked ${w.asked}, answered ${w.served}, waited ${L.secondsText(w.ms || 0)} — the runner's own word` };
+    return { ok: false, turns, detail: `asked ${w.asked}, no answer after ${L.secondsText(w.ms || 0)}: ${String(w.error || "no reason given").slice(0, 160)} — the runner's own word` };
+  }
+  const who = L.whoAnswered({ asked: w.asked, served: w.served, ms: w.ms || 0 });
+  return { ok: who.ok, slow: who.ok && who.slow, turns, detail: `${who.text} — the runner's own word${w.error ? ` (${String(w.error).slice(0, 80)})` : ""}` };
+}
+
+/**
+ * agent_market.turn's verdict over the reply's run as the run page gives it ({run, steps}) and the time
+ * the suite waited. The step that read the sentence names the models it was allowed and the one that
+ * read it. A reply that waits for its model, words that came back unread, or another model's reading
+ * is the FAIL — said first, naming the model asked.
+ */
+function agentTurnVerdict(ended, waitedMs) {
+  const run = ended?.run;
+  const step = (ended?.steps || []).filter((s) => s.name === "instructions").pop();
+  const input = step?.input && typeof step.input === "object" ? step.input : {};
+  const out = step?.output && typeof step.output === "object" ? step.output : {};
+  const asked = (Array.isArray(input.models) && input.models[0]) || null;
+  const took = step?.started_at && step?.finished_at ? Date.parse(step.finished_at) - Date.parse(step.started_at) : waitedMs;
+  const served = out.model || null;
+  const turns = [{ asked, served, ms: Math.round(took), expect_ms: L.TURN_EXPECT_MS }];
+  const state = `reply ${String(run?.id || "").slice(0, 8)} ${run?.status || "did not end"}${run?.status_reason ? ` (${run.status_reason})` : ""} after ${L.secondsText(waitedMs)}`;
+  if (!run || !step) return { ok: false, turns, detail: `asked ${asked || "the agent's model"}, no answer: the sentence was not read — ${state}` };
+  if (!asked) return { ok: false, turns, detail: `the agent was allowed no model to read the sentence — ${state}` };
+  if (run.status === "awaiting_input" && run.status_reason === "model_unreachable") {
+    return { ok: false, turns, detail: `asked ${asked}, no answer: the agent waits for its model — ${state}` };
+  }
+  if (out.unread) return { ok: false, turns, detail: `asked ${asked}, no answer: the sentence came back unread after ${out.tries || 1} reading(s) — ${state}` };
+  if (step.status !== "succeeded") return { ok: false, turns, detail: `asked ${asked}, no answer: the reading ${step.status} — ${state}` };
+  const who = L.whoAnswered({ asked, served, ms: took });
+  if (!who.ok) return { ok: false, turns, detail: `${who.text} — ${state}` };
+  const read = Array.isArray(out.apply) ? out.apply.join(",") : "";
+  if (run.status !== "succeeded") return { ok: false, turns, detail: `${who.text}, but the reply did not finish — ${state}` };
+  return { ok: true, slow: who.slow, turns, detail: `${who.text}, read as "${read || "nothing to do"}" — ${state}` };
+}
 
 module.exports = async function agentMarket(R, session) {
   const on = String(L.env("AGENT_MARKET_ENABLED", "false")).toLowerCase() === "true";
   const edge = `${L.API_BASE.edge}/api/v1/agent-market/availability`;
+  // AM15: the routes a person's screen calls, with the smoke's session
+  const am = (method, p, body) => L.tryHttp(AM() + p, { method, timeoutMs: 60000, headers: { "Content-Type": "application/json", ...(session ? session.headers : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const upload = async (install, file) => {
+    const form = new FormData();
+    form.append("file", new Blob([fs.readFileSync(file)]), path.basename(file));
+    const r = await fetch(`${AM()}/installs/${install}/files`, { method: "POST", headers: session.headers, body: form, signal: AbortSignal.timeout(120000) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.file?.id) throw new Error(`upload ${path.basename(file)} → ${r.status}`);
+    return j.file.id;
+  };
+  /** A run as the run page gives it, once it has ended or waits (null: no such run; the last reading when time ran out). */
+  const runEnds = async (id, ms) => {
+    if (!id) return null;
+    const t0 = Date.now();
+    let last = null;
+    for (;;) {
+      const r = await am("GET", `/runs/${id}`);
+      if (r.status === 200 && r.json?.run) last = r.json;
+      if (last && ["succeeded", "failed", "cancelled", "awaiting_input"].includes(last.run.status)) return last;
+      if (Date.now() - t0 > ms) return last;
+      await L.wait(2000);
+    }
+  };
 
   await R.run("agent_market.flag", async () => {
     const headers = session ? session.headers : {};
@@ -99,4 +179,54 @@ module.exports = async function agentMarket(R, session) {
     const r = await L.http(RUNNER.health);
     return { ok: r.status === 200 && r.json?.sandbox === true, detail: `runner ${r.status} sandbox=${r.json?.sandbox} model=${r.json?.model} engine=${r.json?.engine}` };
   });
+
+  // AM15 — who answers the agents' model calls. The runner's /healthz says "model: true" when a model
+  // is configured, and said so through the hours of 9 Oct 2026 when the in-house model answered
+  // nobody. Its /model page asks the model one word — through the client, key and gateway every step
+  // of a run uses — and says who answered: an answer from another model, or none, is the FAIL.
+  await R.run("agent_market.model", async () => {
+    if (!on) return { skip: true, detail: "flag off (the flag check covers it)" };
+    if (!L.containerRunning(RUNNER.name)) return { skip: true, detail: "profile agent-market not running" };
+    const r = await L.tryHttp(RUNNER.model, { timeoutMs: 100000 });
+    if (r.status === 404) return { ok: false, detail: "the runner has no /model page (a runner from before AM15): who answers the agents' model calls cannot be seen" };
+    return modelWordVerdict(r.status === 200 ? r.json : null, `${r.status || r.error}`);
+  });
+
+  // AM15 — and one turn of an agent the way a person makes it: a sentence typed to an agent whose run
+  // has finished, read by the agent's model into what its documents can be asked. The run's own record
+  // says which model read it. (An account the organisation has not let in can make no such turn: the
+  // check says so and skips — on such a target agent_market.model above is what watches the model.)
+  await R.run("agent_market.turn", async () => {
+    if (!on) return { skip: true, detail: "flag off (the flag check covers it)" };
+    if (!session) return { skip: true, detail: "no signed-in session in this run" };
+    if (!L.containerRunning(RUNNER.name)) return { skip: true, detail: "profile agent-market not running" };
+    const a = await am("GET", "/availability");
+    if (a.json?.available !== true) {
+      return { skip: true, detail: `this account is not let into Agent Market here (access=${a.json?.access} member=${a.json?.member}): it can make no agent turn — agent_market.model is the check of the agents' model on this target` };
+    }
+    // one install, the same every run (the install's own idempotency key), with one finished run to speak to
+    const made = await am("POST", "/installs", { slug: TURN_AGENT.slug, idempotency_key: "smoke-agent-turn-1" });
+    const install = made.json?.install?.id || made.json?.id;
+    if (!install) return { ok: false, detail: `the smoke's own copy of ${TURN_AGENT.slug} could not be installed: ${made.status} ${made.json?.error?.code || made.text.slice(0, 120)}` };
+    const runs = (await am("GET", `/installs/${install}/runs`)).json?.runs || [];
+    if (!runs.some((x) => x.kind === "run" && x.status === "succeeded")) {
+      // the first time only: a run from the package's own sample files, with no words typed (so no model is asked)
+      const ids = [];
+      for (const rel of TURN_AGENT.files) ids.push(await upload(install, path.join(PACKAGES, TURN_AGENT.dir, rel)));
+      const first = await am("POST", `/installs/${install}/messages`, { file_ids: ids });
+      const ended = await runEnds(first.json?.run_id, 300000);
+      if (ended?.run?.status !== "succeeded") return { ok: false, detail: `the smoke's first run of ${TURN_AGENT.slug} did not finish: ${ended?.run?.status || "no run"} ${ended?.run?.status_reason || ""}` };
+    }
+    const t0 = Date.now();
+    const words = `[SMOKE ${crypto.randomUUID().slice(0, 6)}] ${TURN_AGENT.ask}`;
+    const sent = await am("POST", `/installs/${install}/messages`, { text: words });
+    if (!sent.json?.run_id) return { ok: false, detail: `the sentence was not taken: ${sent.status} ${sent.json?.error?.code || sent.text.slice(0, 120)}` };
+    const ended = await runEnds(sent.json.run_id, 180000);
+    const verdict = agentTurnVerdict(ended, Date.now() - t0);
+    // a reply left waiting for a model that is away is cancelled: the suite leaves nothing waiting behind it
+    if (ended?.run?.status === "awaiting_input") await am("POST", `/runs/${sent.json.run_id}/cancel`).catch(() => null);
+    return verdict;
+  });
 };
+module.exports.modelWordVerdict = modelWordVerdict;
+module.exports.agentTurnVerdict = agentTurnVerdict;

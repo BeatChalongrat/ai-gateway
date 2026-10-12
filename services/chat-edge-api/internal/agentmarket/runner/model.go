@@ -52,6 +52,9 @@ type ModelClient struct {
 	Yielded atomic.Int64
 	// catalog is the gateway's model catalogue (AM4, choice.go).
 	catalog catalogCache
+	// lastWord (AM15, modeldown.go): what came of the last word asked of the primary model for /model.
+	wordMu   sync.Mutex
+	lastWord ModelWord
 }
 
 // FallbackOptOut is the request header that tells the gateway never to answer
@@ -122,8 +125,12 @@ var ErrNoModel = errors.New("no model answered")
 // them. Now it stops and waits (modeldown.go), and goes on by itself when the model is back.
 var ErrModelUnreachable = fmt.Errorf("%w: no model it may use could be reached", ErrNoModel)
 
-// unreachable is one call's failure to reach its model at all.
-type unreachable struct{ why error }
+// unreachable is one call's failure to reach its model at all. other: the model that answered in its
+// place, when one did.
+type unreachable struct {
+	why   error
+	other string
+}
 
 func (e *unreachable) Error() string        { return e.why.Error() }
 func (e *unreachable) Unwrap() error        { return e.why }
@@ -360,12 +367,6 @@ func (m *ModelClient) send(ctx context.Context, model string, messages any, temp
 		cost = 0
 	}
 	spent := Completion{CostUSD: cost, Tokens: out.Usage.TotalTokens}
-	if strings.TrimSpace(content) == "" {
-		return spent, fmt.Errorf("empty answer (finish=%s)", out.Choices[0].FinishReason)
-	}
-	if out.Choices[0].FinishReason == "length" {
-		return spent, fmt.Errorf("answer cut off at the output limit")
-	}
 	used := out.Model
 	if used == "" {
 		used = model
@@ -373,8 +374,14 @@ func (m *ModelClient) send(ctx context.Context, model string, messages any, temp
 	if !sameModel(used, model) {
 		// AM4: an answer from a model other than the one asked for is never
 		// used — the organisation allowed that model, not this one. (AM15: and
-		// the model asked for gave no answer at all.)
-		return spent, &unreachable{why: fmt.Errorf("answered by %s instead of %s", used, model)}
+		// the model asked for gave no answer at all — whatever the other one said.)
+		return spent, &unreachable{why: fmt.Errorf("answered by %s instead of %s", used, model), other: used}
+	}
+	if strings.TrimSpace(content) == "" {
+		return spent, fmt.Errorf("empty answer (finish=%s)", out.Choices[0].FinishReason)
+	}
+	if out.Choices[0].FinishReason == "length" {
+		return spent, fmt.Errorf("answer cut off at the output limit")
 	}
 	return Completion{Model: used, Content: content, CostUSD: cost, Tokens: out.Usage.TotalTokens, Cached: out.Cached,
 		FinishedBy: out.Choices[0].FinishReason, Elapsed: time.Since(start)}, nil

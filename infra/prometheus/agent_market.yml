@@ -94,3 +94,15 @@ groups:
           channel: agent-market
         annotations:
           summary: "Agent Market: runs have waited over an hour for budget — raise a person's or department's budget, or tell them"
+      # AM15: runs have stopped because no model they may use can be reached, and have waited ten minutes
+      # (the runner asks the model a word every two minutes and puts them back when it answers: ten
+      # minutes of waiting is the model being away, not a slow answer). Each such run has delivered
+      # nothing and says so in its thread; this is the same said to whoever can bring the model back.
+      - alert: AgentMarketRunsWaitingForModel
+        expr: agent_market_runs_waiting_model > 0
+        for: 10m
+        labels:
+          severity: warning
+          channel: agent-market
+        annotations:
+          summary: "Agent Market: runs are waiting because the model the agents use cannot be reached — they go on by themselves when it answers; nothing was delivered meanwhile"
