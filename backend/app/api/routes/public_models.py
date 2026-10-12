@@ -15,7 +15,7 @@ from app.services.auto_router.tiers import band_for_candidate as _band_for_candi
 from app.services.media_gen import destinations as media_dest
 from app.services.media_gen.image_backends import registered_image_providers
 from app.services.providers.base_urls import SELF_HOSTED_PROVIDERS
-from app.services.providers.recipients import recipient_of
+from app.services.providers.recipients import keys_of as recipient_keys
 from app.services.providers.model_registry import get_all_candidates
 from app.services.providers.reasoning_strategies import (
     STRATEGIES_WITH_ENABLE_THINKING_OFF,
@@ -223,12 +223,7 @@ async def get_models(
                 # FIX65 — the picker groups the operator's own box apart
                 # from the curated vendor list (None keeps it off the wire).
                 self_hosted=True if c.provider in SELF_HOSTED_PROVIDERS else None,
-                recipient=recipient_of(c.provider, c.model).key or None,
-                recipient_company=(
-                    None
-                    if c.provider in SELF_HOSTED_PROVIDERS
-                    else (recipient_of(c.provider, c.model).company or None)
-                ),
+                recipients=recipient_keys(c.provider, c.model) or None,
             )
         )
 

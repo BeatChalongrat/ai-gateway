@@ -132,13 +132,13 @@ class ModelInfo(BaseModel):
     # picker groups it under "your own" and says what it can do. Sent
     # only when True.
     self_hosted: Optional[bool] = None
-    # Who receives what is sent to this model, as a list of recipients can
-    # name it (services/providers/recipients.py): ``<route>`` for a direct
-    # provider, ``<route>:<company>`` behind a router. Absent for an
-    # in-house model (nothing leaves) and for a model whose company cannot
-    # be named — which therefore can be on no list.
-    recipient: Optional[str] = None
-    recipient_company: Optional[str] = None
+    # Who may receive what is sent to this model, as a list of recipients
+    # can name it (services/providers/recipients.py): ``<route>`` for a
+    # direct provider; behind a router ``<route>:<company>``, once for each
+    # company that can run the model there. Absent for an in-house model
+    # (nothing leaves) and for a model no company can be said to run —
+    # which therefore can be on no list.
+    recipients: Optional[List[str]] = None
 
 
 class ModelListResponse(BaseModel):

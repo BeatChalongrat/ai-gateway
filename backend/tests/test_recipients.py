@@ -1,16 +1,18 @@
 """Nothing goes to a recipient the caller did not name (app/services/providers/recipients.py).
 
-A provider row is a route; behind a router the company that runs the model is a second party. A caller
-that names its recipients (``metadata.allowed_recipients``) is held to them, and what is held here is
-the refusal — each time, that the provider was not called at all:
+A provider row is a route; behind a router the company that RUNS the model is a second party — and it is
+not always the one that made it (13 Oct 2026, with this deployment's key: Claude was run by Amazon
+Bedrock, GPT by Azure). A caller that names its recipients (``metadata.allowed_recipients``) is held to
+them, and what is held here is the refusal — each time, that the provider was not called at all:
 
-* a recipient not on the list, by route and by company; the direct route is not the routed one;
+* no company that can run the model is on the list — by route, and by company;
+* the maker is not the host: naming Anthropic does not let Amazon run its model, and the other way;
 * a list that is empty, null or unreadable: nobody outside;
-* a model whose company cannot be named can be on no list;
+* a model no company can be said to run can be on no list;
 * an in-house provider is not a recipient and is always reached;
 * with no list, nothing changes — not the refusal, not the request sent to the router;
-* behind OpenRouter the request is pinned to the company's own endpoints, with no fallback and no
-  endpoint that keeps what it is sent.
+* behind OpenRouter the request is pinned to the endpoints of the companies named, and to no other's,
+  with no fallback and no endpoint that keeps what it is sent.
 """
 
 from __future__ import annotations
@@ -38,7 +40,9 @@ KEY = {"Authorization": "Bearer demo-key"}
 
 GEMINI = ("openrouter", "google/gemini-2.5-flash")
 CLAUDE = ("openrouter", "anthropic/claude-sonnet-4.5")
+GPT = ("openrouter", "openai/gpt-4o")
 INSIDE = ("sranai", "qwen3.8-27b-fp8")
+PIN = {"allow_fallbacks": False, "data_collection": "deny"}
 
 
 def _payload(model: str, meta: dict | None = None, **kw) -> ChatCompletionsRequest:
@@ -61,27 +65,32 @@ class _Spy:
 # ---------------------------------------------------------------------------
 
 
-def test_a_direct_route_is_its_own_company_and_a_router_names_two():
-    assert recipients.recipient_of("deepseek", "deepseek-v4-flash").key == "deepseek"
-    assert recipients.recipient_of("google", "gemini-2.5-flash").key == "google"
-    assert recipients.recipient_of(*GEMINI).key == "openrouter:google"
-    assert recipients.recipient_of(*CLAUDE).key == "openrouter:anthropic"
-    assert recipients.recipient_of("openrouter", "openai/gpt-4o").key == "openrouter:openai"
+def test_a_direct_route_is_its_own_company():
+    assert recipients.keys_of("deepseek", "deepseek-v4-flash") == ["deepseek"]
+    assert recipients.keys_of("google", "gemini-2.5-flash") == ["google"]
+
+
+def test_behind_the_router_a_model_has_a_recipient_for_each_company_that_can_run_it():
+    assert recipients.keys_of(*GEMINI) == ["openrouter:google"]
+    assert set(recipients.keys_of(*CLAUDE)) == {"openrouter:anthropic", "openrouter:amazon", "openrouter:google"}
+    assert set(recipients.keys_of(*GPT)) == {"openrouter:openai", "openrouter:microsoft"}
 
 
 def test_the_direct_route_and_the_routed_one_are_different_recipients():
-    assert recipients.recipient_of("google", "gemini-2.5-flash").key != recipients.recipient_of(*GEMINI).key
+    assert recipients.keys_of("google", "gemini-2.5-flash") != recipients.keys_of(*GEMINI)
 
 
-@pytest.mark.parametrize("model", ["openrouter/auto", "some-maker/some-model", "no-slash-at-all", ""])
-def test_a_model_whose_company_cannot_be_named_has_no_key(model):
-    r = recipients.recipient_of("openrouter", model)
-    assert (r.company, r.key) == ("", "")
+@pytest.mark.parametrize("model", ["openrouter/auto", "deepseek/deepseek-chat", "meta-llama/llama-3.3-70b-instruct",
+                                   "some-maker/some-model", "no-slash-at-all", ""])
+def test_a_model_no_company_can_be_said_to_run_has_no_key(model):
+    # (deepseek's and meta's models were answered by DeepInfra, Novita and Parasail: whoever hosts them that day)
+    assert recipients.keys_of("openrouter", model) == []
 
 
 def test_an_in_house_provider_is_not_a_recipient():
-    r = recipients.recipient_of(*INSIDE)
+    (r,) = recipients.recipients_of(*INSIDE)
     assert r.in_house and r.key == ""
+    assert recipients.keys_of(*INSIDE) == []
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +105,7 @@ def test_no_list_is_not_a_list_and_an_empty_one_is():
     assert recipients.asked({"allowed_recipients": []}) == frozenset()
 
 
-@pytest.mark.parametrize("value", [None, "openrouter:google", 7, {"openrouter:google": True}.keys().__class__])
+@pytest.mark.parametrize("value", [None, "openrouter:google", 7, b"openrouter:google"])
 def test_a_list_that_is_null_or_cannot_be_read_allows_nobody(value):
     # (null is what an empty list becomes in more than one language's JSON: it must never mean "did not ask")
     assert recipients.asked({"allowed_recipients": value}) == frozenset()
@@ -114,11 +123,24 @@ def test_a_recipient_on_the_list_is_reached_and_one_that_is_not_is_refused():
     meta = {"allowed_recipients": ["openrouter:google"]}
     recipients.require(*GEMINI, meta)
     with pytest.raises(NoAllowedProviderError) as e:
-        recipients.require(*CLAUDE, meta)
+        recipients.require(*GPT, meta)
     assert e.value.details["reason"] == "recipient_not_allowed"
-    assert e.value.details["recipient"] == "openrouter:anthropic"
+    assert set(e.value.details["recipients"]) == {"openrouter:openai", "openrouter:microsoft"}
     assert e.value.details["allowed_recipients"] == ["openrouter:google"]
     assert "Nothing was sent" in str(e.value)
+
+
+def test_the_maker_is_not_the_host():
+    # Amazon named: Anthropic's model may be run by Amazon — and the pin lets nobody else run it
+    recipients.require(*CLAUDE, {"allowed_recipients": ["openrouter:amazon"]})
+    assert recipients.router_pin(*CLAUDE, {"allowed_recipients": ["openrouter:amazon"]}) == {"only": ["amazon-bedrock"], **PIN}
+    # Anthropic named: Amazon may not
+    assert recipients.router_pin(*CLAUDE, {"allowed_recipients": ["openrouter:anthropic"]}) == {"only": ["anthropic"], **PIN}
+    # Microsoft named: OpenAI's model may be run by Azure, Anthropic's by nobody
+    recipients.require(*GPT, {"allowed_recipients": ["openrouter:microsoft"]})
+    assert recipients.router_pin(*GPT, {"allowed_recipients": ["openrouter:microsoft"]}) == {"only": ["azure"], **PIN}
+    with pytest.raises(NoAllowedProviderError):
+        recipients.require(*CLAUDE, {"allowed_recipients": ["openrouter:microsoft", "openrouter:openai"]})
 
 
 def test_the_route_alone_is_not_enough_and_neither_is_the_company_alone():
@@ -133,15 +155,17 @@ def test_the_route_alone_is_not_enough_and_neither_is_the_company_alone():
 def test_an_empty_list_reaches_nobody_outside_and_still_reaches_the_in_house_model():
     meta = {"allowed_recipients": []}
     recipients.require(*INSIDE, meta)
-    for provider, model in (GEMINI, CLAUDE, ("deepseek", "deepseek-v4-flash")):
+    for provider, model in (GEMINI, CLAUDE, GPT, ("deepseek", "deepseek-v4-flash")):
         with pytest.raises(NoAllowedProviderError):
             recipients.require(provider, model, meta)
 
 
-def test_a_model_whose_company_cannot_be_named_is_refused_whatever_the_list_holds():
-    for listed in (["openrouter:google", "openrouter:anthropic", "openrouter", "openrouter:", ""],):
+def test_a_model_no_company_can_be_said_to_run_is_refused_whatever_the_list_holds():
+    everything = ["openrouter:google", "openrouter:anthropic", "openrouter:amazon", "openrouter:openai", "openrouter:microsoft",
+                  "openrouter", "openrouter:", "openrouter:deepseek", "openrouter:meta", ""]
+    for model in ("openrouter/auto", "deepseek/deepseek-chat", "meta-llama/llama-3.3-70b-instruct"):
         with pytest.raises(NoAllowedProviderError) as e:
-            recipients.require("openrouter", "openrouter/auto", {"allowed_recipients": listed})
+            recipients.require("openrouter", model, {"allowed_recipients": everything})
         assert e.value.details["reason"] == "recipient_cannot_be_named"
 
 
@@ -160,8 +184,8 @@ def _dispatcher() -> tuple[ProviderDispatcher, dict[str, _Spy]]:
 @pytest.mark.asyncio
 async def test_the_dispatcher_does_not_call_a_provider_that_is_not_on_the_list():
     d, spies = _dispatcher()
-    route = RouteDecision(provider_name="openrouter", model_name=CLAUDE[1])
-    payload = _payload(CLAUDE[1], {"allowed_recipients": ["openrouter:google"]})
+    route = RouteDecision(provider_name="openrouter", model_name=GPT[1])
+    payload = _payload(GPT[1], {"allowed_recipients": ["openrouter:google"]})
     with pytest.raises(NoAllowedProviderError):
         await REAL_DISPATCH(d, route, payload, payload.messages)
     assert spies["openrouter"].calls == [], "a provider that was not named was called"
@@ -183,7 +207,7 @@ async def test_a_second_route_and_a_rescue_are_held_by_the_same_line():
     # every non-stream call leaves through dispatch(): a hop is refused there like a first attempt
     d, spies = _dispatcher()
     payload = _payload(GEMINI[1], {"allowed_recipients": ["openrouter:google"]})
-    for provider, model in (("deepseek", "deepseek-v4-flash"), CLAUDE, ("openrouter", "openrouter/auto")):
+    for provider, model in (("deepseek", "deepseek-v4-flash"), GPT, ("openrouter", "openrouter/auto")):
         with pytest.raises(NoAllowedProviderError):
             await REAL_DISPATCH(d, RouteDecision(provider_name=provider, model_name=model), payload, payload.messages)
     assert spies["deepseek"].calls == [] and spies["openrouter"].calls == []
@@ -200,9 +224,9 @@ async def test_the_boundary_refuses_the_primary_before_a_stream_begins_and_drops
     monkeypatch.setattr(fp, "effective_policy_async", _no_tenant_policy)
     meta = {"allowed_recipients": ["openrouter:google"]}
     with pytest.raises(NoAllowedProviderError):
-        await enforce_provider_boundary(RouteDecision(provider_name="openrouter", model_name=CLAUDE[1]), _payload(CLAUDE[1], meta), "t")
+        await enforce_provider_boundary(RouteDecision(provider_name="openrouter", model_name=GPT[1]), _payload(GPT[1], meta), "t")
     route = RouteDecision(provider_name="openrouter", model_name=GEMINI[1],
-                          fallbacks=[CLAUDE, INSIDE, ("deepseek", "deepseek-v4-flash"), ("openrouter", "google/gemini-2.5-pro")])
+                          fallbacks=[GPT, INSIDE, ("deepseek", "deepseek-v4-flash"), ("openrouter", "google/gemini-2.5-pro")])
     await enforce_provider_boundary(route, _payload(GEMINI[1], meta), "t")
     assert route.fallbacks == [INSIDE, ("openrouter", "google/gemini-2.5-pro")]
 
@@ -245,19 +269,30 @@ def test_http_the_same_request_with_no_list_is_served(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_openrouter_is_pinned_to_the_company_s_own_endpoints_when_recipients_are_named():
+def test_openrouter_is_pinned_to_the_endpoints_of_the_companies_named():
     a = OpenRouterAdapter()
     p = _payload(GEMINI[1], {"allowed_recipients": ["openrouter:google"]})
     body = a._build_body(p, p.messages, resolved_model=GEMINI[1])
-    assert body["provider"] == {"only": ["google-ai-studio", "google-vertex"], "allow_fallbacks": False, "data_collection": "deny"}
-    p = _payload(CLAUDE[1], {"allowed_recipients": ["openrouter:anthropic"]})
-    assert a._build_body(p, p.messages, resolved_model=CLAUDE[1])["provider"]["only"] == ["anthropic"]
+    assert body["provider"] == {"only": ["google-ai-studio", "google-vertex"], **PIN}
+    # two companies named that can run the model: the endpoints of both, and of no third
+    p = _payload(CLAUDE[1], {"allowed_recipients": ["openrouter:amazon", "openrouter:google", "openrouter:microsoft"]})
+    assert a._build_body(p, p.messages, resolved_model=CLAUDE[1])["provider"] == {"only": ["amazon-bedrock", "google-vertex"], **PIN}
 
 
-def test_another_company_hosting_the_same_model_is_not_one_of_its_endpoints():
-    for maker, (_company, endpoints) in recipients.OPENROUTER_MAKERS.items():
-        assert not {"azure", "amazon-bedrock", "together", "fireworks", "deepinfra", "groq"} & set(endpoints), maker
-    assert "google-vertex" not in recipients.OPENROUTER_MAKERS["anthropic"][1]
+def test_a_company_s_endpoints_are_its_own_and_no_other_s():
+    hosts = recipients.OPENROUTER_HOSTS
+    assert hosts["anthropic"]["anthropic"] == ("anthropic",)
+    assert hosts["anthropic"]["amazon"] == ("amazon-bedrock",)
+    assert hosts["openai"]["openai"] == ("openai",)
+    assert hosts["openai"]["microsoft"] == ("azure",)
+    for maker, companies in hosts.items():
+        seen: dict[str, str] = {}
+        for company, slugs in companies.items():
+            for s in slugs:
+                assert s not in seen, f"{maker}: the endpoint {s} is listed for {seen.get(s)} and for {company}"
+                seen[s] = company
+    # an open model's hosts change by the day: no entry, so no key
+    assert "deepseek" not in hosts and "meta-llama" not in hosts
 
 
 def test_with_no_list_the_request_to_openrouter_is_unchanged():
@@ -267,11 +302,11 @@ def test_with_no_list_the_request_to_openrouter_is_unchanged():
 
 
 # ---------------------------------------------------------------------------
-# the catalogue says who the recipient is
+# the catalogue says who the recipients are
 # ---------------------------------------------------------------------------
 
 
-def test_the_catalogue_names_each_model_s_recipient_and_none_for_an_in_house_model(monkeypatch):
+def test_the_catalogue_names_each_model_s_recipients_and_none_for_an_in_house_model(monkeypatch):
     from app.services.provider_key_service import ProviderKeyService
     from app.services.providers.model_registry import get_all_candidates
 
@@ -284,8 +319,7 @@ def test_the_catalogue_names_each_model_s_recipient_and_none_for_an_in_house_mod
     for m in r.json()["data"]:
         if m["provider"] == "gateway":  # (the gateway's own "auto": not a model that is sent anything)
             continue
-        want = recipients.recipient_of(m["provider"], m["id"])
-        assert m.get("recipient") == (want.key or None), m
-        assert m.get("recipient_company") == (None if want.in_house else (want.company or None)), m
+        assert m.get("recipients") == (recipients.keys_of(m["provider"], m["id"]) or None), m
+        assert "recipient" not in m and "recipient_company" not in m
         seen.add(m["provider"])
     assert {"openai", "anthropic", "openrouter"} <= seen, seen

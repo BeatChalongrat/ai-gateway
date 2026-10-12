@@ -69,8 +69,13 @@ Pass constraints via `metadata`:
 `allowed_providers` names routes. A route is not always the company that reads
 the request: behind a router (OpenRouter) a model is run by its maker or by a
 hosting company, and unless told otherwise the router picks one per request.
-A caller that must reach named recipients only sends a list of recipient keys
-— `<route>` for a direct provider, `<route>:<company>` behind a router:
+Measured on 13 Oct 2026 with this deployment's own key
+(`scripts/probes/AM16/openrouter_pin.py`): `anthropic/claude-sonnet-4.5` was
+answered by Amazon Bedrock, `openai/gpt-4o` by Azure, `deepseek/deepseek-chat`
+by DeepInfra, a Llama model by Parasail — only Google's models by their maker.
+So the company in a recipient is the one that **runs** the model. A caller that
+must reach named recipients only sends a list of recipient keys — `<route>` for
+a direct provider, `<route>:<company>` behind a router:
 
 ```json
 {
@@ -89,19 +94,28 @@ With the key present (`app/services/providers/recipients.py`):
   and a rescue by another model are held by the same line;
 - `openrouter:google` is not `google`: the company reached directly and the
   company reached through the router are two recipients;
-- a model whose company cannot be named — the router's own `auto`, a maker
-  that is not in the table — has no key, so it can be on no list
-  (`recipient_cannot_be_named`);
+- the maker is not the host: `openrouter:anthropic` lets Anthropic's own
+  endpoint run Claude and nobody else's; `openrouter:amazon` lets Amazon
+  Bedrock run it; `openrouter:microsoft` lets Azure run OpenAI's models. A
+  model is reached when any company that can run it is on the list;
+- a model no company can be said to run — the router's own `auto`, an open
+  model served by whoever hosts it that day (DeepSeek's, Meta's) — has no key,
+  so it can be on no list (`recipient_cannot_be_named`);
 - an empty list, `null`, or a value that is not a list means **nobody
   outside**. Only the key being absent means the caller did not ask;
-- the request to OpenRouter is pinned: `provider: {only: [the company's own
-  endpoints], allow_fallbacks: false, data_collection: "deny"}`. With none of
-  them up the request fails there; it is not re-routed to another host.
+- the request to OpenRouter is pinned: `provider: {only: [the endpoints of the
+  companies on the list that can run this model], allow_fallbacks: false,
+  data_collection: "deny"}`. With none of them up — or none let through by the
+  router account's own data policy — the request fails there (the gateway
+  answers 502 `provider_error`); it is not re-routed to another host. The
+  account this deployment uses allows zero-data-retention endpoints only,
+  which is why Anthropic's and OpenAI's own endpoints refuse and Bedrock and
+  Azure answer.
 
-`GET /v1/models` says each model's `recipient` and `recipient_company`, so a
-caller builds its list from the catalogue and types no names. Both are absent
-for an in-house model, and `recipient` is absent where the company cannot be
-named. `backend/tests/test_recipients.py` holds the refusals.
+`GET /v1/models` gives each model's `recipients` — the keys a list may hold
+for it — so a caller builds its list from the catalogue and types no names.
+The field is absent for an in-house model and for one no company can be said
+to run. `backend/tests/test_recipients.py` holds the refusals.
 
 ## Cost/Latency Scoring
 

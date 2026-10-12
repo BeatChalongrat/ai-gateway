@@ -2,25 +2,31 @@
 
 A provider row is a route. For a direct row the route and the company are one: what is sent to
 ``deepseek`` is seen by DeepSeek. A router is a route only: behind OpenRouter a model is run by its maker
-or by a hosting company, and unless it is told otherwise OpenRouter picks one per request — a page sent
-to ``google/gemini-2.5-flash`` through it is seen by OpenRouter and by whoever ran it.
+or by a hosting company, and unless it is told otherwise OpenRouter picks one per request. Measured on
+13 Oct 2026 with this deployment's own key (scripts/probes/AM16/openrouter_pin.py): a request for
+``anthropic/claude-sonnet-4.5`` was answered by Amazon Bedrock, ``openai/gpt-4o`` by Azure,
+``deepseek/deepseek-chat`` by DeepInfra and a Llama model by Parasail — none of them the maker, and
+nothing in the model's name said so. Only Google's models were run by Google.
 
-A caller that must reach named recipients only says so with ``metadata.allowed_recipients``: a list of
-recipient keys, ``<route>`` for a direct row and ``<route>:<company>`` behind a router. Then, and only
-then:
+So the company in a recipient is the one that RUNS the model, not the one that made it. A caller that
+must reach named recipients only says so with ``metadata.allowed_recipients``: a list of recipient keys,
+``<route>`` for a direct row and ``<route>:<company>`` behind a router. Then, and only then:
 
 * an in-house provider is not a recipient — nothing leaves — and is always allowed;
-* any other call is refused before anything is sent unless its recipient is on the list
+* any other call is refused before anything is sent unless a company that can run it is on the list
   (``no_allowed_provider``). The check is made where a provider's adapter is called, so the first
   attempt, a second route and a rescue by another model are held by the same line;
-* a model whose company cannot be named — a router's own "auto", a model with no maker's endpoint on
-  that router — has no key, so it can be on no list: with a list present it is refused;
-* the list present and empty means nobody outside. Absent, the caller did not ask and nothing changes;
-* behind a router the request is pinned (``router_pin``): the company's own endpoints only, no
-  falling back to another host, and no endpoint that keeps what it is sent.
+* behind a router the request is pinned (``router_pin``) to the endpoints of the companies on the
+  list — only those, no falling back to another host, and no endpoint that keeps what it is sent. With
+  none of them up, or none allowed by the router account's own data policy, the request fails at the
+  router; it is not re-routed;
+* a model no company in the table can be said to run — a router's own "auto", an open model served by
+  whoever hosts it that day — has no key, so it can be on no list: with a list present it is refused;
+* the list present and empty means nobody outside. Absent, the caller did not ask and nothing changes.
 
-The names of OpenRouter's endpoints are its own (GET https://openrouter.ai/api/v1/providers, read
-12 Oct 2026). A maker that is not in the table has no key here until someone adds it with its endpoint.
+The table holds what was seen to answer, and the names of the endpoints are OpenRouter's own
+(GET https://openrouter.ai/api/v1/providers). A maker or a host that is not in it has no key here until
+someone adds it — after seeing it answer.
 """
 
 from __future__ import annotations
@@ -36,46 +42,50 @@ METADATA_KEY = "allowed_recipients"
 # A route that hands the request on to another company.
 ROUTERS = frozenset({"openrouter"})
 
-# Behind OpenRouter: the maker named at the front of the model id -> (the company, OpenRouter's names for
-# that company's OWN endpoints). Another company hosting the same model (Azure for OpenAI's, Amazon or
-# Google for Anthropic's) is another recipient and is not listed.
-OPENROUTER_MAKERS: dict[str, tuple[str, tuple[str, ...]]] = {
-    "openai": ("openai", ("openai",)),
-    "anthropic": ("anthropic", ("anthropic",)),
-    "google": ("google", ("google-ai-studio", "google-vertex")),
-    "deepseek": ("deepseek", ("deepseek",)),
-    "x-ai": ("xai", ("xai",)),
-    "mistralai": ("mistral", ("mistral",)),
-    "meta-llama": ("meta", ("meta",)),
+# Behind OpenRouter: the maker named at the front of the model id -> the companies that can run its
+# models there, each with OpenRouter's names for that company's endpoints. The maker itself is one of
+# them where it serves its own models; a company hosting another's model is a recipient in its own right.
+OPENROUTER_HOSTS: dict[str, dict[str, tuple[str, ...]]] = {
+    "google": {"google": ("google-ai-studio", "google-vertex")},
+    "anthropic": {"anthropic": ("anthropic",), "amazon": ("amazon-bedrock",), "google": ("google-vertex",)},
+    "openai": {"openai": ("openai",), "microsoft": ("azure",)},
 }
 
 
 @dataclass(frozen=True)
 class Recipient:
-    """Where a call goes. ``key`` is what a list holds; "" when the company cannot be named."""
+    """Where a call may go. ``key`` is what a list holds."""
 
     route: str
-    company: str  # "" = cannot be named
+    company: str
     in_house: bool = False
 
     @property
     def key(self) -> str:
-        if self.in_house or not self.company:
+        if self.in_house:
             return ""
         return self.route if self.company == self.route else f"{self.route}:{self.company}"
 
 
-def recipient_of(provider: str, model: str) -> Recipient:
+def _maker(model: str) -> str:
+    return (model or "").split("/", 1)[0] if "/" in (model or "") else ""
+
+
+def recipients_of(provider: str, model: str) -> tuple[Recipient, ...]:
+    """Every company that may run this model on this route. Empty: no company can be named."""
     provider = (provider or "").strip()
     if provider in SELF_HOSTED_PROVIDERS:
-        return Recipient(route=provider, company=provider, in_house=True)
+        return (Recipient(route=provider, company=provider, in_house=True),)
     if provider == "openrouter":
-        maker = (model or "").split("/", 1)[0] if "/" in (model or "") else ""
-        company = OPENROUTER_MAKERS.get(maker, ("", ()))[0]
-        return Recipient(route=provider, company=company)
-    if provider in ROUTERS:  # a router nobody has written the table for: its company cannot be named
-        return Recipient(route=provider, company="")
-    return Recipient(route=provider, company=provider)
+        return tuple(Recipient(route=provider, company=c) for c in OPENROUTER_HOSTS.get(_maker(model), {}))
+    if provider in ROUTERS:  # a router nobody has written the table for: no company can be named
+        return ()
+    return (Recipient(route=provider, company=provider),)
+
+
+def keys_of(provider: str, model: str) -> list[str]:
+    """The recipient keys a list may hold for this model — none for an in-house one."""
+    return [r.key for r in recipients_of(provider, model) if not r.in_house]
 
 
 def asked(metadata: Any) -> frozenset[str] | None:
@@ -92,14 +102,15 @@ def asked(metadata: Any) -> frozenset[str] | None:
 
 
 def require(provider: str, model: str, metadata: Any) -> None:
-    """Refuse the call — before a byte is sent — when the caller named its recipients and this is not one."""
+    """Refuse the call — before a byte is sent — when the caller named its recipients and none of the
+    companies that can run this model is one of them."""
     allowed = asked(metadata)
     if allowed is None:
         return
-    r = recipient_of(provider, model)
-    if r.in_house:
+    possible = recipients_of(provider, model)
+    if any(r.in_house for r in possible):
         return
-    if r.key and r.key in allowed:
+    if any(r.key in allowed for r in possible):
         return
     raise NoAllowedProviderError(
         f"'{model}' on '{provider}' is not one of the recipients this request may reach. "
@@ -107,9 +118,9 @@ def require(provider: str, model: str, metadata: Any) -> None:
         details={
             "model": model,
             "model_provider": provider,
-            "recipient": r.key or None,
+            "recipients": [r.key for r in possible],
             "allowed_recipients": sorted(allowed),
-            "reason": "recipient_not_allowed" if r.key else "recipient_cannot_be_named",
+            "reason": "recipient_not_allowed" if possible else "recipient_cannot_be_named",
         },
     )
 
@@ -126,12 +137,16 @@ def allowed(provider: str, model: str, metadata: Any) -> bool:
 def router_pin(provider: str, model: str, metadata: Any) -> dict | None:
     """OpenRouter's ``provider`` object for a request that named its recipients, else ``None``.
 
-    Only the company's own endpoints, no fallback to another host, and only endpoints that do not keep
-    what they are sent. With none of them up the request fails at OpenRouter; it is not re-routed."""
-    if provider != "openrouter" or asked(metadata) is None:
+    Only the endpoints of the companies on the list that can run this model, no fallback to another
+    host, and only endpoints that do not keep what they are sent. With none of them available the
+    request fails at OpenRouter; it is not re-routed."""
+    named = asked(metadata)
+    if provider != "openrouter" or named is None:
         return None
-    maker = (model or "").split("/", 1)[0] if "/" in (model or "") else ""
-    endpoints = OPENROUTER_MAKERS.get(maker, ("", ()))[1]
+    endpoints: list[str] = []
+    for company, slugs in OPENROUTER_HOSTS.get(_maker(model), {}).items():
+        if f"{provider}:{company}" in named:
+            endpoints.extend(s for s in slugs if s not in endpoints)
     if not endpoints:
-        return None  # (no key either: ``require`` has refused this call already)
-    return {"only": list(endpoints), "allow_fallbacks": False, "data_collection": "deny"}
+        return None  # (no company of the list runs it: ``require`` has refused this call already)
+    return {"only": endpoints, "allow_fallbacks": False, "data_collection": "deny"}
