@@ -2,10 +2,15 @@
 
 // AM9 — each agent's own answer under the organisation's switch. The
 // organisation's switch stays the ceiling; an agent's own setting can only be
-// stricter (documents leave only when both allow it), and an agent that reads
-// accounting data is off until an admin turns it on here. Every change is an
-// admin's, written to the audit log before it is kept (chat-edge refuses it
-// otherwise).
+// stricter (documents leave only when both allow it), and every agent is off
+// until an admin turns it on here. Every change is an admin's, written to the
+// audit log before it is kept (chat-edge refuses it otherwise).
+//
+// AM16 — masking is a second switch beside it, per agent, and its own: it used
+// to follow the first (AM13b). Both are off by default. With masking off, what
+// leaves is sent as typed; with it on, text is masked and a page — an image,
+// which cannot be masked — is read inside only. The row says, in words, what
+// the two together mean for that agent now.
 
 import { useCallback, useEffect, useState } from "react";
 
@@ -37,10 +42,10 @@ export default function AgentEgressCard({ orgVersion }: { orgVersion: string }) 
   if (error && !rows) return <LoadError error={error} onRetry={load} />;
   if (!rows) return <Loading />;
 
-  const toggle = (row: AgentEgressRow) => {
+  const toggle = (row: AgentEgressRow, which: "leave" | "masked" = "leave") => {
     setBusy(row.slug);
     setMsg(null);
-    amAdmin.putEgress(row.slug, !row.agent).then(
+    (which === "masked" ? amAdmin.putMasked(row.slug, !row.masked) : amAdmin.putEgress(row.slug, !row.agent)).then(
       (r) => {
         setBusy(null);
         setRows((cur) => (cur ?? []).map((x) => (x.slug === row.slug ? { ...x, ...r.egress, slug: x.slug, name: x.name } : x)));
@@ -59,7 +64,7 @@ export default function AgentEgressCard({ orgVersion }: { orgVersion: string }) 
         {t("am.egress.title")}
       </h2>
       <p style={{ ...muted, marginTop: "0.25rem", maxWidth: "52rem", lineHeight: 1.6 }}>{t("am.egress.body")}</p>
-      {/* AM13b: the switch below also decides whether an agent's runs are masked — said where it is decided */}
+      {/* AM16: masking is its own switch beside this one — what each does, said where both are decided */}
       <p style={{ ...muted, marginTop: "0.5rem", maxWidth: "52rem", lineHeight: 1.6 }} data-testid="am-egress-masking">
         {t("am.egress.masking")}
       </p>
@@ -68,6 +73,7 @@ export default function AgentEgressCard({ orgVersion }: { orgVersion: string }) 
           <tr>
             <th style={{ textAlign: "left" }}>{t("am.egress.agent")}</th>
             <th style={{ textAlign: "left" }}>{t("am.egress.allow")}</th>
+            <th style={{ textAlign: "left" }}>{t("am.egress.masked")}</th>
             <th style={{ textAlign: "left" }}>{t("am.egress.now")}</th>
           </tr>
         </thead>
@@ -88,15 +94,38 @@ export default function AgentEgressCard({ orgVersion }: { orgVersion: string }) 
                   />
                   {r.agent_default && r.web && !r.agent ? (
                     <span style={muted}>{t("am.egress.web.default")}</span>
-                  ) : r.agent_default && r.accounting && !r.agent ? (
+                  ) : r.agent_default && !r.agent ? (
                     <span style={muted}>{t("am.egress.default")}</span>
                   ) : null}
                 </label>
               </td>
-              <td data-testid={`am-egress-now-${r.slug}`}>
+              <td>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: "0.45rem", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={!!r.masked}
+                    disabled={busy !== null}
+                    onChange={() => toggle(r, "masked")}
+                    data-testid={`am-masked-toggle-${r.slug}`}
+                  />
+                  {!r.masked ? <span style={muted}>{t("am.egress.masked.default")}</span> : null}
+                </label>
+              </td>
+              <td data-testid={`am-egress-now-${r.slug}`} data-leaves={r.effective ? "yes" : "no"} data-masked={r.masked ? "yes" : "no"}>
                 {/* AM12: an agent on the web does not send documents: it searches and opens pages outside */}
                 {r.web ? (r.effective ? t("am.egress.web.leaves") : t("am.egress.web.stays")) : r.effective ? t("am.egress.leaves") : t("am.egress.stays")}
                 {!r.effective && r.agent && !r.org ? <span style={muted}> · {t("am.egress.ceiling")}</span> : null}
+                {/* AM16: and how — as typed or masked — in the same cell, so the two switches read as one answer */}
+                <span data-testid={`am-masked-now-${r.slug}`}>
+                  {" · "}
+                  {r.masked
+                    ? r.effective && !r.web
+                      ? t("am.egress.how.maskedOut")
+                      : t("am.egress.how.masked")
+                    : r.effective
+                      ? t("am.egress.how.typedOut")
+                      : t("am.egress.how.typedIn")}
+                </span>
               </td>
             </tr>
           ))}

@@ -25,7 +25,7 @@ describe("the files card says whether what a model was sent was masked", () => {
     render(card({ ...rules, masking: "off" }));
     expect(box().getAttribute("data-masking")).toBe("off");
     expect(lines()).toContain(
-      "สิ่งที่ส่งให้โมเดลในรอบนี้ไม่ถูกปิดบัง — โมเดลอยู่ในองค์กร และ agent นี้ปิดการส่งข้อมูลออกนอกองค์กร",
+      "สิ่งที่ส่งให้โมเดลในรอบนี้ไม่ถูกปิดบัง — ส่งให้โมเดลในองค์กรเท่านั้น",
     );
     expect(box().textContent).not.toContain("ถูกปิดบังก่อนส่ง");
   });
@@ -33,13 +33,13 @@ describe("the files card says whether what a model was sent was masked", () => {
   it("egress on, or a model outside: masked first", () => {
     render(card({ uses: "text", choice: "auto", model: "deepseek-v4-flash", self_hosted: false, masking: "on" }));
     expect(box().getAttribute("data-masking")).toBe("on");
-    expect(lines()).toContain("ข้อมูลส่วนบุคคลในสิ่งที่ส่งให้โมเดลในรอบนี้ถูกปิดบังก่อนส่ง");
+    expect(lines()).toContain("ข้อมูลส่วนบุคคลในข้อความที่ส่งให้โมเดลในรอบนี้ถูกปิดบังก่อนส่ง");
     expect(box().textContent).not.toContain("ไม่ถูกปิดบัง");
   });
 
   it("some steps of each: says exactly that", () => {
     render(card({ ...rules, masking: "mixed" }));
-    expect(lines()).toContain("รอบนี้บางขั้นตอนปิดบังข้อมูลส่วนบุคคลก่อนส่งให้โมเดล บางขั้นตอนส่งให้โมเดลในองค์กรโดยไม่ปิดบัง");
+    expect(lines()).toContain("รอบนี้บางขั้นตอนปิดบังข้อมูลส่วนบุคคลก่อนส่งให้โมเดล บางขั้นตอนไม่ปิดบัง");
   });
 
   it("no word from the gateway — no model was called, or an older round: nothing is claimed either way", () => {
@@ -62,11 +62,11 @@ describe("the files card says whether what a model was sent was masked", () => {
     useI18nStore.setState({ locale: "en" });
     render(card({ ...rules, masking: "off" }));
     expect(lines()).toContain(
-      "What was sent to a model in this run was not masked — the model runs in the organisation and this agent's data may not leave it",
+      "What was sent to a model in this run was not masked — it went only to a model in the organisation",
     );
     cleanup();
     render(card({ ...rules, masking: "on" }));
-    expect(lines()).toContain("Personal data in what was sent to a model in this run was masked first");
+    expect(lines()).toContain("Personal data in the text sent to a model in this run was masked first");
     expect(box().textContent).not.toMatch(/[฀-๿]/);
   });
 });

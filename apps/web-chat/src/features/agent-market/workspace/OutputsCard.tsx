@@ -18,6 +18,7 @@ import { formatBytes } from "@/lib/fileUtil";
 
 import { amApi, errorMessage } from "../api";
 import { useAmT, type AmKey } from "../i18n";
+import { SentOutUnmasked } from "./SentOut";
 import { extensionOf, formatMoney, formatMoney2 } from "../format";
 import { COMPLETED_OPEN, delivered } from "../outcome";
 import type { NotIncluded, OutputArtifact, OutputsPayload, QualityCheck } from "../types";
@@ -152,6 +153,9 @@ export function OutputsCard({
       ) : outputs.rerender ? (
         <p className="mt-1 text-xs text-text-secondary">{t("outputs.rerender")}</p>
       ) : null}
+
+      {/* AM16: this run's documents left the organisation as typed — said here, not in the folded details */}
+      {outputs.model?.sent_out_unmasked ? <SentOutUnmasked /> : null}
 
       {isDraft ? (
         <div role={finishedOpen ? "status" : "alert"} className="mt-2 rounded-lg border border-status-warning/40 bg-status-warning/10 px-3 py-2.5" data-testid="am-outputs-draft">
@@ -394,9 +398,10 @@ export function SeenBy({ outputs }: { outputs: OutputsPayload }) {
         : t("outputs.noneInstead", { chosen: m.chosen_model }),
     );
   }
-  // AM13b: which of the two this round used — said only when a model was called, in the gateway's own word
+  // AM13b: what was done with the text of this run's model calls — said only when a model was called, in
+  // the gateway's own word. AM16: "not masked" says it stayed inside only when nothing was sent out.
   const masking = m.masking === "off" || m.masking === "on" || m.masking === "mixed" ? m.masking : null;
-  if (masking) lines.push(t(MASKING_LINE[masking]));
+  if (masking) lines.push(t(masking === "off" && m.sent_out_unmasked ? "outputs.masking.offOut" : MASKING_LINE[masking]));
   return (
     <div className="mt-2 flex flex-col gap-0.5" data-testid="am-outputs-seen-by" data-masking={masking ?? undefined}>
       {lines.map((l) => (

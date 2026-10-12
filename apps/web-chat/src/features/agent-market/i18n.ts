@@ -24,6 +24,7 @@ import { am9En, am9Th } from "./i18n.am9";
 import { am11bEn, am11bTh } from "./i18n.am11b";
 import { am12En, am12Th } from "./i18n.am12";
 import { am15En, am15Th } from "./i18n.am15";
+import { am16En, am16Th } from "./i18n.am16";
 
 const thBase = {
   // common
@@ -1589,8 +1590,8 @@ const enBase = {
 } as const satisfies Record<keyof typeof thBase, string>;
 
 // AM3's strings (self-serve) and the later cards' live in their own files, merged here.
-const th = { ...thBase, ...am3Th, ...am4Th, ...am5Th, ...am6Th, ...am9Th, ...am12Th, ...am11bTh, ...am15Th } as const;
-const en = { ...enBase, ...am3En, ...am4En, ...am5En, ...am6En, ...am9En, ...am12En, ...am11bEn, ...am15En } as const;
+const th = { ...thBase, ...am3Th, ...am4Th, ...am5Th, ...am6Th, ...am9Th, ...am12Th, ...am11bTh, ...am15Th, ...am16Th } as const;
+const en = { ...enBase, ...am3En, ...am4En, ...am5En, ...am6En, ...am9En, ...am12En, ...am11bEn, ...am15En, ...am16En } as const;
 
 export type AmKey = keyof typeof th;
 
@@ -1615,6 +1616,7 @@ export const amParts = {
   "i18n.am12.ts": { th: am12Th, en: am12En },
   "i18n.am11b.ts": { th: am11bTh, en: am11bEn },
   "i18n.am15.ts": { th: am15Th, en: am15En },
+  "i18n.am16.ts": { th: am16Th, en: am16En },
 } as const;
 
 export type AmT = (key: AmKey, vars?: Record<string, string>) => string;

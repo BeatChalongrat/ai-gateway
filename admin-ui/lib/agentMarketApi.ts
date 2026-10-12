@@ -297,6 +297,10 @@ export interface AgentEgressRow {
   web?: boolean;
   effective: boolean;
   words: string;
+  /** AM16: the admin's own masking switch for the agent — off unless turned on; it does not follow `agent` */
+  masked?: boolean;
+  /** AM16: a page image may be read by an outside model — needs `effective` and masking off (an image cannot be masked) */
+  pages_may_leave?: boolean;
 }
 
 // ── AM12: agents that work on the web ────────────────────────────────────
@@ -379,6 +383,9 @@ export const amAdmin = {
   egress: (): Promise<{ org: boolean; agents: AgentEgressRow[] }> => chatEdge.get(`${AM}/egress`),
   putEgress: (slug: string, documentsMayLeave: boolean): Promise<{ slug: string; egress: AgentEgressRow }> =>
     chatEdge.put(`${AM}/egress/${seg(slug)}`, { documents_may_leave: documentsMayLeave }),
+  // AM16 — the agent's masking switch: its own request, and its own line in the audit log
+  putMasked: (slug: string, masked: boolean): Promise<{ slug: string; egress: AgentEgressRow }> =>
+    chatEdge.put(`${AM}/egress/${seg(slug)}`, { masked }),
   // AM12 — agents that work on the web: one run's ceilings, the sites never opened, the organisation's
   // suppliers, and where each run went
   web: (): Promise<AdminWeb> => chatEdge.get(`${AM}/web`),

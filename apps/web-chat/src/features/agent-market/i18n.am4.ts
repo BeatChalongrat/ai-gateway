@@ -76,9 +76,9 @@ export const am4Th = {
   "where.inOrg": "ในองค์กร",
   "where.outside": "นอกองค์กร",
   // AM13b: masking follows where the data goes — which of the two this round used (what the gateway did)
-  "outputs.masking.off": "สิ่งที่ส่งให้โมเดลในรอบนี้ไม่ถูกปิดบัง — โมเดลอยู่ในองค์กร และ agent นี้ปิดการส่งข้อมูลออกนอกองค์กร",
-  "outputs.masking.on": "ข้อมูลส่วนบุคคลในสิ่งที่ส่งให้โมเดลในรอบนี้ถูกปิดบังก่อนส่ง",
-  "outputs.masking.mixed": "รอบนี้บางขั้นตอนปิดบังข้อมูลส่วนบุคคลก่อนส่งให้โมเดล บางขั้นตอนส่งให้โมเดลในองค์กรโดยไม่ปิดบัง",
+  "outputs.masking.off": "สิ่งที่ส่งให้โมเดลในรอบนี้ไม่ถูกปิดบัง — ส่งให้โมเดลในองค์กรเท่านั้น",
+  "outputs.masking.on": "ข้อมูลส่วนบุคคลในข้อความที่ส่งให้โมเดลในรอบนี้ถูกปิดบังก่อนส่ง",
+  "outputs.masking.mixed": "รอบนี้บางขั้นตอนปิดบังข้อมูลส่วนบุคคลก่อนส่งให้โมเดล บางขั้นตอนไม่ปิดบัง",
 
   // what the agent's model is for (AM6: the menu itself is the chat's; its two lines are in i18n.am6.ts)
   "model.label": "โมเดลที่อ่านเอกสาร",
@@ -192,9 +192,9 @@ export const am4En = {
   "where.inOrg": "in the organisation",
   "where.outside": "outside the organisation",
   // AM13b: masking follows where the data goes — which of the two this round used (what the gateway did)
-  "outputs.masking.off": "What was sent to a model in this run was not masked — the model runs in the organisation and this agent's data may not leave it",
-  "outputs.masking.on": "Personal data in what was sent to a model in this run was masked first",
-  "outputs.masking.mixed": "In this run some steps masked personal data before sending it to a model; others sent it unmasked to a model in the organisation",
+  "outputs.masking.off": "What was sent to a model in this run was not masked — it went only to a model in the organisation",
+  "outputs.masking.on": "Personal data in the text sent to a model in this run was masked first",
+  "outputs.masking.mixed": "In this run some steps masked personal data before sending it to a model; others did not",
 
   // what the agent's model is for (AM6: the menu itself is the chat's; its two lines are in i18n.am6.ts)
   "model.label": "Model that reads the documents",

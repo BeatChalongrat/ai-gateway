@@ -49,14 +49,13 @@ describe("per-agent egress", () => {
     expect(now.textContent).toMatch(/does not allow it|องค์กรไม่อนุญาต/);
   });
 
-  // AM13b: the same switch decides whether an agent's runs are masked — an admin is told where they decide it
-  it("says, at the switch, that it also decides masking: inside = not masked, may go out = masked", async () => {
+  // AM16: masking is no longer decided by this switch (egress.am16.test.tsx holds the second switch) —
+  // and the sentence at the switch no longer says it is
+  it("no longer says that this switch decides masking", async () => {
     api.egress.mockResolvedValue({ org: false, agents: [row({ org: false, agent: false, agent_default: true })] });
     wrap(<AgentEgressCard orgVersion="c" />);
     const said = (await screen.findByTestId("am-egress-masking")).textContent ?? "";
-    expect(said).toMatch(/also decides masking|กำหนดการปิดบังข้อมูลด้วย/);
-    expect(said).toMatch(/is not masked|ไม่ถูกปิดบัง/);
-    expect(said).toMatch(/masked before any model sees it|ปิดบังก่อนถึงทุกโมเดล/);
-    expect(said).toMatch(/card says which of the two was done|การ์ดของแต่ละรอบบอกว่ารอบนั้นทำแบบไหน/);
+    expect(said).not.toMatch(/also decides masking|กำหนดการปิดบังข้อมูลด้วย/);
+    expect(said).toMatch(/its own switch|สวิตช์ของตัวเอง/);
   });
 });

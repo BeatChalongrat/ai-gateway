@@ -25,6 +25,7 @@ import { cls } from "../ui";
 import { runHref } from "./context";
 import { aboutTime } from "./Estimate";
 import { personText } from "./personText";
+import { SentOutUnmasked } from "./SentOut";
 
 const STEP_STATUS: Record<string, AmKey> = {
   done: "stepStatus.done",
@@ -175,6 +176,9 @@ export function ProgressCard({
           </div>
         ) : null}
       </div>
+
+      {/* AM16: on the face of the run's own card, as soon as it has happened */}
+      {progress.sent_out_unmasked ? <SentOutUnmasked /> : null}
 
       {steps.length ? (
         <ol className="mt-2.5 flex flex-col gap-1.5">

@@ -598,6 +598,11 @@ export interface ProgressPayload {
   elapsed_ms?: number;
   awaiting_ms?: number;
   steps?: { key: string; label: string; status: ProgressStepStatus | string; detail?: string }[] | null;
+  /**
+   * AM16: something of this run was sent to a model outside the organisation as it was typed — text
+   * that was not masked, or the image of a page. Said on the face of the card.
+   */
+  sent_out_unmasked?: boolean;
 }
 
 export interface OutputArtifact {
@@ -652,11 +657,13 @@ export interface OutputsModel {
   /** AM12 (uses "web"): the models that read the request and the saved pages, in the order they answered */
   web?: { model: string; self_hosted?: boolean }[] | null;
   /**
-   * AM13b: what the gateway did with the text of this round's model calls — "off": sent as typed to an in-house
-   * model (the agent's data may not leave), "on": masked first, "mixed": some of each. Absent: no model was called
-   * (or a card older than this).
+   * AM13b: what the gateway did with the TEXT of this round's model calls — "off": sent as typed, "on": masked
+   * first, "mixed": some of each. Absent: no model was called (or a card older than this). AM16: it says nothing
+   * of where the text went — see sent_out_unmasked.
    */
   masking?: "off" | "on" | "mixed" | string;
+  /** AM16: as ProgressPayload.sent_out_unmasked, on the card of the files */
+  sent_out_unmasked?: boolean;
 }
 
 /** AM4: one conversation with an installed agent (the first has no id). */
