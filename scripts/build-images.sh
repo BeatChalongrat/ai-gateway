@@ -36,6 +36,9 @@
 #                      throwaway check build: --image fix126-check-web-chat
 #   --no-cache         pass --no-cache to docker build
 #
+# On battery the build is refused and nothing is built (scripts/ops/power.sh);
+# RUN_ON_BATTERY=yes on the command runs it anyway.
+#
 # Services: web-chat chat-edge-api gateway backend worker mcp-gateway
 #   ner-service dlp-sidecar rate-limiter log-worker mock-provider admin-ui
 #   portal sandbox backup kb-models
@@ -67,6 +70,8 @@ done
 if [ -n "$IMAGE_OVERRIDE" ] && [ ${#SERVICES[@]} -ne 1 ]; then
   echo "--image names ONE service's image; got ${#SERVICES[@]} services" >&2; exit 2
 fi
+# Nothing heavy starts on battery (scripts/ops/power.sh): refused here, before anything is built.
+bash "$(dirname "${BASH_SOURCE[0]}")/ops/power.sh" need "the image build (${SERVICES[*]})" || exit 3
 
 # First interpreter that actually runs (on Windows `python3` can be the
 # Microsoft Store stub, which exists on PATH but only prints a hint).

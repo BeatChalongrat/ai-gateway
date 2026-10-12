@@ -47,6 +47,9 @@
 # restart never pages at top priority. DEPLOY_MAINTENANCE_CMD overrides the
 # command (it receives `start <minutes> "<reason>"` / `stop`); set it to "" to skip.
 #
+# On battery the deploy is refused and nothing is touched (scripts/ops/power.sh);
+# RUN_ON_BATTERY=yes on the command runs it anyway. A --dry-run is not refused.
+#
 # Never touches the checkout's files; builds from `git archive` (build-images.sh).
 set -euo pipefail
 
@@ -80,6 +83,9 @@ done
 export MSYS_NO_PATHCONV=1
 ROOT=$(git rev-parse --show-toplevel)
 cd "$ROOT"
+# Nothing heavy starts on battery (scripts/ops/power.sh): a deploy the battery cuts short leaves live
+# between two images. Refused here, before an image is built or a container is touched.
+[ "$DRY" = 1 ] || bash scripts/ops/power.sh need "the backend deploy" || exit 3
 DC=(docker compose -p "$PROJECT" "${FILES[@]}")
 BRIDGE="${PROJECT}-backend-bridge"
 GRACE=${DEPLOY_STOP_GRACE:-200}

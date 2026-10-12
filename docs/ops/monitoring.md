@@ -370,6 +370,28 @@ started at 06:30 on a morning the laptop was left unplugged);
 `scripts/smoke-register-task.ps1` now sets both, and the task has to be
 registered again for that to take effect.
 
+**Nothing heavy starts on battery.** The page above tells a person; it does not
+stop a tool. On battery the machine runs at about half speed (the backend lane:
+510 s against 321 s on mains), and a deploy the battery cuts short leaves live
+between two images. Until 12 Oct 2026 the rule was a line to read — the power
+was printed before a lane, it said "battery", and the lane ran. So the tools
+ask for themselves: `scripts/ops/power.sh need "<what>"` exits 0 on mains (and
+on a machine with no battery) and says `REFUSED`, exit 3, on battery or when
+the power cannot be read. The backend deploy (`scripts/deploy-backend.sh`) and
+the image build (`scripts/build-images.sh`) ask it before they touch anything.
+To run one of them on battery anyway, say so on that one command:
+
+```bash
+RUN_ON_BATTERY=yes scripts/deploy-backend.sh --image ai-gateway-backend:1a2b3c4
+```
+
+The word is `yes` and nothing else; it is read from the command's own
+environment and from no file, and the command says on its first line that it
+is running on battery because it was told to. There is no setting that says
+"this is mains". What is not refused: the daily smoke (it is the monitor, and
+must run on a morning the laptop was left unplugged), one test file run by
+hand, and a `--dry-run`. `scripts/tests/test_power_on_battery.py` holds it.
+
 Why the turn rules live here as well as in `alert_rules`: until FIX130 the
 gateway's `request_logs` only recorded requests that reached a provider. On
 the test stack, 12 turns with every model dead produced 12 failed assistant

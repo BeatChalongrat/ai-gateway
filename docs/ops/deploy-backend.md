@@ -137,6 +137,10 @@ scripts/deploy-backend.sh                 # build HEAD from git archive, deploy 
 scripts/deploy-backend.sh --rev 1a2b3c4   # a specific commit
 ```
 
+On battery the script says `REFUSED` and exits 3 before it builds an image or
+touches a container (`scripts/ops/power.sh`; `docs/ops/monitoring.md`, "The
+host's power"). `RUN_ON_BATTERY=yes` on the command runs it anyway.
+
 What it does:
 
 1. refuses a compose shape that runs `--reload` (the dev file);
