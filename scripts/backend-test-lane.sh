@@ -6,7 +6,10 @@
 #
 # * the checkout's backend/ is mounted READ-ONLY at /app, with the cross-tree
 #   paths some tests read (docs, examples, chat-edge Go source, desktop
-#   sources, compose files, infra, the DLP parity fixtures);
+#   sources, compose files, infra, the DLP parity fixtures, and the privacy
+#   sidecar's word lists and source — fourteen tests that hold the Python
+#   detectors' lists to the sidecar's were skipped in every lane for want
+#   of that mount);
 # * --network none: nothing in the lane can reach a database, Redis, a
 #   provider or an alert channel (FIX90: a test run inside the live container
 #   once migrated the live database; FIX130: the lane paged the owner);
@@ -25,6 +28,7 @@ mkdir -p "$ROOT/backend/uploads/avatars"
 docker run --rm --network none -e APP_ENV=test -e PYTHONDONTWRITEBYTECODE=1 -w /app \
   -v "$ROOT/backend:/app:ro" \
   -v "$ROOT/docs:/docs:ro" -v "$ROOT/examples:/examples:ro" \
+  -v "$ROOT/dlp-sidecar/data:/dlp-sidecar/data:ro" -v "$ROOT/dlp-sidecar/src:/dlp-sidecar/src:ro" \
   -v "$ROOT/services/chat-edge-api:/services/chat-edge-api:ro" \
   -v "$ROOT/SranDesktop/src:/SranDesktop/src:ro" -v "$ROOT/apps/desktop/src:/apps/desktop/src:ro" \
   -v "$ROOT/docker-compose.yml:/docker-compose.yml:ro" \
