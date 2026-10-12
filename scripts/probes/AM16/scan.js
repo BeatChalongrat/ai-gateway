@@ -103,9 +103,12 @@ async function run(tag, opt) {
     console.log(`model choice ${opt.model}: ${r.status}${r.status >= 400 ? ` ${(r.text || "").slice(0, 200)}` : ""}${menu.error ? ` (menu: ${menu.error})` : ""}`);
     if (r.status >= 400) { fs.writeFileSync(path.join(OUT, `${tag}.json`), JSON.stringify({ tag, opt, switches: sw, refused: { status: r.status, body: (r.text || "").slice(0, 400) } }, null, 1)); return; }
   }
-  const file = opt.file ? path.resolve(opt.file) : SCAN;
-  const id = await upload(installId, file);
-  const sent = await call("POST", `/installs/${installId}/messages`, { text: opt.say || "", file_ids: [id] });
+  // the scan by default; an agent named with --agent and no --file gets its own sample files
+  const files = opt.file ? [path.resolve(opt.file)] : opt.agent ? (st.files || []).map((rel) => path.join(PKG, dir, rel)) : [SCAN];
+  const file = files[0];
+  const ids = [];
+  for (const f of files) ids.push(await upload(installId, f));
+  const sent = await call("POST", `/installs/${installId}/messages`, { text: opt.say || "", file_ids: ids });
   const runId = sent.run_id || sent.run?.id;
   if (!runId) throw new Error(`no run started: ${JSON.stringify(sent).slice(0, 240)}`);
   console.log(`${tag}: ${m.id} ${m.version}, install ${installId.slice(0, 8)}, run ${runId.slice(0, 8)}, file ${path.basename(file)}`);
@@ -122,7 +125,7 @@ async function run(tag, opt) {
   d = await call("GET", `/runs/${runId}`);
   const steps = (d.steps || []).map((s) => {
     const o = s.output && typeof s.output === "object" ? s.output : {};
-    return { name: s.name, status: s.status, model_id: s.model_id || "", masking: o.masking ?? null, left_unmasked: o.left_unmasked ?? null, model: o.model ?? null,
+    return { name: s.name, status: s.status, model_id: s.model_id || "", masking: o.masking ?? null, left_unmasked: o.sent_out_unmasked ?? null, model: o.model ?? null,
       fields: fieldsOf(o), error: (s.error || o.error || "").toString().slice(0, 300) || undefined, raw: JSON.stringify(o).slice(0, 700) };
   });
   const asks = (d.clarifications || []).map((c) => ({ status: c.status, kind: c.kind || c.payload?.kind, questions: (c.questions || c.payload?.questions || []).map((q) => `${q.reason || q.kind || ""}:${q.field || q.id || ""}`).slice(0, 12) }));
@@ -134,16 +137,25 @@ async function run(tag, opt) {
     rows = gw(`select ${want.map((c) => `coalesce(${c}::text,'')`).join(" || '|' || ")} from request_logs where created_at > ${lit(startedAt)} order by created_at`).split(/\r?\n/).filter(Boolean)
       .map((l) => Object.fromEntries(l.split("|").map((v, i) => [want[i], v])));
   } catch (e) { rows = [{ error: String(e.message).slice(0, 200) }]; }
+  // what the run's own cards say, as the thread holds them
+  const thread = await call("GET", `/installs/${installId}/thread`).catch(() => ({}));
+  const items = (thread.items || thread.thread?.items || []).filter((i) => (i.payload?.run_id || i.run_id) === runId);
+  const progress = items.find((i) => i.kind === "progress")?.payload || {};
+  const outputs = items.filter((i) => i.kind === "outputs").pop()?.payload || null;
+  const cards = { progress_sent_out_unmasked: progress.sent_out_unmasked === true, outputs_model: outputs ? { model: outputs.model?.model, vision_model: outputs.model?.vision_model, masking: outputs.model?.masking, sent_out_unmasked: outputs.model?.sent_out_unmasked === true } : null,
+    notices: items.filter((i) => i.kind === "notice").map((i) => `${i.payload?.reason || ""}: ${String(i.payload?.text?.th || i.payload?.text || "").slice(0, 110)}`) };
   const out = { tag, at: new Date().toISOString(), opt, switches: sw, agent: m.id, version: m.version, install: installId, seconds: Math.round((Date.now() - t0) / 1000),
-    run: { id: runId, status: d.run.status, reason: d.run.status_reason, model_used: d.run.model_used, model_self_hosted: d.run.model_self_hosted }, steps, asks, gateway_rows: rows };
+    run: { id: runId, status: d.run.status, reason: d.run.status_reason, model_used: d.run.model_used, model_self_hosted: d.run.model_self_hosted }, steps, asks, cards, gateway_rows: rows };
   fs.writeFileSync(path.join(OUT, `${tag}.json`), JSON.stringify(out, null, 1));
   console.log(`\n${tag}: run ${runId.slice(0, 8)} ${d.run.status}${d.run.status_reason ? ` (${d.run.status_reason})` : ""} in ${out.seconds} s`);
   for (const s of steps) {
-    if (!s.model_id && !s.masking && !Object.keys(s.fields).length && !s.error) continue;
-    console.log(`  step ${s.name.slice(0, 44).padEnd(44)} ${String(s.status).padEnd(9)} model="${s.model_id}" masking=${s.masking}${s.left_unmasked !== null ? ` left_unmasked=${s.left_unmasked}` : ""}${s.error ? ` error=${s.error.slice(0, 160)}` : ""}`);
+    if (!s.model_id && !s.masking && !s.left_unmasked && !Object.keys(s.fields).length && !s.error) continue;
+    console.log(`  step ${s.name.slice(0, 44).padEnd(44)} ${String(s.status).padEnd(9)} model="${s.model_id}" masking=${s.masking}${s.left_unmasked !== null ? ` sent_out_unmasked=${s.left_unmasked}` : ""}${s.error ? ` error=${s.error.slice(0, 160)}` : ""}`);
     if (Object.keys(s.fields).length) console.log(`       read: ${JSON.stringify(s.fields).slice(0, 420)}`);
   }
-  for (const a of asks) console.log(`  asks the person [${a.status}] ${a.kind || ""}: ${a.questions.join(", ")}`);
+  console.log(`  the run's card says its documents were sent outside unmasked: ${cards.progress_sent_out_unmasked}${cards.outputs_model ? ` · the files card: ${JSON.stringify(cards.outputs_model)}` : ""}`);
+  for (const n of cards.notices) console.log(`  notice ${n}`);
+  console.log(`  asks the person: ${asks.reduce((n, a) => n + a.questions.length, 0)} question(s)`);
   for (const r of rows) console.log(`  gateway: ${Object.entries(r).filter(([k]) => k !== "created_at").map(([k, v]) => `${k}=${v}`).join(" ").slice(0, 260)}`);
 }
 

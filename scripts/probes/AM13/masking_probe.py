@@ -14,6 +14,9 @@ what happened to the sentence:
     python scripts/probes/AM13/masking_probe.py closed:qwen3.8-27b-fp8 none:qwen3.8-27b-fp8 closed:deepseek-v4-flash
 
 A leg is "<header>:<model>", header = closed (X-Sran-Egress: closed) or none. No key is printed.
+AM16: also off / on (X-Sran-Masking, the caller's own word on masking) and closed+off, closed+on:
+
+    python scripts/probes/AM13/masking_probe.py off:deepseek-v4-flash on:deepseek-v4-flash closed+off:deepseek-v4-flash off:qwen3.8-27b-fp8
 """
 from __future__ import annotations
 
@@ -78,8 +81,13 @@ def sql(q: str) -> str:
 
 def leg(header: str, model: str, system: str = SYSTEM, sentence: str = SENTENCE, keep: int = 40) -> dict:
     headers = {"Authorization": "Bearer " + KEY, "Content-Type": "application/json", "X-Sran-Fallback": "off"}
-    if header == "closed":
-        headers["X-Sran-Egress"] = "closed"
+    # AM16: a leg's header is one or more words joined by "+": closed (X-Sran-Egress: closed), off / on
+    # (X-Sran-Masking — the caller's own word on masking), none
+    for word in header.split("+"):
+        if word == "closed":
+            headers["X-Sran-Egress"] = "closed"
+        elif word in ("off", "on"):
+            headers["X-Sran-Masking"] = word
     body = json.dumps({"model": model, "stream": False, "max_tokens": 4000, "reasoning": {"mode": "off"},
                        "messages": [{"role": "system", "content": system}, {"role": "user", "content": sentence}]}).encode("utf-8")
     req = urllib.request.Request(GATEWAY + "/v1/chat/completions", data=body, headers=headers)
