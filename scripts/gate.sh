@@ -7,6 +7,7 @@
 # lane takes 41 minutes and passes.
 #
 # So a gate is this script and nothing beside it. Every phase:
+#   * is refused on battery — before the lock, and again before each lane of a run (scripts/ops/power.sh);
 #   * takes the lock — a second heavy phase does not start while one runs;
 #   * waits for the host to have GATE_MIN_FREE_MB free (default 3000), and gives up saying so;
 #   * stops what the phase does not need (a lane runs with the test stack stopped);
@@ -30,6 +31,10 @@
 #
 # A card says what is its own:  GATE_RESULTS (where the files go) · GATE_IT (its integration lane, run
 # after the AM10 and web chunks).
+#
+# On battery: every phase but preflight and stack-stop says REFUSED and exits 3 having started nothing.
+# Until 12 Oct 2026 the power was a line printed before a lane; it said "battery" and the lane ran, at
+# half speed. To run one phase on battery anyway:  RUN_ON_BATTERY=yes bash scripts/gate.sh <phase> …
 #
 # AM15 — the backend lane is the suite, not a list. Until then a card named the backend files its lane
 # ran (GATE_BACKEND_TESTS, ten of 418), and a test in any other file could fail for months with no lane
@@ -63,7 +68,14 @@ free_mb() { # the host's free memory: Windows' own figure, or the kernel's on a 
 say() { printf '%s gate %s\n' "$(date -u +%H:%M:%SZ)" "$*"; }
 test_containers() { docker ps --format '{{.Names}}' | grep -E '^sran-test-|^sran-agent-market-test-' || true; }
 
+power() { # nothing heavy starts on battery: refused outright, or run because the command itself said so
+  local line
+  line=$(bash scripts/ops/power.sh need "$1" 2>&1) || { say "$line"; exit 3; }
+  [ -n "$line" ] && say "$line"
+  return 0
+}
 lock() {
+  power "gate $1"
   if ! mkdir "$LOCK" 2>/dev/null; then
     say "REFUSED: another heavy phase holds the lock ($(cat "$LOCK/what" 2>/dev/null || echo unknown)) — one at a time. Stale? rmdir after checking: $LOCK"
     exit 3
@@ -73,6 +85,7 @@ lock() {
 }
 room() { # wait for the host to have room; give up saying how much it had
   local waited=0 f
+  power "the gate's next step" # (a run of lanes is an hour: the charger can be pulled between two of them)
   while :; do
     f=$(free_mb); f=${f:-0}
     [ "$f" -ge "$MIN_FREE" ] && { say "host has ${f} MB free (needs ${MIN_FREE})"; return 0; }

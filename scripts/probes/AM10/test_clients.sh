@@ -24,6 +24,8 @@ dotenv() { grep "^$1=" .env | cut -d= -f2- | tr -d '\r\n'; }
 
 case "${1:-}" in
   build)
+    # on battery nothing is built (scripts/ops/power.sh); RUN_ON_BATTERY=yes on the command runs it anyway
+    bash scripts/ops/power.sh need "the test clients' build" || exit 3
     TMP_DIR="$(mktemp -d)"
     trap 'rm -rf "$TMP_DIR"' EXIT
     git archive "$REV" apps/web-chat admin-ui | tar -x -C "$TMP_DIR"

@@ -24,6 +24,8 @@ for a in "$@"; do
 done
 IMAGE=ai-gateway-doc-converter
 FONTS="services/chat-edge-api/scripts/fonts/Sarabun-Regular.ttf services/chat-edge-api/scripts/fonts/Sarabun-Bold.ttf"
+# on battery nothing is built (scripts/ops/power.sh); RUN_ON_BATTERY=yes on the command runs it anyway
+bash "$ROOT/scripts/ops/power.sh" need "the document converter's image build" || exit 3
 native() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT

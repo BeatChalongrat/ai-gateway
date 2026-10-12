@@ -13,6 +13,8 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -W 2>/dev/null || pwd)"
 IMAGE="${AM_SANDBOX_IMAGE:-ai-gateway-sandbox:latest}"
+# on battery the lane does not start (scripts/ops/power.sh); RUN_ON_BATTERY=yes on the command runs it anyway
+bash "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/ops/power.sh" need "the engine's Python lane" || exit 3
 MSYS_NO_PATHCONV=1 docker run --rm --network none \
   -e HOME=/tmp -e MPLCONFIGDIR=/tmp/mpl -e PYTHONDONTWRITEBYTECODE=1 \
   -v "$ROOT/backend:/src:ro" -w /src \

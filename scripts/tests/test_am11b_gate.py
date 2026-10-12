@@ -32,8 +32,16 @@ class GateTest(unittest.TestCase):
         self.marker = self.tmp / "ran"
 
     def gate(self, *args: str, **env: str) -> subprocess.CompletedProcess:
-        e = {**os.environ, "GATE_LOCK": (self.tmp / "lock").as_posix(), "GATE_RESULTS": (self.tmp / "results").as_posix(),
+        # AM16: a phase is refused on battery before it looks at the lock, so what these hold is asked on
+        # mains whatever the machine running the test is plugged into (a stand-in answers for Windows)
+        folder = self.tmp / "bin"
+        folder.mkdir(exist_ok=True)
+        (folder / "powershell").write_text("#!/bin/sh\necho 'Online 1 100'\n", encoding="utf-8", newline="\n")
+        os.chmod(folder / "powershell", 0o755)
+        e = {**os.environ, "PATH": str(folder) + os.pathsep + os.environ.get("PATH", ""),
+             "GATE_LOCK": (self.tmp / "lock").as_posix(), "GATE_RESULTS": (self.tmp / "results").as_posix(),
              "GATE_WAIT_S": "0", **env}
+        e.pop("RUN_ON_BATTERY", None)
         return subprocess.run([BASH, "scripts/gate.sh", *args], cwd=ROOT, env=e, capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=120)
 

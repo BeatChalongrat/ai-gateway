@@ -413,6 +413,8 @@ bash scripts/gate.sh backup             # a live backup with its restore drill (
 
 Every phase:
 
+- is refused on battery (AM16): `REFUSED`, exit 3, before the lock, having started nothing — and a run
+  of lanes asks again before each lane, so a charger pulled an hour in stops the next one;
 - takes a lock, and a second phase is refused while one holds it (exit 3, saying who holds it);
 - stops the test stack first when it does not need it (lanes, the integration lane, builds);
 - waits for 3,000 MB free on the host (`GATE_MIN_FREE_MB`), handing the VM's cache back once, and
@@ -422,8 +424,18 @@ Every phase:
 - writes one file under `GATE_RESULTS` and prints one verdict line.
 
 A card sets `GATE_RESULTS` and `GATE_IT` (its own integration lane, run after the two standing
-chunks; the default is the newest card's, `scripts/probes/AM15/it_lane.sh`).
+chunks; the default is the newest card's, `scripts/probes/AM16/it_lane.sh`).
 `scripts/tests/test_am11b_gate.py` holds the lock and the stop, without Docker.
+
+**On battery nothing heavy starts (AM16).** On 12 Oct 2026 the power was printed in front of
+`gate.sh lanes backend_lane`; it said "battery" and the lane ran. The check is now in the tools
+(`scripts/ops/power.sh`, described in `docs/ops/monitoring.md`): every phase above but `preflight` and
+`stack-stop`, the swap of a live service (`scripts/probes/AM10/swap.sh` — the runner too, asked through
+its health check: `swap.sh agent-runner health:sran-agent-runner -p sran-agent-market -f
+docker-compose.agent-market.yml --profile agent-market`), the runner's, fetcher's and converter's image
+builds, the engine's Python lane, bringing the test stack up and building its clients. To run one of
+them on battery anyway: `RUN_ON_BATTERY=yes` on that command — it says on its output that it did.
+`scripts/tests/test_am16_gate_on_battery.py` holds it, with six ways of breaking the rule shown red.
 
 **The backend lane is the suite, not a list (AM15).** A card used to name the backend files its lane
 ran (`GATE_BACKEND_TESTS`); a test in any other file could fail for months with no lane to say so.
