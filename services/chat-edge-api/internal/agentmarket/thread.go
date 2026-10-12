@@ -179,6 +179,10 @@ type Progress struct {
 	ElapsedMS  int64          `json:"elapsed_ms"`
 	AwaitingMS int64          `json:"awaiting_ms"`
 	Steps      []ProgressStep `json:"steps"`
+	// SentOutUnmasked (AM16): something of this run was sent to a model outside the organisation as it
+	// was typed — text that was not masked, or the image of a page (an image is never masked). Said on
+	// the face of the run's card as soon as it has happened, whatever the run then comes to.
+	SentOutUnmasked bool `json:"sent_out_unmasked,omitempty"`
 }
 
 // QueuedProgress is the progress card of a run that has not started.
@@ -223,10 +227,22 @@ type OutputsModel struct {
 	// Web (AM12, Uses "web"): the models that read the request and the saved pages in a round on the
 	// web, in the order they first answered. Empty: no model answered (a sample round reads none).
 	Web []OutputsWebModel `json:"web,omitempty"`
-	// Masking (AM13b): what the gateway did with the text of this round's model calls — MaskingOff when
-	// every call reached an in-house model as typed (nothing could leave: the agent's egress is off),
-	// MaskingOn when every call was masked, MaskingMixed when some were. Empty: no model was called.
+	// Masking (AM13b): what the gateway did with the TEXT of this round's model calls — MaskingOff when
+	// every call's text reached its model as typed, MaskingOn when every call's was masked,
+	// MaskingMixed when some were. Empty: no model was called. (AM16: it says nothing of where the
+	// text went, and nothing of pages — see SentOutUnmasked.)
 	Masking string `json:"masking,omitempty"`
+	// SentOutUnmasked (AM16): as Progress.SentOutUnmasked, on the card of the files.
+	SentOutUnmasked bool `json:"sent_out_unmasked,omitempty"`
+}
+
+// ReasonSentOut marks the thread's notice that an answer's question and figures left as typed (AM16).
+const ReasonSentOut = "sent_out_unmasked"
+
+// SentOutAnswerNotice is said beside an answer whose question, and the figures it was answered from,
+// went to a model outside the organisation as typed (AM16). A run says the same on its own card.
+func SentOutAnswerNotice() PersonText {
+	return Text("คำถามนี้และตัวเลขของรอบที่ถามถึง ถูกส่งให้โมเดลนอกองค์กรโดยไม่ได้ปิดบังข้อมูล")
 }
 
 // What a round's card says about masking (OutputsModel.Masking).

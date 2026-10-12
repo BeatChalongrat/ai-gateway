@@ -261,7 +261,8 @@ func (m *ModelClient) Vision(ctx context.Context, model, prompt string, images [
 				"image_url": map[string]any{"url": "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(img)}})
 		}
 		m.yield(ctx)
-		c, err := m.send(ctx, model, []any{map[string]any{"role": "user", "content": parts}}, 0, 2000)
+		// AM16 (masking.go): this call carries the image of a page, which nothing masks
+		c, err := m.send(withPages(ctx), model, []any{map[string]any{"role": "user", "content": parts}}, 0, 2000)
 		spent += c.CostUSD
 		tokens += c.Tokens
 		if err != nil {
@@ -300,17 +301,34 @@ func (m *ModelClient) send(ctx context.Context, model string, messages any, temp
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Client-Name", "agent-runner")
 	req.Header.Set(FallbackOptOutHeader, FallbackOptOutValue)
-	// AM13b (masking.go): this call's data may not leave the organisation and the model is in-house —
-	// nothing leaves, so the gateway is told and does not mask. Any other call is masked as before.
+	// AM16 (masking.go): the gateway is told what the admin's two switches say for this agent. Masking
+	// on: nothing more is said — every gateway masks a request that says nothing. Masking off: the
+	// gateway is asked to send the text as typed, and — when the data may not leave and the model is
+	// in-house — told so (the header an older gateway already knows: for it nothing changes).
 	calls := modelCallsOf(ctx)
-	if calls != nil && calls.closed && m.IsSelfHosted(model) {
-		req.Header.Set(EgressHeader, EgressClosed)
+	outside := !m.IsSelfHosted(model)
+	if calls != nil {
+		if calls.masked {
+			req.Header.Set(AskMaskingHeader, maskingOn)
+		} else {
+			req.Header.Set(AskMaskingHeader, maskingOff)
+			if calls.closed && !outside {
+				req.Header.Set(EgressHeader, EgressClosed)
+			}
+		}
 	}
+	// What left the organisation as typed: a page image always does when the model is outside (nothing
+	// masks an image); text does when it was not to be masked. A call that failed after the provider
+	// may have been sent it counts — the card must never say less than what happened.
+	asTyped := carriesPages(ctx) || (calls != nil && !calls.masked)
 	start := time.Now()
 	resp, err := m.HTTP.Do(req)
 	if err != nil {
 		if run.Err() != nil {
 			return Completion{}, err
+		}
+		if outside && asTyped {
+			calls.noteSentOut()
 		}
 		// AM15: no response at all — refused, reset, or nothing within the call's own time
 		return Completion{}, &unreachable{why: err}
@@ -318,6 +336,9 @@ func (m *ModelClient) send(ctx context.Context, model string, messages any, temp
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode >= 400 {
+		if outside && asTyped && !refusedBeforeSending(resp.StatusCode) {
+			calls.noteSentOut()
+		}
 		refused := fmt.Errorf("gateway %d: %s", resp.StatusCode, trim(string(raw), 200))
 		if awayStatus(resp.StatusCode, raw) {
 			return Completion{}, &unreachable{why: refused}
@@ -325,7 +346,15 @@ func (m *ModelClient) send(ctx context.Context, model string, messages any, temp
 		return Completion{}, refused
 	}
 	// what the gateway DID with the text, in its own words; no word from it means masked
-	calls.note(resp.Header.Get(MaskingHeader) == maskingOff)
+	gatewayUnmasked := resp.Header.Get(MaskingHeader) == maskingOff
+	calls.note(gatewayUnmasked)
+	// until the answer says who gave it, the model asked for is who was sent it
+	sentOut := outside && (carriesPages(ctx) || gatewayUnmasked)
+	defer func() {
+		if sentOut {
+			calls.noteSentOut()
+		}
+	}()
 	var out struct {
 		Model   string `json:"model"`
 		Cached  bool   `json:"cached"`
@@ -370,6 +399,11 @@ func (m *ModelClient) send(ctx context.Context, model string, messages any, temp
 	used := out.Model
 	if used == "" {
 		used = model
+	}
+	// the model that answered is the one that was sent it — also when it is not the one asked for
+	// (the same model under a provider's prefix is the one asked for)
+	if !sameModel(used, model) {
+		sentOut = !m.IsSelfHosted(used) && (carriesPages(ctx) || gatewayUnmasked)
 	}
 	if !sameModel(used, model) {
 		// AM4: an answer from a model other than the one asked for is never

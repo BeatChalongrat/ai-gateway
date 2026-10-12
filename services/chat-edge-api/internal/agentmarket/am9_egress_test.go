@@ -27,7 +27,9 @@ func TestAM9AnAgentsOwnSettingOnlyNarrowsTheOrganisations(t *testing.T) {
 		{"organisation on, an accounting agent never set", true, fin, nil, false, false, true},
 		{"organisation on, an accounting agent an admin opened", true, fin, &yes, true, true, false},
 		{"organisation on, another agent closed", true, ops, &no, false, false, false},
-		{"organisation on, another agent never set", true, ops, nil, true, true, true},
+		// AM16: an agent nobody has set is off whatever it touches (until then: on, unless accounting or the web)
+		{"organisation on, another agent never set", true, ops, nil, false, false, true},
+		{"organisation on, another agent an admin opened", true, ops, &yes, true, true, false},
 	} {
 		e := EgressOf(c.org, c.m, c.set)
 		if e.Org != c.org || e.Agent != c.agent || e.Effective != c.eff || e.AgentDefault != c.df || e.Words.Empty() {

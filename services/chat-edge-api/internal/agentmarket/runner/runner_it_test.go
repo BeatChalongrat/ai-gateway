@@ -68,6 +68,7 @@ type itEnv struct {
 	// as the real one does; unset, it says nothing at all (a gateway older than the rule)
 	egressMu       sync.Mutex
 	egressSaid     []string
+	maskingSaid    []string // AM16: what the same calls said about masking (X-Sran-Masking)
 	egressMark     string
 	rounds         int
 	gatewayHonours atomic.Bool
@@ -115,9 +116,11 @@ func envOr(k, d string) string {
 // the guard passes) unless the test asks it to lie.
 func (e *itEnv) fakeModel(w http.ResponseWriter, r *http.Request) {
 	e.calls.Add(1)
-	said := r.Header.Get(EgressHeader)
+	// (as the real gateway answers a caller it knows — backend app/services/dlp/in_house.py: "off" is
+	// sent as typed, "on" is masked, and the older header alone is read as before)
+	said, masking := r.Header.Get(EgressHeader), r.Header.Get(AskMaskingHeader)
 	if e.gatewayHonours.Load() {
-		if said == EgressClosed {
+		if masking == maskingOff || (masking == "" && said == EgressClosed) {
 			w.Header().Set(MaskingHeader, "off")
 		} else {
 			w.Header().Set(MaskingHeader, "on")
@@ -140,6 +143,7 @@ func (e *itEnv) fakeModel(w http.ResponseWriter, r *http.Request) {
 		e.egressMu.Lock()
 		if e.egressMark == "" || strings.Contains(string(body), e.egressMark) {
 			e.egressSaid = append(e.egressSaid, said)
+			e.maskingSaid = append(e.maskingSaid, masking)
 		}
 		e.egressMu.Unlock()
 	}

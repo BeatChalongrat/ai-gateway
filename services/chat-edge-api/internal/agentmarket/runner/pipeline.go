@@ -37,6 +37,10 @@ type runCtx struct {
 	// docsMayLeave (AM4): the organisation lets this round's data go to a
 	// model outside it. Off by default: only in-house models see anything.
 	docsMayLeave bool
+	// masked (AM16): the admin's own switch for this agent — personal data in what the round sends to a
+	// model is masked first. Off by default; it no longer follows docsMayLeave (masking.go). A page
+	// image cannot be masked, so while this is on pages are read by an in-house model only (choice.go).
+	masked bool
 	// modelAway (AM15): this job has just found no model reachable to read a person's typed words
 	// (jobs.go replyToAsked) — a second question of the same model in the same job is not put.
 	modelAway bool
@@ -317,8 +321,8 @@ func (r *Runner) load(ctx context.Context, run am.Run, log *slog.Logger) (*runCt
 	// AM6: the install's settings — the ones its agent declares included — over
 	// the defaults of the manifest of the version the run is pinned to
 	engineDefaults, remembered := am.EngineDefaults(pkg.Manifest, defs)
-	rc := &runCtx{ctx: ctx, r: r, run: run, install: in, engine: eng, pkg: pkg, defaults: engineDefaults, remembered: remembered, log: log,
-		docsMayLeave: r.docsMayLeave(ctx, in.OrgID, in.Slug, pkg.Manifest)}
+	rc := &runCtx{ctx: ctx, r: r, run: run, install: in, engine: eng, pkg: pkg, defaults: engineDefaults, remembered: remembered, log: log}
+	rc.docsMayLeave, rc.masked = r.switchesOf(ctx, in.OrgID, in.Slug, pkg.Manifest)
 	rc.selfTestSettings()
 	return rc, rc.reloadAnswers(ctx)
 }
@@ -442,25 +446,28 @@ func (rc *runCtx) step(ctx context.Context, name, kind, key string, input any, c
 	if costly {
 		// AM3: the person's, their department's and the install's month.
 		if err := rc.budgetCheck(ctx); err != nil {
-			_ = rc.r.Store.FinishStep(ctx, st.ID, "failed", nil, "budget_paused: "+err.Error(), "", "", 0)
+			_ = rc.r.Store.FinishStep(ctx, st.ID, "failed", stampSentOut(nil, sentOutStamped(st.Output)), "budget_paused: "+err.Error(), "", "", 0)
 			return nil, err
 		}
 	}
-	// AM13b (masking.go): every model call a step makes carries whether the round's data may leave,
-	// and what the gateway did with each is written beside the step's output
-	stepCtx, calls := withModelCalls(ctx, !rc.docsMayLeave)
+	// AM16 (masking.go): every model call a step makes carries what the admin's two switches say, and
+	// what happened to each is written beside the step's output. What left the organisation as typed is
+	// written beside a FAILED step too — the page left, whatever became of the step — and what an
+	// earlier attempt of the same step sent is kept when the step is run again.
+	sentBefore := sentOutStamped(st.Output)
+	stepCtx, calls := withModelCalls(ctx, !rc.docsMayLeave, rc.masked)
 	out, credits, script, model, err := fn(stepCtx)
 	if err != nil {
 		msg := err.Error()
 		if ctx.Err() != nil {
 			msg = "stopped: " + msg
 		}
-		_ = rc.r.Store.FinishStep(context.Background(), st.ID, "failed", nil, trim(msg, 1500), script, model, credits)
+		_ = rc.r.Store.FinishStep(context.Background(), st.ID, "failed", stampSentOut(nil, sentBefore || calls.wentOut()), trim(msg, 1500), script, model, credits)
 		rc.r.syncProgress(context.Background(), rc.run.ID)
 		return nil, err
 	}
 	b, _ := json.Marshal(out)
-	b = stampMasking(b, calls.masking())
+	b = stampSentOut(stampMasking(b, calls.masking()), sentBefore || calls.wentOut())
 	if err := rc.r.Store.FinishStep(ctx, st.ID, "succeeded", b, "", script, model, credits); err != nil {
 		return nil, err
 	}

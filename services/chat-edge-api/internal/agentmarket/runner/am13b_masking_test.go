@@ -36,42 +36,52 @@ func gatewayThatSays(t *testing.T, masking func(r *http.Request) string, got *[]
 	return s
 }
 
-// AM13b: the header that says "this data may not leave" is sent only when BOTH are true — the round's
-// egress is off and the model called is in-house. Everything else is sent as before, to be masked.
-func TestEgressClosedIsSaidOnlyForAnInHouseModelOfARoundWhoseDataMayNotLeave(t *testing.T) {
+// AM16 (AM13b's rule, separated): the gateway is told what the admin's two switches say. Masking is its
+// own word — "off" asks for the text as typed, "on" for it masked — and "this data may not leave" is
+// said only when BOTH are true: the round's egress is off and the model called is in-house. While
+// masking is on the second header is not sent at all: a gateway older than AM16 reads it as "send this
+// as typed", and every gateway masks a request that does not send it.
+func TestTheGatewayIsToldWhatTheTwoSwitchesSay(t *testing.T) {
 	var got []http.Header
 	s := gatewayThatSays(t, func(*http.Request) string { return "" }, &got)
 	m := &ModelClient{BaseURL: s.URL, APIKey: "k", Primary: "qwen3.8-27b-fp8", Fallback: "deepseek-v4-flash",
 		SelfHosted: map[string]bool{"qwen3.8-27b-fp8": true}, Timeout: 5 * time.Second, HTTP: http.DefaultClient}
-	closed, _ := withModelCalls(context.Background(), true)
-	open, _ := withModelCalls(context.Background(), false)
+	with := func(closed, masked bool) context.Context {
+		ctx, _ := withModelCalls(context.Background(), closed, masked)
+		return ctx
+	}
 	for _, c := range []struct {
-		what  string
-		ctx   context.Context
-		model string
-		want  string
+		what        string
+		ctx         context.Context
+		model       string
+		wantMasking string
+		wantEgress  string
 	}{
-		{"egress off · in-house model", closed, "qwen3.8-27b-fp8", EgressClosed},
-		{"egress off · a model outside", closed, "deepseek-v4-flash", ""},
-		{"egress on · in-house model", open, "qwen3.8-27b-fp8", ""},
-		{"egress on · a model outside", open, "deepseek-v4-flash", ""},
-		{"a call nobody marked", context.Background(), "qwen3.8-27b-fp8", ""},
+		{"stays inside, not masked (the default) · in-house model", with(true, false), "qwen3.8-27b-fp8", maskingOff, EgressClosed},
+		{"stays inside, not masked · a model outside (never picked: choice.go)", with(true, false), "deepseek-v4-flash", maskingOff, ""},
+		{"may leave, not masked · in-house model", with(false, false), "qwen3.8-27b-fp8", maskingOff, ""},
+		{"may leave, not masked · a model outside", with(false, false), "deepseek-v4-flash", maskingOff, ""},
+		{"stays inside, masked · in-house model", with(true, true), "qwen3.8-27b-fp8", maskingOn, ""},
+		{"may leave, masked · in-house model", with(false, true), "qwen3.8-27b-fp8", maskingOn, ""},
+		{"may leave, masked · a model outside", with(false, true), "deepseek-v4-flash", maskingOn, ""},
+		{"a call nobody marked", context.Background(), "qwen3.8-27b-fp8", "", ""},
 	} {
 		got = got[:0]
 		if _, _, err := m.CompleteWith(c.ctx, []string{c.model}, "s", "u", nil); err != nil {
 			t.Fatalf("%s: %v", c.what, err)
 		}
-		if len(got) != 1 || got[0].Get(EgressHeader) != c.want {
-			t.Fatalf("%s: %s = %q, want %q", c.what, EgressHeader, got[0].Get(EgressHeader), c.want)
+		if len(got) != 1 || got[0].Get(AskMaskingHeader) != c.wantMasking || got[0].Get(EgressHeader) != c.wantEgress {
+			t.Fatalf("%s: %s = %q (want %q), %s = %q (want %q)", c.what, AskMaskingHeader, got[0].Get(AskMaskingHeader), c.wantMasking,
+				EgressHeader, got[0].Get(EgressHeader), c.wantEgress)
 		}
 	}
 	// and a page image (Vision) is a model call like any other
 	got = got[:0]
-	if _, err := m.Vision(closed, "qwen3.8-27b-fp8", "read", [][]byte{{0xff, 0xd8}}, nil); err != nil {
+	if _, err := m.Vision(with(true, false), "qwen3.8-27b-fp8", "read", [][]byte{{0xff, 0xd8}}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got[0].Get(EgressHeader) != EgressClosed {
-		t.Fatalf("vision: %q", got[0].Get(EgressHeader))
+	if got[0].Get(EgressHeader) != EgressClosed || got[0].Get(AskMaskingHeader) != maskingOff {
+		t.Fatalf("vision: %q %q", got[0].Get(EgressHeader), got[0].Get(AskMaskingHeader))
 	}
 }
 
@@ -89,7 +99,7 @@ func TestWhatTheGatewayDidIsWhatIsNoted(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	ctx, calls := withModelCalls(context.Background(), true)
+	ctx, calls := withModelCalls(context.Background(), true, false)
 	if calls.masking() != "" {
 		t.Fatal("no call yet")
 	}
@@ -106,7 +116,7 @@ func TestWhatTheGatewayDidIsWhatIsNoted(t *testing.T) {
 	}
 	// the runner asked (egress off, in-house) and the gateway did not say it complied: masked
 	for _, silent := range []string{"", "on", "OFF ", "yes"} {
-		ctx2, calls2 := withModelCalls(context.Background(), true)
+		ctx2, calls2 := withModelCalls(context.Background(), true, false)
 		say = silent
 		ask(ctx2)
 		if calls2.masking() != am.MaskingOn {
@@ -117,7 +127,7 @@ func TestWhatTheGatewayDidIsWhatIsNoted(t *testing.T) {
 	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "x", http.StatusBadGateway) }))
 	t.Cleanup(down.Close)
 	m.BaseURL = down.URL
-	ctx3, calls3 := withModelCalls(context.Background(), true)
+	ctx3, calls3 := withModelCalls(context.Background(), true, false)
 	if _, _, err := m.CompleteWith(ctx3, []string{"qwen3.8-27b-fp8"}, "s", "u", nil); err == nil || calls3.masking() != "" {
 		t.Fatalf("a failed call: err=%v noted %q", err, calls3.masking())
 	}

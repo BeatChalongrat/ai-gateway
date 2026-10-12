@@ -185,6 +185,13 @@ func (rc *runCtx) mayUse(model string) bool {
 	return model != "" && (rc.r.Model.IsSelfHosted(model) || rc.docsMayLeave)
 }
 
+// mayRead: this model may be given the image of a page of the round's documents. An image cannot be
+// masked (the gateway masks text), so while the admin's masking switch for the agent is on a page is
+// read inside the organisation only — whatever the other switch says (AM16).
+func (rc *runCtx) mayRead(model string) bool {
+	return model != "" && (rc.r.Model.IsSelfHosted(model) || (rc.docsMayLeave && !rc.masked))
+}
+
 // visionModel is the model that reads this round's scans and photos, and
 // whether it is not the one chosen (the chosen one is not allowed now or
 // cannot read images). "" = none may read them (OCR on the organisation's
@@ -199,10 +206,10 @@ func (rc *runCtx) visionModel() (model string, notChosen bool) {
 		return "", false
 	}
 	c := rc.choice()
-	if c != am.ModelAuto && m.readsImages(c) && rc.mayUse(c) {
+	if c != am.ModelAuto && m.readsImages(c) && rc.mayRead(c) {
 		return c, false
 	}
-	if rc.mayUse(m.VisionModel) {
+	if rc.mayRead(m.VisionModel) {
 		return m.VisionModel, c != am.ModelAuto && c != m.VisionModel
 	}
 	return "", c != am.ModelAuto
@@ -244,8 +251,19 @@ func (rc *runCtx) chosenModel() string {
 // organisation — the organisation's switch and, under it, the agent's own
 // (AM9: off by default for an agent that touches accounting).
 func (r *Runner) docsMayLeave(ctx context.Context, org, slug string, m am.Manifest) bool {
+	leave, _ := r.switchesOf(ctx, org, slug, m)
+	return leave
+}
+
+// switchesOf is what the admin's two switches say for this agent's rounds (AM16): whether its
+// documents may leave, and whether personal data is masked before a model reads it. A setting that
+// cannot be read is the careful one of each: nothing leaves, and what is sent is masked.
+func (r *Runner) switchesOf(ctx context.Context, org, slug string, m am.Manifest) (mayLeave, masked bool) {
 	e, err := r.Store.EgressFor(ctx, orgOrDefault(org), slug, m)
-	return err == nil && e.Effective
+	if err != nil {
+		return false, true
+	}
+	return e.Effective, e.Masked
 }
 
 func orgOrDefault(org string) string {

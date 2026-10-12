@@ -103,9 +103,13 @@ func TestModelMenuListsEveryModelThatCanDoTheJob(t *testing.T) {
 			t.Errorf("%q is still sent: %v", k, p[k])
 		}
 	}
-	// the organisation lets documents leave: nothing is blocked, and nothing says so
+	// the organisation lets documents leave, and so does this agent's own switch (AM16: off for every
+	// agent until an admin turns it on): nothing is blocked, and nothing says so
 	if code, body := e.do("PUT", "/admin/org", map[string]any{"documents_may_leave": true}); code != 200 {
 		t.Fatalf("admin: %d %v", code, body)
+	}
+	if code, body := e.do("PUT", "/admin/egress/sran.financial-report", map[string]any{"documents_may_leave": true}); code != 200 {
+		t.Fatalf("admin, the agent's own switch: %d %v", code, body)
 	}
 	_, p = e.do("GET", "/installs/"+id+"/models", nil)
 	if got := menuOf(t, p); got != "deepseek=allowed gpt-4o=allowed qwen=allowed typhoon=allowed" || p["blocked_reason"] != "" {

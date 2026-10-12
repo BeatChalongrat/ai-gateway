@@ -19,7 +19,16 @@ import (
 // and the agent that reads suppliers' invoices should not share one answer.
 // The organisation's switch stays the ceiling; each agent has a setting under
 // it that can only be stricter — documents leave only when both allow it. An
-// agent nobody has set takes its default: off when it touches accounting.
+// agent nobody has set takes its default: off (AM16: for every agent; until
+// then an agent that touched neither accounting nor the web defaulted to on).
+//
+// AM16 — masking is the admin's second switch for the agent, and its own.
+// Until then it followed the first one (AM13b): documents that could leave
+// were masked, documents that could not were sent to the in-house model as
+// typed. The owner separated them: reading a document correctly matters more
+// than masking it on the way, so documents that leave are sent as typed
+// unless an admin turns masking on for that agent. Both are off by default,
+// and each change of either is written to the audit log.
 
 // Egress is whether one agent's documents may go to a model outside the
 // organisation, with both levels a person sees where they choose a model.
@@ -38,6 +47,19 @@ type Egress struct {
 	// Effective: documents of this agent may go to an outside model.
 	Effective bool       `json:"effective"`
 	Words     PersonText `json:"words"`
+	// Masked (AM16): the admin's own choice for this agent — personal data in the text this agent sends
+	// to a model is masked first. Off unless an admin turns it on.
+	Masked bool `json:"masked"`
+	// PagesMayLeave (AM16): the image of a page of this agent's documents may be read by a model
+	// outside the organisation. An image cannot be masked, so this needs Effective AND masking off.
+	PagesMayLeave bool `json:"pages_may_leave"`
+}
+
+// WithMasked puts the admin's masking switch beside the leave switch.
+func (e Egress) WithMasked(masked bool) Egress {
+	e.Masked = masked
+	e.PagesMayLeave = e.Effective && !masked
+	return e
 }
 
 // TouchesAccounting is whether an agent reads accounting data: every agent
@@ -53,10 +75,12 @@ func EgressOf(orgMayLeave bool, m Manifest, set *bool) Egress {
 	if set != nil {
 		e.Agent = *set
 	} else {
+		// AM16: off for every agent nobody has set — the owner's "both off by default"
 		e.AgentDefault = true
-		e.Agent = !e.Accounting && !e.Web
+		e.Agent = false
 	}
 	e.Effective = e.Org && e.Agent
+	e.PagesMayLeave = e.Effective
 	if e.Web {
 		// AM12: for an agent that works on the web the same switch decides whether it may search and open
 		// pages at all, and the words say that
@@ -75,6 +99,8 @@ func EgressOf(orgMayLeave bool, m Manifest, set *bool) Egress {
 	switch {
 	case !e.Org:
 		e.Words = Text("องค์กรไม่อนุญาตให้ส่งเอกสารไปโมเดลนอกองค์กร agent นี้จึงใช้ได้เฉพาะโมเดลในองค์กร")
+	case !e.Agent && e.AgentDefault && !e.Accounting:
+		e.Words = Text("องค์กรอนุญาตให้ส่งเอกสารไปโมเดลนอกองค์กรได้ แต่ agent นี้ยังไม่ได้เปิดให้ส่งออก ซึ่งเป็นค่าตั้งต้น — ผู้ดูแลเปิดให้ agent นี้ได้ที่แอปผู้ดูแลระบบ")
 	case !e.Agent && e.AgentDefault:
 		e.Words = Text("องค์กรอนุญาตให้ส่งเอกสารไปโมเดลนอกองค์กรได้ แต่ agent นี้อ่านข้อมูลบัญชี จึงไม่ส่งออกเป็นค่าตั้งต้น — ผู้ดูแลเปิดให้ agent นี้ได้ที่แอปผู้ดูแลระบบ")
 	case !e.Agent:
@@ -87,16 +113,27 @@ func EgressOf(orgMayLeave bool, m Manifest, set *bool) Egress {
 
 // AgentEgressSetting is an agent's own setting in an organisation (nil: never set).
 func (s *Store) AgentEgressSetting(ctx context.Context, q Querier, org, slug string) (*bool, error) {
-	var v bool
-	err := q.QueryRow(ctx, `SELECT documents_may_leave FROM agent_market.agent_egress WHERE org_id = $1 AND slug = $2`,
-		orgOr(org), slug).Scan(&v)
+	set, _, err := s.AgentSwitches(ctx, q, org, slug)
+	return set, err
+}
+
+// AgentSwitches is an agent's row of the admin's two switches (AM16): whether its documents may leave
+// (nil: never set) and whether they are masked (false: never set — the default). A row an admin made by
+// setting only masking carries no word about leaving; its leave value is the default it was made with.
+func (s *Store) AgentSwitches(ctx context.Context, q Querier, org, slug string) (mayLeave *bool, masked bool, err error) {
+	var leave, leaveSet bool
+	err = q.QueryRow(ctx, `SELECT documents_may_leave, leave_set, masked FROM agent_market.agent_egress WHERE org_id = $1 AND slug = $2`,
+		orgOr(org), slug).Scan(&leave, &leaveSet, &masked)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return &v, nil
+	if !leaveSet {
+		return nil, masked, nil
+	}
+	return &leave, masked, nil
 }
 
 // EgressFor is one agent's egress in an organisation, as rounds and menus apply it.
@@ -105,11 +142,11 @@ func (s *Store) EgressFor(ctx context.Context, org, slug string, m Manifest) (Eg
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return Egress{}, err
 	}
-	set, err := s.AgentEgressSetting(ctx, s.Pool, org, slug)
+	set, masked, err := s.AgentSwitches(ctx, s.Pool, org, slug)
 	if err != nil {
 		return Egress{}, err
 	}
-	return EgressOf(o.DocumentsMayLeave, m, set), nil
+	return EgressOf(o.DocumentsMayLeave, m, set).WithMasked(masked), nil
 }
 
 // ── the admin door ───────────────────────────────────────────────────────
@@ -142,27 +179,29 @@ func (a *API) adminEgress(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		set, err := a.store.AgentEgressSetting(ctx, a.store.Pool, acc.OrgID, d.Slug)
+		set, masked, err := a.store.AgentSwitches(ctx, a.store.Pool, acc.OrgID, d.Slug)
 		if err != nil {
 			a.fail(w, err, "egress")
 			return
 		}
-		out = append(out, row{Slug: d.Slug, Name: d.Name, Egress: EgressOf(o.DocumentsMayLeave, m, set)})
+		out = append(out, row{Slug: d.Slug, Name: d.Name, Egress: EgressOf(o.DocumentsMayLeave, m, set).WithMasked(masked)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	writeJSON(w, http.StatusOK, map[string]any{"org": o.DocumentsMayLeave, "agents": out})
 }
 
-// adminPutEgress sets one agent's own setting. It can be set either way at
-// any time; it only ever narrows what the organisation's switch allows.
+// adminPutEgress sets one agent's own settings: whether its documents may leave (it can be set either
+// way at any time; it only ever narrows what the organisation's switch allows), and — AM16 — whether
+// they are masked. One request sets one or both; each one that moved is its own line of the audit log.
 func (a *API) adminPutEgress(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAdmin(w, r) {
 		return
 	}
 	var body struct {
 		DocumentsMayLeave *bool `json:"documents_may_leave"`
+		Masked            *bool `json:"masked"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<12)).Decode(&body); err != nil || body.DocumentsMayLeave == nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<12)).Decode(&body); err != nil || (body.DocumentsMayLeave == nil && body.Masked == nil) {
 		badRequest(w, "BAD_JSON")
 		return
 	}
@@ -185,24 +224,40 @@ func (a *API) adminPutEgress(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, err
 		}
-		before, err := a.store.AgentEgressSetting(ctx, tx, acc.OrgID, slug)
+		before, wasMasked, err := a.store.AgentSwitches(ctx, tx, acc.OrgID, slug)
 		if err != nil {
 			return nil, err
 		}
-		from := EgressOf(o.DocumentsMayLeave, m, before)
-		if _, err := tx.Exec(ctx, `INSERT INTO agent_market.agent_egress (org_id, slug, documents_may_leave, updated_by)
-			VALUES ($1, $2, $3, $4) ON CONFLICT (org_id, slug) DO UPDATE SET documents_may_leave = EXCLUDED.documents_may_leave,
-			updated_by = EXCLUDED.updated_by, updated_at = now()`, orgOr(acc.OrgID), slug, *body.DocumentsMayLeave,
+		from := EgressOf(o.DocumentsMayLeave, m, before).WithMasked(wasMasked)
+		// one row holds both; the one the request does not name stays as it is (leave_set: an admin
+		// has said whether the documents may leave — a row made for masking alone says nothing of it)
+		leave, leaveSet, masked := from.Agent, before != nil, wasMasked
+		if body.DocumentsMayLeave != nil {
+			leave, leaveSet = *body.DocumentsMayLeave, true
+		}
+		if body.Masked != nil {
+			masked = *body.Masked
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO agent_market.agent_egress (org_id, slug, documents_may_leave, leave_set, masked, updated_by)
+			VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (org_id, slug) DO UPDATE SET documents_may_leave = EXCLUDED.documents_may_leave,
+			leave_set = EXCLUDED.leave_set, masked = EXCLUDED.masked,
+			updated_by = EXCLUDED.updated_by, updated_at = now()`, orgOr(acc.OrgID), slug, leave, leaveSet, masked,
 			normEmail(c.Email)); err != nil {
 			return nil, err
 		}
-		if from.Agent == *body.DocumentsMayLeave && !from.AgentDefault {
-			return nil, nil // nothing moved: nothing to log
+		var entries []AuditEntry
+		if body.DocumentsMayLeave != nil && (from.Agent != *body.DocumentsMayLeave || from.AgentDefault) {
+			entries = append(entries, entry(r, "agent_market.agent.documents_may_leave", "agent_market_agent", slug, map[string]any{
+				"setting": "documents_may_leave", "label": T(LangOf(r.Context()), "เอกสารของ agent นี้ส่งไปโมเดลนอกองค์กรได้"), "agent": def.Name,
+				"from": from.Agent, "from_default": from.AgentDefault, "to": *body.DocumentsMayLeave,
+				"org_allows": o.DocumentsMayLeave, "masked": masked}))
 		}
-		return []AuditEntry{entry(r, "agent_market.agent.documents_may_leave", "agent_market_agent", slug, map[string]any{
-			"setting": "documents_may_leave", "label": T(LangOf(r.Context()), "เอกสารของ agent นี้ส่งไปโมเดลนอกองค์กรได้"), "agent": def.Name,
-			"from": from.Agent, "from_default": from.AgentDefault, "to": *body.DocumentsMayLeave,
-			"org_allows": o.DocumentsMayLeave})}, nil
+		if body.Masked != nil && wasMasked != *body.Masked {
+			entries = append(entries, entry(r, "agent_market.agent.masked", "agent_market_agent", slug, map[string]any{
+				"setting": "masked", "label": T(LangOf(r.Context()), "ปิดบังข้อมูลส่วนบุคคลก่อนส่งให้โมเดล"), "agent": def.Name,
+				"from": wasMasked, "to": *body.Masked, "documents_may_leave": leave && o.DocumentsMayLeave}))
+		}
+		return entries, nil // nothing moved: nothing to log
 	})
 	if err != nil {
 		a.failChange(w, r, err, "egress")

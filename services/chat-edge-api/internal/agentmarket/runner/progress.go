@@ -30,6 +30,9 @@ func (r *Runner) syncProgress(ctx context.Context, runID uuid.UUID) {
 	if webSteps(steps) || r.fromRequest(ctx, run) {
 		p = buildWebProgress(run, steps, r.Now())
 	}
+	// AM16: the run's own card says it as soon as it has happened, and whatever the run comes to —
+	// something of this run left the organisation as typed (masking.go)
+	p.SentOutUnmasked = sentOutOf(steps)
 	// AM11: the card is the run's and is written in its language — also when the run is ended under a
 	// context of its own (a cancel, a failure), which carries none
 	_ = r.Store.UpdateItem(am.InRunLang(ctx, run), item.ID, p)

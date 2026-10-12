@@ -99,9 +99,11 @@ type ModelPicker struct {
 }
 
 const (
-	reasonOutside   = "โมเดลนอกองค์กรเลือกไม่ได้ เพราะองค์กรยังไม่อนุญาตให้ส่งเอกสารออกนอกองค์กร"
-	reasonNoVision  = "agent นี้ต้องใช้โมเดลที่อ่านภาพได้"
-	reasonNotListed = "โมเดลนี้ไม่อยู่ในรายการโมเดลที่ agent นี้ใช้ได้"
+	reasonOutside  = "โมเดลนอกองค์กรเลือกไม่ได้ เพราะองค์กรยังไม่อนุญาตให้ส่งเอกสารออกนอกองค์กร"
+	reasonNoVision = "agent นี้ต้องใช้โมเดลที่อ่านภาพได้"
+	// AM16: masking is on for the agent, and the image of a page cannot be masked
+	reasonMaskedPages = "ผู้ดูแลตั้งให้ปิดบังข้อมูลของ agent นี้ก่อนส่งให้โมเดล ภาพของหน้าเอกสารปิดบังไม่ได้ จึงให้โมเดลในองค์กรอ่านเท่านั้น"
+	reasonNotListed   = "โมเดลนี้ไม่อยู่ในรายการโมเดลที่ agent นี้ใช้ได้"
 )
 
 // ModelUse is what a model does for this agent: read scans (vision), write
@@ -241,7 +243,13 @@ func MenuFor(in Install, m Manifest, e Egress, rm RunnerModels) ModelPicker {
 			p.cannot[id] = true
 			continue
 		}
-		if rm.lock(use, id, e.Effective) != "" {
+		// AM16: a model that reads pages is given their images, and an image cannot be masked — so while
+		// the admin's masking switch for this agent is on, an outside model is not in its menu
+		mayLeave := e.Effective
+		if use == "vision" {
+			mayLeave = e.PagesMayLeave
+		}
+		if rm.lock(use, id, mayLeave) != "" {
 			// AM11b: a model that may not be given this agent's data is not in the list at all — it is
 			// never offered and then quietly swapped. The menu says so in one line (OutsideAbsent).
 			p.outside[id] = true
@@ -255,6 +263,9 @@ func MenuFor(in Install, m Manifest, e Egress, rm RunnerModels) ModelPicker {
 		if e.Org {
 			// the organisation allows it; this agent does not (its default, or an admin's choice)
 			p.BlockedReason = e.Words
+		}
+		if use == "vision" && e.Effective && e.Masked {
+			p.BlockedReason = Text(reasonMaskedPages)
 		}
 	}
 	// a choice made while a model could be used, which may not be used now, is no choice: the menu shows

@@ -611,9 +611,16 @@ func knowledgeGuard(l am.Lang, quotable map[string]string, k *am.KnowledgeContex
 // AM15: away says there is none because no model the question may be sent to could be reached at all.
 func (r *Runner) askModel(ctx context.Context, rc *runCtx, models []string, system, user string, check func(string) error) (said am.PersonText, ok, away bool) {
 	var answer string
+	var calls *modelCalls
 	if rc != nil {
 		// AM13b (masking.go): an answer about a round is made from that round's data — the same rule
-		ctx, _ = withModelCalls(ctx, !rc.docsMayLeave)
+		ctx, calls = withModelCalls(ctx, !rc.docsMayLeave, rc.masked)
+		// AM16: an answer is not a step, so what it sent out as typed is said in the thread, beside it
+		defer func() {
+			if calls.wentOut() {
+				_ = r.Store.AddNotice(context.Background(), r.Store.Pool, rc.run, am.Notice{Text: am.SentOutAnswerNotice(), Tone: "warning", Reason: am.ReasonSentOut})
+			}
+		}()
 	}
 	c, _, err := r.Model.CompleteWith(ctx, models, system, user, func(s string) error {
 		var v struct {

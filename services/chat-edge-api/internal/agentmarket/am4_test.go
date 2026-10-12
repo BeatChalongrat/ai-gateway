@@ -333,9 +333,16 @@ func TestModelPickerOffersOutsideModelsOnlyWhenDocumentsMayLeave(t *testing.T) {
 	if code, _ := e.do("PUT", "/installs/"+id+"/model", map[string]any{"choice": "deepseek"}); code != http.StatusConflict {
 		t.Fatalf("an outside model cannot be picked while documents stay inside: %d", code)
 	}
-	// the admin lets documents leave: now it can be picked, and it is remembered for the install
+	// the admin lets documents leave — the organisation's switch, and (AM16: off for every agent until an
+	// admin turns it on) this agent's own: now it can be picked, and it is remembered for the install
 	if code, body := e.do("PUT", "/admin/org", map[string]any{"documents_may_leave": true}); code != 200 {
 		t.Fatalf("admin: %d %v", code, body)
+	}
+	if code, _ := e.do("PUT", "/installs/"+id+"/model", map[string]any{"choice": "deepseek"}); code != http.StatusConflict {
+		t.Fatalf("the organisation's switch alone does not let this agent's documents leave: %d", code)
+	}
+	if code, body := e.do("PUT", "/admin/egress/sran.financial-report", map[string]any{"documents_may_leave": true}); code != 200 {
+		t.Fatalf("admin, the agent's own switch: %d %v", code, body)
 	}
 	code, p = e.do("PUT", "/installs/"+id+"/model", map[string]any{"choice": "deepseek"})
 	if code != 200 || p["choice"] != "deepseek" {

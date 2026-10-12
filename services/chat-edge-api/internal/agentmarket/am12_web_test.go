@@ -94,7 +94,9 @@ func TestAM12AnAgentOnTheWebIsOffUntilAnAdminTurnsItOn(t *testing.T) {
 		agent, eff bool
 	}{
 		{"never set: off, whatever its category", true, web, nil, false, false},
-		{"an agent of the same category that does not use the web is unchanged", true, plain, nil, true, true},
+		// AM16: every agent nobody has set is off — until then one that touched neither accounting nor the web was on
+		{"an agent of the same category that does not use the web: off too until an admin turns it on", true, plain, nil, false, false},
+		{"… and on once an admin has", true, plain, &yes, true, true},
 		{"an admin turned it on", true, web, &yes, true, true},
 		{"an admin turned it on, the organisation's switch is off", false, web, &yes, true, false},
 		{"an admin turned it off again", true, web, &no, false, false},
