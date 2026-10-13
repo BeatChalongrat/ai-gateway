@@ -18,6 +18,7 @@ set -uo pipefail
 SERVICE="${1:?service}"; URL="${2:?probe url}"; shift 2
 bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/power.sh" need "the swap of $SERVICE" || exit 3
 OUT="${SWAP_OUT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/results/swap_${SERVICE}.txt}" # (SWAP_OUT: the script's own test)
+mkdir -p "$(dirname "$OUT")" # (AM19: the folder is made here — at the tool's new home it did not exist, and one swap went unmeasured)
 : > "$OUT"
 ask() { # 200 when the service answers: its door, or (health:<container>) what Docker's health check says of it
   case "$URL" in
