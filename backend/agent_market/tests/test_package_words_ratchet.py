@@ -56,7 +56,7 @@ READS = {
     "po_matching": (),
     "financial_report": (),
 }
-DOCUMENTS_DONE = ("bank_reconciliation",)
+DOCUMENTS_DONE = ("bank_reconciliation", "invoice_processing")
 
 
 def documents_left(p: dict[str, dict[str, int]]) -> dict[str, int]:

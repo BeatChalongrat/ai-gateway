@@ -421,7 +421,9 @@ class EnglishRuns:
                 continue
             self.assertNotIn("document", th["computed"], cid)   # one table, in the run's language, both ways
             self.assertNotIn("document", en["computed"], cid)
-            own = self.own[cid] + thai_only("".join(self.own_more))
+            # (a model's readings of their documents are data too: an English run's source table holds no words of
+            # the product's but its labels, which are English)
+            own = self.own[cid] + thai_only("".join(self.own_more)) + thai_only("".join(strings_of(en["computed"].get("provenance") or [])))
             bad += [f"{cid}: {x}" for x in dockit.same_but_words(th["sheets"], en["sheets"], w, sheet_names)]
             bad += [f"{cid}: Thai left — {x}" for x in dockit.thai_left(en["sheets"], own)]
             seen += 1
@@ -496,6 +498,7 @@ class ABankRunInEnglish(EnglishRuns, unittest.TestCase):
 
 class AnInvoiceRunInEnglish(EnglishRuns, unittest.TestCase):
     package, kit = "invoice_processing", IK
+    documents = True   # AM18
 
     @classmethod
     def files_of(cls, case):

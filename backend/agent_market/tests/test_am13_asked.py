@@ -326,7 +326,7 @@ class AskedOfTheInvoiceRegister(unittest.TestCase):
         _, path = self._render(["sort_by_amount"])
         wb = load_workbook(path)
         ident = self.W.ID_COLS[self.W.S_REGISTER]
-        main, evidence = [[r[:ident] for r in wb[s].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
+        main, evidence = [[r[:ident] for r in wb[self.W.W(s)].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
                           for s in self.W.PARTS[self.W.S_REGISTER]]
         self.assertEqual(main, evidence)
         self.assertEqual(len(main), 3)
@@ -342,7 +342,7 @@ class AskedOfTheInvoiceRegister(unittest.TestCase):
 
     def test_its_manifest_declares_what_its_renderer_applies(self):
         m = _manifest_says(self, "invoice_processing", self.IP.DIRECTIVES, grouped=True)
-        self.assertEqual(m["version"], "1.10.0")
+        self.assertEqual(m["version"], "1.11.0")
         split = next(d for d in m["instructions"]["cannot"] if d["id"] == "split_by_seller")
         self.assertIn("ยอดรวมย่อย", split["why"])
 

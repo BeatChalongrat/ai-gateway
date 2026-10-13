@@ -94,7 +94,7 @@ def compute(files, roles, period, *, answers=None, defaults=None, today=None, hi
         return _register.compute(files, roles, period, answers=answers, defaults=defaults, today=today, history=history,
                                  proposals=proposals)
 
-    return _words.with_document(table(), table)
+    return table()
 
 
 def postcompute(files, roles, period, computed, *, answers=None, defaults=None) -> dict:
@@ -110,7 +110,6 @@ def template_values(computed: dict) -> dict:
     """The values a customer's template can take (the manifest's templates block): money as printed text."""
     from ...engine.thai import fmt_money
 
-    computed = _words.for_document(computed)   # a customer's form is a document: it is filled from the documents' table
     t = computed["totals"]
     thb = t["thb"]
 
@@ -164,18 +163,18 @@ def _asked_check(path: str, view: dict, applied: list[str]) -> dict:
 
     rows = table(parts(load_workbook(path), S_REGISTER), H_REGISTER)
     same = len(rows) == len([d for d in view["documents"] if d["status"] == "included"])
-    col = {h: i for i, h in enumerate(H_REGISTER)}
+    col = {k: i for i, k in enumerate(H_REGISTER.keys)}   # by key: the heading is said in the run's language
     if applied == ["sort_by_seller"]:
-        ok, what, said = asked.names_run_up([r[col["ผู้ขาย"]] for r in rows]), W("asked.what.seller"), W("asked.said.seller")
+        ok, what, said = asked.names_run_up([r[col["doc.col.seller"]] for r in rows]), W("asked.what.seller"), W("asked.said.seller")
     elif applied == ["sort_by_date"]:
-        ok = asked.runs_up([str(r[col["วันที่"]]) if r[col["วันที่"]] not in (None, "") else None for r in rows])
+        ok = asked.runs_up([str(r[col["doc.col.date"]]) if r[col["doc.col.date"]] not in (None, "") else None for r in rows])
         what, said = W("asked.what.date"), W("asked.said.date")
     else:
-        c = col["ยอดรวม (บาท)"]
+        c = col["doc.col.total_thb"]
         ok = asked.runs_down([asked.number(r[c]) if isinstance(r[c], (int, float)) and not isinstance(r[c], bool) else None for r in rows])
         what, said = W("asked.what.amount"), W("asked.said.amount")
     if not same or not ok:
-        return asked.check(False, W("asked.not", what=what, sheet=S_REGISTER))
+        return asked.check(False, W("asked.not", what=what, sheet=W(S_REGISTER)))
     return asked.check(True, W("asked.ok", n=len(rows), said=said), len(rows))
 
 
@@ -186,17 +185,15 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     from ...deliverables.theme import resolve
     from .scripts.workbook import InvoiceWorkbook, check
 
-    # the register is written from the table in the documents' language; what the gate then says of the
-    # file is said in the run's
-    view, applied = _as_asked(_words.for_document(computed), req)
+    # AM18: the register is written in the run's language, like everything the run says
+    view, applied = _as_asked(computed, req)
     theme = resolve(req.get("theme"))
     names = req.get("names") or {}
     artifacts, all_ok = [], True
     for fmt in [f for f in wanted_formats(req, ["xlsx"]) if f == "xlsx"]:
         name = os.path.basename(names.get(fmt) or "register.xlsx")
         path = os.path.join(out_dir, name)
-        with _words.speaking(_words.DOCUMENT):
-            meta = InvoiceWorkbook(view, theme, req.get("run")).write(path)
+        meta = InvoiceWorkbook(view, theme, req.get("run")).write(path)
         checks = check(path, view, req.get("run"))
         if applied:
             checks.append(_asked_check(path, view, applied))

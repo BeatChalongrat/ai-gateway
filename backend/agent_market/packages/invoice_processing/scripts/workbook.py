@@ -1,9 +1,10 @@
 """The register as .xlsx — the deliverable a bookkeeper checks and keys from.
 
-Sheets: สรุป · ทะเบียน (one row per recorded document) · เอกสารที่ยังไม่ได้รวม (AM5: every document
-left out of the register, why, and how it comes back) · รายการสินค้า · ที่มา (every value: page,
-box, method, printed text, confidence, who decided it) · ข้อยกเว้น (reason-coded) · การตรวจ (each
-document's deterministic checks). Amounts are numbers, not text, so a reader can sum them again;
+Sheets: summary · register (one row per recorded document) · documents not included (AM5: every document
+left out of the register, why, and how it comes back) · line items · source (every value: page, box,
+method, printed text, confidence, who decided it) · exceptions (reason-coded) · checks (each document's
+deterministic checks). AM18: every word the register itself says has a key and is said in the run's language
+(the manifest holds the Thai and the English; the module keeps keys, W says them when read). Amounts are numbers, not text, so a reader can sum them again;
 the quality gate reopens the file and checks the register adds up to computed.json.
 
 AM10: the register prints one page across. It is one table (H_REGISTER) written as the main sheet —
@@ -31,85 +32,88 @@ from ..words import W
 from .register import DOC_TYPE_TH, REASON_TH
 
 MONEY = '#,##0.00;[Red](#,##0.00);"-"'
-NOT_INCLUDED = "เอกสารที่ยังไม่ได้รวม"
-S_REGISTER, S_REGISTER_EV = "ทะเบียน", "ทะเบียน · หลักฐาน"
-SHEETS = ("สรุป", S_REGISTER, S_REGISTER_EV, NOT_INCLUDED, "รายการสินค้า", "ที่มา", "ข้อยกเว้น", "การตรวจ")
+NOT_INCLUDED = "doc.sheet.not_included"
+S_REGISTER, S_REGISTER_EV = "doc.sheet.register", "doc.sheet.register_ev"
+SHEETS = ("doc.sheet.summary", S_REGISTER, S_REGISTER_EV, NOT_INCLUDED, "doc.sheet.items", "doc.sheet.provenance", "doc.sheet.exceptions", "doc.sheet.checks")
 # The register's columns in the order the data is built and read back (the gate reads by name, from both of its
 # sheets together — ``table(parts(wb, S_REGISTER), H_REGISTER)``)
-H_REGISTER = ["ลำดับ", "วันที่", "เลขที่", "ชนิดเอกสาร", "ผู้ขาย", "เลขผู้เสียภาษีผู้ขาย", "สาขา", "ผู้ซื้อ", "เลขผู้เสียภาษีผู้ซื้อ", "สกุลเงิน",
-              "ยอดก่อน VAT", "VAT", "ยอดรวม", "หัก ณ ที่จ่าย", "ยอดที่ต้องชำระ", "อัตราแลกเปลี่ยน", "ยอดก่อน VAT (บาท)", "VAT (บาท)",
-              "ยอดรวม (บาท)", "ที่มา", "ไฟล์"]
+H_REGISTER = W.heads(["doc.col.no", "doc.col.date", "doc.col.number", "doc.col.doc_type", "doc.col.seller", "doc.col.seller_tax_id", "doc.col.branch", "doc.col.buyer", "doc.col.buyer_tax_id", "doc.col.currency",
+              "doc.col.subtotal", "doc.col.vat", "doc.col.total", "doc.col.wht", "doc.col.payable", "doc.col.fx_rate", "doc.col.subtotal_thb", "doc.col.vat_thb",
+              "doc.col.total_thb", "doc.sheet.provenance", "doc.col.file"])
 PARTS = {S_REGISTER: (S_REGISTER, S_REGISTER_EV)}
 # AM10: what prints on each sheet of the register, in print order, with the column's width: the main sheet leads
 # with the row's identity (ID_COLS of them, repeated on the companion and on every page), then the seller and
 # every amount; the companion repeats the identity and holds the rest. Every column of H_REGISTER is on one.
 LAYOUT = {
-    S_REGISTER: [("ลำดับ", 6), ("วันที่", 11), ("เลขที่", 15), ("ผู้ขาย", 24), ("เลขผู้เสียภาษีผู้ขาย", 15), ("ชนิดเอกสาร", 14), ("สกุลเงิน", 7),
-                 ("ยอดก่อน VAT", 12), ("VAT", 12), ("ยอดรวม", 12), ("หัก ณ ที่จ่าย", 12), ("ยอดที่ต้องชำระ", 12), ("อัตราแลกเปลี่ยน", 9),
-                 ("ยอดก่อน VAT (บาท)", 13), ("VAT (บาท)", 12), ("ยอดรวม (บาท)", 13)],
-    S_REGISTER_EV: [("ลำดับ", 6), ("วันที่", 11), ("เลขที่", 15), ("สาขา", 7), ("ผู้ซื้อ", 26), ("เลขผู้เสียภาษีผู้ซื้อ", 15), ("ที่มา", 15),
-                    ("ไฟล์", 30)],
+    S_REGISTER: [("doc.col.no", 6), ("doc.col.date", 11), ("doc.col.number", 15), ("doc.col.seller", 24), ("doc.col.seller_tax_id", 15), ("doc.col.doc_type", 14), ("doc.col.currency", 7),
+                 ("doc.col.subtotal", 12), ("doc.col.vat", 12), ("doc.col.total", 12), ("doc.col.wht", 12), ("doc.col.payable", 12), ("doc.col.fx_rate", 9),
+                 ("doc.col.subtotal_thb", 13), ("doc.col.vat_thb", 12), ("doc.col.total_thb", 13)],
+    S_REGISTER_EV: [("doc.col.no", 6), ("doc.col.date", 11), ("doc.col.number", 15), ("doc.col.branch", 7), ("doc.col.buyer", 26), ("doc.col.buyer_tax_id", 15), ("doc.sheet.provenance", 15),
+                    ("doc.col.file", 30)],
 }
 ID_COLS = {S_REGISTER: 3}
-DECIDED_TH = {"document": "อ่านจากเอกสาร", "typed_by_person": "ผู้ใช้พิมพ์", "confirmed_by_person": "ผู้ใช้ยืนยัน",
-              "computed": "คำนวณจากค่าในเอกสาร", "model_proposal": "โมเดลเสนอ (ยังไม่ยืนยัน)"}
-METHOD_TH = {"pdf_text": "ข้อความใน PDF", "ocr": "OCR", "etax_xml": "e-Tax XML", "typed_by_person": "ผู้ใช้พิมพ์",
-             "confirmed_by_person": "ผู้ใช้ยืนยัน", "chosen_by_person": "ผู้ใช้เลือก",
-             # AM4: the rest a person could meet in the ที่มา sheet
-             "document_scan": "ตรวจทั้งเอกสาร", "default": "ค่าตั้งต้น", "hybrid": "ข้อความใน PDF และ OCR"}
+DECIDED_TH = W.table({"document": "doc.decided.document", "typed_by_person": "doc.decided.typed", "confirmed_by_person": "doc.decided.confirmed",
+                        "computed": "doc.decided.computed", "model_proposal": "doc.decided.model"})
+METHOD_TH = W.table({"pdf_text": "doc.method.pdf_text", "ocr": "doc.method.ocr", "etax_xml": "doc.method.etax", "typed_by_person": "doc.decided.typed",
+                     "confirmed_by_person": "doc.decided.confirmed", "chosen_by_person": "doc.method.chosen",
+                     # AM4: the rest a person could meet in the source sheet
+                     "document_scan": "doc.method.document_scan", "default": "doc.method.default", "hybrid": "doc.method.hybrid"})
 
 
 def method_th(method) -> str:
     """How a value was read, in Thai ("computed:sum_of_lines" → คำนวณจากรายการในเอกสาร)."""
     m = str(method or "")
     if m in METHOD_TH:
-        return METHOD_TH[m]
+        return METHOD_TH[m]   # (a table of keys, said when read)
     if m.startswith("computed:"):
-        return "คำนวณจากรายการในเอกสาร" if "lines" in m else "คำนวณจากค่าในเอกสาร"
+        return W("doc.method.computed_lines") if "lines" in m else W("doc.decided.computed")
     if m.startswith("vision:"):
-        return f"โมเดล {m.split(':', 1)[1]} อ่านจากภาพ"
+        return W("doc.method.vision", v=m.split(":", 1)[1])
     return m
-STATUS_TH = {"pass": "ผ่าน", "fail": "ไม่ผ่าน", "skip": "ไม่เกี่ยว"}
+STATUS_TH = W.table({"pass": "doc.status.pass", "fail": "doc.status.fail", "skip": "doc.status.skip"})
 
 # AM3: what each check looks at, in words that do not sound like a finding (a stranger read the
 # card headers "VAT ไม่ตรง" / "duplicate" beside "ผ่าน" as problems with their documents).
-CHECK_NAME_TH = {
-    "seller_tax_id_format": "เลขผู้เสียภาษีผู้ขายถูกรูปแบบ", "buyer_tax_id_format": "เลขผู้เสียภาษีผู้ซื้อถูกรูปแบบ",
-    "document_date": "วันที่เอกสารสมเหตุสมผล", "line_arithmetic": "จำนวน × ราคา = ยอดรายการ",
-    "subtotal_sum": "ผลรวมรายการ = ยอดก่อน VAT", "discount_arithmetic": "ส่วนลดคำนวณถูก",
-    "vat_7_percent": "VAT = 7% ของฐาน", "grand_total": "ยอดก่อน VAT + VAT = ยอดรวม", "wht": "หัก ณ ที่จ่ายสอดคล้องกัน",
-    "currency": "สกุลเงินบาท", "required_fields": "มีช่องที่เอกสารชนิดนี้ต้องมีครบ", "buyer_match": "ออกในนามบริษัทเรา",
-    "duplicate": "ไม่ซ้ำกับเอกสารที่เคยบันทึก", "original_copy": "เป็นต้นฉบับ (ไม่ใช่สำเนา)",
-    "amount_in_words": "จำนวนเงินตัวอักษร = ยอดรวม", "document_type": "ชนิดเอกสารชัดเจน",
-}
+CHECK_NAME_TH = W.table({
+    "seller_tax_id_format": "doc.check.seller_tax_id_format", "buyer_tax_id_format": "doc.check.buyer_tax_id_format",
+    "document_date": "doc.check.document_date", "line_arithmetic": "doc.check.line_arithmetic",
+    "subtotal_sum": "doc.check.subtotal_sum", "discount_arithmetic": "doc.check.discount_arithmetic",
+    "vat_7_percent": "doc.check.vat_7_percent", "grand_total": "doc.check.grand_total", "wht": "doc.check.wht",
+    "currency": "doc.check.currency", "required_fields": "doc.check.required_fields", "buyer_match": "doc.check.buyer_match",
+    "duplicate": "doc.check.duplicate", "original_copy": "doc.check.original_copy",
+    "amount_in_words": "doc.check.amount_in_words", "document_type": "doc.check.document_type",
+})
+# an engine check's message → the key of the sentence the register prints for it (said in the run's language)
 _MSG_TH = {
-    "not printed": "เอกสารไม่ได้พิมพ์ค่านี้", "no date found": "ไม่พบวันที่ในเอกสาร",
-    "a date in the future or implausibly old": "วันที่อยู่ในอนาคตหรือเก่าผิดปกติ",
-    "no quantity × price rows": "เอกสารไม่มีรายการแบบจำนวน × ราคา", "no line amounts": "เอกสารไม่มียอดรายการ",
-    "no subtotal to compare the lines with": "ไม่มียอดก่อน VAT ให้เทียบกับผลรวมรายการ",
-    "no VAT on this document": "เอกสารนี้ไม่มี VAT", "no base to check the VAT against": "ไม่มีฐานให้ตรวจ VAT",
-    "no withholding tax on this document": "เอกสารนี้ไม่มีหัก ณ ที่จ่าย",
-    "the 13th digit does not match the other twelve (mod-11 check digit)": "หลักที่ 13 ไม่ตรงกับ 12 หลักแรก (หลักตรวจสอบ)",
+    "not printed": "doc.msg.not_printed", "no date found": "doc.msg.no_date",
+    "a date in the future or implausibly old": "doc.msg.date_implausible",
+    "no quantity × price rows": "doc.msg.no_qty_rows", "no line amounts": "doc.msg.no_line_amounts",
+    "no subtotal to compare the lines with": "doc.msg.no_subtotal",
+    "no VAT on this document": "doc.msg.no_vat", "no base to check the VAT against": "doc.msg.no_vat_base",
+    "no withholding tax on this document": "doc.msg.no_wht",
+    "the 13th digit does not match the other twelve (mod-11 check digit)": "doc.msg.check_digit",
     "only a full tax invoice with a buyer tax ID is matched against the organisation":
-        "ตรวจเฉพาะใบกำกับภาษีเต็มรูปที่มีเลขผู้เสียภาษีผู้ซื้อ",
-    "made out to another tax ID: input VAT cannot be claimed on it": "ออกในนามเลขผู้เสียภาษีอื่น ขอคืนภาษีซื้อไม่ได้",
-    "marked สำเนา / copy": "พิมพ์ว่า สำเนา", "the amount in words is not the total": "จำนวนเงินตัวอักษรไม่เท่ากับยอดรวม",
-    "13 digits with a valid check digit": "13 หลัก หลักตรวจสอบถูกต้อง", "not seen before": "ไม่เคยพบมาก่อน",
-    "a known document type": "ชนิดเอกสารที่รู้จัก", "a date": "มีวันที่", "a VAT base": "มีฐานภาษี",
-    "subtotal + VAT": "ยอดก่อน VAT + VAT", "THB": "บาท", "original": "ต้นฉบับ", "copy": "สำเนา", "unmarked": "ไม่ได้พิมพ์ว่าสำเนา",
-    "a withholding amount (the net payable is not the total)": "ยอดหัก ณ ที่จ่าย (เพราะยอดสุทธิไม่เท่ากับยอดรวม)",
-    "rate × base = WHT; total − WHT = net": "อัตรา × ฐาน = หัก ณ ที่จ่าย; ยอดรวม − หัก ณ ที่จ่าย = ยอดสุทธิ",
-    "no net payable": "เอกสารไม่ได้พิมพ์ยอดสุทธิ", "quantity × unit price = amount": "จำนวน × ราคาต่อหน่วย = ยอดรายการ",
+        "doc.msg.only_full_invoice",
+    "made out to another tax ID: input VAT cannot be claimed on it": "doc.msg.another_tax_id",
+    "the amount in words is not the total": "doc.msg.words_not_total",
+    "13 digits with a valid check digit": "doc.msg.valid_tax_id", "not seen before": "doc.msg.not_seen",
+    "a known document type": "doc.msg.known_type", "a date": "doc.msg.a_date", "a VAT base": "doc.msg.a_vat_base",
+    "subtotal + VAT": "doc.msg.subtotal_plus_vat", "THB": "doc.msg.thb", "original": "doc.msg.original", "copy": "doc.msg.copy", "unmarked": "doc.msg.unmarked",
+    "a withholding amount (the net payable is not the total)": "doc.msg.wht_amount",
+    "rate × base = WHT; total − WHT = net": "doc.msg.wht_rule",
+    "no net payable": "doc.msg.no_net", "quantity × unit price = amount": "doc.msg.qty_rule",
 }
-_KEY_TH = {"net": "ยอดสุทธิ", "total": "ยอดรวม", "wht": "หัก ณ ที่จ่าย", "rate": "อัตรา (%)", "match": "ตรงกันที่",
-           "name": "เอกสารเดิม", "row": "บรรทัด", "expected": "ควรเป็น", "printed": "พิมพ์"}
-_MATCH_TH = {"document number": "เลขที่เอกสาร", "date and total": "วันที่และยอดรวม"}
-_FORM_TH = {"company_limited": "บริษัทจำกัด", "public_company": "บริษัทมหาชน", "limited_partnership": "ห้างหุ้นส่วนจำกัด",
-            "sole_proprietor": "บุคคลธรรมดา/ร้าน"}
+_KEY_TH = W.table({"net": "doc.key.net", "total": "doc.col.total", "wht": "doc.col.wht", "rate": "doc.key.rate", "match": "doc.key.match",
+                   "name": "doc.key.name", "row": "doc.key.row", "expected": "doc.key.expected", "printed": "doc.key.printed"})
+_MATCH_TH = W.table({"document number": "doc.match.number", "date and total": "doc.match.date_total"})
+_FORM_TH = W.table({"company_limited": "doc.form.company_limited", "public_company": "doc.form.public_company", "limited_partnership": "doc.form.limited_partnership",
+                    "sole_proprietor": "doc.form.sole_proprietor"})
 
 
 def msg_th(text) -> str | None:
-    """An engine check's English message or value, in Thai (numbers kept as they are)."""
+    """An engine check's message or value, as the register prints it in the run's language (numbers kept as they are).
+    The engine says its messages in English; each has a key here, said in Thai on a Thai paper and as the
+    manifest's English on an English one (the name is from before a paper could be English)."""
     if text in (None, ""):
         return text
     if isinstance(text, dict) and "core" in text:  # a party name: the name as read, and its legal form
@@ -120,27 +124,29 @@ def msg_th(text) -> str | None:
     if isinstance(text, (list, tuple)):
         return ", ".join(FIELD_TH.get(str(x), msg_th(x) or "") for x in text)
     s = str(text)
+    if s.startswith("marked ") and s.endswith("/ copy"):
+        return W("doc.msg.copy_marked")   # the engine's own words for a copy mark name the Thai word on the page
     if s in _MSG_TH:
-        return _MSG_TH[s]
+        return W(_MSG_TH[s])
     if s in DOC_TYPE_TH:
         return DOC_TYPE_TH[s]
     if s in _MATCH_TH:
         return _MATCH_TH[s]
     rules = (
-        (r"^row (\S+): (\S+) printed, (\S+) computed$", lambda m: f"บรรทัด {m[1]}: พิมพ์ {m[2]} คำนวณได้ {m[3]}"),
-        (r"^VAT should be (\S+) at (\S+)% of the base$", lambda m: f"VAT ควรเป็น {m[1]} ({m[2]}% ของฐาน)"),
+        (r"^row (\S+): (\S+) printed, (\S+) computed$", lambda m: W("doc.msg.row_printed_computed", v=m[1], v2=m[2], v3=m[3])),
+        (r"^VAT should be (\S+) at (\S+)% of the base$", lambda m: W("doc.msg.vat_should_be", v=m[1], v2=m[2])),
         (r"^net payable (\S+) is not the total (\S+), and no withholding amount was read$",
-         lambda m: f"ยอดสุทธิ {m[1]} ไม่เท่ากับยอดรวม {m[2]} และไม่พบยอดหัก ณ ที่จ่าย"),
+         lambda m: W("doc.msg.net_not_total", v=m[1], v2=m[2])),
         (r"^amounts are in (\S+): the THB amount needs an exchange-rate source$",
-         lambda m: f"ยอดเป็นสกุล {m[1]} ต้องมีอัตราแลกเปลี่ยนก่อนบันทึกเป็นบาท"),
+         lambda m: W("doc.msg.fx_needed", v=m[1])),
         (r"^missing for a (\S+): (.+)$",
-         lambda m: "เอกสารชนิดนี้ขาด: " + ", ".join(FIELD_TH.get(x.strip(), x.strip()) for x in m[2].split(","))),
-        (r"^same supplier and (.+) as (.+)$", lambda m: f"ผู้ขายเดียวกันและ{_MATCH_TH.get(m[1], m[1])}ตรงกับ {m[2]}"),
+         lambda m: W("doc.msg.missing_for") + ", ".join(FIELD_TH.get(x.strip(), x.strip()) for x in m[2].split(","))),
+        (r"^same supplier and (.+) as (.+)$", lambda m: W("doc.msg.same_supplier", v=_MATCH_TH.get(m[1], m[1]), v2=m[2])),
         (r"^(\w+):(\S+) read (.+), the document text (.+)$",
-         lambda m: (f"โมเดล {m[2]}" if m[1] == "vision" else m[1]) + f" อ่านได้ {_val(m[3])} แต่ข้อความในเอกสารเป็น {_val(m[4])}"),
-        (r"^not after (\S+)$", lambda m: f"ไม่เกิน {m[1]}"),
-        (r"^(\S+)% of (\S+) is (\S+), printed (\S+)$", lambda m: f"{m[1]}% ของ {m[2]} = {m[3]} แต่พิมพ์ {m[4]}"),
-        (r"^total − WHT = (\S+), net printed (\S+)$", lambda m: f"ยอดรวม − หัก ณ ที่จ่าย = {m[1]} แต่พิมพ์ยอดสุทธิ {m[2]}"),
+         lambda m: (W("doc.msg.model", v=m[2]) if m[1] == "vision" else m[1]) + W("doc.msg.read_vs_text", v=_val(m[3]), v2=_val(m[4]))),
+        (r"^not after (\S+)$", lambda m: W("doc.msg.not_after", v=m[1])),
+        (r"^(\S+)% of (\S+) is (\S+), printed (\S+)$", lambda m: W("doc.msg.pct_of", v=m[1], v2=m[2], v3=m[3], v4=m[4])),
+        (r"^total − WHT = (\S+), net printed (\S+)$", lambda m: W("doc.msg.total_minus_wht", v=m[1], v2=m[2])),
     )
     parts = []
     for part in s.split("; "):
@@ -150,7 +156,7 @@ def msg_th(text) -> str | None:
                 parts.append(fn(m))
                 break
         else:
-            parts.append(_MSG_TH.get(part, part))
+            parts.append(W(_MSG_TH[part]) if part in _MSG_TH else part)
     return "; ".join(parts)
 
 
@@ -166,7 +172,7 @@ def _val(text: str) -> str:
 def check_name(code: str) -> str:
     if code.startswith("source_agreement:"):
         f = code.split(":", 1)[1]
-        return f"{FIELD_TH.get(f, f)} อ่านจากสองแหล่งตรงกัน"
+        return W("doc.check.source_agreement", f=FIELD_TH.get(f, f))
     return CHECK_NAME_TH.get(code) or CHECK_TH.get(code, (code,))[0]
 
 
@@ -176,19 +182,19 @@ def _num(v):
 
 def parts(wb, sheet: str) -> list:
     """The sheets a table prints on — the main sheet and the companion that is in the file — for ``table``."""
-    return sheets(wb, *PARTS.get(sheet, (sheet,)))
+    return sheets(wb, *(W(k) for k in PARTS.get(sheet, (sheet,))))
 
 
 def item_status(line: dict) -> str:
     """What a line item's status says (AM8): "ยืนยันแล้ว" is a person's word — the machine never says it.
     A reading a script made says it was read by the system, and whether it still needs a look."""
     if line.get("decided_by") == "person":
-        return "คนยืนยันแล้ว"
+        return W("doc.status.person_confirmed")
     if line.get("left_out"):
-        return "ระบบอ่าน · ต้องตรวจ: ในแถวมีคำว่า “" + " ".join(line["left_out"])[:40] + "” ที่ไม่ได้อ่านเข้าชื่อรายการ"
+        return W("doc.status.left_out", words=" ".join(line["left_out"])[:40])
     if line.get("verified"):
-        return "ระบบอ่าน · ตัวเลขผ่านการตรวจ (ยังไม่มีคนตรวจ)"
-    return "ระบบอ่าน · ต้องตรวจ"
+        return W("doc.status.system_passed")
+    return W("doc.status.system_review")
 
 
 class InvoiceWorkbook:
@@ -238,35 +244,33 @@ class InvoiceWorkbook:
     # ── sheets ─────────────────────────────────────────────────────────────
     def summary(self):
         ws = self.wb.active
-        ws.title = "สรุป"
+        ws.title = W("doc.sheet.summary")
         c, t = self.c, self.c["totals"]
-        self._title(ws, f"ทะเบียนเอกสารซื้อ · {c['period_label']}",
-                    " · ".join(x for x in (c.get("company"), f"เลขผู้เสียภาษี {c['company_tax_id']}" if c.get("company_tax_id") else None,
-                                            f"จัดทำ {c['prepared_on']}") if x))
+        self._title(ws, W("doc.title.summary", period_label=c["period_label"]),
+                    " · ".join(x for x in (c.get("company"), W("doc.face.tax_id", company_tax_id=c["company_tax_id"]) if c.get("company_tax_id") else None,
+                                            W("doc.face.prepared", prepared_on=c["prepared_on"])) if x))
         rows = [
-            ["เอกสารที่ได้รับ", t["documents"]], ["บันทึกเข้าทะเบียน", t["included"]],
-            [f"{NOT_INCLUDED} (ดูแผ่นชื่อเดียวกัน)", t["excluded"]],
-            ["ข้อยกเว้นทั้งหมด", t["exceptions"]], ["คำถามที่ตอบแล้ว", t["questions_answered"]],
-            ["ยอดก่อน VAT (บาท)", _num(t["thb"]["subtotal"])], ["ภาษีมูลค่าเพิ่ม (บาท)", _num(t["thb"]["vat_amount"])],
-            ["ยอดรวม (บาท)", _num(t["thb"]["total"])], ["หัก ณ ที่จ่าย (บาท)", _num(t["thb"]["wht_amount"])],
-            ["ยอดที่ต้องชำระ (บาท)", _num(t["thb"].get("payable", t["thb"]["net_payable"]))],
+            [W("doc.face.received"), t["documents"]], [W("doc.face.recorded"), t["included"]],
+            [W("doc.face.not_included", not_included=W(NOT_INCLUDED)), t["excluded"]],
+            [W("doc.face.exceptions"), t["exceptions"]], [W("doc.face.answered"), t["questions_answered"]],
+            [W("doc.col.subtotal_thb"), _num(t["thb"]["subtotal"])], [W("doc.face.vat_thb"), _num(t["thb"]["vat_amount"])],
+            [W("doc.col.total_thb"), _num(t["thb"]["total"])], [W("doc.face.wht_thb"), _num(t["thb"]["wht_amount"])],
+            [W("doc.face.payable_thb"), _num(t["thb"].get("payable", t["thb"]["net_payable"]))],
         ]
-        self._table(ws, 4, ["รายการ", "ค่า"], rows, [36, 22])
+        self._table(ws, 4, [W("doc.col.item"), W("doc.col.value")], rows, [36, 22])
         for r in range(10, 15):           # the five baht rows (the counts stay integers)
             ws.cell(row=r, column=2).number_format = MONEY
         r = 4 + len(rows) + 2
-        notes = ["ตัวเลขทุกตัวอ่านจากเอกสารด้วยสคริปต์ (ข้อความใน PDF / e-Tax XML / OCR) หรือผู้ใช้พิมพ์หรือยืนยัน "
-                 "โมเดลไม่ได้เป็นผู้กำหนดตัวเลขใดในไฟล์นี้",
-                 "ยอดที่ต้องชำระ = ยอดสุทธิที่เอกสารพิมพ์ ถ้าไม่ได้พิมพ์ = ยอดรวม − หัก ณ ที่จ่าย (ไม่มีหัก ณ ที่จ่าย = ยอดรวม)",
-                 "ที่มาของทุกค่าอยู่ในชีต “ที่มา”: หน้า ตำแหน่งบนหน้า ข้อความที่พิมพ์ และความมั่นใจ"]
+        notes = [W("doc.note.figures"),
+                 W("doc.note.payable"),
+                 W("doc.note.provenance")]
         if t["excluded"]:
-            notes.insert(0, f"มี{NOT_INCLUDED} {t['excluded']} ฉบับ ยอดในไฟล์นี้ยังไม่รวมเอกสารเหล่านั้น "
-                            f"ดูเหตุผลและวิธีนำกลับมารวมในแผ่น “{NOT_INCLUDED}”")
+            notes.insert(0, W("doc.note.excluded", not_included=W(NOT_INCLUDED), excluded=t["excluded"]))
         for m in self.c.get("models") or []:
-            notes.append(f"โมเดลที่เห็นเอกสาร: {m['model']} ({'รันในองค์กร' if m['self_hosted'] else 'ผู้ให้บริการภายนอก'}) "
-                         f"อ่านซ้ำ {len(m['documents'])} ฉบับที่เป็นสแกนหรือรูปถ่าย เพื่อเทียบกับ OCR เท่านั้น")
+            notes.append(W("doc.note.models", model=m["model"], place=W("doc.model.inside") if m["self_hosted"] else W("doc.model.outside"),
+                           n=len(m["documents"])))
         if any(d["tier"] == "photo" for d in self.c["documents"]):
-            notes.append("รูปถ่ายใบเสร็จอ่านได้เท่าที่ภาพชัด: บันทึกเฉพาะผู้ขาย วันที่ ยอดรวม VAT และเลขผู้เสียภาษี")
+            notes.append(W("doc.note.photo"))
         for n in notes:
             cell = ws.cell(row=r, column=1, value=n)
             cell.font = Font(name=self.font, size=9, color=self.p["muted"])
@@ -284,64 +288,62 @@ class InvoiceWorkbook:
                          _num(d.get("payable", d["net_payable"])), _num(d["fx_rate"]), _num(d["thb_subtotal"]),
                          _num(d["thb_vat_amount"]),
                          _num(d["thb_total"]), d["tier_label"], d["name"]])
-        for sheet, title, sub in ((S_REGISTER, "ทะเบียนเอกสาร", "เฉพาะเอกสารที่บันทึก ยอด “บาท” แปลงด้วยอัตราที่ผู้ใช้ระบุเมื่อเป็นเงินตราต่างประเทศ "
-                                                             f"· สาขา ผู้ซื้อ วิธีอ่าน และไฟล์อยู่ในชีต “{S_REGISTER_EV}” แถวเดียวกัน"),
-                                  (S_REGISTER_EV, S_REGISTER_EV, f"หลักฐานของแต่ละแถวในชีต “{S_REGISTER}” อ่านเทียบกันตามลำดับ · สาขา ผู้ซื้อ "
-                                                                 "ที่มา (วิธีอ่าน) และไฟล์")):
-            ws = self.wb.create_sheet(sheet)
+        for sheet, title, sub in ((S_REGISTER, W("doc.title.register"), W("doc.sub.register", s_register_ev=W(S_REGISTER_EV))),
+                                  (S_REGISTER_EV, W(S_REGISTER_EV), W("doc.sub.register_ev", s_register=W(S_REGISTER)))):
+            ws = self.wb.create_sheet(W(sheet))
             self._title(ws, title, sub)
-            picked, prow, cols = workpaper.pick(H_REGISTER, rows, [h for h, _ in LAYOUT[sheet]], money_cols=(11, 12, 13, 14, 15, 17, 18, 19),
+            picked, prow, cols = workpaper.pick(list(H_REGISTER), rows, [W(h) for h, _ in LAYOUT[sheet]], money_cols=(11, 12, 13, 14, 15, 17, 18, 19),
                                                 wrap_cols=(4, 5, 8, 21))
             self._table(ws, 4, picked, prow, [w for _, w in LAYOUT[sheet]], **cols)
             # a tax ID is text, never a number
             for j, h in enumerate(picked, start=1):
-                if h in ("เลขผู้เสียภาษีผู้ขาย", "เลขผู้เสียภาษีผู้ซื้อ"):
+                if h in (W("doc.col.seller_tax_id"), W("doc.col.buyer_tax_id")):
                     for r in range(5, 5 + len(rows)):
                         ws.cell(row=r, column=j).number_format = "@"
 
     def not_included(self):
-        ws = self.wb.create_sheet(NOT_INCLUDED)
+        ws = self.wb.create_sheet(W(NOT_INCLUDED))
         rows = [[e["name"], e["reason"], e.get("detail") or "", e["how"]] for e in self.c.get("not_included") or []]
-        self._title(ws, NOT_INCLUDED,
-                    "เอกสารในแผ่นนี้ไม่อยู่ในทะเบียน และไม่ได้นับในยอดรวมของรอบนี้ · นำกลับมารวมได้จากห้องทำงานของ agent"
-                    if rows else "รอบนี้ไม่มีเอกสารที่ถูกตัดออก เอกสารที่ส่งมาทุกฉบับอยู่ในทะเบียน")
-        self._table(ws, 4, ["ไฟล์", "เหตุผล", "รายละเอียด", "การนำกลับมารวม"], rows, [36, 30, 64, 44], wrap_cols=(3, 4))
+        self._title(ws, W(NOT_INCLUDED),
+                    W("doc.sub.not_included")
+                    if rows else W("doc.sub.none_left_out"))
+        self._table(ws, 4, [W("doc.col.file"), W("doc.col.reason"), W("doc.col.detail"), W("doc.col.how_back")], rows, [36, 30, 64, 44], wrap_cols=(3, 4))
 
     def line_items(self):
-        ws = self.wb.create_sheet("รายการสินค้า")
-        self._title(ws, "รายการสินค้า/บริการ", "“ระบบอ่าน” = อ่านด้วยสคริปต์ ยังไม่มีคนตรวจ · “คนยืนยันแล้ว” = มีคนตอบการ์ดของรายการนั้น · "
-                                               "ความมั่นใจต่ำกว่า 0.95 = ต้องตรวจ (ยอดหัวเอกสารตรวจแยกไว้แล้ว)")
+        ws = self.wb.create_sheet(W("doc.sheet.items"))
+        self._title(ws, W("doc.title.items"), W("doc.sub.items"))
         rows = [[l["name"], l["row"], l["description"], _num(l["quantity"]), _num(l["unit_price"]), _num(l["amount"]),
                  l["confidence"], item_status(l)] for l in self.c["line_items"]]
-        self._table(ws, 4, ["ไฟล์", "บรรทัด", "รายการ", "จำนวน", "ราคาต่อหน่วย", "จำนวนเงิน", "ความมั่นใจ", "สถานะ"], rows,
+        self._table(ws, 4, [W("doc.col.file"), W("doc.key.row"), W("doc.col.item"), W("doc.col.quantity"), W("doc.col.unit_price"), W("doc.col.amount"), W("doc.col.confidence"), W("doc.col.status")], rows,
                     [30, 8, 44, 10, 14, 14, 10, 30], money_cols=(5, 6), wrap_cols=(3, 8))
 
     def provenance(self):
-        ws = self.wb.create_sheet("ที่มา")
-        self._title(ws, "ที่มาของทุกค่า", "หน้า · ตำแหน่งบนหน้า (x0,y0,x1,y1 หน่วย pt; รูปถ่ายเป็น px) · ข้อความที่พิมพ์ · ใครเป็นผู้กำหนด")
+        ws = self.wb.create_sheet(W("doc.sheet.provenance"))
+        self._title(ws, W("doc.title.provenance"), W("doc.sub.provenance"))
         rows = []
         for p in self.c["provenance"]:
-            vision = "; ".join(f"{c['method']}: {c['value']}" for c in p.get("candidates") or [])
+            # (a party the model read is shown as the name and its legal form, not as the engine wrote it down)
+            vision = "; ".join(f"{c['method']}: {_val(str(c['value']))}" for c in p.get("candidates") or [])
             rows.append([p["name"], p["label"], p["value"] if not isinstance(p["value"], (int, float)) else str(p["value"]),
                          p["confidence"], method_th(p["method"]), p["page"], p["bbox"], p["raw_text"],
                          DECIDED_TH.get(p["decided_by"], p["decided_by"]),
                          ", ".join(CHECK_NAME_TH.get(c, c) for c in p["checks"] if c in CHECK_NAME_TH) or None, vision or None])
-        self._table(ws, 4, ["ไฟล์", "ช่อง", "ค่า", "ความมั่นใจ", "อ่านด้วย", "หน้า", "ตำแหน่ง", "ข้อความในเอกสาร",
-                            "ผู้กำหนด", "ผ่านการตรวจ", "โมเดลอ่านได้ (อ้างอิง)"], rows,
+        self._table(ws, 4, [W("doc.col.file"), W("doc.col.field"), W("doc.col.value"), W("doc.col.confidence"), W("doc.col.read_by"), W("doc.col.page"), W("doc.col.position"), W("doc.col.doc_text"),
+                            W("doc.col.decided_by"), W("doc.col.checks_passed"), W("doc.col.model_read")], rows,
                     [22, 15, 24, 9, 13, 6, 20, 28, 15, 28, 22], wrap_cols=(1, 2, 3, 5, 7, 8, 9, 10, 11))
 
     def exceptions(self):
-        ws = self.wb.create_sheet("ข้อยกเว้น")
-        self._title(ws, "ข้อยกเว้น", "“ไม่ได้บันทึก” = ไม่อยู่ในทะเบียน · “บันทึกพร้อมหมายเหตุ” = อยู่ในทะเบียน แต่มีสิ่งที่คนตรวจควรรู้")
-        who = {"person": "ผู้ใช้", "card": "คำตอบในการ์ด", "rule": "กฎของระบบ"}
-        rows = [[e["name"], e["code"], e["reason"], "ไม่ได้บันทึก" if e["severity"] == "excluded" else "บันทึกพร้อมหมายเหตุ",
+        ws = self.wb.create_sheet(W("doc.sheet.exceptions"))
+        self._title(ws, W("doc.sheet.exceptions"), W("doc.sub.exceptions"))
+        who = {"person": W("doc.who.person"), "card": W("doc.who.card"), "rule": W("doc.who.rule")}
+        rows = [[e["name"], e["code"], e["reason"], W("doc.result.excluded") if e["severity"] == "excluded" else W("doc.result.noted"),
                  e.get("detail") or "", who.get(e["decided_by"], e["decided_by"])] for e in self.c["exceptions"]]
-        self._table(ws, 4, ["ไฟล์", "รหัสเหตุผล", "เหตุผล", "ผล", "รายละเอียด", "ตัดสินโดย"], rows,
+        self._table(ws, 4, [W("doc.col.file"), W("doc.col.reason_code"), W("doc.col.reason"), W("doc.col.result"), W("doc.col.detail"), W("doc.col.decided")], rows,
                     [30, 24, 34, 18, 60, 14], wrap_cols=(5,))
 
     def checks(self):
-        ws = self.wb.create_sheet("การตรวจ")
-        self._title(ws, "การตรวจตัวเลขของแต่ละเอกสาร", "ตรวจด้วยกฎ ไม่ใช้โมเดล: เลขผู้เสียภาษี วันที่ จำนวน×ราคา ผลรวม VAT 7% ยอดรวม หัก ณ ที่จ่าย ฯลฯ")
+        ws = self.wb.create_sheet(W("doc.sheet.checks"))
+        self._title(ws, W("doc.title.checks"), W("doc.sub.checks"))
         def note(c):
             m = msg_th(c.get("message")) or ""
             try:
@@ -349,12 +351,12 @@ class InvoiceWorkbook:
             except Exception:  # noqa: BLE001 — not two amounts
                 differs = False
             if not m and c["status"] == "pass" and differs:
-                m = "ต่างกันไม่เกิน 1 สตางค์ จากการปัดเศษ ถือว่าตรง"
+                m = W("doc.note.rounding")
             return m
         rows = [[c["name"], check_name(c["code"]), STATUS_TH.get(c["status"], c["status"]),
                  None if c.get("expected") is None else msg_th(c["expected"]), None if c.get("actual") is None else msg_th(c["actual"]),
                  note(c), c["code"]] for c in self.c["checks"]]
-        self._table(ws, 4, ["ไฟล์", "ตรวจอะไร", "ผล", "ควรเป็น", "ที่พบ", "หมายเหตุ", "รหัส (สำหรับผู้ดูแล)"], rows,
+        self._table(ws, 4, [W("doc.col.file"), W("doc.col.what"), W("doc.col.result"), W("doc.key.expected"), W("doc.col.found"), W("doc.col.note"), W("doc.col.code")], rows,
                     [30, 30, 10, 22, 22, 44, 20], wrap_cols=(6,))
 
     def write(self, path: str) -> dict:
@@ -369,7 +371,8 @@ class InvoiceWorkbook:
         # AM8: printable — the register's row number, date and document number repeat on every page (AM10: and
         # open its companion sheet)
         workpaper.setup_workbook(self.wb, doc_name=os.path.basename(path),
-                                 id_cols={S_REGISTER: ID_COLS[S_REGISTER], S_REGISTER_EV: ID_COLS[S_REGISTER], "ที่มา": 2})
+                                 id_cols={W(S_REGISTER): ID_COLS[S_REGISTER], W(S_REGISTER_EV): ID_COLS[S_REGISTER], W("doc.sheet.provenance"): 2},
+                                 lang=words.lang())
         self.wb.save(path)
         return {"sheets": list(self.wb.sheetnames), "register_rows": self.c["totals"]["included"]}
 
@@ -384,18 +387,18 @@ def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
         return {"name": name, "ok": bool(ok), "detail": detail, "label": label}
 
     wb = load_workbook(path)
-    out = [ck("xlsx.sheets", set(SHEETS) <= set(wb.sheetnames), ", ".join(wb.sheetnames), W("check.sheets"))]
+    out = [ck("xlsx.sheets", {W(k) for k in SHEETS} <= set(wb.sheetnames), ", ".join(wb.sheetnames), W("check.sheets"))]
     rows = table(parts(wb, S_REGISTER), H_REGISTER)
     want = computed["totals"]["included"]
     out.append(ck("xlsx.register_rows", len(rows) == want, W("check.rows.detail", n=len(rows), want=want), W("check.rows")))
     out.append(_figures(wb, rows, computed))
-    pv = [r for r in wb["ที่มา"].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
+    pv = [r for r in wb[W("doc.sheet.provenance")].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
     out.append(ck("xlsx.provenance", len(pv) == len(computed["provenance"]) and all(r[4] for r in pv),
                   W("check.n_values", n=len(pv)), W("check.provenance")))
-    ex = [r for r in wb["ข้อยกเว้น"].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
+    ex = [r for r in wb[W("doc.sheet.exceptions")].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
     out.append(ck("xlsx.exceptions", len(ex) == len(computed["exceptions"]) and all(r[1] in REASON_TH for r in ex),
                   W("check.n_items", n=len(ex)), W("check.exceptions")))
-    left = [r for r in wb[NOT_INCLUDED].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
+    left = [r for r in wb[W(NOT_INCLUDED)].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
     want_left = sorted(e["name"] for e in computed.get("not_included") or [])
     out.append(ck("xlsx.not_included", sorted(r[0] for r in left) == want_left and all(r[1] and r[3] for r in left)
                   and len(want_left) == computed["totals"]["excluded"],
@@ -408,13 +411,13 @@ def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
 
 # The register's columns a value is read back from: (index in H_REGISTER, header, computed key, money?)
 REGISTER_FIELDS = (
-    (1, "วันที่", "document_date", False), (2, "เลขที่", "document_number", False),
-    (5, "เลขผู้เสียภาษีผู้ขาย", "seller_tax_id", False), (8, "เลขผู้เสียภาษีผู้ซื้อ", "buyer_tax_id", False),
-    (9, "สกุลเงิน", "currency", False),
-    (10, "ยอดก่อน VAT", "subtotal", True), (11, "VAT", "vat_amount", True), (12, "ยอดรวม", "total", True),
-    (13, "หัก ณ ที่จ่าย", "wht_amount", True), (14, "ยอดที่ต้องชำระ", "payable", True), (15, "อัตราแลกเปลี่ยน", "fx_rate", True),
-    (16, "ยอดก่อน VAT (บาท)", "thb_subtotal", True), (17, "VAT (บาท)", "thb_vat_amount", True),
-    (18, "ยอดรวม (บาท)", "thb_total", True),
+    (1, "doc.col.date", "document_date", False), (2, "doc.col.number", "document_number", False),
+    (5, "doc.col.seller_tax_id", "seller_tax_id", False), (8, "doc.col.buyer_tax_id", "buyer_tax_id", False),
+    (9, "doc.col.currency", "currency", False),
+    (10, "doc.col.subtotal", "subtotal", True), (11, "doc.col.vat", "vat_amount", True), (12, "doc.col.total", "total", True),
+    (13, "doc.col.wht", "wht_amount", True), (14, "doc.col.payable", "payable", True), (15, "doc.col.fx_rate", "fx_rate", True),
+    (16, "doc.col.subtotal_thb", "thb_subtotal", True), (17, "doc.col.vat_thb", "thb_vat_amount", True),
+    (18, "doc.col.total_thb", "thb_total", True),
 )
 
 
@@ -430,24 +433,24 @@ def _figures(wb, rows: list, computed: dict) -> dict:
         for col, head, key, money in REGISTER_FIELDS:
             want = d.get("payable", d.get("net_payable")) if key == "payable" else d.get(key)
             if money:
-                t.number(f"{where} {head}", r[col], want)
+                t.number(f"{where} {W(head)}", r[col], want)
             else:
-                t.text(f"{where} {head}", r[col], "" if want is None else want)
-    face = labelled(wb["สรุป"], min_row=5)
+                t.text(f"{where} {W(head)}", r[col], "" if want is None else want)
+    face = labelled(wb[W("doc.sheet.summary")], min_row=5)
     tt = computed["totals"]
-    for label, want in (("เอกสารที่ได้รับ", tt["documents"]), ("บันทึกเข้าทะเบียน", tt["included"]),
-                        ("ข้อยกเว้นทั้งหมด", tt["exceptions"]), ("คำถามที่ตอบแล้ว", tt["questions_answered"]),
-                        ("ยอดก่อน VAT (บาท)", tt["thb"]["subtotal"]), ("ภาษีมูลค่าเพิ่ม (บาท)", tt["thb"]["vat_amount"]),
-                        ("ยอดรวม (บาท)", tt["thb"]["total"]), ("หัก ณ ที่จ่าย (บาท)", tt["thb"]["wht_amount"]),
-                        ("ยอดที่ต้องชำระ (บาท)", tt["thb"].get("payable", tt["thb"]["net_payable"]))):
+    for label, want in ((W("doc.face.received"), tt["documents"]), (W("doc.face.recorded"), tt["included"]),
+                        (W("doc.face.exceptions"), tt["exceptions"]), (W("doc.face.answered"), tt["questions_answered"]),
+                        (W("doc.col.subtotal_thb"), tt["thb"]["subtotal"]), (W("doc.face.vat_thb"), tt["thb"]["vat_amount"]),
+                        (W("doc.col.total_thb"), tt["thb"]["total"]), (W("doc.face.wht_thb"), tt["thb"]["wht_amount"]),
+                        (W("doc.face.payable_thb"), tt["thb"].get("payable", tt["thb"]["net_payable"]))):
         t.number(W("where.summary", label=label), face.get(label), want)
-    items = [r for r in wb["รายการสินค้า"].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
+    items = [r for r in wb[W("doc.sheet.items")].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
     if len(items) != len(computed["line_items"]):
         t.fail(W("check.items.count", got=len(items), want=len(computed["line_items"])))
     for r, li in zip(items, computed["line_items"]):
         where = W("where.item", name=li["name"], row=li["row"])
         t.text(W("where.item.name", where=where), r[2], li["description"] or "")
-        for col, head, key in ((3, "จำนวน", "quantity"), (4, "ราคาต่อหน่วย", "unit_price"), (5, "จำนวนเงิน", "amount")):
+        for col, head, key in ((3, W("doc.col.quantity"), "quantity"), (4, W("doc.col.unit_price"), "unit_price"), (5, W("doc.col.amount"), "amount")):
             t.number(f"{where} {head}", r[col], li[key])
         t.text(W("where.item.status", where=where), r[7], item_status(li))
     return t.result("xlsx.figures", W("check.figures"), W("noun.values"))
