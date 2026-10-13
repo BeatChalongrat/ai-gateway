@@ -124,7 +124,7 @@ services:
     ports:
       - "127.0.0.1:9090:9090"
     environment:
-      # DLP instrument (docs/DLP_INSTRUMENT_REPORT.md): when set, the mock
+      # DLP instrument (the DLP instrument record): when set, the mock
       # appends every completion request (full raw body + redacted headers)
       # to this file. Empty (default) = capture off. Point it inside the
       # /capture mount below, e.g. MOCK_CAPTURE_PATH=/capture/requests.jsonl

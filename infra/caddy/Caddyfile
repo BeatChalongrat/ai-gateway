@@ -87,7 +87,7 @@
 # A service with ONE copy behind this door (today: every one of them). Taking the only upstream out of
 # rotation sends nobody anywhere else — it only stretches a restart: on 7 Oct 2026 web-chat was ready 3.5 s
 # after its swap and was served again after 16 s, the rest being fail_duration. Measured on a front door of
-# its own (scripts/probes/AM13/front_door_gap.sh, a 3.5 s restart): with (balanced) 2 requests failed and
+# its own (the AM13 front-door-gap probe, a 3.5 s restart): with (balanced) 2 requests failed and
 # the service was away 15.1 s; with this, none failed and the slowest waited 5.8 s.
 #   - no passive penalty (fail_duration 0): a failed connection is not a reason to stop trying the one
 #     upstream there is;

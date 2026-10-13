@@ -7,7 +7,7 @@
 | test_portal_team_routes.py::TestRemoveMember::test_owner_removes_member | flaky, not reproduced | Once, in one of the AM1c full lanes (`scripts/probes/AM1c/results/lanes/backend_tip2.txt`), a signup returned 200 with its token and the next request (`POST /portal/team/invites`) was refused 401 `Invalid portal token`, so `inv["code"]` raised KeyError. It passed 3/3 alone. AM2 ran the full unit lane 10 times from a worktree at `e5d79bea`, two at a time: 10/10 green, 4885 passed each (`scripts/probes/AM2/results/lanes/flake_hunt_*.txt`). A clock watcher in the same VM recorded no wall-clock step. Mechanism shown, cause not proven: PyJWT checks `iat` with zero leeway, and a verify-time clock 1.2 s behind the mint-time clock produces exactly `AuthenticationError: Invalid portal token`. Hyper-V TimeSync can step this VM's clock. **Quarantine:** only that signature (401 + `Invalid portal token` on the first authed call) xfails, via `_quarantine_am2_q1`, with the token's `iat` and the clock in the message; any other failure still fails. **Release:** when it fires, compare `iat` with `now`. If `iat > now`, the fix is a small `leeway` in `verify_portal_token`, since production has the same exposure on an NTP step back. If not, the token was refused for another reason: investigate that | AM2-Q1 |
 
 **FIX133 (2026-09-25): no test is quarantined.** The lane (a throwaway container
-from the backend image, `scripts/probes/FIX132/results/lane_backend.sh`, FIX131)
+from the backend image, the FIX132 backend lane script, FIX131)
 mounts the sibling trees the 32 conditional quarantines were written for
 (`examples/`, `services/chat-edge-api/`, `SranDesktop/src`, `apps/desktop/src`,
 `docker-compose*.yml`), so their `condition=` was already false and they ran as

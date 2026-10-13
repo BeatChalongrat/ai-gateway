@@ -13,7 +13,7 @@ POST /v1/guardrails/check
     chat path runs (orchestrator.py / public_chat.py) — so there is exactly
     one set of rules and one matcher. It does not modify the service, does
     not add a trust flag, and does not drop a role from the scan (that
-    design question is deliberately parked; see docs/FIX21_REPORT.md §1).
+    design question is deliberately parked; see FIX21's record, §1).
     The matched span is located with the same compiled patterns so the
     caller can tell the user WHICH phrase is the problem.
 

@@ -749,7 +749,7 @@ function UserMenu({
               web Settings page is appearance + account), so they show on
               both surfaces and each page hides its device-only sections
               itself. Connectors and Writing style keep ALL their state in the
-              desktop host over the bridge (docs/FIX43_REPORT.md §B2), so they
+              desktop host over the bridge (FIX43's record, §B2), so they
               stay desktop-only — decided at RUNTIME (FIX20 §6.5): hosted is
               true exactly when the Electron preload's window.sranHost is
               present, so ONE build serves both surfaces. */}

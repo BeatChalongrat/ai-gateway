@@ -75,7 +75,7 @@ win:
   # Electron's atom logo; FIX20 removed it. Build-host note: rcedit comes from
   # electron-builder's winCodeSign package, whose archive carries macOS
   # symlinks that 7-Zip refuses to create on Windows without symlink
-  # privilege; see docs/FIX20_REPORT.md for what the host needs.
+  # privilege; FIX20's record says what the host needs.
 
 nsis:
   # One click: double-click installs (per-user, no admin prompt, no wizard,

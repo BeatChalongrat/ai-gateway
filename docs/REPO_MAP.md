@@ -3,7 +3,10 @@
 What is tracked is what a person who cloned this repository needs to build, run, deploy, operate or
 understand the system. Working notes, per-round probes, result folders and reports stay on the
 author's machine: `.gitignore` names those kinds, and `scripts/gate/tracks.py` (the gate's `tracks`
-lane, the `drill` phase, CI) fails by name if one is tracked anyway.
+lane, the `drill` phase, CI) fails by name if one is tracked anyway. Nothing is untracked while
+something still points at it: the same check fails on any tracked line that names a `docs/` or
+`scripts/` file that is not tracked, so a record that stays outside the repository is described in
+words where it is cited, never by a path a clone cannot follow.
 
 ## Root
 

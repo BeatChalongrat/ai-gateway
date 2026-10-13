@@ -17,7 +17,7 @@ in the user's own files. That is why production holds a stronger line than a
 desktop sandbox needs: in production the per-run container executes under
 **gVisor (`runsc`)**, a user-space kernel that intercepts every syscall, so the
 host kernel is not the boundary any more. gVisor was chosen over Kata /
-Firecracker because it needs no KVM (`docs/FIX14_REPORT.md` §1).
+Firecracker because it needs no KVM (FIX14's record, §1).
 
 **The rule that makes this real (FIX14 §2): the service never falls back
 silently.** When `SANDBOX_RUNTIME=runsc` is set, chat-edge starts a probe

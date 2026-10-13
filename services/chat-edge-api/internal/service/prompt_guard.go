@@ -7,7 +7,7 @@ package service
 // instructions) is checked against the gateway's content guardrail BEFORE
 // it is persisted. A stored string that matches a guardrail rule would 403
 // every future turn that carries it — silently, permanently, with an error
-// that names no cause (docs/FIX21_REPORT.md §5) — and `save_memory` is a tool
+// that names no cause (FIX21's record, §5) — and `save_memory` is a tool
 // the model can call on its own, so a poisoned page can talk it into planting
 // exactly such a string. Refusing at write time cuts that chain at storage.
 //

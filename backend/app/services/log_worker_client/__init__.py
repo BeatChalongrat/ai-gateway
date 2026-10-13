@@ -2,7 +2,7 @@
 
 The ``.proto`` source lives at ``log-worker/proto/logworker.proto``;
 both the Go server and these Python stubs are regenerated with
-``scripts/proto_codegen.sh`` (commit the generated files so live
+``protoc`` from it (commit the generated files so live
 clusters don't need a build-time protoc).
 """
 
