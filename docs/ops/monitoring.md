@@ -414,7 +414,7 @@ AFTER a provider was called on the non-streaming path still write no row.
 
 It runs from the backend image with the docker socket read-only; it is not
 part of the test stack. `python -m app.ops.watch once` runs a single tick
-(the test-fire recipe in `scripts/probes/FIX129/`).
+(the test fire: stop a database, watch the tick page, start it again).
 
 ## Sign-out ends the session (B2)
 
@@ -476,13 +476,13 @@ failure via ntfy / Resend.
 
 ## Log secret scan
 
-`scripts/probes/FIX129/log_secret_scan.py` fails if any secret value from a
+`scripts/ops/log_secret_scan.py` fails if any secret value from a
 `.env` appears in a container log:
 
 ```sh
-python scripts/probes/FIX129/log_secret_scan.py --env .env                 # whole history of every ai-gateway container
-python scripts/probes/FIX129/log_secret_scan.py --env .env --since 24h     # since the last day
-python scripts/probes/FIX129/log_secret_scan.py --env .env --project sran-test
+python scripts/ops/log_secret_scan.py --env .env                 # whole history of every ai-gateway container
+python scripts/ops/log_secret_scan.py --env .env --since 24h     # since the last day
+python scripts/ops/log_secret_scan.py --env .env --project sran-test
 ```
 
 * Secrets = the values of every key whose NAME matches
@@ -498,9 +498,7 @@ python scripts/probes/FIX129/log_secret_scan.py --env .env --project sran-test
   never the line.
 * Exit 1 on any hit, 0 when clean, 2 on a usage error. Read-only.
 
-The 2026-09-23 run against the live project
-(`scripts/probes/FIX129/results/ops/log_secret_scan_live.txt`) was the
-evidence for finding B3:
+The 2026-09-23 run against the live project was the evidence for finding B3:
 
 ```
   RED   ai-gateway-rate-limiter-1: REDIS_PASSWORD x2 (first at log line 1)

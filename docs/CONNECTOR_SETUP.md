@@ -63,7 +63,7 @@ They are **not shown** while the app runs on the embedded starter catalogue, bec
 
 ## 5. Your own MCP server — the same capability the hosted assistants give their users
 
-**A program on this computer (stdio).** Have a program that speaks MCP over stdio (one JSON-RPC message per line); the smallest working example is `scripts/probes/fix68/demo-mcp-server.mjs`. Connectors → **+ Add custom connector** → *Program on this computer* → pick the file → the dialog shows the exact command that will be spawned → **Add connector**. A `.js`/`.mjs` file runs as `node <file>`, a `.py` as `python <file>`, anything else directly; no arguments, no environment — use a wrapper if the server needs them.
+**A program on this computer (stdio).** Have a program that speaks MCP over stdio (one JSON-RPC message per line); the smallest working example is `apps/desktop/scripts/demo-mcp-server.mjs`. Connectors → **+ Add custom connector** → *Program on this computer* → pick the file → the dialog shows the exact command that will be spawned → **Add connector**. A `.js`/`.mjs` file runs as `node <file>`, a `.py` as `python <file>`, anything else directly; no arguments, no environment — use a wrapper if the server needs them.
 
 **A remote server (https).** Connectors → **+ Add custom connector** → *Remote server (URL)* → the app opens **its own window** (not the chat page) for the address and, optionally, a key → **Next** → the dialog names the exact origin it will connect to and whether a key is sent → **Add connector**. The sidecar dials the server (`POST <url>/mcp`), lists its tools, and only then stores the key.
 

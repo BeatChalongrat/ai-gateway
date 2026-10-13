@@ -3,7 +3,7 @@
 # the result: a manifest was written, drill.json says every check passed,
 # sizes are reported. Test stack only: it refuses the live network.
 #
-#   bash scripts/probes/FIX129/backup_drill_check.sh --env-file <scratch env> [options]
+#   bash scripts/ops/backup_drill_check.sh --env-file <scratch env> [options]
 #
 #   --env-file FILE   a scratch file holding ONLY the lines the backup needs
 #                     (POSTGRES_PASSWORD, WEBCHAT_POSTGRES_PASSWORD, and
@@ -13,15 +13,15 @@
 #   --uploads VOLUME  the test stack's uploads volume (default sran-test_ts_chat_edge_uploads)
 #   --image IMAGE     backup image (default ai-gateway-backup:fix129)
 #   --out DIR         host directory that becomes /backups
-#                     (default scripts/probes/FIX129/results/ops/backups)
+#                     (default scripts/ops/results/backups)
 #
 # Exit 0 = all assertions hold; 1 = the run or an assertion failed; 2 = refused.
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 NET=sran-test_default
 VOL=sran-test_ts_chat_edge_uploads
 IMG=ai-gateway-backup:fix129
-OUT="$ROOT/scripts/probes/FIX129/results/ops/backups"
+OUT="$ROOT/scripts/ops/results/backups"
 ENVF=""
 while [ $# -gt 0 ]; do
   case "$1" in

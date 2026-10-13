@@ -210,6 +210,19 @@ jobs:
         # HttpListener fakes for MCP dials — no secrets, no live services.
         run: dotnet test SranDesktop/SranDesktop.sln -c Release --no-build
 
+  repo-tracks:
+    # AM19 — only what the code needs is tracked: a tracked file that
+    # .gitignore excludes (working notes, probes, result folders, reports)
+    # fails by name. Mirrors the gate's `tracks` lane and .gitlab-ci.yml.
+    name: Only what the code needs is tracked
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python scripts/gate/tracks.py
+
   secret-leak-guard:
     name: No NEXT_PUBLIC secrets
     runs-on: ubuntu-latest

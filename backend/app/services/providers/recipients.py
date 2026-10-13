@@ -3,7 +3,7 @@
 A provider row is a route. For a direct row the route and the company are one: what is sent to
 ``deepseek`` is seen by DeepSeek. A router is a route only: behind OpenRouter a model is run by its maker
 or by a hosting company, and unless it is told otherwise OpenRouter picks one per request. Measured on
-13 Oct 2026 with this deployment's own key (scripts/probes/AM16/openrouter_pin.py): a request for
+13 Oct 2026 with this deployment's own key (scripts/agent-market/openrouter_pin.py): a request for
 ``anthropic/claude-sonnet-4.5`` was answered by Amazon Bedrock, ``openai/gpt-4o`` by Azure,
 ``deepseek/deepseek-chat`` by DeepInfra and a Llama model by Parasail — none of them the maker, and
 nothing in the model's name said so. Only Google's models were run by Google.

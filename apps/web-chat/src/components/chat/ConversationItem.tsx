@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { Archive, ArchiveRestore, BrainCircuit, FolderKanban, FolderPlus, Pin, PinOff } from "lucide-react";
+import { Archive, ArchiveRestore, FolderKanban, FolderPlus, MessageSquareDashed, Pencil, Pin, PinOff } from "lucide-react";
+
+import { BrainOff } from "@/components/ui/BrainOff";
 
 import { useChatDeletionText } from "@/hooks/useDataPolicy";
 import { DELETION_NOTICE_KEYS } from "@/lib/dataPolicy";
@@ -140,13 +142,10 @@ export function ConversationItem({
                 className="shrink-0 text-text-muted opacity-70"
               />
             ) : null}
-            {memoryMode !== "on" ? (
-              <BrainCircuit
-                width={12}
-                height={12}
-                aria-hidden
-                className="shrink-0 text-text-muted opacity-70"
-              />
+            {memoryMode === "temporary" ? (
+              <MessageSquareDashed width={12} height={12} aria-hidden className="shrink-0 text-text-muted opacity-70" />
+            ) : memoryMode === "off" ? (
+              <BrainOff width={12} height={12} aria-hidden className="shrink-0 text-text-muted opacity-70" />
             ) : null}
             <span className="truncate">{conv.title || t("conv.untitled")}</span>
           </span>
@@ -216,19 +215,7 @@ export function ConversationItem({
               }}
               className="flex w-full items-center gap-2 px-3 py-2 text-left text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
             >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden
-              >
-                <path d="M11.5 1.5l3 3L5 14H2v-3L11.5 1.5z" />
-              </svg>
+              <Pencil width={14} height={14} aria-hidden />
               {t("conv.rename")}
             </button>
             {onMoveToProject ? (

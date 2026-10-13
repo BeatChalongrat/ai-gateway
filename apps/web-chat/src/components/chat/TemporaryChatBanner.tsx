@@ -20,7 +20,9 @@
 // is the one the user already expects, and a permanent "memory is on"
 // bar would train people to ignore the strip they need to notice.
 
-import { BrainCircuit } from "lucide-react";
+import { MessageSquareDashed } from "lucide-react";
+
+import { BrainOff } from "@/components/ui/BrainOff";
 
 import { toast } from "@/components/ui/Toast";
 import { tOutside, useT } from "@/lib/i18n";
@@ -70,7 +72,11 @@ export function TemporaryChatBanner({ conversationId }: Props) {
         role="status"
         className="mx-auto flex max-w-3xl items-center gap-2 rounded-t-lg border border-b-0 border-border bg-bg-elevated px-3 py-1.5 text-[11px] text-text-secondary"
       >
-        <BrainCircuit className="h-3.5 w-3.5 shrink-0 text-text-muted" />
+        {temporary ? (
+          <MessageSquareDashed className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
+        ) : (
+          <BrainOff className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
+        )}
         <span className="min-w-0 flex-1">
           <span className="font-medium text-text-primary">
             {t(temporary ? "memory.banner.title" : "memory.banner.offTitle")}

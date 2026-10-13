@@ -37,7 +37,7 @@ import { useChatStore } from "@/stores/chatStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { ConversationListSkeleton } from "@/components/ui/Skeleton";
 import {
-  Archive, Brain, BrainCircuit, ChevronRight, Clock, FolderKanban, Pencil, PenLine, Plug, Plus,
+  Archive, Brain, ChevronRight, Clock, FolderKanban, MessageSquareDashed, MessageSquarePlus, Pencil, PenLine, Plug, Plus,
   Settings as SettingsIcon, Trash2, Wrench,
 } from "lucide-react";
 
@@ -412,14 +412,7 @@ export function Sidebar({
             onClick={handleNew}
             className="focus-ring tap-44 flex w-full items-center gap-2.5 rounded-lg border border-border-subtle bg-transparent px-3 py-2 text-sm text-text-primary transition-colors hover:bg-bg-elevated"
           >
-            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path
-                d="M12 5v14M5 12h14"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-            </svg>
+            <MessageSquarePlus width={16} height={16} aria-hidden />
             <span>{t("sidebar.newChat")}</span>
             <span className="ml-auto hidden text-[10px] text-text-muted md:inline">
               {hint("Mod+Shift+N")}
@@ -432,7 +425,7 @@ export function Sidebar({
             title={t("sidebar.newTemporaryChat.tooltip")}
             className="focus-ring tap-44 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
           >
-            <BrainCircuit width={16} height={16} aria-hidden />
+            <MessageSquareDashed width={16} height={16} aria-hidden />
             <span>{t("sidebar.newTemporaryChat")}</span>
           </button>
 

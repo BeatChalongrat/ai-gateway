@@ -1,4 +1,4 @@
-// FIX68 — the dev-only demo MCP server (scripts/probes/fix68/demo-mcp-server.mjs)
+// FIX68 — the dev-only demo MCP server (apps/desktop/scripts/demo-mcp-server.mjs)
 // speaks the stdio transport the sidecar's StdioMcpTransport expects: one
 // JSON-RPC 2.0 message per '\n'-terminated line, no Content-Length framing,
 // initialize → notifications/initialized → tools/list → tools/call. This test
@@ -13,7 +13,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { afterEach, describe, expect, it } from "vitest";
 
-const SERVER = path.resolve(__dirname, "..", "..", "..", "scripts", "probes", "fix68", "demo-mcp-server.mjs");
+const SERVER = path.resolve(__dirname, "..", "scripts", "demo-mcp-server.mjs");
 
 type Reply = { id?: number; result?: Record<string, unknown>; error?: { code: number; message: string } };
 

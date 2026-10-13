@@ -17,9 +17,9 @@
 # manifest + pg_restore --list) → wrong password → unreachable bucket →
 # not configured. Assertions print PASS/FAIL; exit 0 = all passed.
 #
-#   scripts/probes/FIX130/offsite_e2e.sh [image] [results dir]
+#   scripts/ops/offsite_e2e.sh [image] [results dir]
 #     image        default fix130-ops-backup (docker build -t fix130-ops-backup infra/backup)
-#     results dir  default scripts/probes/FIX130/results/ops
+#     results dir  default scripts/ops/results/ops
 set -uo pipefail
 export MSYS_NO_PATHCONV=1
 

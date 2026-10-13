@@ -200,6 +200,18 @@ secret-leak-guard:
       echo "OK: no NEXT_PUBLIC_ secret leaks in tracked files."
 
 # ─────────────────────────────────────────────────────────────────────────
+# repo-tracks (AM19) — only what the code needs is tracked. A tracked file
+# that .gitignore excludes (a working note, a probe, a result folder, a
+# report) fails the pipeline by name. The same check is the gate's `tracks`
+# lane; the rule lives in .gitignore, not in a document someone has to read.
+# ─────────────────────────────────────────────────────────────────────────
+repo-tracks:
+  stage: test
+  image: python:3.11
+  script:
+    - python scripts/gate/tracks.py
+
+# ─────────────────────────────────────────────────────────────────────────
 # gitleaks (FIX126 O5) — scan the commits this pipeline brings in for
 # secrets (gitleaks default ruleset) and FAIL on any finding. GitLab-only:
 # the GitHub workflow has no equivalent lane yet.

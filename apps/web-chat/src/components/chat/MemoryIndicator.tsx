@@ -4,8 +4,10 @@
 //
 // Three states (FIX130 A2 — lib/memoryMode.ts, the one rule):
 //   - on (default):  Brain glyph + "Memory" label
-//   - off:           BrainCircuit glyph + "Memory off", dim
-//   - temporary:     BrainCircuit glyph + "Temporary chat", dim
+//   - off:           BrainOff glyph (the Brain, struck through) + "Memory off", dim
+//   - temporary:     MessageSquareDashed glyph (a dashed bubble) + "Temporary chat", dim
+// AM19 — one icon per meaning: BrainCircuit is the composer's thinking toggle
+// and nothing else; the two no-memory states each have a glyph of their own.
 // The popover says what each state really does — off and temporary both
 // neither use nor save memory — and offers:
 //   - "Turn off / on for this chat"  → optimistic PATCH via store
@@ -21,7 +23,9 @@ import { useCallback, useRef, useState } from "react";
 import { useDismissable } from "@/hooks/useDismissable";
 import { useRouter } from "next/navigation";
 
-import { Brain, BrainCircuit } from "lucide-react";
+import { Brain, MessageSquareDashed, Settings } from "lucide-react";
+
+import { BrainOff } from "@/components/ui/BrainOff";
 
 import { toast } from "@/components/ui/Toast";
 import { tOutside, useT } from "@/lib/i18n";
@@ -103,8 +107,10 @@ export function MemoryIndicator({ conversationId }: Props) {
       >
         {enabled ? (
           <Brain className="h-3.5 w-3.5" />
+        ) : temporary ? (
+          <MessageSquareDashed className="h-3.5 w-3.5 opacity-60" />
         ) : (
-          <BrainCircuit className="h-3.5 w-3.5 opacity-60" />
+          <BrainOff className="h-3.5 w-3.5 opacity-60" />
         )}
         <span className="hidden sm:inline">
           {enabled
@@ -155,7 +161,7 @@ export function MemoryIndicator({ conversationId }: Props) {
                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-text-primary transition-colors hover:bg-bg-elevated"
               >
                 {enabled ? (
-                  <BrainCircuit className="h-3.5 w-3.5 text-text-muted" />
+                  <BrainOff className="h-3.5 w-3.5 text-text-muted" />
                 ) : (
                   <Brain className="h-3.5 w-3.5 text-text-muted" />
                 )}
@@ -170,35 +176,11 @@ export function MemoryIndicator({ conversationId }: Props) {
             onClick={openSettings}
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-text-primary transition-colors hover:bg-bg-elevated"
           >
-            <SettingsIcon />
+            <Settings width={14} height={14} className="text-text-muted" aria-hidden />
             <span>{t("memory.openSettings")}</span>
           </button>
         </div>
       ) : null}
     </div>
-  );
-}
-
-function SettingsIcon() {
-  // Same gear icon style used in the sidebar UserMenu — kept inline
-  // so we don't import lucide twice for the same glyph.
-  return (
-    <svg
-      width={14}
-      height={14}
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden
-      className="text-text-muted"
-    >
-      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
-      <path
-        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06A2 2 0 0 1 4.21 16.97l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9 1.65 1.65 0 0 0 4.27 7.18l-.06-.06A2 2 0 1 1 7.03 4.29l.06.06A1.65 1.65 0 0 0 8.91 4.6 1.65 1.65 0 0 0 9.91 3.09V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }

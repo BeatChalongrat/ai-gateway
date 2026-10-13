@@ -19,7 +19,7 @@
 // every turn.submit from this page carry `quick: true` (the host answers with
 // no tool list).
 
-import { ExternalLink, MessageSquare, Plus, X } from "lucide-react";
+import { ExternalLink, MessageSquare, MessageSquarePlus, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ChatInput } from "@/components/chat/ChatInput";
@@ -187,7 +187,7 @@ export function QuickAsk() {
                 title={t("quick.newChat")}
                 data-testid="quick-new"
               >
-                <Plus width={14} height={14} aria-hidden />
+                <MessageSquarePlus width={14} height={14} aria-hidden />
                 {t("quick.newChat")}
               </button>
               <button

@@ -1,38 +1,4 @@
-"""P5-01: Routing inventory validation tests.
-
-Verifies:
-- Inventory document exists and references key components
-- Current routing service exists and is callable
-- Model registry is accessible
-- Scattered auto-resolution in adapters is documented
-"""
-
-from pathlib import Path
-
-DOCS_DIR = Path(__file__).resolve().parent.parent.parent / "docs"
-
-
-class TestRoutingInventoryDoc:
-    def test_doc_exists(self):
-        assert (DOCS_DIR / "P5_ROUTING_INVENTORY.md").exists()
-
-    def test_documents_routing_service(self):
-        doc = (DOCS_DIR / "P5_ROUTING_INVENTORY.md").read_text(encoding="utf-8")
-        assert "RoutingService" in doc
-
-    def test_documents_model_registry(self):
-        doc = (DOCS_DIR / "P5_ROUTING_INVENTORY.md").read_text(encoding="utf-8")
-        assert "model_registry" in doc
-
-    def test_documents_adapter_auto_resolution(self):
-        doc = (DOCS_DIR / "P5_ROUTING_INVENTORY.md").read_text(encoding="utf-8")
-        assert "auto" in doc.lower()
-        assert "adapter" in doc.lower()
-
-    def test_documents_gaps(self):
-        doc = (DOCS_DIR / "P5_ROUTING_INVENTORY.md").read_text(encoding="utf-8")
-        for gap in ["GAP-R1", "GAP-R2", "GAP-R3", "GAP-R4", "GAP-R5"]:
-            assert gap in doc, f"Missing gap: {gap}"
+"""P5-01: the routing pieces the inventory named exist and are callable."""
 
 
 class TestCurrentRoutingServiceExists:

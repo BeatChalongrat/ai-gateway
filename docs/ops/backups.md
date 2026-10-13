@@ -346,16 +346,15 @@ no access to the local backups: 3/3 sha256 matched the manifest, and
 
 ### Proving it without a real bucket
 
-`scripts/probes/FIX130/offsite_e2e.sh [image] [results dir]` builds the whole
+`scripts/ops/offsite_e2e.sh [image] [results dir]` builds the whole
 path on throwaway containers — MinIO with a bucket and a least-privilege
 user, two seeded Postgres 16 servers, a dummy alert endpoint — and asserts:
 first-time `offsite-check`, `now` twice (upload, off-site drill, retention,
 check; dedup on the second run), a restore on a "new machine" from the
 bucket alone, a wrong password and an unreachable bucket (exit 3 + an alert
 to the dummy endpoint, local backup still proven), not configured (one line,
-exit 0, no alert), and no secret in any log. The 2026-09-23 run
-(`scripts/probes/FIX130/results/ops/`): all 20 assertions PASS; the same
-script against the FIX129 image: 15 FAIL.
+exit 0, no alert), and no secret in any log. The 2026-09-23 run: all 20
+assertions PASS; the same script against the FIX129 image: 15 FAIL.
 
 ### A synced folder instead of a bucket (FIX133 C)
 
@@ -571,9 +570,9 @@ log — configure one; a backup nobody hears about failing is the same as none.
 
 ## Proving it without the live stack
 
-`scripts/probes/FIX129/backup_drill_check.sh` runs the image once against the
+`scripts/ops/backup_drill_check.sh` runs the image once against the
 **test stack** (`scripts/test-stack.sh up`; the generator includes the
 `backup` service and gives it its own `ts_backups` volume) and asserts:
 manifest written, `drill.json` all pass, sizes reported. It refuses the live
 network (`ai-gateway_default`) and any container that is not `sran-test-*`.
-The 2026-09-23 run is under `scripts/probes/FIX129/results/ops/`.
+It was last run on 2026-09-23 (all pass).

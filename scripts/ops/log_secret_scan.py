@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """FIX129 B — fail if a secret from .env shows up in a container log.
 
-    python scripts/probes/FIX129/log_secret_scan.py --env /path/to/.env [--project ai-gateway] [--since 24h]
+    python scripts/ops/log_secret_scan.py --env /path/to/.env [--project ai-gateway] [--since 24h]
 
 What counts as a secret (values are NEVER printed, only the key names):
   * the value of every .env key whose NAME matches (PASSWORD|SECRET|KEY|TOKEN|DSN);

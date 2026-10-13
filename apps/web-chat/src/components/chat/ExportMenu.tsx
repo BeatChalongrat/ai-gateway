@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { Copy } from "lucide-react";
 import { useDismissable } from "@/hooks/useDismissable";
 
 import { api } from "@/lib/api";
@@ -82,7 +83,7 @@ export function ExportMenu({ conversationId, onShare }: Props) {
           <MenuButton onClick={() => exportFile("json")} icon={<BracketsIcon />}>
             {t("export.json")}
           </MenuButton>
-          <MenuButton onClick={copyMarkdown} icon={<ClipboardIcon />}>
+          <MenuButton onClick={copyMarkdown} icon={<Copy width={16} height={16} aria-hidden />}>
             {t("export.copy")}
           </MenuButton>
           {onShare ? (
@@ -148,15 +149,6 @@ function BracketsIcon() {
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M8 4H6a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h2" />
       <path d="M16 4h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v3a2 2 0 0 1-2 2h-2" />
-    </svg>
-  );
-}
-
-function ClipboardIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <rect x="8" y="3" width="8" height="4" rx="1" />
-      <path d="M16 5h2a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2" />
     </svg>
   );
 }
