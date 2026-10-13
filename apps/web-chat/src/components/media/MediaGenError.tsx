@@ -4,7 +4,7 @@
 // Maps the gateway's HTTP status / error code to a human-readable state and
 // the right recovery action (retry / add key / contact admin / dismiss).
 
-import { AlertTriangle, KeyRound, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, KeyRound, RotateCw, X } from "lucide-react";
 
 import { useT } from "@/lib/i18n";
 import type { DictKey } from "@/lib/i18n/dict";
@@ -122,7 +122,7 @@ export function MediaGenError({
               onClick={onRetry}
               className="focus-ring inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
             >
-              <RefreshCw className="h-3 w-3" aria-hidden />
+              <RotateCw className="h-3 w-3" aria-hidden />
               {t("common.retry")}
             </button>
           ) : null}

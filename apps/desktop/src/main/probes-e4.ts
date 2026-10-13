@@ -759,7 +759,7 @@ export async function runE4Probe(ctx: ProbeContext, name: string): Promise<void>
 
       case "fix68-connector": {
         // FIX68 — the custom-connector path end to end, against OUR OWN MCP
-        // server (scripts/probes/fix68/demo-mcp-server.mjs), through the page's
+        // server (apps/desktop/scripts/demo-mcp-server.mjs), through the page's
         // real "Add custom connector" button. Run as:
         //   FIX68_NONCE=<random> FIX68_MCP_LOG=<file> npx electron . \
         //     --probe-e4 fix68-connector --probe-mcp-server <abs path to the .mjs>

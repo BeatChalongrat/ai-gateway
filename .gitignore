@@ -253,3 +253,40 @@ apps/desktop/build/installer-defines.nsh
 # Output folders written by AI tooling. The repo is meant to read as the
 # owner's own work; a folder named after a tool does not belong in it.
 Claude outputs/
+
+# ---------------------------------------------------------------------------
+# AM19 — only what the code needs is tracked. The rule, in the owner's words: if it is not about how the
+# code works, keep it on the machine. A clone must hold source, tests, fixtures, migrations, package
+# definitions, build and deploy scripts, CI, and the documents someone needs to run the thing — never
+# the record of how we got here. Everything below stays on the author's disk. scripts/gate/tracks.py
+# (the gate's `tracks` lane, and CI) fails naming any tracked file that a rule here matches.
+# ---------------------------------------------------------------------------
+# per-card probes, walks and their output: the gate's own tooling moved out to scripts/gate, scripts/ops
+# and scripts/agent-market; what is left here is one round's instrument and stays on the machine
+scripts/probes/
+# output of the gate, the ops tools and the words tools
+scripts/**/results/
+# working notes in any spelling: cards, plans, notes, test sheets, progress logs, discovery papers
+CARD-RULES.md
+note-*.md
+plan-*.md
+PLAN-*.md
+TEST-SHEET-*.md
+PROGRESS.md
+**/PROGRESS.md
+_superseded-*
+DISCOVERY.md
+*-DISCOVERY.md
+OUTPUT-AUDIT.md
+# phase and sprint inventories, one-off exercise records
+*_INVENTORY.md
+docs/sprint-*.md
+docs/CAPACITY_VALIDATION_*.md
+docs/COMPACTION_FIRST_RUN.md
+docs/READY_PENDING_INTEGRATION.md
+docs/LOAD_TEST_GROWTH_BASELINE.md
+docs/PILOT_READINESS.md
+# stray outputs of a test run
+backend/tests/integration/fix_test_report.txt
+backend/evals/**/results/
+services/chat-edge-api/tests/phase1_results.json

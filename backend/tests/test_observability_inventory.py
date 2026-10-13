@@ -1,22 +1,4 @@
-"""P6-01: Observability inventory validation tests."""
-
-from pathlib import Path
-
-DOCS_DIR = Path(__file__).resolve().parent.parent.parent / "docs"
-
-
-class TestObservabilityInventoryDoc:
-    def test_doc_exists(self):
-        assert (DOCS_DIR / "P6_OBSERVABILITY_INVENTORY.md").exists()
-
-    def test_documents_gaps(self):
-        doc = (DOCS_DIR / "P6_OBSERVABILITY_INVENTORY.md").read_text(encoding="utf-8")
-        for gap in ["GAP-O1", "GAP-O2", "GAP-O3", "GAP-O4", "GAP-O5"]:
-            assert gap in doc
-
-    def test_documents_privacy(self):
-        doc = (DOCS_DIR / "P6_OBSERVABILITY_INVENTORY.md").read_text(encoding="utf-8")
-        assert "privacy" in doc.lower() or "Privacy" in doc
+"""P6-01: the observability pieces the inventory named exist."""
 
 
 class TestExistingObservability:

@@ -1,18 +1,4 @@
-"""P8-01: Enterprise controls inventory validation tests."""
-
-from pathlib import Path
-
-DOCS_DIR = Path(__file__).resolve().parent.parent.parent / "docs"
-
-
-class TestEnterpriseInventoryDoc:
-    def test_doc_exists(self):
-        assert (DOCS_DIR / "P8_ENTERPRISE_INVENTORY.md").exists()
-
-    def test_documents_gaps(self):
-        doc = (DOCS_DIR / "P8_ENTERPRISE_INVENTORY.md").read_text(encoding="utf-8")
-        for gap in ["GAP-E1", "GAP-E2", "GAP-E3", "GAP-E4", "GAP-E5"]:
-            assert gap in doc
+"""P8-01: the enterprise-control foundations the inventory named exist."""
 
 
 class TestExistingEnterpriseFoundations:
