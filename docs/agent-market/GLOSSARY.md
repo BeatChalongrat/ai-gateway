@@ -104,6 +104,37 @@ These have been argued over. They do not drift, in either language.
 | ร้านค้าต้องห้าม | prohibited merchant |
 | เบิกซ้ำ · เอกสารซ้ำ | duplicate claim · duplicate document |
 
+Added by AM18, when the documents themselves were put into both languages (each is the words a
+working paper prints; the English is the term an accountant reading the paper in English expects,
+and where a sheet's name was already said on the screen in AM14 the paper uses the same words):
+
+| Thai | English |
+|---|---|
+| งบกระทบยอด · รายการกระทบยอด | reconciliation statement · reconciling items |
+| ยอดหลังปรับปรุง (ของธนาคาร / ของบัญชี) | adjusted balance (bank / book) |
+| ยังไม่ลงตัว | not yet reconciled |
+| รายการน่าสงสัย | suspect items (a pair that nearly matches, for a person to decide) |
+| ช่วงอายุ | age band (of an outstanding item) |
+| ร่างรายการปรับปรุง | proposed adjusting entries (a draft; the agent posts nothing) |
+| ค่าธรรมเนียมธนาคาร · ดอกเบี้ยรับ | bank charges · interest income |
+| หลักฐาน (ชีตคู่ของตาราง) | evidence (the companion sheet of a table) |
+| ผู้จัดทำ · ผู้สอบทาน (บนหน้าเอกสาร) | prepared by · reviewed by (on a document's face) |
+| ทะเบียนเอกสารซื้อ | purchase document register |
+| ที่มาของทุกค่า · โมเดลอ่านได้ (อ้างอิง) | source of every value · model's reading (for reference) |
+| ข้อความใน PDF และ OCR | PDF text and OCR (how a value was read) |
+| ข้อยกเว้น (คนตัดสิน) · รอคนตัดสิน | exception (a person decides) · awaiting decision |
+| ปฏิทินวันหยุดของบริษัท · เบิกในวันหยุด | the company's holiday calendar · claims on holidays |
+| ตรวจ 3 ทาง · ตรวจ 2 ทาง | matched three ways · matched two ways (a figure in Thai, a word in English) |
+| ยอดสะสมตาม PO · การจับคู่ · สถานะ PO | PO totals · pairs · PO status |
+| หน่วยที่เทียบ · การแปลงหน่วยนับ | unit compared · unit conversions |
+| ผลต่าง (ในตารางผลตรวจ) | variance (in a matching table); difference (in a reconciliation) |
+| สรุปผู้บริหาร · รายการที่ต้องตรวจสอบ | executive summary · items to check |
+| แนวโน้มและองค์ประกอบ · เทียบงบประมาณ | trends and composition · vs budget |
+| ภาคผนวก ก/ข/ค | Appendix A/B/C |
+| ที่มาของข้อมูล · ที่มาของตัวเลข · อ้างอิง (ชีต) | source of data · source of figures · References (the sheet) |
+| หน่วย: บาท · ล้านบาท · 12.48 ล้าน | unit: baht · THB millions · 12.48 M |
+| วันที่ในเอกสาร: 5 ก.ย. 2569 · ก.ย. 69 (แกนกราฟ) | 5 Sep 2026 · Sep 2026 (a chart's axis) |
+
 ## 4. Numbers, dates and money
 
 Formatting follows the language. The value never changes, and no rule of law

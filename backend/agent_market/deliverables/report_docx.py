@@ -24,6 +24,7 @@ from docx.shared import Cm, Pt, RGBColor
 
 import docx_generator as dg  # /sandbox/scripts — shared, imported, not modified
 
+from ..engine.words import SHARED as S
 from . import thai_break
 from .fit import SAFETY, text_width_pt
 from .theme import FONT_FILES, rgb
@@ -246,7 +247,7 @@ class ReportWriter:
         _run(lp, self.m["source_note"], self.font, 7.5, color=self.p["muted"])
         rp = right.paragraphs[0]
         rp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        dg._build_paged_footer(rp, "หน้า {page} / {total}", self.font)
+        dg._build_paged_footer(rp, S("docs.page", page="{page}", total="{total}"), self.font)   # (the builder puts field codes there)
         for run in rp.runs:
             run.font.size = Pt(8)
             run.font.color.rgb = _rgb(self.p["muted"])
@@ -288,8 +289,7 @@ class ReportWriter:
         _para(doc, space_before=18, space_after=6)
         self.kpi_tiles()
         note = _para(doc, space_before=14)
-        _run(note, "ทุกตัวเลขในรายงานนี้มีรหัสอ้างอิง (เช่น c12) ที่บอกได้ว่ามาจากไฟล์ไหน ชีตไหน ช่องไหน "
-                   "และคำนวณด้วยสคริปต์ใด ดูภาคผนวก ข", self.font, 9, color=p["muted"])
+        _run(note, S("docs.cover.cite_note"), self.font, 9, color=p["muted"])
         doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
 
     def kpi_tiles(self):
@@ -320,7 +320,7 @@ class ReportWriter:
                 arrow = {"up": "▲ ", "down": "▼ ", "flat": ""}[kp["tone"]]
                 last = _cell_text(dp, arrow + kp["delta"], self.font, 8, tile, color=color, pad_pt=pad)
             else:
-                last = _cell_text(dp, "ไม่มีข้อมูลเปรียบเทียบ", self.font, 8, tile, color=p["muted"], pad_pt=pad)
+                last = _cell_text(dp, S("docs.kpi.no_compare"), self.font, 8, tile, color=p["muted"], pad_pt=pad)
             cite = f"  [{kp['cite']}]"
             used = getattr(last, "_am_last_line_pt", None)
             if used is not None and used + text_width_pt(cite, self.font, 7) * SAFETY > tile / EMU_PER_PT - pad:
@@ -366,7 +366,7 @@ class ReportWriter:
         rows = block["rows"]
         if not rows:
             para = _para(doc, space_after=8)
-            _run(para, block.get("empty_text") or "ไม่มีรายการ", self.font, BODY_PT, color=p["muted"])
+            _run(para, block.get("empty_text") or S("docs.table.empty"), self.font, BODY_PT, color=p["muted"])
             return
         size = SMALL_PT if block.get("small") else 9.5
         t = doc.add_table(rows=1 + len(rows), cols=len(cols))
@@ -484,7 +484,7 @@ class ReportWriter:
         pp = _para(self.doc, space_after=2, align=WD_ALIGN_PARAGRAPH.CENTER)
         pp.add_run().add_picture(path, width=Cm(16.2))
         cap = _para(self.doc, space_after=10)
-        _run(cap, "กราฟวาดจากตัวเลขที่คำนวณแล้ว · ตัวเลขทุกจุดที่กราฟวาดและเลขอ้างอิงของแต่ละจุดอยู่ในตารางใต้กราฟ",
+        _run(cap, S("docs.chart.note"),
              self.font, 8, color=self.p["muted"])
 
     # ── appendix (AM9) ────────────────────────────────────────────────
@@ -507,7 +507,7 @@ class ReportWriter:
         p, cols = self.p, block["columns"]
         if not block["rows"]:
             para = _para(self.doc, space_after=6)
-            _run(para, block.get("empty_text") or "ไม่มีรายการ", self.font, APPENDIX_PT, color=p["muted"])
+            _run(para, block.get("empty_text") or S("docs.table.empty"), self.font, APPENDIX_PT, color=p["muted"])
             return
         for row in block["rows"]:
             para = _para(self.doc, space_after=3, line=1.0)

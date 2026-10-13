@@ -226,7 +226,7 @@ class MatchWorkbook:
         made = E3C.date_th(self.run.get("date") or c["prepared_on"])
         depth = W("doc.face.depth_line", three_way=t["three_way"], two_way=t["two_way"])
         if t["unlinked"]:
-            depth += W("doc.face.unlinked_line", unlinked=t["unlinked"])
+            depth += " " + W("doc.face.unlinked_line", unlinked=t["unlinked"])
         r = 4
         for label, value in ((W(L_COMPANY), head[W(L_COMPANY)] or W(MISSING)), (W(L_PERIOD), c["period_label"]),
                              (W(L_PREPARER), W("doc.face.prepared_line", preparer=preparer, made=made, v=self.run.get("agent_version") or "").rstrip(" ·")
@@ -279,7 +279,7 @@ class MatchWorkbook:
             rows.append([n, i["number"], E3C.date_th(i["date"]), i["doc_type_label"], i["supplier"]["name"], i["supplier"]["tax_id"],
                          ", ".join(i["po_named"]), i["currency"], _num(i["subtotal"]), _num(i["vat_amount"]), _num(i["total"]),
                          i["status_label"], " · ".join(i["reason_labels"]), i["depth_text"],
-                         (W("doc.vat.claimable") if i["vat"]["claimable"] else W("doc.vat.not_claimable")) + i["vat"]["why"], "\n".join(i["notes"]), _where(i)])
+                         (W("doc.vat.claimable") if i["vat"]["claimable"] else W("doc.vat.not_claimable")) + " " + i["vat"]["why"], "\n".join(i["notes"]), _where(i)])
         for sheet, sub in ((S_INVOICES, W("doc.sub.invoices")),
                            (S_INVOICES_EV, W("doc.sub.invoices_ev", s_invoices=W(S_INVOICES)))):
             ws = self.wb.create_sheet(W(sheet))
@@ -415,7 +415,7 @@ class MatchWorkbook:
         srows = [[c["practice"]["question"], c["practice"]["label"], ""]]
         srows += [[self.labels[k], v, W("doc.note.setting_unusable") if k in c["settings"]["unusable"] else ""]
                   for k, v in c["settings"]["tolerances"].items()]
-        srows += [[W("doc.setting.unit_conversion"), f"1 {x['from']} = {x['factor']} {x['to']}" + (W("doc.setting.only_item", item=x["item"]) if x.get("item") else ""),
+        srows += [[W("doc.setting.unit_conversion"), f"1 {x['from']} = {x['factor']} {x['to']}" + (" " + W("doc.setting.only_item", item=x["item"]) if x.get("item") else ""),
                    W("doc.setting.answered") if x.get("answered") else W("doc.setting.in_agent")] for x in c["settings"]["conversions"]]
         self._table(ws, r + 1, [W("doc.col.setting"), W("doc.col.used_this_run"), W("doc.col.note")], srows, freeze=False)
         r += len(srows) + 3

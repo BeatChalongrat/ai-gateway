@@ -31,12 +31,12 @@ PL_GROUPS = (
     ("income_tax", "line.income_tax", lambda d: d.startswith("59"), -1),
 )
 
-STANDARD_NAMES = {
-    "41": "รายได้จากการขายและบริการ", "42": "รายได้อื่น", "51": "ต้นทุนขาย",
-    "52": "ค่าใช้จ่ายเกี่ยวกับพนักงาน", "53": "ค่าธรรมเนียมวิชาชีพ", "54": "ค่าใช้จ่ายสำนักงาน",
-    "55": "ค่าใช้จ่ายในการขาย", "56": "ค่าเสื่อมราคา", "57": "ค่าใช้จ่ายเบ็ดเตล็ด",
-    "58": "ต้นทุนทางการเงิน", "59": "ภาษีเงินได้",
-}
+STANDARD_NAMES = W.table({
+    "41": "doc.std.41", "42": "doc.std.42", "51": "doc.std.51",
+    "52": "doc.std.52", "53": "doc.std.53", "54": "doc.std.54",
+    "55": "doc.std.55", "56": "doc.std.56", "57": "doc.std.57",
+    "58": "doc.std.58", "59": "doc.std.59",
+})
 
 
 GROUP_LABEL = W.table({key: name for key, name, _, _ in PL_GROUPS})
@@ -87,13 +87,13 @@ _EN_INCOME = frozenset(("revenue", "revenues", "income", "sales", "sale", "gain"
 _EN_SALES = frozenset(("revenue", "revenues", "sales", "sale", "turnover"))
 _EN_OTHER_INCOME = frozenset(("interest", "dividend", "dividends", "gain", "gains", "other", "miscellaneous",
                               "sundry", "exchange"))
-_TH_FINANCE = ("ดอกเบี้ยจ่าย", "ต้นทุนทางการเงิน")
-_TH_TAX = ("ภาษีเงินได้",)
-_TH_COGS = ("ต้นทุนขาย", "ต้นทุนบริการ", "ต้นทุนสินค้า")
+_TH_FINANCE = ("ดอกเบี้ยจ่าย", "doc.std.58")
+_TH_TAX = ("doc.std.59",)
+_TH_COGS = ("doc.std.51", "ต้นทุนบริการ", "ต้นทุนสินค้า")
 _TH_EXPENSE = ("ค่าใช้จ่าย", "ต้นทุน", "เงินเดือน", "ขาดทุน")
 _TH_INCOME = ("รายได้", "กำไรจาก", "ดอกเบี้ยรับ", "เงินปันผลรับ")
 _TH_SALES = ("รายได้จากการขาย", "รายได้จากการให้บริการ", "รายได้ค่าบริการ", "ขายสินค้า")
-_TH_OTHER_INCOME = ("ดอกเบี้ยรับ", "เงินปันผลรับ", "รายได้อื่น", "กำไรจาก")
+_TH_OTHER_INCOME = ("ดอกเบี้ยรับ", "เงินปันผลรับ", "doc.std.42", "กำไรจาก")
 
 
 def name_group(name: str) -> tuple[str | None, str | None]:

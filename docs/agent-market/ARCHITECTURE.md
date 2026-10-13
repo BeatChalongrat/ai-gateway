@@ -1130,6 +1130,51 @@ of the runs it reads, not the list of everything an engine can say.
   Thai is read from the code and written to the manifest by a script, never retyped.
 
 
+## The documents speak the language of the run (AM18, part A)
+
+AM14 left one thing in Thai: the files. A working paper's sheet names, its column headings, the labels
+of its face, its notes and footers, the drafted entries' memos, the report's section titles and chart
+captions were string literals in the writers, and a run in English computed its table twice so that its
+paper could be written from the Thai one. AM18 moved those words too, one package at a time — bank
+reconciliation 1.8.0, invoice processing 1.11.0, expense audit 1.10.0, PO matching 1.8.0, financial
+report 1.10.0 — and the second table went away.
+
+- A document's word is a sentence like any other: a key under `doc.` in the package's manifest
+  (`doc.sheet.*`, `doc.col.*`, `doc.face.*`, `doc.note.*`, …), its Thai exactly as the code held it, its
+  English beside it, said when read. The shared writers' words (the report's sections, the sign-off
+  sheet, the citations, the deck's notes) are under `docs.` in `engine/words.json`.
+- A table's headings are kept by key and said when read (`W.heads([...])`, a `Heads`): `index(text)`
+  finds a column by its words in the language being spoken, `of(key)` by its key, so a check that reads a
+  finished sheet back reads it in the run's language and never names a column in either.
+- Numbers, dates and money follow the language where it is *formatting* — a Thai paper prints BE years
+  (`words.date`, `words.period`, `words.period_short` for a chart's axis), an English one the common era —
+  and a value never changes. A date a paper printed is read back in either language (`words.date_read`),
+  so a bank paper's carried-forward sheet is read by a run in the other language.
+- A manifest says which languages its documents speak (`"languages": ["th","en"]`): the agent's page no
+  longer tells an English screen that the files will be Thai, and a printed PDF is set in the run's
+  language.
+- The words an engine *reads* from a person's files — a bank's "ดอกเบี้ย", a policy paragraph's "ต่อวัน",
+  a closed PO — are not the document's and stay in the code, in files the ratchet names per package
+  (`READS` in `test_package_words_ratchet.py`); a package whose documents speak both languages may hold
+  Thai nowhere else.
+- `with_document`, `for_document` and `speaking(DOCUMENT)` in a writer are gone; a run computes once.
+
+**What proves the figures did not move** (`tests/dockit.py`). From identical inputs a Thai run and an
+English run are compared cell for cell on every case of each package's eval set
+(`test_am14_*.py`, `EnglishRuns.documents`): the same sheets in the same order, the same rows and
+columns, every number the same to the cell — a day or a month read as the same day in either language,
+the numbers of a sentence as a set since the two languages order them differently — and the person's own
+data in the same places. The only difference allowed is the document's own words; and the English file
+holds no Thai but the person's own (`thai_left`), where their own is what their files, their settings and
+their answers held, and what the model read from their scan. The printed paper passes AM9's row-by-row
+check and AM14's print proof in English as in Thai (`am9_print_it_test.go`, `printedSelfTestIn`; the IT
+lane `scripts/probes/AM18/it_lane.sh`).
+
+The tool the words were moved with: `scripts/probes/AM18/doc_words.py` — the Thai is read from the code
+and written to the manifest by a script, never retyped; a module-level literal becomes a bare key, a
+function-level one `W("key", place=…)`.
+
+
 ## A run that cannot reach its model waits (AM15)
 
 What was found (test stack, 12 Oct 2026, the in-house model taken away — `scripts/smoke/primary.js

@@ -4,9 +4,7 @@ Request fields used: formats[], names{format: filename}, theme, narrative,
 assumptions[], run{id, date, agent_version}, model_info{model, self_hosted},
 logo (input file name, optional).
 
-AM14: the files are written in the documents' language whatever the run (their own pass has not been made);
-what the gate says of each file — its check lines, what each found — is said in the run's. ``computed`` is
-the table the files are written from (engine/words.for_document).
+AM18: the files are written in the run's language, like everything the run says, and so are the gate's lines.
 """
 
 from __future__ import annotations
@@ -37,8 +35,7 @@ def _sha(path: str) -> str:
 def render_all(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     theme = resolve(req.get("theme"))
     req = {**req, "theme": theme}
-    with words.speaking(words.DOCUMENT):
-        model = content_mod.build(computed, req)
+    model = content_mod.build(computed, req)
     computed = model["computed"]  # with the cosmetic (presentation) answers applied
     formats = [f for f in wanted_formats(req, ["docx", "pptx"]) if f in FORMATS]
     names = req.get("names") or {}
@@ -51,8 +48,7 @@ def render_all(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     if "docx" in formats:
         for spec in [c for c in model["charts"] if c["id"] in in_report]:
             path = os.path.join("/tmp", f"chart_{spec['id']}.png")
-            with words.speaking(words.DOCUMENT):
-                chart_bindings.append(render_png(spec, theme, path))
+            chart_bindings.append(render_png(spec, theme, path))
             chart_files[spec["id"]] = path
 
     artifacts = []
@@ -69,20 +65,17 @@ def render_all(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
         if fmt == "docx":
             from .report_docx import ReportWriter
 
-            with words.speaking(words.DOCUMENT):
-                meta = ReportWriter(model, theme, chart_files).write(path, logo)
+            meta = ReportWriter(model, theme, chart_files).write(path, logo)
             checks = quality.check_docx(path, model, theme, req)
         elif fmt == "pptx":
             from .deck_pptx import DeckWriter
 
-            with words.speaking(words.DOCUMENT):
-                meta = DeckWriter(model, computed, theme).write(path)
+            meta = DeckWriter(model, computed, theme).write(path)
             checks = quality.check_pptx(path, meta, computed, theme, asked=model["asked"]["applied"])
         else:
             from .table_xlsx import XlsxWriter
 
-            with words.speaking(words.DOCUMENT):
-                meta = XlsxWriter(model, computed, theme).write(path)
+            meta = XlsxWriter(model, computed, theme).write(path)
             checks = quality.check_xlsx(path, computed)
         if fmt == carrier:
             checks = checks + run_level

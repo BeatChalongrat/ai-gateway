@@ -69,7 +69,14 @@ from .reread import squash as _squash
 
 W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 # A figure as a sentence prints it: 12,480,300 · (41,730) · 10.5% · 12.48 ล้าน · +0.95 จุด
-NUMBER = re.compile(r"[-+]?\(?\d[\d,]*(?:\.\d+)?\)?(?:\s?%|\s?ล้าน|\s?จุด)?")
+# … and as an English one does: 12.48 M · +0.95 pp
+# … and as an English one does: 12.48 M · +0.95 pp. The units are the documents' own words, in both languages
+# (AM18), never written here.
+UNITS = [v for k in ("docs.unit.m", "docs.unit.pp") for v in S.both(k).values()]
+_UNIT = "|".join(r"\s?" + re.escape(u) + (r"\b" if u.isascii() else "") for u in UNITS)
+NUMBER = re.compile(r"[-+]?\(?\d[\d,]*(?:\.\d+)?\)?(?:\s?%|" + _UNIT + ")?")
+_NUMBER_AT_END = re.compile(r"([-+]?\(?\d[\d,]*(?:\.\d+)?\)?(?:\s?%|" + _UNIT + r")?)\s*$")
+_STRIP = "+-()% " + "".join(sorted(set("".join(UNITS))))
 
 
 # ── expected figures, from computed.json itself ───────────────────────────
@@ -199,7 +206,7 @@ def _narrative_check(doc, model: dict, computed: dict) -> dict:
             cite = nxt[0].strip() if nxt[1] else ""
             body = t
             if cite:
-                m = re.search(r"([-+]?\(?\d[\d,]*(?:\.\d+)?\)?(?:\s?%|\s?ล้าน|\s?จุด)?)\s*$", t)
+                m = _NUMBER_AT_END.search(t)
                 n += 1
                 if not m or _squash(_balanced(m.group(1))) not in by_cite.get(cite, set()):
                     bad.append(S("gate.narrative.wrong_cite", text=t.strip()[-30:], cite=cite))
@@ -208,7 +215,7 @@ def _narrative_check(doc, model: dict, computed: dict) -> dict:
             plain += body + " "
         for tok in NUMBER.findall(_blank_ids(plain, ids)):
             tok = _balanced(tok)
-            digits = tok.strip("+-()% ล้านจุด").replace(",", "")
+            digits = tok.strip(_STRIP).replace(",", "")
             if "." not in digits and digits.isdigit() and (int(digits) <= 31 or 1990 <= int(digits) <= 2100
                                                           or 2400 <= int(digits) <= 2700):
                 continue
@@ -239,7 +246,9 @@ def _blank_ids(text: str, ids: set[str]) -> str:
         if i and any(ch in i for ch in "-./"):
             text = text.replace(i, " ")
         elif i:
-            text = re.sub(rf"(บัญชี|รหัส)\s*{re.escape(i)}(?![0-9.,])", r"\1 ", text)
+            # (the word before a figure's id — account, code — in either language)
+            before = "|".join(re.escape(w) for k in ("docs.col.account", "docs.col.code") for w in S.both(k).values())
+            text = re.sub(rf"({before}|[Aa]ccount|[Cc]ode)\s*{re.escape(i)}(?![0-9.,])", r"\1 ", text)
     return text
 
 
@@ -350,9 +359,9 @@ def _asked_docx(doc, headings: list, model: dict, computed: dict, applied: list[
             sizes = []
             for row in (got or [])[1:]:
                 if block.get("ordered_by") == "var_budget":
-                    v = _cell_money(row[cols.index("ต่างจากงบ")])
+                    v = _cell_money(row[cols.index(S("docs.col.var_budget"))])
                 else:
-                    cur, pri = _cell_money(row[cols.index("งวดนี้")]), _cell_money(row[cols.index("งวดก่อน")])
+                    cur, pri = _cell_money(row[cols.index(S("docs.col.current"))]), _cell_money(row[cols.index(S("docs.col.prior"))])
                     v = None if cur is None or pri is None else cur - pri
                 sizes.append(abs(v) if v is not None else Decimal(-1))
             tally.n += 1
@@ -533,7 +542,7 @@ def check_pptx(path: str, deck: dict, computed: dict, theme: dict, asked=()) -> 
     # The summary P&L table.
     c = computed
     lines = {l["key"]: l for l in c["lines"]}
-    heads = ["รายการ", "งวดนี้"] + (["งวดก่อน", "%"] if c["has_prior"] else []) + (["งบประมาณ"] if c["has_budget"] else [])
+    heads = [S("docs.col.item"), S("docs.col.current")] + ([S("docs.col.prior"), "%"] if c["has_prior"] else []) + ([S("docs.col.budget")] if c["has_budget"] else [])
     rows = []
     for key in ("revenue", "cost_of_sales", "gross_profit", "operating_expenses", "total_expenses", "net_profit"):
         l = lines[key]
@@ -548,22 +557,22 @@ def check_pptx(path: str, deck: dict, computed: dict, theme: dict, asked=()) -> 
     pl = next((t for t in tables if t and [_squash(x) for x in t[0]] == [_squash(h) for h in heads]), None)
     _compare_table(tally, S("gate.table.deck_pl"), pl, {"columns": heads, "rows": rows})
     # KPI values on the key-figures slide.
-    kslide = next((s for s in prs.slides if "ตัวเลขสำคัญ" in _slide_text(s)), None)
+    kslide = next((s for s in prs.slides if S("docs.deck.stats") in _slide_text(s)), None)
     ktext = _squash(_slide_text(kslide)) if kslide is not None else ""
     for k in content_mod.kpis(computed):
         tally.n += 1
-        if _squash(k["value_short"].replace(" ล้าน", "M")) not in ktext:
+        if _squash(k["value_short"].replace(" " + S("docs.unit.m"), "M")) not in ktext:
             tally.bad.append(S("gate.kpi.pptx", label=k["label"], value=k["value_short"]))
     # The summary slide: no figure that is not a computed one.
     allowed_forms = set()
     for f in (computed.get("figures") or {}).values():
         allowed_forms |= {_squash(f["text"]), _squash(content_mod.figure_text(f, "abs"))}
-    sslide = next((s for s in prs.slides if "สรุปผู้บริหาร" in _slide_text(s)), None)
+    sslide = next((s for s in prs.slides if S("docs.section.summary") in _slide_text(s)), None)
     if sslide is not None:
         body = _blank_ids(_slide_text(sslide), set(computed.get("quotable_ids") or []))
-        for tok in NUMBER.findall(body.split("ที่มา:")[0]):
+        for tok in NUMBER.findall(body.split(S("docs.source_prefix"))[0]):
             tok = _balanced(tok)
-            digits = tok.strip("+-()% ล้านจุด").replace(",", "")
+            digits = tok.strip(_STRIP).replace(",", "")
             if "." not in digits and digits.isdigit() and (int(digits) <= 31 or 1990 <= int(digits) <= 2100
                                                           or 2400 <= int(digits) <= 2700):
                 continue
@@ -580,17 +589,17 @@ def check_xlsx(path: str, computed: dict) -> list[dict]:
     from openpyxl import load_workbook
 
     wb = load_workbook(path)
-    need = {"สรุป", "รายบัญชี", "รายการที่ใช้", "ตรวจสอบ", "อ้างอิง"}
+    need = {S("docs.sheet.summary"), S("docs.sheet.accounts"), S("docs.sheet.ledger"), S("docs.sheet.verify"), S("docs.sheet.citations")}
     out = [_check("xlsx.sheets", need <= set(wb.sheetnames), ", ".join(wb.sheetnames), S("gate.xlsx.sheets.label"))]
     tally = _Tally()
     if need <= set(wb.sheetnames):
-        ws = wb["สรุป"]
+        ws = wb[S("docs.sheet.summary")]
         by_label = {}
         for row in ws.iter_rows(min_row=5, values_only=True):
             if row and row[0] not in (None, "") and row[0] not in by_label:
                 by_label[row[0]] = row
         cols = ("current", "prior", "var_prior", "var_prior_pct", "budget", "var_budget")
-        heads = ("งวดนี้", "งวดก่อน", "เปลี่ยนแปลง", "%", "งบประมาณ", "ต่างจากงบ")
+        heads = (S("docs.col.current"), S("docs.col.prior"), S("docs.col.change"), "%", S("docs.col.budget"), S("docs.col.var_budget"))
         for l in computed["lines"]:
             row = by_label.get(l["label"])
             if row is None:
@@ -608,7 +617,7 @@ def check_xlsx(path: str, computed: dict) -> list[dict]:
                 continue
             tally.number(S("gate.xlsx.summary.now", label=rt["label"]), row[1], rt["current"])
             tally.number(S("gate.xlsx.summary.prior", label=rt["label"]), row[2], rt["prior"])
-        ws = wb["รายบัญชี"]
+        ws = wb[S("docs.sheet.accounts")]
         by_code = {str(r[0]): r for r in ws.iter_rows(min_row=5, values_only=True) if r and r[0] not in (None, "")}
         for a in computed["accounts"]:
             row = by_code.get(str(a["code"]))
@@ -618,7 +627,7 @@ def check_xlsx(path: str, computed: dict) -> list[dict]:
                 continue
             for j, k in ((3, "current"), (4, "prior"), (5, "var_prior"), (6, "var_prior_pct"), (7, "budget"), (8, "var_budget")):
                 tally.number(S("gate.xlsx.accounts.cell", code=a["code"], column=j + 1), row[j], a[k])
-        ws = wb["อ้างอิง"]
+        ws = wb[S("docs.sheet.citations")]
         by_id = {r[0]: r for r in ws.iter_rows(min_row=5, values_only=True) if r and r[0]}
         for cit in computed["citations"]:
             row = by_id.get(cit["id"])
@@ -631,7 +640,7 @@ def check_xlsx(path: str, computed: dict) -> list[dict]:
             tally.n += 1
             if not (row[3] and row[6] and row[7]):
                 tally.bad.append(S("gate.xlsx.cites.no_source", id=cit["id"]))
-        ws = wb["รายการที่ใช้"]
+        ws = wb[S("docs.sheet.ledger")]
         led = [r for r in ws.iter_rows(min_row=5, values_only=True) if r and r[1] not in (None, "")]
         tally.number(S("gate.xlsx.ledger.rows"), len(led), len(computed["ledger"]))
         dr = sum((Decimal(str(r[5] or 0)) for r in led), Decimal(0))

@@ -209,7 +209,7 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
     answers = answers or {}
     rv = RV.review(uploads, defaults=defaults, answers=answers, today=today, history=history, proposals=proposals, final=True)
     if rv.policy is None:
-        raise ValueError(W("say.no_policy") + "; ".join(rv.problems))
+        raise ValueError(W("say.no_policy") + " " + "; ".join(rv.problems))
     if not rv.sheets:
         raise ValueError(W("say.no_claims"))
     claims, run_ex = [], []

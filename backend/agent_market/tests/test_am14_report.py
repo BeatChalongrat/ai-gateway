@@ -78,8 +78,8 @@ class AReportRunInEnglish(EnglishRuns, unittest.TestCase):
     def test_a_person_who_reads_only_english_meets_no_thai_but_their_own_data_and_the_papers_own_words(self):
         left, rendered = [], 0
         for cid, res in self.en.items():
-            # the gate names a row, a column or a sheet of a file by the words the file prints
-            paper = thai_only("\n".join(strings_of(res["sheets"]) + list(res["sheets"])))
+            # (AM18: the files are in the run's language too — nothing of theirs is excused)
+            paper = ""
             rendered += bool(res.get("render"))
             for text in said(res):
                 for run in THAI_RUN.findall(text):
@@ -101,14 +101,14 @@ class AReportRunInEnglish(EnglishRuns, unittest.TestCase):
                 e, t = en["computed"], th["computed"]
                 for k in ("accounts", "balance", "trend", "ledger", "source", "materiality", "quotable_ids", "quotable_cites"):
                     if k == "trend":
-                        self.assertEqual(dict(e[k], cite=None), dict(t[k], cite=None), (cid, k))
+                        self.assertEqual(dict(e[k], cite=None, labels=None), dict(t[k], cite=None, labels=None), (cid, k))   # (AM18: the labels follow the run)
                     else:
                         self.assertEqual(e[k], t[k], (cid, k))
                 where = lambda c: (c["id"], c["value"], c["sources"], c.get("derived_from"), c["script"], c.get("unit"))   # noqa: E731
                 self.assertEqual([where(c) for c in e["citations"]], [where(c) for c in t["citations"]], cid)
                 self.assertEqual([(x["code"], x["rows"]) for x in e["excluded"]], [(x["code"], x["rows"]) for x in t["excluded"]], cid)
                 self.assertEqual([n["code"] for n in e["notes"]], [n["code"] for n in t["notes"]], cid)
-                self.assertEqual(dict(en["summary"], excluded=None), dict(th["summary"], excluded=None), cid)
+                self.assertEqual(dict(en["summary"], excluded=None, period_label=None), dict(th["summary"], excluded=None, period_label=None), cid)
                 if th.get("render"):
                     self.assertTrue(th["render"]["passed"], (cid, [k for a in th["render"]["artifacts"] for k in a["quality"]["checks"] if not k["ok"]]))
                     self.assertEqual((en["render"]["passed"], checks_of(en)), (th["render"]["passed"], checks_of(th)), cid)
@@ -118,35 +118,57 @@ class AReportRunInEnglish(EnglishRuns, unittest.TestCase):
             self.assertEqual(self.kit.check(self.case(cid), en), [], cid)
 
     def test_the_paper_is_the_one_a_thai_run_writes(self):
-        # the .docx, the .pptx and the .xlsx: every text each prints. An assumption the run made is printed as
-        # the runner hands it over — in the run's language, as the platform's own are — and no case of the set
-        # that is rendered here makes one, so the three files are the same text for text.
-        seen = 0
+        # AM18: the .docx, the .pptx and the .xlsx — every text each prints — are the Thai run's files in English:
+        # the same texts in the same order, every number and date the same, the person's own words in the same
+        # places, and only the documents' own words different; none of those is left in Thai.
+        from agent_market.tests import dockit
+
+        seen, bad = 0, []
         for cid, en in self.en.items():
             th = self.th[cid]
             if not th.get("computed"):
                 continue
-            self.assertNotIn("document", th["computed"], cid)           # a Thai run carries one table, as before
-            self.assertEqual(en["computed"]["document"], th["computed"], cid)
+            self.assertNotIn("document", th["computed"], cid)   # one table, in the run's language, both ways
+            self.assertNotIn("document", en["computed"], cid)
             if not th.get("render"):
                 continue
             self.assertEqual(sorted(en["sheets"]), ["report.docx", "report.pptx", "report.xlsx"], cid)
-            self.assertEqual(en["sheets"], th["sheets"], cid)
+            as_rows = lambda files: {name: [[t] for t in texts] for name, texts in files.items()}   # noqa: E731
+            w = words.of("agent_market.packages.financial_report")
+            bad += [f"{cid}: {x}" for x in dockit.same_but_words(as_rows(th["sheets"]), as_rows(en["sheets"]), w)]
+            bad += [f"{cid}: Thai left — {x}" for x in dockit.thai_left(as_rows(en["sheets"]), self.own[cid])]
             self.assertFalse(en["assumptions"], cid)
             seen += 1
+        self.assertEqual(bad, [], "\n" + "\n".join(bad[:60]))
         self.assertEqual(seen, len(RENDERED))
 
     def test_what_only_the_files_and_their_writer_read_is_the_documents_own(self):
         # the runner hands a model the lines, the ratios, the movements, the exceptions and the figures of the
         # table to write the Thai commentary from, and takes the rules' own commentary from it when no model
         # answers; the platform says the period itself when the label is its own
+        # AM18: those words follow the run too. What the two runs share is everything but the words — the same
+        # keys, figures, citations and codes — and an English run's label is English where the Thai run's is Thai.
+        def shape(v):
+            if isinstance(v, dict):
+                return {k: shape(x) for k, x in v.items() if k not in ("label", "text", "title", "detail", "name", "labels", "summary",
+                                                                       "movements", "watch", "next_steps", "period_label", "prior_label")}
+            if isinstance(v, list):
+                return [shape(x) for x in v]
+            return v if not (isinstance(v, str) and re.search(r"[A-Za-z฀-๿]", v)) else "…"   # (a word, in either language)
+
         for cid, en in self.en.items():
             th = self.th[cid]
             if th.get("computed"):
                 for k in OF_THE_DOCUMENTS:
-                    self.assertEqual(en["computed"][k], th["computed"][k], (cid, k))
-                self.assertEqual(en["summary"]["period_label"], th["summary"]["period_label"], cid)
-                self.assertEqual(pkg.template_values(en["computed"]), pkg.template_values(th["computed"]), cid)
+                    self.assertEqual(shape(en["computed"][k]), shape(th["computed"][k]), (cid, k))
+                for line_en, line_th in zip(en["computed"]["lines"], th["computed"]["lines"]):
+                    self.assertEqual(line_en["key"], line_th["key"], cid)
+                    self.assertTrue(THAI.search(line_th["label"]) and not THAI.search(line_en["label"]), (cid, line_en["label"]))
+                self.assertNotEqual(en["summary"]["period_label"], th["summary"]["period_label"], cid)
+                self.assertIsNone(THAI.search(en["summary"]["period_label"]), cid)
+                tv_en, tv_th = pkg.template_values(en["computed"]), pkg.template_values(th["computed"])
+                self.assertEqual([l["current"] for l in tv_en["lines"]], [l["current"] for l in tv_th["lines"]], cid)
+                self.assertEqual((tv_en["revenue"], tv_en["net_profit"]), (tv_th["revenue"], tv_th["net_profit"]), cid)
 
     def test_the_set_asks_many_kinds_of_question_and_leaves_rows_out(self):
         codes = {f["code"] for r in self.en.values() for f in r["asked"]}

@@ -21,7 +21,7 @@ from ....engine.ledger import (
 )
 from ....engine.tabular import col_letter
 from ....engine.thai import (
-    fmt_millions, fmt_money, fmt_pct, period_bounds, period_label_th, period_short_th, prev_period,
+    fmt_millions, fmt_money, fmt_pct, period_bounds, prev_period,
 )
 from .rules import (
     PL_GROUPS, RULES_VERSION, STANDARD_NAMES, Chart, apply_date_orders, chart_for, duplicate_docs, expense_total,
@@ -34,8 +34,8 @@ SCRIPT_VERSION = "metrics.py@1.2.0"
 # What a rule-flagged exception is, in words (the figure table names an exception's amount by it). These, the
 # names of the figures a sentence may quote, the exceptions and the commentary the rules write are read by the
 # files and by the model that writes their commentary, never by a screen: the documents' own words, in Thai.
-EXC_TH = {"budget_variance_high": "สูงกว่างบมาก", "expense_spike": "เพิ่มขึ้นผิดปกติ", "new_account": "บัญชีใหม่",
-          "negative_revenue": "รายได้ติดลบ", "large_single_entry": "รายการเดียวยอดสูง", "unbalanced_ledger": "ไม่สมดุล"}
+EXC_TH = W.table({"budget_variance_high": "doc.exc.budget_variance_high", "expense_spike": "doc.exc.expense_spike", "new_account": "doc.exc.new_account",
+                  "negative_revenue": "doc.exc.negative_revenue", "large_single_entry": "doc.exc.large_single_entry", "unbalanced_ledger": "doc.exc.unbalanced_ledger"})
 FORMAT = "am.computed.v1"
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
@@ -58,7 +58,7 @@ def s(x) -> str | None:
 def _month(m: str) -> str:
     """A month in the name of a figure: the short form the report's charts print (“ก.ย. 69”); a run in
     another language says the month in full."""
-    return period_short_th(m) if _words.lang() == _words.DOCUMENT else _words.period(m)
+    return _words.period_short(m) if _words.lang() == "th" else _words.period(m)
 
 
 def _name(label) -> tuple:
@@ -507,7 +507,7 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
                    for a in exp_accounts[:8]]
     rest = sum((Decimal(a["current"]) for a in exp_accounts[8:]), ZERO)
     if rest:
-        composition.append({"code": "", "name": "อื่น ๆ", "amount": s(q2(rest)),
+        composition.append({"code": "", "name": W("doc.word.other"), "amount": s(q2(rest)),
                             "cite": cites.derived(lambda: W("cite.other_expenses"), q2(rest),
                                                   [a["cite"] for a in exp_accounts[8:]], W("formula.other_expenses"))})
 
@@ -521,7 +521,7 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
             series_rows[r.period].append(r)
     series_rows[period] = cur_rows
     months_sorted = sorted(series_rows)[-6:]
-    trend = {"months": months_sorted, "labels": [period_short_th(m) for m in months_sorted],
+    trend = {"months": months_sorted, "labels": [_words.period_short(m) for m in months_sorted],
              "revenue": [], "total_expenses": [], "net_profit": [],
              # AM8: every point the chart draws has its own citation (one list per series, one entry per month)
              "cites": {"revenue": [], "total_expenses": [], "net_profit": []}}
@@ -564,8 +564,8 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
         cur = Decimal(a["current"])
         if a["group"] in ("revenue", "other_income"):
             if cur < 0:
-                exceptions.append({"code": "negative_revenue", "title": f"รายได้ติดลบ: {a['code']} {a['name']}",
-                                   "detail": f"ยอด {fmt_money(cur)}", "account": a["code"], "amount": a["current"],
+                exceptions.append({"code": "negative_revenue", "title": W("doc.exc.negative_revenue.title", code=a["code"], name=a["name"]),
+                                   "detail": W("doc.exc.amount", cur=fmt_money(cur)), "account": a["code"], "amount": a["current"],
                                    "rows": [r.row for r in rows_by_acct.get(a["code"], [])][:30], "cite": a["cite"]})
             continue
         if a["budget"] is not None and Decimal(a["budget"]) > 0:
@@ -573,8 +573,8 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
             if cur > b * Decimal("1.5") and cur - b >= materiality:
                 times = (cur / b).quantize(Decimal("0.1"))
                 exceptions.append({"code": "budget_variance_high",
-                                   "title": f"{a['name'] or a['code']} {fmt_money(cur, 0)} สูงกว่างบ {times} เท่า",
-                                   "detail": f"งบ {fmt_money(b, 0)} · ส่วนต่าง {fmt_money(cur - b, 0)}",
+                                   "title": W("doc.exc.over_budget.title", v=a["name"] or a["code"], cur=fmt_money(cur, 0), times=times),
+                                   "detail": W("doc.exc.over_budget.detail", b=fmt_money(b, 0), v=fmt_money(cur - b, 0)),
                                    "account": a["code"], "amount": a["current"],
                                    "rows": [r.row for r in rows_by_acct.get(a["code"], [])][:30], "cite": a["cite"]})
                 continue
@@ -582,23 +582,23 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
             p = Decimal(a["prior"])
             if p > 0 and cur > p * 2 and cur - p >= materiality:
                 exceptions.append({"code": "expense_spike",
-                                   "title": f"{a['name'] or a['code']} เพิ่มขึ้น {fmt_pct(pct(cur - p, p), 0)} จากงวดก่อน",
+                                   "title": W("doc.exc.spike.title", v=a["name"] or a["code"], v2=fmt_pct(pct(cur - p, p), 0)),
                                    "detail": f"{fmt_money(p, 0)} → {fmt_money(cur, 0)}", "account": a["code"],
                                    "amount": a["current"], "rows": [r.row for r in rows_by_acct.get(a["code"], [])][:30],
                                    "cite": a["cite"]})
             elif p == 0 and cur >= materiality and has_prior:
-                exceptions.append({"code": "new_account", "title": f"บัญชีใหม่ที่งวดก่อนไม่มี: {a['code']} {a['name']}",
-                                   "detail": f"ยอด {fmt_money(cur, 0)}", "account": a["code"], "amount": a["current"],
+                exceptions.append({"code": "new_account", "title": W("doc.exc.new_account.title", code=a["code"], name=a["name"]),
+                                   "detail": W("doc.exc.amount", cur=fmt_money(cur, 0)), "account": a["code"], "amount": a["current"],
                                    "rows": [r.row for r in rows_by_acct.get(a["code"], [])][:30], "cite": a["cite"]})
     if answers.get("materiality_exceeded") == "keep":
         for f in large_entries(cur_rows, te_c or ZERO, chart=chart):
             exceptions.append({"code": "large_single_entry",
-                               "title": f"รายการเดียว {fmt_money(Decimal(f['amount']), 0)} ในบัญชี {f['account']}",
-                               "detail": f"คุณยืนยันว่าถูกต้อง · สูงกว่ารายการปกติของบัญชีนี้ {(Decimal(f['amount']) / Decimal(f['median'])).quantize(Decimal('1'))} เท่า",
+                               "title": W("doc.exc.single.title", amount=fmt_money(Decimal(f["amount"]), 0), account=f["account"]),
+                               "detail": W("doc.exc.single.detail", v=(Decimal(f["amount"]) / Decimal(f["median"])).quantize(Decimal("1"))),
                                "account": f["account"], "amount": f["amount"], "rows": [f["row"]], "cite": None})
     if balance["applicable"] and Decimal(balance["diff"]) != 0:
-        exceptions.append({"code": "unbalanced_ledger", "title": f"เดบิตไม่เท่ากับเครดิต ต่างกัน {fmt_money(Decimal(balance['diff']))}",
-                           "detail": "ทำต่อตามที่เลือก ตัวเลขในรายงานคำนวณจากรายการที่มี", "account": "",
+        exceptions.append({"code": "unbalanced_ledger", "title": W("doc.exc.unbalanced.title", diff=fmt_money(Decimal(balance["diff"]))),
+                           "detail": W("doc.exc.unbalanced.detail"), "account": "",
                            "amount": balance["diff"], "rows": [], "cite": balance["cite_debit"]})
 
     # Pre-formatted strings the narrative may quote. The guard rejects any
@@ -618,13 +618,13 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
         if kind == "money":
             quotable[key] = fmt_money(d, 0)
             quotable[key + "_m"] = fmt_millions(d)
-            figures[key + "_m"] = {"text": quotable[key + "_m"], "cite": cite, "label": f"{label} (ล้านบาท)"}
+            figures[key + "_m"] = {"text": quotable[key + "_m"], "cite": cite, "label": W("doc.cite.millions", label=label)}
             if cite:
                 quotable_cites[key + "_m"] = cite
-            label = f"{label} (บาท)"
+            label = W("doc.cite.baht", label=label)
         elif kind == "points":
-            quotable[key] = f"{d:+.2f} จุด"
-            label = f"{label} (จุดร้อยละ)"
+            quotable[key] = W("doc.points", d=f"{d:+.2f}")
+            label = W("doc.cite.points", label=label)
         else:
             quotable[key] = fmt_pct(d)
             label = f"{label} (%)"
@@ -634,42 +634,42 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
 
     for l in lines:
         n = l["label"]
-        addq(l["key"], l["current"], cite=l["cite"], label=f"{n} งวดนี้")
-        addq(l["key"] + "_prior", l["prior"], cite=l.get("cite_prior"), label=f"{n} งวดก่อน")
-        addq(l["key"] + "_budget", l["budget"], cite=l.get("cite_budget"), label=f"{n} งบประมาณ")
-        addq(l["key"] + "_var_prior", l["var_prior"], cite=l.get("cite_var_prior"), label=f"{n} เปลี่ยนแปลงจากงวดก่อน")
+        addq(l["key"], l["current"], cite=l["cite"], label=W("doc.cite.current", n=n))
+        addq(l["key"] + "_prior", l["prior"], cite=l.get("cite_prior"), label=W("doc.cite.prior", n=n))
+        addq(l["key"] + "_budget", l["budget"], cite=l.get("cite_budget"), label=W("doc.cite.budget", n=n))
+        addq(l["key"] + "_var_prior", l["var_prior"], cite=l.get("cite_var_prior"), label=W("doc.cite.change", n=n))
         addq(l["key"] + "_var_budget", l.get("var_budget"), cite=l.get("cite_var_budget"),  # the report's "ต่างจากงบ"
-             label=f"{n} ต่างจากงบประมาณ")
+             label=W("doc.cite.var_budget", n=n))
         if l["var_prior_pct"] is not None:
             addq(l["key"] + "_var_prior_pct", l["var_prior_pct"], "pct", cite=l.get("cite_var_prior"),
-                 label=f"{n} เปลี่ยนแปลงจากงวดก่อน")
+                 label=W("doc.cite.change", n=n))
         if l["var_budget_pct"] is not None:
             addq(l["key"] + "_var_budget_pct", l["var_budget_pct"], "pct", cite=l.get("cite_var_budget"),
-                 label=f"{n} ต่างจากงบประมาณ")
+                 label=W("doc.cite.var_budget", n=n))
     for r in ratios:
-        addq(r["key"], r["current"], "pct", cite=r["cite"], label=f"{r['label']} งวดนี้")
-        addq(r["key"] + "_prior", r["prior"], "pct", cite=r.get("cite_prior"), label=f"{r['label']} งวดก่อน")
+        addq(r["key"], r["current"], "pct", cite=r["cite"], label=W("doc.cite.ratio_current", label=r["label"]))
+        addq(r["key"] + "_prior", r["prior"], "pct", cite=r.get("cite_prior"), label=W("doc.cite.ratio_prior", label=r["label"]))
         if r["change_points"] is not None:
             addq(r["key"] + "_change_points", r["change_points"], "points", cite=r.get("cite_change_points"),
-                 label=f"{r['label']} เปลี่ยนแปลง")
+                 label=W("doc.cite.ratio_change", label=r["label"]))
     by_code = {a["code"]: a for a in accounts}
     for m in top_movements:
-        n = f"บัญชี {m['code']} {m['name']}".strip()
-        addq(f"acct_{m['code']}", m["current"], cite=m["cite"], label=f"{n} งวดนี้")
-        addq(f"acct_{m['code']}_change", m["change"], cite=m["cite"], label=f"{n} เปลี่ยนแปลงจากงวดก่อน")
+        n = W("doc.cite.account", code=m["code"], name=m["name"]).strip()
+        addq(f"acct_{m['code']}", m["current"], cite=m["cite"], label=W("doc.cite.current", n=n))
+        addq(f"acct_{m['code']}_change", m["change"], cite=m["cite"], label=W("doc.cite.change", n=n))
         if m["change_pct"] is not None:
-            addq(f"acct_{m['code']}_change_pct", m["change_pct"], "pct", cite=m["cite"], label=f"{n} เปลี่ยนแปลงจากงวดก่อน")
+            addq(f"acct_{m['code']}_change_pct", m["change_pct"], "pct", cite=m["cite"], label=W("doc.cite.change", n=n))
     for a in accounts:
-        n = f"บัญชี {a['code']} {a['name']}".strip()
+        n = W("doc.cite.account", code=a["code"], name=a["name"]).strip()
         if f"acct_{a['code']}" not in figures:
-            addq(f"acct_{a['code']}", a["current"], cite=a["cite"], label=f"{n} งวดนี้")
+            addq(f"acct_{a['code']}", a["current"], cite=a["cite"], label=W("doc.cite.current", n=n))
         if a["budget"] is not None:
-            addq(f"acct_{a['code']}_budget", a["budget"], cite=a.get("cite_budget") or a["cite"], label=f"{n} งบประมาณ")
+            addq(f"acct_{a['code']}_budget", a["budget"], cite=a.get("cite_budget") or a["cite"], label=W("doc.cite.budget", n=n))
             addq(f"acct_{a['code']}_var_budget", a["var_budget"], cite=a.get("cite_var_budget") or a["cite"],
-                 label=f"{n} ต่างจากงบประมาณ")
+                 label=W("doc.cite.var_budget", n=n))
             if a["var_budget_pct"] is not None:
                 addq(f"acct_{a['code']}_var_budget_pct", a["var_budget_pct"], "pct", cite=a.get("cite_var_budget") or a["cite"],
-                     label=f"{n} ต่างจากงบประมาณ")
+                     label=W("doc.cite.var_budget", n=n))
     for e in exceptions:
         if e.get("amount"):
             addq(f"exc_{e['code']}_{e.get('account') or 'x'}", e["amount"], cite=e.get("cite"),
@@ -694,9 +694,9 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
         "script": SCRIPT_VERSION,
         "rules": RULES_VERSION,
         "period": period,
-        "period_label": period_label_th(period),
+        "period_label": _words.period(period),
         "prior_period": prep["prior_period"],
-        "prior_label": period_label_th(prep["prior_period"]) if prep["prior_period"] else None,
+        "prior_label": _words.period(prep["prior_period"]) if prep["prior_period"] else None,
         "currency": defaults.get("currency", "THB"),
         "doc_type": primary.doc_type,
         "has_prior": has_prior, "has_budget": has_budget,
@@ -744,44 +744,45 @@ def fallback_narrative(c: dict) -> dict:
     f = c.get("figures") or {}
     lines = {l["key"]: l for l in c["lines"]}
     rev = lines["revenue"]
-    parts = ["งวด" + c["period_label"] + " รายได้จากการขายและบริการ {revenue} บาท กำไรสุทธิ {net_profit} บาท"]
+    parts = [W("doc.narr.summary", period_label=c["period_label"], revenue="{revenue}", net_profit="{net_profit}")]
     if c["has_prior"] and rev["var_prior_pct"] is not None:
-        way = "เพิ่มขึ้น" if Decimal(rev["var_prior_pct"]) > 0 else ("ลดลง" if Decimal(rev["var_prior_pct"]) < 0 else "เท่าเดิม")
-        parts.append(f"รายได้{way} {{revenue_var_prior_pct:abs}} จาก{c['prior_label']}")
+        way = W("doc.narr.up") if Decimal(rev["var_prior_pct"]) > 0 else (W("doc.narr.down") if Decimal(rev["var_prior_pct"]) < 0 else W("doc.narr.flat"))
+        parts.append(W("doc.narr.revenue_vs_prior", way=way, pct="{revenue_var_prior_pct:abs}", prior_label=c["prior_label"]))
     nm = next(r for r in c["ratios"] if r["key"] == "net_margin")
     if nm["current"] is not None:
-        parts.append("อัตรากำไรสุทธิ {net_margin}")
+        parts.append(W("doc.narr.margin", margin="{net_margin}"))
     summary = " ".join(parts) + "."
     movers = []
     for m in c["top_movements"][:4]:
         k = f"acct_{m['code']}"
-        text = f"{m['name'] or 'บัญชี'}: {{{k}}} บาท" if k in f else f"{m['name'] or 'บัญชี'}"
+        name = m["name"] or W("doc.narr.account")
+        text = W("doc.narr.mover_amount", name=name, figure=f"{{{k}}}") if k in f else name
         if m.get("change_pct") and f"{k}_change_pct" in f:
-            way = "เพิ่มขึ้น" if Decimal(m["change_pct"]) > 0 else "ลดลง"
-            text += f" ({way} {{{k}_change_pct:abs}})"
+            way = W("doc.narr.up") if Decimal(m["change_pct"]) > 0 else W("doc.narr.down")
+            text += " " + W("doc.narr.mover_change", way=way, pct=f"{{{k}_change_pct:abs}}")
         movers.append(text)
     watch, steps = [], []
     for e in c["exceptions"][:4]:
-        name = next((a["name"] for a in c["accounts"] if a["code"] == e.get("account")), "") or "บัญชี"
+        name = next((a["name"] for a in c["accounts"] if a["code"] == e.get("account")), "") or W("doc.narr.account")
         k = f"acct_{e.get('account')}"
         if e["code"] == "budget_variance_high" and f"{k}_budget" in f:
-            watch.append(f"{name} {{{k}}} บาท สูงกว่างบประมาณ {{{k}_budget}} บาท เกินงบ {{{k}_var_budget}} บาท")
+            watch.append(W("doc.narr.over_budget", name=name, figure=f"{{{k}}}", budget=f"{{{k}_budget}}", over=f"{{{k}_var_budget}}"))
         elif e["code"] == "unbalanced_ledger":
-            watch.append("เดบิตไม่เท่ากับเครดิตในงวดนี้")
+            watch.append(W("doc.narr.unbalanced"))
         elif k in f:
-            watch.append(f"{EXC_TH.get(e['code'], 'ต้องตรวจ')}: {name} {{{k}}} บาท")
+            watch.append(W("doc.narr.exc_amount", label=EXC_TH.get(e["code"], W("doc.narr.to_check")), name=name, figure=f"{{{k}}}"))
         else:
-            watch.append(f"{EXC_TH.get(e['code'], 'ต้องตรวจ')}: {name}")
-    watch = watch or ["ไม่พบรายการผิดปกติตามกฎที่ตั้งไว้"]
+            watch.append(W("doc.narr.exc", label=EXC_TH.get(e["code"], W("doc.narr.to_check")), name=name))
+    watch = watch or [W("doc.exc.none")]
     for e in c["exceptions"][:3]:
-        name = next((a["name"] for a in c["accounts"] if a["code"] == e.get("account")), "") or "บัญชีนี้"
+        name = next((a["name"] for a in c["accounts"] if a["code"] == e.get("account")), "") or W("doc.narr.this_account")
         if e["code"] == "budget_variance_high":
-            steps.append(f"ทบทวนเหตุที่ {name} สูงกว่างบประมาณ")
+            steps.append(W("doc.narr.review_budget", name=name))
         elif e["code"] == "unbalanced_ledger":
-            steps.append("หาสาเหตุที่เดบิตไม่เท่ากับเครดิตก่อนส่งรายงาน")
+            steps.append(W("doc.narr.find_unbalanced"))
         else:
-            steps.append(f"ตรวจสอบ{EXC_TH.get(e['code'], 'รายการ')}ของ {name}")
+            steps.append(W("doc.narr.check", label=EXC_TH.get(e["code"], W("doc.narr.item")), name=name))
     if not steps:
-        steps = ["ตรวจทานตัวเลขกับผู้รับผิดชอบแต่ละหมวดก่อนส่งผู้บริหาร"]
+        steps = [W("doc.narr.review_figures")]
     return {"summary": summary, "movements": movers, "watch": watch, "next_steps": steps,
             "written_by": "rules", "model": None}

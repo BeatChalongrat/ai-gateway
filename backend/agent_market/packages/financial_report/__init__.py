@@ -49,7 +49,7 @@ def compute(files, roles, period, *, answers=None, defaults=None) -> dict:
     def table():
         return _metrics.compute(files, roles, period, answers=answers, defaults=defaults)
 
-    return _words.with_document(table(), table)
+    return table()
 
 
 def postcompute(files, roles, period, computed, *, answers=None, defaults=None) -> dict:
@@ -73,7 +73,6 @@ def template_values(computed: dict) -> dict:
     """The values a customer's template can take (the manifest's templates block): money as printed text."""
     from ...engine.thai import fmt_money
 
-    computed = _words.for_document(computed)  # (a form is a document: the words the report prints)
     lines = {l["key"]: l for l in computed["lines"]}
 
     def m(key):
@@ -90,6 +89,5 @@ def template_values(computed: dict) -> dict:
 def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     from ...deliverables import render as _render
 
-    # the files are written from the table in the documents' language; what the gate then says of each file
-    # is said in the run's (deliverables/render.py)
-    return _render.render_all(_words.for_document(computed), req, in_dir=in_dir, out_dir=out_dir)
+    # AM18: the files are written in the run's language, like everything the run says
+    return _render.render_all(computed, req, in_dir=in_dir, out_dir=out_dir)

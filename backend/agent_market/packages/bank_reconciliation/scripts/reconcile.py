@@ -242,7 +242,7 @@ def journal_of(rv: Review, items: list[dict]) -> list[dict]:
         for account, amount, acc_code in parts:            # amount > 0 is a debit
             lines.append({"account": account, "code": acc_code, "debit": f2(amount) if amount > ZERO else "0.00",
                           "credit": f2(-amount) if amount < ZERO else "0.00"})
-        out.append({"id": W("doc.journal.draft_id", n=len(out) + 1), "date": date, "memo": memo, "lines": lines, "items": ids, "draft": True,
+        out.append({"id": W("doc.journal.draft_id", n=f"{len(out) + 1:02d}"), "date": date, "memo": memo, "lines": lines, "items": ids, "draft": True,
                     "note": note})
 
     for i in mine:
@@ -262,7 +262,7 @@ def journal_of(rv: Review, items: list[dict]) -> list[dict]:
                     note += " " + W("journal.wht_unusual")
             parts.append((ACCOUNTS["interest"], -amount, ""))
             used.update([i["id"]] + [t["id"] for t in tax])
-            entry(i["date"], W("doc.journal.memo_interest") + (W("doc.journal.memo_and_wht") if withheld > ZERO else ""), parts,
+            entry(i["date"], W("doc.journal.memo_interest") + (" " + W("doc.journal.memo_and_wht") if withheld > ZERO else ""), parts,
                   [i["id"]] + [t["id"] for t in tax], note)
             continue
         if i["type"] == "wht_interest" and any(t["type"] == "interest" and t["date"] == i["date"] for t in mine):

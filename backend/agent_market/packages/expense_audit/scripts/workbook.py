@@ -203,7 +203,7 @@ class ExpenseWorkbook:
         for r in range(9, 13):
             ws.cell(row=r, column=2).number_format = MONEY
         r = 4 + len(rows) + 2
-        src = (W("doc.policy.sample") if pol["source"] == "package_sample"
+        src = (W("doc.policy.came_with_agent") if pol["source"] == "package_sample"
                else W("doc.policy.set"))
         notes = [
             W("doc.note.rules"),
@@ -321,7 +321,7 @@ class ExpenseWorkbook:
         r = r + 1 + len(settings) + 2
         cal = pol["calendar"]
         if cal.get("active"):
-            self._section(ws, r, W("doc.section.holidays") + (cal.get("note") or W("doc.calendar.company")))
+            self._section(ws, r, W("doc.section.holidays") + " " + (cal.get("note") or W("doc.calendar.company")))
             hol = [[d, n] for d, n in cal["dates"].items()] or [["-", W("doc.calendar.none")]]
         else:
             self._section(ws, r, W("doc.section.calendar_off"))

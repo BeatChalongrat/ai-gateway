@@ -55,9 +55,10 @@ READS = {
     # (audit.py keeps the words a policy paragraph is looked for by — TOPICS — and nothing it says)
     "expense_audit": ("checks/inputs.py", "checks/policy.py", "checks/rules.py", "scripts/audit.py"),
     "po_matching": ("checks/inputs.py", "checks/units.py", "checks/book.py"),
-    "financial_report": (),
+    # (preflight reads the person's words for a budget; rules.py keeps the words an account's name is grouped by)
+    "financial_report": ("checks/preflight.py", "scripts/rules.py"),
 }
-DOCUMENTS_DONE = ("bank_reconciliation", "invoice_processing", "expense_audit", "po_matching")
+DOCUMENTS_DONE = ("bank_reconciliation", "invoice_processing", "expense_audit", "po_matching", "financial_report")
 
 
 def documents_left(p: dict[str, dict[str, int]]) -> dict[str, int]:

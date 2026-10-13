@@ -31,6 +31,8 @@ import shutil
 import zipfile
 from xml.sax.saxutils import escape, quoteattr
 
+from ..engine.words import SHARED as S
+
 STAMP_TAG = "am-review-stamp"              # docx: the stamp table's caption
 PPTX_SHAPE = "Review stamp"                 # pptx: the stamp box's name
 # AM6: the stamp names no organisation. A stamp written before then carried the publisher's name in
@@ -39,7 +41,7 @@ _STAMP_CAPTION = re.compile(r"^(?:[a-z]+-)?review-stamp$")
 _STAMP_SHAPE = re.compile(r"^(?:[A-Za-z]+ )?review stamp$", re.I)
 XLSX_PART = "xl/worksheets/am_review.xml"   # xlsx: the stamp sheet's part
 XLSX_RID = "rIdAmReview"
-XLSX_SHEET = "ตรวจทาน"
+XLSX_SHEET = "docs.sheet.review"
 
 SUPPORTED = ("docx", "pptx", "xlsx")
 
@@ -52,15 +54,15 @@ WS_CT = "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+x
 def lines(review: dict) -> list[str]:
     """The stamp's text, one entry per line (the note only when there is one)."""
     r = {k: str(review.get(k) or "").strip() for k in ("reviewer", "at_label", "preparer", "agent", "run_ref", "note")}
-    out = [f"ตรวจทานแล้ว · ผู้ตรวจทาน: {r['reviewer'] or '—'} · {r['at_label'] or '—'}"]
-    made = f"จัดทำโดย {r['preparer'] or '—'}"
+    out = [S("docs.review.line", v=r["reviewer"] or "—", v2=r["at_label"] or "—")]
+    made = S("docs.review.prepared_by", v=r["preparer"] or "—")
     if r["agent"]:
-        made += f" ด้วย {r['agent']}"
+        made += " " + S("docs.review.with", agent=r["agent"])
     if r["run_ref"]:
-        made += f" · รอบ {r['run_ref']}"
+        made += " " + S("docs.review.run", run_ref=r["run_ref"])
     out.append(made)
     if r["note"]:
-        out.append(f"หมายเหตุ: {r['note']}")
+        out.append(S("docs.review.note", note=r["note"]))
     return out
 
 
@@ -211,15 +213,15 @@ def _cell(ref: str, text: str, bold: bool = False) -> str:
 
 def _sheet_xml(review: dict, doc_name: str = "") -> bytes:
     r = {k: str(review.get(k) or "").strip() for k in ("reviewer", "reviewer_email", "at_label", "preparer", "agent", "run_ref", "note")}
-    rows = [("A1", "ตรวจทานแล้ว", None)]
-    table = [("ผู้ตรวจทาน", r["reviewer"] + (f" ({r['reviewer_email']})" if r["reviewer_email"] else "")),
-             ("เวลาที่ตรวจทาน", r["at_label"]),
-             ("จัดทำโดย", r["preparer"]),
+    rows = [("A1", S("docs.review.reviewed"), None)]
+    table = [(S("docs.review.reviewer"), r["reviewer"] + (f" ({r['reviewer_email']})" if r["reviewer_email"] else "")),
+             (S("docs.review.at"), r["at_label"]),
+             (S("docs.review.preparer"), r["preparer"]),
              ("agent", r["agent"]),
-             ("รอบ", r["run_ref"])]
+             (S("docs.review.run_label"), r["run_ref"])]
     if r["note"]:
-        table.append(("หมายเหตุ", r["note"]))
-    table.append(("ไฟล์นี้", "เหมือนไฟล์ที่ agent ส่งมาทุกแผ่น เพิ่มเฉพาะแผ่นนี้ ตัวเลขไม่ได้เปลี่ยน"))
+        table.append((S("docs.col.note"), r["note"]))
+    table.append((S("docs.review.this_file"), S("docs.review.unchanged")))
     xml = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
            '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>'
@@ -232,7 +234,7 @@ def _sheet_xml(review: dict, doc_name: str = "") -> bytes:
         xml.append(f'<row r="{i}">{_cell(f"A{i}", k)}{_cell(f"B{i}", v)}</row>')
     # AM8: the review sheet prints like the rest of the working paper — one A4 page, the document's
     # name and the page number on it
-    foot = escape(f"&L{doc_name} · ตรวจทาน&Rหน้า &P / &N")
+    foot = escape(S("docs.review.footer", doc_name=doc_name))
     xml.append('</sheetData><pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/>'
                '<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="1"/>'
                f'<headerFooter><oddFooter>{foot}</oddFooter></headerFooter></worksheet>')
@@ -281,10 +283,10 @@ def stamp_xlsx(src: str, dst: str, review: dict) -> dict:
     names = [_attr(t, "name") for t in sheet_tags]
     ours = next((i for i, t in enumerate(sheet_tags) if _attr(t, "r:id") == XLSX_RID), None)
     if ours is None:
-        name = XLSX_SHEET
+        name = S(XLSX_SHEET)
         n = 2
         while name in names:
-            name = f"{XLSX_SHEET} ({n})"
+            name = f"{S(XLSX_SHEET)} ({n})"
             n += 1
         sheet_id = max((int(_attr(t, "sheetId") or 0) for t in sheet_tags), default=0) + 1
         new = (f'<sheet xmlns:r="{R_NS}" name={quoteattr(name)} sheetId="{sheet_id}" state="visible" '
@@ -357,14 +359,14 @@ def stamp_files(files: list[dict], review: dict, in_dir: str, out_dir: str) -> d
         fmt = str(f.get("format") or "").lower()
         src = os.path.join(in_dir, os.path.basename(str(f.get("input") or "")))
         if not name:
-            skipped.append({"name": name, "reason": "ไม่มีชื่อไฟล์"})
+            skipped.append({"name": name, "reason": S("docs.review.no_name")})
             continue
         if fmt not in SUPPORTED:
-            skipped.append({"name": name, "reason": f"ไฟล์ชนิด {fmt or '?'} ไม่ประทับตราการตรวจทาน"
-                            + (" (แปลงจาก .docx ที่ประทับแล้วแทน)" if fmt == "pdf" else "")})
+            skipped.append({"name": name, "reason": S("docs.review.not_stamped", v=fmt or "?")
+                            + (" " + S("docs.review.from_docx") if fmt == "pdf" else "")})
             continue
         if not os.path.isfile(src):
-            skipped.append({"name": name, "reason": "ไม่พบไฟล์ต้นฉบับ"})
+            skipped.append({"name": name, "reason": S("docs.review.no_source")})
             continue
         dst = os.path.join(out_dir, name)
         if os.path.abspath(dst) == os.path.abspath(src):

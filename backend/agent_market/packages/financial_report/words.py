@@ -3,7 +3,7 @@
 No sentence a person reads on a screen is written in this package's code: it has a key, its Thai is in
 agent.json under "strings" and its English under "en" (engine/words.py). What the report, the deck and the
 workbook themselves say — their headings, the names of a figure in a sentence, the commentary the rules
-write when no model answers — is still written in their own code, in Thai: the documents' own pass.
+write when no model answers — has a key too, since AM18, and is said in the run's language.
 """
 
 from ...engine import words as _words
@@ -17,8 +17,6 @@ def columns(*keys: str) -> list:
 
 
 def printed(key: str) -> str:
-    """A name as the report prints it — the documents' language, whatever the run. The lines of the
-    computed table are read by the files and by the model that writes their commentary, never by a screen;
-    a figure's own record (its citation) names it in the run's language."""
-    with _words.speaking(_words.DOCUMENT):
-        return W(key)
+    """A name as the report prints it — in the run's language, like everything else since AM18 (the name is
+    from when the documents were Thai whatever the run)."""
+    return W(key)

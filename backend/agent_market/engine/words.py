@@ -220,6 +220,16 @@ def period(value: str) -> str:
     return period_label_th(value)
 
 
+def period_short(value: str) -> str:
+    """A month as a chart's axis or a narrow column says it: '2026-09' → “ก.ย. 69”, “Sep 2026”."""
+    from .thai import MONTHS_EN, period_short_th
+
+    if _lang == "en":
+        y, m = (int(x) for x in value.split("-"))
+        return f"{MONTHS_EN[m - 1][:3]} {y}"
+    return period_short_th(value)
+
+
 def _read(path: str) -> dict:
     with open(path, encoding="utf-8") as f:
         return json.load(f)

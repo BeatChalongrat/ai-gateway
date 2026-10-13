@@ -21,6 +21,7 @@ from pptx.util import Inches, Pt
 
 import pptx_generator as pg  # /sandbox/scripts — shared, imported, not modified
 
+from ..engine.words import SHARED as S
 from .content import money0, pct_or_dash
 from .fit import shrink_to_fit
 
@@ -66,7 +67,7 @@ class DeckWriter:
         rule.line.fill.background()
         note = self.m["source_note"]
         if cites:
-            note += "  ·  อ้างอิง " + ", ".join(cites)  # every figure on the slide: never "…" (AM8)
+            note += "  " + S("docs.deck.cites") + " " + ", ".join(cites)  # every figure on the slide: never "…" (AM8)
         self._text(slide, 0.5, 5.2, 8.2, 0.3, note, 7.5, p["muted"])
         self._text(slide, 8.7, 5.2, 0.8, 0.3, str(n), 8, p["muted"], align=PP_ALIGN.RIGHT)
 
@@ -107,8 +108,8 @@ class DeckWriter:
     # ── slides ────────────────────────────────────────────────────────
     def title(self):
         p = self.p
-        pg.build_title_slide(self.prs, {"title": "ผลประกอบการ", "subtitle": self.m["subtitle"].replace("ประจำเดือน", ""),
-                                        "author": " · ".join(x for x in (self.m["company"], "ประชุมผู้บริหาร") if x)},
+        pg.build_title_slide(self.prs, {"title": S("docs.deck.title"), "subtitle": self.m["computed"]["period_label"],
+                                        "author": " · ".join(x for x in (self.m["company"], S("docs.deck.audience")) if x)},
                              self.settings, self.colors)
         s = self.prs.slides[-1]
         if self.m["company"]:
@@ -119,8 +120,8 @@ class DeckWriter:
 
     def stats(self):
         k = self.m["kpis"]
-        pg.build_stats_slide(self.prs, {"title": "ตัวเลขสำคัญ",
-                                        "stats": [{"value": x["value_short"].replace(" ล้าน", "M"), "label": x["label"],
+        pg.build_stats_slide(self.prs, {"title": S("docs.deck.stats"),
+                                        "stats": [{"value": x["value_short"].replace(" " + S("docs.unit.m"), "M"), "label": x["label"],
                                                    "color": self.p["primary"]} for x in k]},
                              self.settings, self.colors)
         s = self.prs.slides[-1]
@@ -146,7 +147,7 @@ class DeckWriter:
     def summary(self):
         nar = self.m["narrative"]
         watch = (nar.get("watch", [])[:2] + nar.get("movements", [])[:2])[:4]
-        pg.build_content_slide(self.prs, {"title": "สรุปผู้บริหาร", "body": nar["summary"], "bullets": watch},
+        pg.build_content_slide(self.prs, {"title": S("docs.section.summary"), "body": nar["summary"], "bullets": watch},
                                {**self.settings, "font": {**self.settings["font"], "body_size": 13}}, self.colors)
         s = self.prs.slides[-1]
         # The stock body box is one inch tall; give the summary the room it needs.
@@ -284,7 +285,7 @@ class DeckWriter:
         if "trend" in charts:
             self.chart(charts["trend"])
         lines = {l["key"]: l for l in c["lines"]}
-        heads = ["รายการ", "งวดนี้"] + (["งวดก่อน", "%"] if c["has_prior"] else []) + (["งบประมาณ"] if c["has_budget"] else [])
+        heads = [S("docs.col.item"), S("docs.col.current")] + ([S("docs.col.prior"), "%"] if c["has_prior"] else []) + ([S("docs.col.budget")] if c["has_budget"] else [])
         rows = []
         for key in ("revenue", "cost_of_sales", "gross_profit", "operating_expenses", "total_expenses", "net_profit"):
             l = lines[key]
@@ -294,42 +295,42 @@ class DeckWriter:
             if c["has_budget"]:
                 r += [money0(l["budget"])]
             rows.append(r)
-        self.table("งบกำไรขาดทุนโดยย่อ", heads, rows, [lines[k]["cite"] for k in ("revenue", "total_expenses", "net_profit")],
+        self.table(S("docs.deck.pl"), heads, rows, [lines[k]["cite"] for k in ("revenue", "total_expenses", "net_profit")],
                    widths=[2.6] + [1.3] * (len(heads) - 1))
         if "budget_variance" in charts:
             self.chart(charts["budget_variance"])
         if "composition" in charts:
             self.chart(charts["composition"])
         if c["top_movements"]:
-            heads = ["บัญชี", "งวดนี้"] + (["งวดก่อน", "เปลี่ยนแปลง", "%"] if c["has_prior"] else [])
+            heads = [S("docs.col.account"), S("docs.col.current")] + ([S("docs.col.prior"), S("docs.col.change"), "%"] if c["has_prior"] else [])
             rows = []
             for mv in c["top_movements"][:6]:
                 r = [f"{mv['code']} {mv['name']}".strip(), money0(mv["current"])]
                 if c["has_prior"]:
                     r += [money0(mv["prior"]), money0(mv["change"]), pct_or_dash(mv["change_pct"])]
                 rows.append(r)
-            self.table("รายการเคลื่อนไหวสำคัญ", heads, rows, [mv["cite"] for mv in c["top_movements"][:6]],
+            self.table(S("docs.section.movements"), heads, rows, [mv["cite"] for mv in c["top_movements"][:6]],
                        widths=[3.2] + [1.2] * (len(heads) - 1))
         exc = c["exceptions"]
         from .content import EXC_LABEL
 
         # what kind of item, in Thai (the code is in the full report's รหัสเหตุผล column, for whoever maintains it)
-        items = [f"{EXC_LABEL.get(e['code'], 'ต้องตรวจ')}: {e['title']} — {e['detail']}" for e in exc[:5]] or [
-            "ไม่พบรายการผิดปกติตามกฎที่ตั้งไว้"]
-        self.bullets(f"รายการที่ต้องตรวจ ({len(exc)})", items, [e["cite"] for e in exc[:5] if e.get("cite")],
-                     body="ระบบไม่แก้ตัวเลขเอง ทุกข้อมีแถวต้นทางในรายงานฉบับเต็ม")
+        items = [f"{EXC_LABEL.get(e['code'], S('docs.exc.to_check'))}: {e['title']} — {e['detail']}" for e in exc[:5]] or [
+            S("docs.exc.none")]
+        self.bullets(S("docs.deck.exceptions", n=len(exc)), items, [e["cite"] for e in exc[:5] if e.get("cite")],
+                     body=S("docs.deck.exceptions_note"))
         nar = m["narrative"]
-        self.bullets("สิ่งที่ควรทำต่อ", nar.get("next_steps", [])[:5], list(dict.fromkeys(
+        self.bullets(S("docs.sub.next"), nar.get("next_steps", [])[:5], list(dict.fromkeys(
             (self.m.get("narrative_cites") or {}).get("next_steps") or [])))
         assumptions = [a["text"] for a in m["assumptions"]][:6]
         model = m.get("model") or {}
-        about = [f"ไฟล์หลัก: {c['source']['primary']['file']} ({c['source']['primary']['rows_used']:,} รายการ)",
-                 f"คำนวณด้วย {c['script']} (Decimal)",
-                 "โมเดลที่เขียนคำอธิบาย: " + (model.get("model") or "ไม่มี (ข้อความจากกฎ)")
-                 + (" · รันในองค์กร" if model.get("self_hosted") else ""),
-                 "อ่านอย่างเดียว: ไม่เขียนกลับระบบบัญชี ไม่โอนเงิน · ไม่ส่งอีเมลเอง ส่งผ่านระบบได้เมื่อผู้ดูแลตั้งค่าและมีคนอนุมัติ",
-                 "รายงานผู้บริหาร ไม่ใช่การปิดบัญชี: ไม่มีงบแสดงฐานะการเงิน งบกระแสเงินสด หรือรายการปรับปรุง"]
-        self.two_column("ข้อสมมติและที่มาของข้อมูล", ("ข้อสมมติในรอบนี้", assumptions), ("ที่มาและขอบเขต", about), [])
+        about = [S("docs.deck.primary", file=c["source"]["primary"]["file"], rows_used=f"{c['source']['primary']['rows_used']:,}"),
+                 S("docs.deck.computed", script=c["script"]),
+                 S("docs.deck.model") + " " + (model.get("model") or S("docs.deck.no_model"))
+                 + (" " + S("docs.deck.inside") if model.get("self_hosted") else ""),
+                 S("docs.deck.readonly"),
+                 S("docs.deck.scope")]
+        self.two_column(S("docs.deck.assumptions"), (S("docs.deck.assumptions_left"), assumptions), (S("docs.deck.scope_right"), about), [])
         props = self.prs.core_properties
         props.title = f"{m['title']} {m['subtitle']}"
         props.author = m["company"] or "Agent Market"

@@ -12,15 +12,15 @@ import datetime as _dt
 import re
 from decimal import Decimal
 
-from ..engine.thai import MONTHS_TH_ABBR, fmt_millions, fmt_money, fmt_pct
+from ..engine import words
+from ..engine.thai import fmt_millions, fmt_money, fmt_pct
+from ..engine.words import SHARED as S
 
 REQUIRED_SECTIONS = ("summary", "pl", "exceptions", "insights", "assumptions", "sources", "citations")
 
 # AM8: what the report is, and what the agent does not do — said the way the system works.
-SCOPE_NOTE = ("รายงานนี้เป็นรายงานผลประกอบการสำหรับผู้บริหาร (งบกำไรขาดทุนและการวิเคราะห์) ไม่ใช่การปิดบัญชี: "
-              "ไม่มีงบแสดงฐานะการเงิน งบกระแสเงินสด หรือรายการปรับปรุงบัญชี")
-DOES_NOT = ("agent นี้อ่านอย่างเดียว ไม่เขียนกลับระบบบัญชี และไม่โอนเงิน · agent ไม่ส่งอีเมลเอง "
-            "ผู้ใช้ส่งไฟล์ผ่านระบบได้เมื่อผู้ดูแลตั้งค่าเซิร์ฟเวอร์อีเมลไว้ และทุกฉบับต้องมีคนกดอนุมัติ")
+SCOPE_NOTE = ("docs.report.scope")
+DOES_NOT = ("docs.report.does_not")
 
 
 # AM11b — what a person asked of the documents (agent.json "instructions"; the runner sends the ids a
@@ -29,9 +29,9 @@ DOES_NOT = ("agent นี้อ่านอย่างเดียว ไม่
 # figure — the computed table and its citations are the same with or without it — and the sections a
 # report must always have (REQUIRED_SECTIONS: the checks' results, the assumptions, the sources) stay.
 DIRECTIVES = ("no_charts", "brief", "sort_by_variance")
-SECTION_TITLES = {"charts": "แนวโน้มและองค์ประกอบ", "movements": "รายการเคลื่อนไหวสำคัญ", "accounts": "รายละเอียดรายบัญชี"}
+SECTION_TITLES = S.table({"charts": "docs.section.charts", "movements": "docs.section.movements", "accounts": "docs.section.accounts"})
 BRIEF_LEAVES_OUT = ("charts", "movements", "accounts")
-CHART_TABLE_HEADS = ("รายการในกราฟ", "เดือนในกราฟ")
+CHART_TABLE_HEADS = S.heads(["docs.chart.col.item", "docs.chart.col.month"])
 
 
 def asked_of(req: dict) -> list[str]:
@@ -68,7 +68,8 @@ def pct_or_dash(v, signed=True) -> str:
 
 
 def date_th(d: _dt.date) -> str:
-    return f"{d.day} {MONTHS_TH_ABBR[d.month - 1]} {d.year + 543}"
+    """A day as the report prints it, in the run's language (the name is from before a report could be English)."""
+    return words.date(d.isoformat())
 
 
 # ── figures in prose (AM8) ────────────────────────────────────────────────
@@ -135,28 +136,28 @@ def _ratio(computed, key):
 def kpis(computed: dict) -> list[dict]:
     has_prior = computed["has_prior"]
     out = []
-    for key, label, good_when_up in (("revenue", "รายได้จากการขายและบริการ", True),
-                                     ("total_expenses", "ค่าใช้จ่ายรวม", False),
-                                     ("net_profit", "กำไรสุทธิ", True)):
+    for key, label, good_when_up in (("revenue", S("docs.kpi.revenue"), True),
+                                     ("total_expenses", S("docs.kpi.total_expenses"), False),
+                                     ("net_profit", S("docs.kpi.net_profit"), True)):
         l = _line(computed, key)
         delta = None
         tone = "flat"
         if has_prior and l["var_prior_pct"] is not None:
             v = Decimal(l["var_prior_pct"])
-            delta = f"{fmt_pct(v, 1, signed=True)} จาก{computed['prior_label']}"
+            delta = S("docs.kpi.vs_prior", v=fmt_pct(v, 1, signed=True), prior_label=computed["prior_label"])
             tone = "up" if v > 0 else ("down" if v < 0 else "flat")
         elif computed["has_budget"] and l["var_budget_pct"] is not None:
             v = Decimal(l["var_budget_pct"])
-            delta = f"{fmt_pct(v, 1, signed=True)} เทียบงบประมาณ"
+            delta = S("docs.kpi.vs_budget", v=fmt_pct(v, 1, signed=True))
             tone = "up" if v > 0 else ("down" if v < 0 else "flat")
         good = None if tone == "flat" else ((tone == "up") == good_when_up)
         out.append({"key": key, "label": label, "value": money0(l["current"]),
                     "value_short": fmt_millions(Decimal(l["current"])), "delta": delta, "tone": tone,
                     "good": good, "cite": l["cite"]})
     nm = _ratio(computed, "net_margin")
-    delta = f"{Decimal(nm['change_points']):+.1f} จุด" if nm["change_points"] is not None else None
+    delta = S("docs.points", change_points=f"{Decimal(nm['change_points']):+.1f}") if nm["change_points"] is not None else None
     tone = "flat" if not nm["change_points"] else ("up" if Decimal(nm["change_points"]) > 0 else "down")
-    out.append({"key": "net_margin", "label": "อัตรากำไรสุทธิ", "value": pct_or_dash(nm["current"], signed=False),
+    out.append({"key": "net_margin", "label": S("docs.kpi.net_margin"), "value": pct_or_dash(nm["current"], signed=False),
                 "value_short": pct_or_dash(nm["current"], signed=False), "delta": delta, "tone": tone,
                 "good": None if tone == "flat" else tone == "up", "cite": nm["cite"]})
     return out
@@ -164,12 +165,12 @@ def kpis(computed: dict) -> list[dict]:
 
 def pl_table(computed: dict) -> dict:
     has_prior, has_budget = computed["has_prior"], computed["has_budget"]
-    cols = ["รายการ", "งวดนี้"]
+    cols = [S("docs.col.item"), S("docs.col.current")]
     if has_prior:
-        cols += [computed["prior_label"] or "งวดก่อน", "เปลี่ยนแปลง", "%"]
+        cols += [computed["prior_label"] or S("docs.col.prior"), S("docs.col.change"), "%"]
     if has_budget:
-        cols += ["งบประมาณ", "ต่างจากงบ"]
-    cols.append("อ้างอิง")
+        cols += [S("docs.col.budget"), S("docs.col.var_budget")]
+    cols.append(S("docs.col.ref"))
     order = ["revenue", "other_income", "cost_of_sales", "gross_profit", "operating_expenses", "finance_costs",
              "income_tax", "total_expenses", "net_profit"]
     emphasis = {"gross_profit", "net_profit"}
@@ -192,30 +193,30 @@ def pl_table(computed: dict) -> dict:
         r = [rt["label"], pct_or_dash(rt["current"], signed=False)]
         if has_prior:
             r += [pct_or_dash(rt["prior"], signed=False),
-                  "—" if rt["change_points"] is None else f"{Decimal(rt['change_points']):+.1f} จุด", ""]
+                  "—" if rt["change_points"] is None else S("docs.points", change_points=f"{Decimal(rt['change_points']):+.1f}"), ""]
         if has_budget:
             r += ["", ""]
         r.append(rt["cite"])
         rows.append(r)
     return {"type": "table", "columns": cols, "rows": rows, "strong_rows": strong,
             "numeric_from": 1, "cite_col": len(cols) - 1,
-            "caption": "หน่วย: บาท · ตัวเลขทุกช่องคำนวณด้วย " + computed["script"]}
+            "caption": S("docs.caption.pl") + " " + computed["script"]}
 
 
 def account_table(computed: dict, limit: int = 40, by_variance: bool = False) -> dict:
     has_prior, has_budget = computed["has_prior"], computed["has_budget"]
-    accounts, caption, order = computed["accounts"], "หน่วย: บาท", None
+    accounts, caption, order = computed["accounts"], S("docs.caption.unit_baht"), None
     if by_variance:
         key, ordered = variance_order(computed)
         if ordered is not None:
             accounts, order = ordered, key
-            caption = "หน่วย: บาท · เรียงจากส่วนต่าง" + ("จากงบประมาณ" if key == "var_budget" else "จากงวดก่อน") + "มากไปน้อย"
-    cols = ["รหัส", "ชื่อบัญชี", "งวดนี้"]
+            caption = S("docs.caption.by_variance", source=S("docs.variance.budget") if key == "var_budget" else S("docs.variance.prior"))
+    cols = [S("docs.col.code"), S("docs.col.account_name"), S("docs.col.current")]
     if has_prior:
-        cols += ["งวดก่อน", "%"]
+        cols += [S("docs.col.prior"), "%"]
     if has_budget:
-        cols += ["งบประมาณ", "ต่างจากงบ"]
-    cols.append("อ้างอิง")
+        cols += [S("docs.col.budget"), S("docs.col.var_budget")]
+    cols.append(S("docs.col.ref"))
     rows = []
     for a in accounts[:limit]:
         r = [a["code"], a["name"] or "—", money0(a["current"])]
@@ -233,7 +234,7 @@ def movement_table(computed: dict) -> dict | None:
     if not computed["top_movements"]:
         return None
     has_prior = computed["has_prior"]
-    cols = ["บัญชี", "งวดนี้"] + (["งวดก่อน", "เปลี่ยนแปลง", "%"] if has_prior else []) + ["อ้างอิง"]
+    cols = [S("docs.col.account"), S("docs.col.current")] + ([S("docs.col.prior"), S("docs.col.change"), "%"] if has_prior else []) + [S("docs.col.ref")]
     rows = []
     for m in computed["top_movements"]:
         r = [f"{m['code']} {m['name']}".strip(), money0(m["current"])]
@@ -243,27 +244,26 @@ def movement_table(computed: dict) -> dict | None:
         rows.append(r)
     return {"type": "table", "columns": cols, "rows": rows, "strong_rows": [], "numeric_from": 1,
             "cite_col": len(cols) - 1,
-            "caption": "เรียงตามขนาดการเปลี่ยนแปลงจากงวดก่อน" if has_prior else "ค่าใช้จ่ายที่ใหญ่ที่สุดของงวด"}
+            "caption": S("docs.caption.movements") if has_prior else S("docs.caption.largest")}
 
 
-EXC_LABEL = {
-    "budget_variance_high": "สูงกว่างบมาก", "expense_spike": "เพิ่มขึ้นผิดปกติ", "new_account": "บัญชีใหม่",
-    "negative_revenue": "รายได้ติดลบ", "large_single_entry": "รายการเดียวยอดสูง", "unbalanced_ledger": "ไม่สมดุล",
-}
+EXC_LABEL = S.table({
+    "budget_variance_high": "docs.exc.budget_variance_high", "expense_spike": "docs.exc.expense_spike", "new_account": "docs.exc.new_account",
+    "negative_revenue": "docs.exc.negative_revenue", "large_single_entry": "docs.exc.large_single_entry", "unbalanced_ledger": "docs.exc.unbalanced_ledger",
+})
 
 
 def exceptions_table(computed: dict) -> dict:
     rows = []
     src = computed["source"]["primary"]["file"]
     for e in computed["exceptions"]:
-        where = f"{src} แถว {', '.join(str(r) for r in e['rows'][:6])}" + (" …" if len(e["rows"]) > 6 else "") \
+        where = S("docs.where.rows", src=src, v=", ".join((str(r) for r in e["rows"][:6]))) + (" …" if len(e["rows"]) > 6 else "") \
             if e["rows"] else src
         rows.append([e["code"], EXC_LABEL.get(e["code"], e["code"]) + ": " + e["title"], e["detail"], where,
                      e.get("cite") or ""])
-    return {"type": "table", "columns": ["รหัสเหตุผล", "รายการ", "รายละเอียด", "แถวต้นทาง", "อ้างอิง"],
+    return {"type": "table", "columns": [S("docs.col.reason_code"), S("docs.col.item"), S("docs.col.detail"), S("docs.col.source_row"), S("docs.col.ref")],
             "rows": rows, "strong_rows": [], "numeric_from": None, "cite_col": 4, "small": True,
-            "empty_text": "ไม่พบรายการผิดปกติตามกฎที่ตั้งไว้ (เกณฑ์ความมีสาระสำคัญ "
-                          f"{money0(computed['materiality'])} บาท)"}
+            "empty_text": S("docs.exc.none_with", materiality=money0(computed["materiality"]))}
 
 
 def charts(computed: dict) -> list[dict]:
@@ -276,13 +276,13 @@ def charts(computed: dict) -> list[dict]:
     tc = t.get("cites") or {}
     if len(t["months"]) >= 2:
         out.append({
-            "id": "trend", "kind": "line", "title": f"แนวโน้ม {len(t['months'])} เดือน",
-            "subtitle": "หน่วย: ล้านบาท", "categories": t["labels"], "scale": 1_000_000,
-            "series": [{"name": "รายได้", "values": t["revenue"], "path": "trend.revenue",
+            "id": "trend", "kind": "line", "title": S("docs.chart.trend", n=len(t["months"])),
+            "subtitle": S("docs.caption.unit_m"), "categories": t["labels"], "scale": 1_000_000,
+            "series": [{"name": S("docs.series.revenue"), "values": t["revenue"], "path": "trend.revenue",
                         "cites": tc.get("revenue") or [t["cite"]] * len(t["labels"])},
-                       {"name": "ค่าใช้จ่ายรวม", "values": t["total_expenses"], "path": "trend.total_expenses",
+                       {"name": S("docs.kpi.total_expenses"), "values": t["total_expenses"], "path": "trend.total_expenses",
                         "cites": tc.get("total_expenses") or [t["cite"]] * len(t["labels"])},
-                       {"name": "กำไรสุทธิ", "values": t["net_profit"], "path": "trend.net_profit",
+                       {"name": S("docs.kpi.net_profit"), "values": t["net_profit"], "path": "trend.net_profit",
                         "cites": tc.get("net_profit") or [t["cite"]] * len(t["labels"])}],
         })
     if computed["has_budget"]:
@@ -292,10 +292,10 @@ def charts(computed: dict) -> list[dict]:
         rows = rows[:7]
         if rows:
             out.append({
-                "id": "budget_variance", "kind": "barh", "title": "ค่าใช้จ่ายเทียบงบประมาณ",
-                "subtitle": "ส่วนต่างจากงบ (บาท) · บวก = ใช้เกินงบ",
+                "id": "budget_variance", "kind": "barh", "title": S("docs.chart.budget"),
+                "subtitle": S("docs.chart.budget_sub"),
                 "categories": [a["name"] or a["code"] for a in rows], "scale": 1,
-                "series": [{"name": "ต่างจากงบ", "values": [a["var_budget"] for a in rows],
+                "series": [{"name": S("docs.col.var_budget"), "values": [a["var_budget"] for a in rows],
                             "path": "accounts[].var_budget", "codes": [a["code"] for a in rows],
                             "cites": [a.get("cite_var_budget") or a["cite"] for a in rows]}],
                 "signed": True,
@@ -303,9 +303,9 @@ def charts(computed: dict) -> list[dict]:
     comp = computed["composition"]
     if comp:
         out.append({
-            "id": "composition", "kind": "barh", "title": "องค์ประกอบค่าใช้จ่ายของงวด",
-            "subtitle": "หน่วย: ล้านบาท", "categories": [c["name"] for c in comp], "scale": 1_000_000,
-            "series": [{"name": "งวดนี้", "values": [c["amount"] for c in comp], "path": "composition[].amount",
+            "id": "composition", "kind": "barh", "title": S("docs.chart.composition"),
+            "subtitle": S("docs.caption.unit_m"), "categories": [c["name"] for c in comp], "scale": 1_000_000,
+            "series": [{"name": S("docs.col.current"), "values": [c["amount"] for c in comp], "path": "composition[].amount",
                         "codes": [c.get("code") or "" for c in comp], "cites": [c.get("cite") for c in comp]}],
         })
     for spec in out:
@@ -323,10 +323,10 @@ def chart_table(spec: dict) -> dict:
     """The numbers a chart draws, as a table under it: a reader can read each point and its citation,
     and the gate reads them back out of the finished file (AM8)."""
     scale = Decimal(str(spec.get("scale", 1)))
-    unit = "ล้านบาท" if scale == 1_000_000 else "บาท"
+    unit = S("docs.unit.millions") if scale == 1_000_000 else S("docs.unit.baht")
     # a heading of its own ("…ในกราฟ"): with one month and no budget, the P&L table's columns are the same
     # words, and a reader (and the gate) must tell the two tables apart
-    cols = ["รายการในกราฟ" if spec["kind"] == "barh" else "เดือนในกราฟ"] + [s["name"] for s in spec["series"]] + ["อ้างอิง"]
+    cols = [S("docs.chart.col.item") if spec["kind"] == "barh" else S("docs.chart.col.month")] + [s["name"] for s in spec["series"]] + [S("docs.col.ref")]
     rows = []
     for i, cat in enumerate(spec["categories"]):
         vals = []
@@ -337,7 +337,7 @@ def chart_table(spec: dict) -> dict:
         rows.append([str(cat)] + vals + [", ".join(dict.fromkeys(cites))])
     return {"type": "table", "columns": cols, "rows": rows, "strong_rows": [], "numeric_from": 1,
             "cite_col": len(cols) - 1, "small": True, "chart_data": spec["id"],
-            "caption": f"ตัวเลขที่กราฟวาด หน่วย: {unit} · แต่ละแถวอ้างอิงที่มาของตัวเลขนั้น"}
+            "caption": S("docs.caption.chart_table", unit=unit)}
 
 
 def apply_presentation(computed: dict, pres: dict) -> dict:
@@ -351,9 +351,11 @@ def apply_presentation(computed: dict, pres: dict) -> dict:
     pres = {"year_style": pres.get("year_style") or pres.get("year_convention_mixed"),
             "account_names": pres.get("account_names") or pres.get("account_name_missing")}
     if pres.get("year_style") == "ce":
-        c["period_label"] = period_label_th(c["period"], "ce")
+        # (an English label is in the common era already)
+        ce = (lambda p: words.period(p)) if words.lang() == "en" else (lambda p: period_label_th(p, "ce"))
+        c["period_label"] = ce(c["period"])
         if c.get("prior_period"):
-            c["prior_label"] = period_label_th(c["prior_period"], "ce")
+            c["prior_label"] = ce(c["prior_period"])
     if pres.get("account_names") == "standard_names":
         from ..engine.ledger import account_digits
         from ..packages.financial_report.scripts.rules import STANDARD_NAMES
@@ -393,20 +395,20 @@ def build(computed: dict, req: dict) -> dict:
         narrative[key] = sentences(narrative, key)  # the report and the deck both read these
     assumptions = list(req.get("assumptions") or [])
     for e in computed["excluded"]:
-        assumptions.append({"code": e["code"], "source": "answer", "text": f"ไม่นับ{e['reason']}",
+        assumptions.append({"code": e["code"], "source": "answer", "text": S("docs.assume.excluded", reason=e["reason"]),
                             "changes_numbers": True})
     for n in computed["notes"]:
         assumptions.append({"code": n["code"], "source": "answer", "text": n["text"], "changes_numbers": True})
     if not computed["has_prior"]:
-        assumptions.append({"code": "no_prior", "source": "data", "text": "ไม่มีข้อมูลงวดก่อน จึงไม่ได้เทียบการเปลี่ยนแปลงรายเดือน"})
+        assumptions.append({"code": "no_prior", "source": "data", "text": S("docs.assume.no_prior")})
     if not computed["has_budget"]:
-        assumptions.append({"code": "no_budget", "source": "data", "text": "ไม่มีไฟล์งบประมาณ จึงไม่ได้เทียบกับงบ"})
+        assumptions.append({"code": "no_budget", "source": "data", "text": S("docs.assume.no_budget")})
     if not any(a["group"] == "income_tax" for a in computed["accounts"]):
         # AM8 (the audit): a zero tax line is the absence of a tax account, not a computed tax
         assumptions.append({"code": "no_income_tax", "source": "data",
-                            "text": "ไฟล์ไม่มีบัญชีภาษีเงินได้ กำไรสุทธิในรายงานนี้จึงยังไม่หักภาษีเงินได้นิติบุคคล"})
+                            "text": S("docs.assume.no_income_tax")})
     assumptions.append({"code": "materiality", "source": "rule",
-                        "text": f"เกณฑ์ความมีสาระสำคัญสำหรับรายการที่ต้องตรวจ: {money0(computed['materiality'])} บาท"})
+                        "text": S("docs.assume.materiality", materiality=money0(computed["materiality"]))})
     # Deduplicate by text, keep order.
     seen, uniq = set(), []
     for a in assumptions:
@@ -424,46 +426,45 @@ def build(computed: dict, req: dict) -> dict:
     if computed["has_prior"]:
         compare_bits.append(computed["prior_label"])
     if computed["has_budget"]:
-        compare_bits.append("งบประมาณ")
-    doc_type_th = {"gl": "บัญชีแยกประเภท", "tb": "งบทดลอง", "pl": "งบกำไรขาดทุน"}.get(computed["doc_type"], "ไฟล์บัญชี")
-    cover_lines = [f"จัดทำจาก{doc_type_th} {src['primary']['rows_used']:,} รายการ"]
+        compare_bits.append(S("docs.col.budget"))
+    doc_type_th = {"gl": S("docs.doctype.gl"), "tb": S("docs.doctype.tb"), "pl": S("docs.section.pl")}.get(computed["doc_type"], S("docs.doctype.file"))
+    cover_lines = [S("docs.cover.made_from", doc_type_th=doc_type_th, rows_used=f"{src['primary']['rows_used']:,}")]
     if compare_bits:
-        cover_lines.append("เทียบกับ" + " และ".join(compare_bits))
+        cover_lines.append(S("docs.cover.compared", what=words.and_(compare_bits)))
 
     sources_rows = []
     for f in src["files"]:
-        role = {"primary": "ข้อมูลหลัก", "prior": "งวดก่อน", "budget": "งบประมาณ", "ignored": "ไม่ได้ใช้",
-                "unknown": "ไม่ได้ใช้"}.get(f["role"], f["role"] or "")
+        role = {"primary": S("docs.role.primary"), "prior": S("docs.col.prior"), "budget": S("docs.col.budget"), "ignored": S("docs.role.unused"),
+                "unknown": S("docs.role.unused")}.get(f["role"], f["role"] or "")
         sources_rows.append([f["file"], role, f"{f['rows']:,}", f["sha256"][:16] + "…"])
     citation_rows = []
     for c in computed["citations"]:
         if c["sources"]:
             where = "; ".join(source_where(s) for s in c["sources"])
         elif c.get("derived_from"):
-            where = "คำนวณจาก " + ", ".join(c["derived_from"])  # every one: a reader follows each (AM8)
+            where = S("docs.cite.derived") + " " + ", ".join(c["derived_from"])  # every one: a reader follows each (AM8)
         else:
             where = "—"
         numeric = c["value"] not in (None, "") and re.match(r"^-?\d+(\.\d+)?$", str(c["value"]))
         if numeric and c.get("unit") == "pct":
             val = fmt_pct(Decimal(str(c["value"])), 1)  # a ratio, not baht ("อัตรากำไรสุทธิ 2.4%", not "2")
         elif numeric and c.get("unit") == "points":
-            val = f"{Decimal(str(c['value'])):+.2f} จุด"
+            val = S("docs.points2", value=f"{Decimal(str(c['value'])):+.2f}")
         else:
             val = money0(c["value"]) if numeric else (c["value"] or "")
         citation_rows.append([c["id"], c["label"], val, where, f"{c['script']} · {c['formula']}"])
 
     about = [
-        f"โมเดลที่อ่านตัวเลขที่คำนวณแล้วเพื่อเขียนคำอธิบาย: {model.get('model') or 'ไม่มี (ใช้ข้อความจากกฎ)'}"
-        + (" (รันในองค์กร)" if model.get("self_hosted") else (" (ผู้ให้บริการภายนอก)" if model.get("model") else "")),
-        "โมเดลเห็นเฉพาะตารางตัวเลขที่คำนวณเสร็จแล้ว ไม่เห็นไฟล์ต้นฉบับทั้งไฟล์ และไม่ได้พิมพ์ตัวเลขเอง: "
-        "ทุกตัวเลขในคำอธิบายถูกวางโดยสคริปต์จากตารางที่คำนวณ พร้อมเลขอ้างอิงของตัวเลขนั้น",
-        f"การคำนวณ: {computed['script']} และ {computed['rules']} ด้วยเลขทศนิยมแม่นยำ (Decimal)",
-        f"รอบการทำงาน: {run.get('id', '—')} · agent {run.get('agent_version', '—')} · ธีม {req.get('theme', {}).get('name', '')} v{req.get('theme', {}).get('version', 1)}",
-        SCOPE_NOTE,
-        DOES_NOT,
+        S("docs.about.model", model=model.get("model") or S("docs.about.no_model"),
+          place=" " + S("docs.model.inside") if model.get("self_hosted") else (" " + S("docs.model.outside") if model.get("model") else "")),
+        S("docs.about.sees"),
+        S("docs.about.computation", script=computed["script"], rules=computed["rules"]),
+        S("docs.about.run", v=run.get("id", "—"), v2=run.get("agent_version", "—"), v3=req.get("theme", {}).get("name", ""), v4=req.get("theme", {}).get("version", 1)),
+        S(SCOPE_NOTE),
+        S(DOES_NOT),
     ]
     if narrative.get("written_by") == "rules":
-        about.insert(1, "คำอธิบายในรายงานนี้เขียนจากกฎ เพราะไม่มีโมเดลที่ตอบได้ในรอบนี้")
+        about.insert(1, S("docs.about.rules_wrote"))
 
     # AM11b: what the person asked of the documents (asked_of). Ordering by the difference needs one.
     ask = asked_of(req)
@@ -474,11 +475,11 @@ def build(computed: dict, req: dict) -> dict:
     for c in chart_specs:
         chart_blocks += [{"type": "chart", "chart": c["id"]}, chart_table(c)]
     sections = [
-        {"key": "summary", "title": "สรุปผู้บริหาร", "blocks": [
+        {"key": "summary", "title": S("docs.section.summary"), "blocks": [
             {"type": "paragraph", "runs": cite_runs(narrative["summary"], computed), "narrative": True},
             {"type": "kpis"},
         ]},
-        {"key": "pl", "title": "งบกำไรขาดทุน", "blocks": [pl_table(computed)]},
+        {"key": "pl", "title": S("docs.section.pl"), "blocks": [pl_table(computed)]},
         {"key": "charts", "title": SECTION_TITLES["charts"], "blocks": chart_blocks},
         {"key": "movements", "title": SECTION_TITLES["movements"], "blocks": [b for b in (
             movement_table(computed),
@@ -487,28 +488,28 @@ def build(computed: dict, req: dict) -> dict:
             if sentences(narrative, "movements") else None,
         ) if b]},
         {"key": "accounts", "title": SECTION_TITLES["accounts"], "blocks": [account_table(computed, by_variance=by_variance)]},
-        {"key": "exceptions", "title": "รายการที่ต้องตรวจสอบ", "blocks": [
-            {"type": "paragraph", "runs": [("รายการที่กฎของระบบตั้งข้อสังเกตไว้ ระบบไม่แก้ตัวเลขเอง รอผู้รับผิดชอบตัดสิน", None)], "muted": True},
+        {"key": "exceptions", "title": S("docs.section.exceptions"), "blocks": [
+            {"type": "paragraph", "runs": [(S("docs.exceptions.note"), None)], "muted": True},
             exceptions_table(computed)]},
-        {"key": "insights", "title": "ข้อสังเกตและสิ่งที่ควรทำต่อ", "blocks": [
-            {"type": "subheading", "text": "สิ่งที่ควรดู"},
+        {"key": "insights", "title": S("docs.section.insights"), "blocks": [
+            {"type": "subheading", "text": S("docs.sub.watch")},
             {"type": "bullets", "items": [cite_runs(t, computed) for t in sentences(narrative, "watch")], "narrative": True},
-            {"type": "subheading", "text": "สิ่งที่ควรทำต่อ"},
+            {"type": "subheading", "text": S("docs.sub.next")},
             {"type": "bullets", "items": [cite_runs(t, computed) for t in sentences(narrative, "next_steps")],
              "narrative": True},
         ]},
-        {"key": "assumptions", "title": "ข้อสมมติที่ใช้ในรอบนี้", "blocks": [
+        {"key": "assumptions", "title": S("docs.section.assumptions"), "blocks": [
             {"type": "bullets", "items": [[(a["text"] + _assumption_tag(a), None)] for a in assumptions]},
         ]},
-        {"key": "sources", "title": "ภาคผนวก ก · ที่มาของข้อมูล", "appendix": True, "blocks": [
-            {"type": "table", "columns": ["ไฟล์", "บทบาท", "แถว", "SHA-256"], "rows": sources_rows,
+        {"key": "sources", "title": S("docs.section.sources"), "appendix": True, "blocks": [
+            {"type": "table", "columns": [S("docs.col.file"), S("docs.col.role"), S("docs.col.rows"), "SHA-256"], "rows": sources_rows,
              "strong_rows": [], "numeric_from": None, "cite_col": None, "small": True},
         ]},
-        {"key": "citations", "title": "ภาคผนวก ข · ที่มาของตัวเลข", "appendix": True, "blocks": [
-            {"type": "table", "columns": ["อ้างอิง", "ตัวเลข", "ค่า", "ไฟล์ · ชีต · ช่อง", "คำนวณโดย"],
+        {"key": "citations", "title": S("docs.section.citations"), "appendix": True, "blocks": [
+            {"type": "table", "columns": [S("docs.col.ref"), S("docs.col.figure"), S("docs.col.value"), S("docs.col.file_sheet_cell"), S("docs.col.computed_by")],
              "rows": citation_rows, "strong_rows": [], "numeric_from": None, "cite_col": 0, "small": True},
         ]},
-        {"key": "about", "title": "ภาคผนวก ค · ผู้จัดทำและขอบเขต", "appendix": True, "blocks": [
+        {"key": "about", "title": S("docs.section.about"), "appendix": True, "blocks": [
             {"type": "bullets", "items": [[(t, None)] for t in about]},
         ]},
     ]
@@ -524,10 +525,10 @@ def build(computed: dict, req: dict) -> dict:
         printed[key] = [plain_text(t, computed) for t in narrative[key]]
         narrative_cites[key] = [c for t in narrative[key] for c in cites_in(t, computed)]
     return {
-        "title": "รายงานผลประกอบการ",
-        "subtitle": f"ประจำเดือน{computed['period_label']}",
+        "title": S("docs.report.title"),
+        "subtitle": S("docs.report.subtitle", period_label=computed["period_label"]),
         "company": theme_company,
-        "prepared": f"จัดทำ {date_th(today)}",
+        "prepared": S("docs.report.prepared", today=date_th(today)),
         "cover_lines": cover_lines,
         "kpis": kpis(computed),
         "charts": chart_specs,
@@ -536,7 +537,7 @@ def build(computed: dict, req: dict) -> dict:
         "narrative": {**narrative, **printed},
         "narrative_source": narrative,
         "narrative_cites": narrative_cites,
-        "source_note": f"ที่มา: {src['primary']['file']} (sha256 {src['primary']['sha256'][:8]}…) · {computed['script']}",
+        "source_note": S("docs.report.source_note", file=src["primary"]["file"], v=src["primary"]["sha256"][:8], script=computed["script"]),
         "model": model,
         "computed": computed,
         "asked": {"applied": [i for i in ask if i not in refused], "refused": refused},
@@ -559,12 +560,11 @@ def source_where(s: dict) -> str:
             parts.append(f"{start}–{prev}" if prev != start else f"{start}")
             if r is not None:
                 start = prev = r
-        return f"{s['file']} · {s['sheet']} · คอลัมน์ {cols} แถว {', '.join(parts)}"
+        return S("docs.where.cells", file=s["file"], sheet=s["sheet"], cols=cols, parts=", ".join(parts))
     return f"{s['file']} · {s['sheet']} · {s.get('cells') or ''}"
 
 
 def _assumption_tag(a: dict) -> str:
-    return {"default": " — ใช้ค่าตั้งต้น เพราะยังไม่ได้ตอบ",
-            "remembered": " — ค่าที่จำไว้จากรอบก่อน",
-            "answer": " — ตามที่คุณตอบ",
-            "reprompt_default": " — ใช้ค่าตั้งต้นหลังถามซ้ำ 2 ครั้ง"}.get(a.get("source", ""), "")
+    tag = {"default": "docs.tag.default", "remembered": "docs.tag.remembered", "answer": "docs.tag.answer",
+           "reprompt_default": "docs.tag.reprompt"}.get(a.get("source", ""))
+    return " " + S(tag) if tag else ""

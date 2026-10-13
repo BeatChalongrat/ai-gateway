@@ -21,19 +21,19 @@ FONT_FILES = {
 
 PRESETS: dict[str, dict] = {
     "navy": {
-        "id": "navy", "name": "กรมท่า",
+        "id": "navy", "name": "docs.theme.navy",
         "palette": {"primary": "12264A", "primary_dark": "0B1A33", "accent": "2F6FD6", "accent_soft": "E3ECFB",
                     "gold": "C99A2E", "positive": "1E7F55", "negative": "B93A32", "ink": "1C2230",
                     "muted": "5F6B7A", "rule": "D5DBE4", "surface": "F3F5F9", "on_primary": "FFFFFF"},
     },
     "teal": {
-        "id": "teal", "name": "เขียวหยก",
+        "id": "teal", "name": "docs.theme.teal",
         "palette": {"primary": "0F4C4C", "primary_dark": "093333", "accent": "1C8C84", "accent_soft": "DDF0EE",
                     "gold": "D08C2E", "positive": "1E7F55", "negative": "B5413A", "ink": "1B2626",
                     "muted": "5C6B6A", "rule": "D3DEDD", "surface": "F2F7F6", "on_primary": "FFFFFF"},
     },
     "charcoal": {
-        "id": "charcoal", "name": "ถ่านหิน",
+        "id": "charcoal", "name": "docs.theme.charcoal",
         "palette": {"primary": "24272E", "primary_dark": "16181C", "accent": "D9642B", "accent_soft": "FBE9DF",
                     "gold": "B8862B", "positive": "2A7A4F", "negative": "B23A31", "ink": "1E2024",
                     "muted": "656B75", "rule": "DADDE2", "surface": "F4F4F5", "on_primary": "FFFFFF"},
@@ -48,8 +48,16 @@ DEFAULT_THEME = {
     "fonts": {"thai": "Sarabun", "latin": "Sarabun"},
     "cover": {"style": "band"},
     "table": {"zebra": True},
-    "footer_note": "จัดทำอัตโนมัติ · ตัวเลขคำนวณด้วยสคริปต์ ไม่ได้ให้โมเดลคำนวณ",
+    "footer_note": "docs.footer",
 }
+
+
+def said(value):
+    """A preset's word — a theme's name, the footer's note — said in the run's language; any other text as it is."""
+    from ..engine.words import SHARED as S
+
+    return S(value) if isinstance(value, str) and value in S.strings else value
+
 
 _HEX = re.compile(r"^[0-9A-Fa-f]{6}$")
 
@@ -65,7 +73,8 @@ def resolve(theme: dict | None) -> dict:
     preset = PRESETS.get(theme.get("id") or theme.get("preset") or "navy") or PRESETS["navy"]
     t.update({k: v for k, v in theme.items() if k not in ("palette", "fonts")})
     t["id"] = preset["id"]
-    t["name"] = theme.get("name") or preset["name"]
+    t["name"] = theme.get("name") or said(preset["name"])   # an organisation's own name as given; a preset's said
+    t["footer_note"] = said(t["footer_note"])
     t["palette"] = {**preset["palette"], **(theme.get("palette") or {})}
     t["fonts"] = {**DEFAULT_THEME["fonts"], **(theme.get("fonts") or {})}
     for k, v in t["palette"].items():

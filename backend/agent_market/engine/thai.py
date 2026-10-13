@@ -271,10 +271,12 @@ def fmt_int(value) -> str:
 
 
 def fmt_millions(value, decimals: int = 2) -> str:
-    """12,480,300 → '12.48 ล้าน'."""
+    """12,480,300 → '12.48 ล้าน' ('12.48 M' in an English run)."""
+    from .words import SHARED
+
     d = Decimal(str(value)) / Decimal(1_000_000)
     q = Decimal(1).scaleb(-decimals)
-    return f"{d.quantize(q, rounding=ROUND_HALF_UP):,.{decimals}f} ล้าน"
+    return f"{d.quantize(q, rounding=ROUND_HALF_UP):,.{decimals}f} {SHARED('docs.unit.m')}"
 
 
 def fmt_pct(value, decimals: int = 1, signed: bool = False) -> str:

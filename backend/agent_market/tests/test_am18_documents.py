@@ -26,10 +26,11 @@ EXCEL_SHEET = re.compile(r"[/\\?*\[\]:]")
 class TheDocumentsWordsFit(unittest.TestCase):
     def test_every_sheet_name_fits_excel_in_both_languages(self):
         for pkg in DOCUMENTS_DONE:
+            # (the report's sheets are the shared writers': their names are in the engine's words)
             w = words.of(f"agent_market.packages.{pkg}")
-            keys = [k for k in w.strings if k.startswith("doc.sheet.")]
+            keys = [(w, k) for k in w.strings if k.startswith("doc.sheet.")] + [(words.SHARED, k) for k in words.SHARED.strings if k.startswith("docs.sheet.")]
             self.assertGreater(len(keys), 3, pkg)
-            for k in keys:
+            for w, k in keys:
                 for text in (w.strings[k], w.english_of(k)):
                     self.assertLessEqual(len(text), 31, f"{pkg} {k}: {text!r}")
                     self.assertIsNone(EXCEL_SHEET.search(text), f"{pkg} {k}: {text!r}")

@@ -140,9 +140,16 @@ class ThePackagesHandTheReaderOn(unittest.TestCase):
         engine = json.load(open(os.path.join(os.path.dirname(cards.__file__), "..", "words.json"), encoding="utf-8"))
         # the two sentences that may say it are the ones the code picks only on the runner's word
         allowed = {engine["strings"]["e2.reader.inside"], engine["strings"]["e2.source.model"]}
+        # (AM18: the documents' two notes on where the narrative's model ran, said only on the run's own flag —
+        # the words the deliverables held as literals before, and the runner sets, see test_am8_gate)
+        allowed |= {engine["strings"]["docs.deck.inside"], engine["strings"]["docs.model.inside"]}
         for key, s in engine["strings"].items():
             if "ในองค์กร" in s.replace("นอกองค์กร", ""):
                 self.assertIn(s, allowed, key)
+        from agent_market.deliverables import content, deck_pptx
+
+        self.assertIn('S("docs.model.inside") if model.get("self_hosted")', inspect.getsource(content))
+        self.assertIn('S("docs.deck.inside") if model.get("self_hosted")', inspect.getsource(deck_pptx))
         src = inspect.getsource(cards)
         self.assertEqual(src.count('S("e2.reader.inside")'), 1)
         self.assertEqual(src.count('S("e2.source.model")'), 1)

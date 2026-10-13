@@ -46,7 +46,7 @@ def _year(word: str, year: int) -> int:
 def numbers_of(text: str) -> list[str]:
     """The numbers a text holds, in order — a day or a period in either language read as the same day or
     month (“5 ก.ย. 2569” is “5 Sep 2026”, “กันยายน 2569” is “September 2026”), thousands separators dropped."""
-    text = DAY.sub(lambda m: f"{_year(m.group(2), int(m.group(3))):04d}-{_month(m.group(2)):02d}-{int(m.group(1)):02d}", str(text))
+    text = DAY.sub(lambda m: f"{_year(m.group(2), int(m.group(3))):04d}-{_month(m.group(2)):02d}-{int(m.group(1)):02d}", str(text).replace(chr(10), " "))
     text = MONTH.sub(lambda m: f"{_year(m.group(1), int(m.group(2))):04d}-{_month(m.group(1)):02d}", text)
     # (the glossary's three-way / two-way match is a figure in Thai — “ตรวจ 3 ทาง” — and a word in English)
     text = WAYS.sub("way", text)
@@ -75,7 +75,7 @@ def fragments_of(w) -> list[str]:
 def own_runs(text, fragments: list[str]) -> list[str]:
     """The Thai a cell holds once the document's own words are taken out: what must be the person's."""
     out = []
-    text = DAY.sub(" ", str(text))
+    text = DAY.sub(" ", str(text).replace(chr(10), " "))   # (a line break inside a cell is a space)
     text = MONTH.sub(" ", text)   # (a day or a month written in Thai is not the person's words)
     for run in THAI_RUN.findall(text):
         s = "".join(run.split())
@@ -100,7 +100,7 @@ def is_own(run: str, own: str) -> bool:
 
 def foreign_thai(text, own: str) -> list[str]:
     """Thai in a text that is not the person's own."""
-    return [r for r in THAI_RUN.findall(str(text)) if not is_own(r, own)]
+    return [r for r in THAI_RUN.findall(str(text).replace(chr(10), " ")) if not is_own(r, own)]
 
 
 def same_but_words(th: dict, en: dict, w, sheet_names: dict | None = None, limit: int = 40) -> list[str]:

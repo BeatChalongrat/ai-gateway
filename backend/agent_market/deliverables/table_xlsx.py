@@ -12,8 +12,12 @@ from __future__ import annotations
 from decimal import Decimal
 
 from openpyxl import Workbook
+
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+
+from ..engine import words
+from ..engine.words import SHARED as S
 
 MONEY = '#,##0.00;[Red](#,##0.00);"-"'
 PCT = '0.00"%";[Red]-0.00"%";"-"'
@@ -63,10 +67,10 @@ class XlsxWriter:
 
     def summary(self):
         ws = self.wb.active
-        ws.title = "สรุป"
+        ws.title = S("docs.sheet.summary")
         c = self.c
-        self._title(ws, f"งบกำไรขาดทุน · {c['period_label']}", self.m["source_note"])
-        heads = ["รายการ", "งวดนี้", "งวดก่อน", "เปลี่ยนแปลง", "%", "งบประมาณ", "ต่างจากงบ", "อ้างอิง"]
+        self._title(ws, S("docs.xlsx.title", period_label=c["period_label"]), self.m["source_note"])
+        heads = [S("docs.col.item"), S("docs.col.current"), S("docs.col.prior"), S("docs.col.change"), "%", S("docs.col.budget"), S("docs.col.var_budget"), S("docs.col.ref")]
         self._header(ws, 4, heads)
         r = 5
         for l in c["lines"]:
@@ -93,9 +97,9 @@ class XlsxWriter:
         self._widths(ws, [34, 16, 16, 16, 9, 16, 16, 9])
 
     def accounts(self):
-        ws = self.wb.create_sheet("รายบัญชี")
-        self._title(ws, "รายละเอียดรายบัญชี", "ค่าตามบัญชีที่อ่านได้จากไฟล์ (รายได้แสดงเป็นบวก)")
-        heads = ["รหัส", "ชื่อบัญชี", "หมวด", "งวดนี้", "งวดก่อน", "เปลี่ยนแปลง", "%", "งบประมาณ", "ต่างจากงบ", "จำนวนรายการ", "อ้างอิง"]
+        ws = self.wb.create_sheet(S("docs.sheet.accounts"))
+        self._title(ws, S("docs.section.accounts"), S("docs.xlsx.accounts_sub"))
+        heads = [S("docs.col.code"), S("docs.col.account_name"), S("docs.col.group"), S("docs.col.current"), S("docs.col.prior"), S("docs.col.change"), "%", S("docs.col.budget"), S("docs.col.var_budget"), S("docs.col.count"), S("docs.col.ref")]
         self._header(ws, 4, heads)
         r = 5
         # an account's group is the key of the line it adds up to: named as that line is (AM4)
@@ -114,10 +118,10 @@ class XlsxWriter:
         self._widths(ws, [11, 30, 18, 15, 15, 15, 9, 15, 15, 10, 9])
 
     def ledger(self):
-        ws = self.wb.create_sheet("รายการที่ใช้")
+        ws = self.wb.create_sheet(S("docs.sheet.ledger"))
         c = self.c
-        self._title(ws, "รายการที่ใช้คำนวณ", "ทุกแถวอ้างกลับไปที่แถวในไฟล์ต้นฉบับ (คอลัมน์ ไฟล์ และ แถวในไฟล์)")
-        heads = ["ไฟล์", "แถวในไฟล์", "วันที่", "รหัสบัญชี", "คำอธิบาย", "เดบิต", "เครดิต", "เลขที่เอกสาร", "ศูนย์ต้นทุน"]
+        self._title(ws, S("docs.xlsx.ledger_title"), S("docs.xlsx.ledger_sub"))
+        heads = [S("docs.col.file"), S("docs.col.row_in_file"), S("docs.col.date"), S("docs.col.account_code"), S("docs.col.description"), S("docs.col.debit"), S("docs.col.credit"), S("docs.col.doc_no"), S("docs.col.cost_centre")]
         self._header(ws, 4, heads)
         files = [f["file"] for f in c["source"]["files"]]
         r = 5
@@ -134,7 +138,7 @@ class XlsxWriter:
         for row in ws.iter_rows(min_row=5, max_row=last, min_col=1, max_col=5):
             for cell in row:
                 cell.font = Font(name=self.font, size=10)
-        ws.cell(row=r, column=5, value="รวม").font = Font(name=self.font, bold=True, size=10)
+        ws.cell(row=r, column=5, value=S("docs.word.total")).font = Font(name=self.font, bold=True, size=10)
         for col in (6, 7):
             L = get_column_letter(col)
             cell = ws.cell(row=r, column=col, value=f"=SUM({L}5:{L}{last})")
@@ -145,14 +149,15 @@ class XlsxWriter:
         return last
 
     def verify(self, ledger_last: int):
-        ws = self.wb.create_sheet("ตรวจสอบ")
-        self._title(ws, "ตรวจสอบการคำนวณ",
-                    "คอลัมน์ C คำนวณใหม่ด้วยสูตร SUMIFS จากชีต รายการที่ใช้ · คอลัมน์ E ควรเป็นศูนย์ทุกแถว")
-        heads = ["รหัสบัญชี", "ชื่อบัญชี", "คำนวณใหม่ (สูตร)", "ค่าจากสคริปต์", "ส่วนต่าง"]
+        ws = self.wb.create_sheet(S("docs.sheet.verify"))
+        self._title(ws, S("docs.xlsx.verify_title"),
+                    S("docs.xlsx.verify_sub"))
+        heads = [S("docs.col.account_code"), S("docs.col.account_name"), S("docs.col.recomputed"), S("docs.col.from_script"), S("docs.col.difference")]
         self._header(ws, 4, heads)
-        rng = f"'รายการที่ใช้'!$D$5:$D${ledger_last}"
-        dr = f"'รายการที่ใช้'!$F$5:$F${ledger_last}"
-        cr = f"'รายการที่ใช้'!$G$5:$G${ledger_last}"
+        ledger = S("docs.sheet.ledger")   # (the formulas name the sheet as the file names it)
+        rng = f"'{ledger}'!$D$5:$D${ledger_last}"
+        dr = f"'{ledger}'!$F$5:$F${ledger_last}"
+        cr = f"'{ledger}'!$G$5:$G${ledger_last}"
         r = 5
         for a in self.c["accounts"]:
             sign = "-" if a["group"] in ("revenue", "other_income") else ""
@@ -169,9 +174,9 @@ class XlsxWriter:
         self._widths(ws, [12, 32, 18, 18, 12])
 
     def lists(self):
-        ws = self.wb.create_sheet("รายการต้องตรวจ")
-        self._title(ws, "รายการที่ต้องตรวจสอบ", "ระบบไม่แก้ตัวเลขเอง")
-        self._header(ws, 4, ["รหัสเหตุผล", "รายการ", "รายละเอียด", "บัญชี", "จำนวนเงิน", "แถวต้นทาง", "อ้างอิง"])
+        ws = self.wb.create_sheet(S("docs.sheet.exceptions"))
+        self._title(ws, S("docs.section.exceptions"), S("docs.xlsx.exceptions_sub"))
+        self._header(ws, 4, [S("docs.col.reason_code"), S("docs.col.item"), S("docs.col.detail"), S("docs.col.account"), S("docs.col.amount"), S("docs.col.source_row"), S("docs.col.ref")])
         r = 5
         for e in self.c["exceptions"]:
             vals = [e["code"], e["title"], e["detail"], e.get("account"), _num(e.get("amount")),
@@ -181,30 +186,30 @@ class XlsxWriter:
             ws.cell(row=r, column=5).number_format = MONEY
             r += 1
         if r == 5:
-            ws.cell(row=5, column=2, value="ไม่พบรายการผิดปกติตามกฎที่ตั้งไว้")
+            ws.cell(row=5, column=2, value=S("docs.exc.none"))
         self._body_font(ws, 5)
         self._widths(ws, [22, 44, 36, 11, 15, 24, 9])
 
-        ws = self.wb.create_sheet("ข้อสมมติ")
-        self._title(ws, "ข้อสมมติที่ใช้ในรอบนี้")
-        self._header(ws, 4, ["ข้อสมมติ", "ที่มา"])
+        ws = self.wb.create_sheet(S("docs.sheet.assumptions"))
+        self._title(ws, S("docs.section.assumptions"))
+        self._header(ws, 4, [S("docs.sheet.assumptions"), S("docs.col.source")])
         for i, a in enumerate(self.m["assumptions"], start=5):
             ws.cell(row=i, column=1, value=a["text"])
-            ws.cell(row=i, column=2, value={"default": "ค่าตั้งต้น", "remembered": "ค่าที่จำไว้", "answer": "คำตอบของคุณ",
-                                            "data": "ข้อมูลที่มี", "rule": "กฎของ agent",
-                                            "reprompt_default": "ค่าตั้งต้นหลังถามซ้ำ",
-                                            "skip": "กดข้าม ใช้ค่าแนะนำ"}.get(a.get("source"), a.get("source")))
+            ws.cell(row=i, column=2, value={"default": S("docs.assume_src.default"), "remembered": S("docs.assume_src.remembered"), "answer": S("docs.assume_src.answer"),
+                                            "data": S("docs.assume_src.data"), "rule": S("docs.assume_src.rule"),
+                                            "reprompt_default": S("docs.assume_src.reprompt"),
+                                            "skip": S("docs.assume_src.skip")}.get(a.get("source"), a.get("source")))
         self._body_font(ws, 5)
         self._widths(ws, [90, 18])
 
-        ws = self.wb.create_sheet("อ้างอิง")
-        self._title(ws, "ที่มาของตัวเลข")
-        self._header(ws, 4, ["อ้างอิง", "ตัวเลข", "ค่า", "ไฟล์", "ชีต", "ช่อง", "สคริปต์", "สูตร"])
+        ws = self.wb.create_sheet(S("docs.sheet.citations"))
+        self._title(ws, S("docs.xlsx.citations_title"))
+        self._header(ws, 4, [S("docs.col.ref"), S("docs.col.figure"), S("docs.col.value"), S("docs.col.file"), S("docs.col.sheet"), S("docs.col.cell"), S("docs.col.script"), S("docs.col.formula")])
         r = 5
         for cit in self.c["citations"]:
             src = cit["sources"][0] if cit["sources"] else {}
             vals = [cit["id"], cit["label"], _num(cit["value"]) if cit["value"] and _isnum(cit["value"]) else cit["value"],
-                    src.get("file") or ("คำนวณจาก " + ", ".join(cit.get("derived_from", [])[:10])),
+                    src.get("file") or (S("docs.cite.derived") + " " + ", ".join(cit.get("derived_from", [])[:10])),
                     src.get("sheet"), src.get("cells"), cit["script"], cit["formula"]]
             for j, v in enumerate(vals, start=1):
                 ws.cell(row=r, column=j, value=v)
@@ -225,7 +230,7 @@ class XlsxWriter:
 
         from . import workpaper
 
-        workpaper.setup_workbook(self.wb, doc_name=os.path.basename(path), id_cols={"รายการที่ใช้": 2})
+        workpaper.setup_workbook(self.wb, doc_name=os.path.basename(path), id_cols={S("docs.sheet.ledger"): 2}, lang=words.lang())
         self.wb.save(path)
         return {"path": path, "sheets": self.wb.sheetnames, "ledger_rows": last - 4}
 
