@@ -161,8 +161,8 @@ guardrail), so **ticking "Anthropic via OpenRouter" or "OpenAI via OpenRouter" g
 at the router** — it is not sent to Amazon or Microsoft instead; tick those if that is who should read
 it, or give the gateway a direct key. DeepSeek's and Meta's models behind OpenRouter, and OpenRouter's
 own "auto", are run by whoever hosts them that day: they have no recipient and cannot be opened.
-Who really answers is asked of OpenRouter with `scripts/probes/AM16/openrouter_pin.py`; the gateway's
-rule is asked with `scripts/probes/AM16/recipients_probe.py`.
+Who really answers is asked of OpenRouter with `scripts/agent-market/openrouter_pin.py`; the gateway's
+rule is asked with `scripts/agent-market/recipients_probe.py`.
 
 **Before an agent that reads pages is opened to outside models, its installs must be on the version
 that names the reader:** tax-invoice 1.10.0, expense audit 1.9.0, invoice ↔ PO matching 1.7.0. An
@@ -414,7 +414,7 @@ its JSON shape among the rules loses pieces of every faithful answer
 
 **The test stack** has no route to the real web: its fetcher's `web` network
 is replaced by an internal network of stand-in sites on a public address
-range (`scripts/probes/AM12/test_stack.sh`), so every refusal and every page
+range (`scripts/agent-market/test_stack_web.sh`), so every refusal and every page
 is the fetcher's real code against a web that is a fixture.
 
 ## The gate, one heavy thing at a time (AM11b)
@@ -450,13 +450,13 @@ Every phase:
 - writes one file under `GATE_RESULTS` and prints one verdict line.
 
 A card sets `GATE_RESULTS` and `GATE_IT` (its own integration lane, run after the two standing
-chunks; the default is the newest card's, `scripts/probes/AM16/it_lane.sh`).
+chunks; the default is the newest card's, `scripts/gate/it/am16.sh`).
 `scripts/tests/test_am11b_gate.py` holds the lock and the stop, without Docker.
 
 **On battery nothing heavy starts (AM16).** On 12 Oct 2026 the power was printed in front of
 `gate.sh lanes backend_lane`; it said "battery" and the lane ran. The check is now in the tools
 (`scripts/ops/power.sh`, described in `docs/ops/monitoring.md`): every phase above but `preflight` and
-`stack-stop`, the swap of a live service (`scripts/probes/AM10/swap.sh` — the runner too, asked through
+`stack-stop`, the swap of a live service (`scripts/ops/swap.sh` — the runner too, asked through
 its health check: `swap.sh agent-runner health:sran-agent-runner -p sran-agent-market -f
 docker-compose.agent-market.yml --profile agent-market`), the runner's, fetcher's and converter's image
 builds, the engine's Python lane, bringing the test stack up and building its clients. To run one of
@@ -476,7 +476,7 @@ lanes' last line does not say "ALL GREEN" while a name is on it. `lanes` also ru
 author ran before: `scripts/tests/test_*.py` (`host_tests`), `scripts/smoke/*.test.js`
 (`smoke_units`) and the alert rules' own tests (`alert_rules`).
 
-**The integration lane is a list of names too** (`scripts/probes/*/it_lane.sh`, in chunks): a
+**The integration lane is a list of names too** (`scripts/gate/it/*.sh`, in chunks): a
 sandbox test that no chunk names runs nowhere, and a renamed one leaves a chunk that matches nothing
 and passes. `runner/am15_lane_test.go`, in the unit lane, fails for either.
 
@@ -486,7 +486,7 @@ names the model it asked, then puts it back and demands GREEN (`green`).
 
 What the gate starts gives way to live: the test stack's services have no floor and turn 500 (the
 generator), the test project's runner, converter and fetcher are put at 500 by
-`scripts/probes/AM12/test-web.yml`, the built test clients and stand-in sites are started with
+`scripts/agent-market/test-web.yml`, the built test clients and stand-in sites are started with
 `--oom-score-adj 500` and a ceiling. On live the runner keeps −500, the converter and the fetcher −300:
 after the databases, the front door and the applications
 (`backend/tests/test_am11b_memory_guard.py`).

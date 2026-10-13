@@ -165,7 +165,7 @@ over the same bytes and stored on every install and run.
   pass, tier and who confirmed it. Tolerances are install settings
   (`match_*`, validated in `api.go` with the engine's own bounds). No model, no
   clock, no set order: the same input and answers give the same figures, the same
-  pairs and the same questions (AM8: what `scripts/probes/AM6/same_input_twice.sh` compares —
+  pairs and the same questions (AM8: what the same-input-twice check compares —
   computed.json, the matching results, the cards asked and every cell's value; not the Office
   files' bytes, whose packaging carries times and metadata).
 - **A package's completion gate.** A manifest with `"completion_gate": true`
@@ -204,9 +204,9 @@ over the same bytes and stored on every install and run.
   read), runs its self-test and looks into what it delivered, and walks the rest
   of the runtime zip (the engine) the same way; any name, id, tax id, host or
   mail of this repository's owner fails it. The publisher's namespace in a
-  package id is reported apart. `scripts/probes/AM6/fresh_install.js` installs
-  every agent on a test stack whose `agent_market` schema was just created and
-  downloads what each self-test delivered for the same check.
+  package id is reported apart. AM6's fresh-install check installed every agent
+  on a test stack whose `agent_market` schema was just created and put what
+  each self-test delivered through the same check.
 - **Bank statements as PDF** go through E2's words: `engine/e2/grid.py` rebuilds
   a statement's table from word positions (amount columns by right edges, text
   columns by left edges, repeated headers dropped). A page without a text layer
@@ -368,8 +368,8 @@ over the same bytes and stored on every install and run.
   the catalogue never has to know an agent to draw it. The rail, the installs
   list and the workspace header take the newest released version's look for
   the agent, so an install pinned to a version from before the icon shows it
-  too — presentation, not behaviour. `scripts/probes/AM10/icons.js` renders the
-  set together at 32 px and at full size, light and dark.
+  too — presentation, not behaviour. AM10 rendered the set together at 32 px and
+  at full size, light and dark, to check it.
 
 - **A catalogue card says what it does, what to feed it and what comes back —
   nothing else.** The sample's price and run time, the tags and the scope line
@@ -1107,7 +1107,7 @@ When the documents get their own pass, `document` goes away and nothing else cha
 is shown only words the product's own sentences use, so an English sentence this plane did not know would
 reach a person as "…": the rule is held on every finding, summary, gate, check and assumption of the
 packages' own eval sets run in English (`am14_packages_table_test.go`, written by
-`scripts/probes/AM14/dump_english_texts.sh`), each put through the thread's own door. A manifest on its
+`scripts/agent-market/words/dump_english_texts.sh`), each put through the thread's own door. A manifest on its
 way to a client loses `strings` and `en_by_key` as it always lost `en`: a screen is sent the sentences
 of the runs it reads, not the list of everything an engine can say.
 
@@ -1123,11 +1123,11 @@ of the runs it reads, not the list of everything an engine can say.
   package (`EnglishRuns`): the package's whole eval set run in English beside the same set in Thai — no
   Thai reaches a person but their own data and the paper's own words, the run is the same run (the same
   questions by key, answers, figures and end), and the paper is the one a Thai run writes.
-- `scripts/probes/AM14/walk.js run <agent> en` — one run on the built clients, from the agent's page to
+- AM14's walk — one run on the built clients, from the agent's page to
   the finished files, with every piece of Thai on the screen sorted: the person's own data, the finished
   document's own wording, or neither.
-- The tools the sentences were moved with (`scripts/probes/AM14/words_tool.py`, `manifest_edit.py`): the
-  Thai is read from the code and written to the manifest by a script, never retyped.
+- The sentences were moved by a script, once: the Thai read from the code and written to the manifest,
+  never retyped. (A one-time tool; it is not in the repository.)
 
 
 ## The documents speak the language of the run (AM18, part A)
@@ -1168,11 +1168,11 @@ data in the same places. The only difference allowed is the document's own words
 holds no Thai but the person's own (`thai_left`), where their own is what their files, their settings and
 their answers held, and what the model read from their scan. The printed paper passes AM9's row-by-row
 check and AM14's print proof in English as in Thai (`am9_print_it_test.go`, `printedSelfTestIn`; the IT
-lane `scripts/probes/AM18/it_lane.sh`).
+lane `scripts/gate/it/am18.sh`).
 
-The tool the words were moved with: `scripts/probes/AM18/doc_words.py` — the Thai is read from the code
-and written to the manifest by a script, never retyped; a module-level literal becomes a bare key, a
-function-level one `W("key", place=…)`.
+The words were moved by a script, once — the Thai read from the code and written to the manifest, never
+retyped; a module-level literal becomes a bare key, a function-level one `W("key", place=…)`. (A one-time
+tool; it is not in the repository.)
 
 
 ## The agent does what it is asked, in the person's own words (AM18, part B)
@@ -1285,8 +1285,8 @@ itself when the model is back.**
   `runner/am15_model_down_it_test.go`, both directions: down — the run waits, nothing made, the thread
   says so in Thai and in English; back — the same run finishes from the step that could not ask, the
   words read, the steps before it not run again; and a cancelled wait, the three-wait bound, a scan,
-  the report's commentary. `scripts/probes/AM15/model_down.js` is the same reading on the test stack
-  through the routes a person's screen calls.
+  the report's commentary. AM15 made the same reading on the test stack through the routes a
+  person's screen calls.
 - **The integration lane is a list of names**: a sandbox test no chunk names runs nowhere, and a
   renamed test leaves a chunk that matches nothing and passes. `runner/am15_lane_test.go`, in the unit
   lane, fails for either.
