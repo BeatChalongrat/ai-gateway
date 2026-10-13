@@ -19,12 +19,12 @@ import (
 // AM9 (I) end to end, outside the unit lane: chat-edge's own mail client
 // (MCPMail) against the REAL MCP gateway image — its proxy, its per-person
 // child, servers/mail-send.js — and a stand-in for the backend's broker and
-// the Gmail API (scripts/probes/AM9/fake_google.js). Runs only when
-// scripts/probes/AM9/mail_e2e.sh sets AM9_MAIL_E2E_GATEWAY; skipped otherwise.
+// the Gmail API (the AM9 mail probe's fake Google, kept with the probes on the
+// author's machine). Runs only when that probe sets AM9_MAIL_E2E_GATEWAY; skipped otherwise.
 func TestAM9MailEndToEndThroughTheRealGateway(t *testing.T) {
 	gw := os.Getenv("AM9_MAIL_E2E_GATEWAY")
 	if gw == "" {
-		t.Skip("set by scripts/probes/AM9/mail_e2e.sh")
+		t.Skip("AM9_MAIL_E2E_GATEWAY not set (the AM9 mail probe sets it)")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

@@ -5,7 +5,8 @@ not presented the cheque or credited the deposit yet. It adjusts the *bank's* ba
 
 A row of the statement that the ledger does not show is something the company has not recorded:
 a fee, interest and the tax withheld on it, a cheque that came back, a direct debit. It adjusts
-the *book* balance, and each one gets a drafted journal entry (scripts/journal.py) — a draft: this
+the *book* balance, and each one gets a drafted journal entry (``journal_of`` in the package's
+reconcile step) — a draft: this
 agent writes nothing into an accounting system.
 
 The words are read from the statement's own text by rule. A row no rule recognises is still a

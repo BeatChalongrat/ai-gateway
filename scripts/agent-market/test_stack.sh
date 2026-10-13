@@ -58,7 +58,7 @@ case "${1:-status}" in
   up)
     TAG="${2:?tag}"
     # on battery the stack is not brought up (scripts/ops/power.sh); RUN_ON_BATTERY=yes on the command does it anyway
-    bash "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/scripts/ops/power.sh" need "bringing the test stack up" || exit 3
+    bash "$ROOT/scripts/ops/power.sh" need "bringing the test stack up" || exit 3
     export TS_BACKEND_TAG="${TS_BACKEND_TAG:-$TAG}" TS_CHAT_EDGE_TAG="$TAG"
     docker tag "$SANDBOX_FROM" "$SANDBOX_TAG"
     # AM12: bounded — a sync that blocks inside the VM (seen once: 30 minutes, unkillable) must not hold the stack up

@@ -3,7 +3,7 @@ package runner
 // Integration tests: a private Postgres database (testdb), local object
 // storage in a temp dir, the REAL sandbox image through Docker, and a fake
 // model gateway. They need Docker and ai-gateway-sandbox, so they run only
-// with AGENT_MARKET_IT=1 (scripts/agent-market/go-it-lane.sh sets it).
+// with AGENT_MARKET_IT=1 (scripts/gate/it/chunk.sh sets it).
 
 import (
 	"context"
