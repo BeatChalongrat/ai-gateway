@@ -151,7 +151,7 @@ _COMPONENT_NUMBER_COMPONENT = (
     rf"[^\n]{{0,120}}?(?:{_COMPONENT_ALT}|\d{{5}}(?=[\s,]|$)))"
 )
 # 8 Oct 2026 — two openers more, found by asking the engine about lead-ins one by one
-# (scripts/probes/AM13/dlp_lead_matrix.py). ``ส่งที่`` was the only way of saying "send it to" this detector
+# (the AM13 lead-matrix probe). ``ส่งที่`` was the only way of saying "send it to" this detector
 # heard, and a house number was only an address when one of a handful of words came before it:
 #
 #   ส่งเอกสารไปที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ          not found (ส่งที่ + the same place: found)

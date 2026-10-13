@@ -15,7 +15,7 @@ namespace SranDesktop.Infrastructure.Hosting;
 /// The presentation-free half of the desktop composition root — everything
 /// both hosts (the WPF app and the WebView2 shell) share. Moved verbatim from
 /// <c>SranDesktop.App/Hosting/AppHostBuilder.cs:44-359</c> (Shell Phase 1;
-/// sizing in <c>docs/SHELL_PHASE0_SIZING_REPORT.md</c> Q1).
+/// sizing in the shell's phase-0 sizing record, Q1).
 ///
 /// What this deliberately does NOT register — each host must supply its own
 /// implementation, and both hosts build with <c>ValidateOnBuild = true</c> so

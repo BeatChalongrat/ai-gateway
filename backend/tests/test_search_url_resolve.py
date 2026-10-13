@@ -2,7 +2,7 @@
 
 Recorded fixtures only (no network): a Tavily-shaped reply whose news
 items are Google News RSS redirects — the NEW ``AU_yqL`` id format seen
-live on 2026-09-21 (scripts/probes/r2/results/c-websearch.json) and the
+live on 2026-09-21 (the round-2 web-search capture) and the
 OLD format whose id carries the URL itself — plus the article page and
 ``batchexecute`` reply Google serves for the new format.
 """

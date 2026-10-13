@@ -2,7 +2,7 @@
 // accepts before sending them, what each server status and error code means
 // in words, which documents an answer drew on, and how the original file is
 // opened. One module so the knowledge page, the store and the answer bubble
-// all read the contract (scripts/probes/FIX132/results/kb/CONTRACT.md) the
+// all read the contract (written down with the FIX132 knowledge-base probes) the
 // same way.
 
 import type { DictKey } from "@/lib/i18n/dict";

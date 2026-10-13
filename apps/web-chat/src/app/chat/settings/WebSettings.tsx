@@ -11,7 +11,7 @@
 // sidebar menu already drives, and the account rows go through the same
 // session helpers the sidebar uses. Connectors and Writing style are NOT
 // listed — on the web they do not exist (their state lives in the desktop
-// host; see docs/FIX43_REPORT.md §B2), and a door to a missing room is worse
+// host; FIX43's record, §B2), and a door to a missing room is worse
 // than no door.
 //
 // Every visible string comes from lib/i18n/dict.ts (settings.web.* keys).

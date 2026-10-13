@@ -15,7 +15,7 @@ namespace SranDesktop.ToolsSidecar;
 /// line — the framing <c>StdioMcpTransport</c> (the WPF client) and the
 /// Electron host's transport both speak.
 ///
-/// E4 (docs/E4_REPORT.md §1):
+/// E4 (its record, §1):
 ///   * every <c>tools/call</c> must carry <c>_meta.grants</c> (the folders the
 ///     host granted, possibly empty) and <c>_meta.conversationId</c>; a call
 ///     without them is REFUSED before the tool is resolved — refusal is the

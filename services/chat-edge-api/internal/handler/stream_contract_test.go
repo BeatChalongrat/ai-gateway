@@ -3,7 +3,7 @@ package handler
 // FIX41 C6 — the stream contract, pinned.
 //
 // These are the properties docs/STREAM_CONTRACT.md promises and that
-// docs/fix41/A-baseline.md measured as broken. They run in the normal
+// FIX41 Part A's baseline record measured as broken. They run in the normal
 // suite (no database, no network) so a future change that quietly ends a
 // run with silence, or renumbers a replay, fails here rather than in
 // somebody's browser.

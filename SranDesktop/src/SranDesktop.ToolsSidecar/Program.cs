@@ -18,7 +18,7 @@ using SranDesktop.ToolsSidecar;
 // not registered; the code stays in Infrastructure.Windows.Desktop, which this
 // exe does not reference) and minus the clipboard (the Electron host's).
 //
-// Host-side by design (docs/E4_REPORT.md §1): run_subagent, web_search,
+// Host-side by design (the E4 record, §1): run_subagent, web_search,
 // run_python, read_clipboard, write_clipboard. Everything else is here.
 //
 // stdout is the MCP wire and nothing else; every log line goes to stderr.

@@ -243,7 +243,7 @@ func main() {
 	// alternatives were measured and rejected: one Redis round trip per
 	// frame costs 325 ms per turn and one Postgres INSERT per frame
 	// 425 ms, against a 15 ms budget
-	// (scripts/fix41-probe/results/E1-ledger-backends.json).
+	// (FIX41's E1 ledger-backends probe).
 	//
 	// Redis unreachable is NOT fatal: the broker falls back to
 	// in-memory-only, which is exactly the pre-chunk-2 behaviour.

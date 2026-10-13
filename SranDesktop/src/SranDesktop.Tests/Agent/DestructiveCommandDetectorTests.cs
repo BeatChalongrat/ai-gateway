@@ -117,7 +117,7 @@ public class DestructiveCommandDetectorTests
     [InlineData("echo format c: is dangerous")]
     [InlineData("git commit -m \"del /s cleanup; format tweaks\"")]
     [InlineData("type C:\\notes\\diskpart_usage.md")]
-    [InlineData("cat docs/format-guide.md")]
+    [InlineData("cat README.md")]
     [InlineData("wsl --shutdown")]
     [InlineData("Get-Content shutdown.log")]
     // safe tool usage that shares first letters with rules

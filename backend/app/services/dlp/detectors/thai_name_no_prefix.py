@@ -180,7 +180,7 @@ _NAME_LABEL_BEFORE_RE = re.compile(r"(?:ชื่อ|name)\s*[:：]?\s*$", re.IG
 # (``คุณ`` / ``นาย`` / ``พี่`` …). Measured against T1 (require NER
 # agreement), T2 (hand stoplist), T3 (no number before) and T5 (dictionary
 # gate): this is the only one that removed the over-masking WITHOUT
-# costing recall anywhere — see docs/FIX40_REPORT.md §3.
+# costing recall anywhere — see FIX40's record, §3.
 #
 # What Pass 1 still carries, measured: the ``ผู้รับ: สุรชัย มั่นคง`` shape.
 # Turning the pass off entirely costs exactly that one item across both

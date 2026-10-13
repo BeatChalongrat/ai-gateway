@@ -1,6 +1,6 @@
 // FIX132 D1 — artifact versions never started on the real server.
 //
-// Live walkthrough (scripts/probes/FIX132/results/lanes/lane-ux/probe/d1.json):
+// Live walkthrough (the FIX132 UX lane's probe d1):
 // a [FIX132] chat, deepseek-v4-flash writes one ```html block, the page opens
 // it in the canvas. The page asks GET …/artifacts/{key}/versions; chat-edge
 // answers 404 for a key with no rows ("a key only exists through its

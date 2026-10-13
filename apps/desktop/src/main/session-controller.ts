@@ -1,5 +1,5 @@
 // The host owns the session (E2). Ported from the WebView2 shell's
-// ShellSessionController (docs/SHELL_PHASE2_REPORT.md) — same ladder, same
+// ShellSessionController (the shell's phase-2 record) — same ladder, same
 // guards — with Electron's primitives underneath:
 //
 //   safeStorage           instead of DPAPI            (session-store.ts)

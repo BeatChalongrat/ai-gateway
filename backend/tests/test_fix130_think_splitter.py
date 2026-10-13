@@ -2,7 +2,7 @@
 out of the answer (think_splitter module doc).
 
 The shapes are the ones measured straight from the sranai box in FIX130
-step 1 (scripts/probes/FIX130/results/ans/STEP1_raw_shape.txt):
+step 1 (the raw-shape capture of the FIX130 probes):
 
 * qwen3.5-9b / qwen3.6-35b-a3b — implicit-open: ``Thinking Process: …</think>\\n\\n5``;
 * Pathumma-…-think — explicit: ``<think>…</think>\\n\\nanswer``;
