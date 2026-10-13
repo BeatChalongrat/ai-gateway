@@ -25,7 +25,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 LANGS = ("th", "en")
 DOCUMENT = "th"
@@ -96,6 +96,39 @@ class Words:
         (``cap`` for a table of headings)."""
         return Table(self, keys, then)
 
+    def heads(self, keys: list) -> "Heads":
+        """A table's column headings, by key, each said when it is read (AM18: a document's own words)."""
+        return Heads(self, keys)
+
+
+class Heads(Sequence):
+    """A list of headings kept by key and said when read — made when a module is imported, like Table.
+    ``index(text)`` finds a heading by its words in the language being spoken; ``of(key)`` by its key."""
+
+    def __init__(self, words: Words, keys: list):
+        self._words, self._keys = words, list(keys)
+
+    def __getitem__(self, i):
+        if isinstance(i, slice):
+            return [self._words(k) for k in self._keys[i]]
+        return self._words(self._keys[i])
+
+    def __len__(self):
+        return len(self._keys)
+
+    def __add__(self, other):
+        return list(self) + list(other)
+
+    def __radd__(self, other):
+        return list(other) + list(self)
+
+    def of(self, key: str) -> int:
+        return self._keys.index(key)
+
+    @property
+    def keys(self) -> list:
+        return list(self._keys)
+
 
 class Table(Mapping):
     """A module's table of codes and their words. A table is made when its module is imported — before
@@ -155,6 +188,26 @@ def date(value) -> str:
     if _lang == "en":
         return f"{d.day} {MONTHS_EN[d.month - 1][:3]} {d.year}"
     return f"{d.day} {MONTHS_TH_ABBR[d.month - 1]} {d.year + BE_OFFSET}"
+
+
+def date_read(text) -> tuple | None:
+    """A day as a document prints it in either language (“5 ก.ย. 2569”, “5 Sep 2026”), read back as
+    (year, month, day) in the common era; None for anything else."""
+    from .thai import BE_OFFSET, MONTHS_EN, MONTHS_TH_ABBR
+
+    bits = str(text or "").split()
+    if len(bits) != 3:
+        return None
+    try:
+        day, year = int(bits[0]), int(bits[2])
+    except ValueError:
+        return None
+    if bits[1] in MONTHS_TH_ABBR:
+        return (year - BE_OFFSET, MONTHS_TH_ABBR.index(bits[1]) + 1, day)
+    short = [m[:3] for m in MONTHS_EN]
+    if bits[1] in short:
+        return (year, short.index(bits[1]) + 1, day)
+    return None
 
 
 def period(value: str) -> str:

@@ -30,6 +30,7 @@ from openpyxl import load_workbook
 from agent_market.deliverables import asked
 from agent_market.deliverables.reread import table
 from agent_market.deliverables.theme import resolve
+from agent_market.engine import words
 from agent_market.tests import samplekit
 
 RUN = {"id": "t", "date": "2026-10-07", "agent_version": "t", "preparer": "ผู้ทดสอบ"}
@@ -219,14 +220,14 @@ class AskedOfTheBankReconciliation(unittest.TestCase):
         self.assertTrue(res["passed"], json.dumps(res["artifacts"][0]["quality"], ensure_ascii=False)[:700])
         self.assertEqual(res["asked"], {"applied": ["sort_by_date"], "refused": []})
         rows = self._items(path)
-        dates = [self.BR._date_read(r[3]) for r in rows]
+        dates = [words.date_read(r[3]) for r in rows]
         self.assertNotIn(None, dates)
         self.assertEqual(dates, sorted(dates))
         self.assertEqual(dates[0], (2026, 9, 20))
         self._same_but_for_order(rows, self._items(plain_path))
         self.assertTrue(_checks(res)["xlsx.asked"]["ok"])
         # of one day, the file's order: the four of 30 Sep are as they were among themselves
-        last_day = lambda rs: [tuple(str(v) for v in r[1:]) for r in rs if self.BR._date_read(r[3]) == (2026, 9, 30)]  # noqa: E731
+        last_day = lambda rs: [tuple(str(v) for v in r[1:]) for r in rs if words.date_read(r[3]) == (2026, 9, 30)]  # noqa: E731
         self.assertEqual(last_day(rows), last_day(self._items(plain_path)))
 
     def test_the_statement_and_next_months_list_do_not_move(self):
@@ -234,6 +235,7 @@ class AskedOfTheBankReconciliation(unittest.TestCase):
         for order in ("sort_by_amount", "sort_by_date"):
             res, path = self._render([order])
             for sheet in (self.W.S_STATEMENT, self.W.S_OUT, self.W.S_JOURNAL, self.W.S_PAIRS, self.W.S_IN):
+                sheet = self.W.W(sheet)   # AM18: a sheet is named by key, said in the run's language
                 self.assertEqual(_cells(path, sheet), _cells(plain_path, sheet), (order, sheet))
             ck = _checks(res)
             for name in ("xlsx.statement", "xlsx.verdict", "xlsx.adjustments_bank", "xlsx.adjustments_book", "xlsx.carried_out", "xlsx.figures"):
@@ -243,7 +245,7 @@ class AskedOfTheBankReconciliation(unittest.TestCase):
         _, path = self._render(["sort_by_amount"])
         wb = load_workbook(path)
         ident = self.W.ID_COLS[self.W.S_ITEMS]
-        main, evidence = [[r[:ident] for r in wb[s].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
+        main, evidence = [[r[:ident] for r in wb[self.W.W(s)].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
                           for s in self.W.PARTS[self.W.S_ITEMS]]
         self.assertEqual(main, evidence)
         self.assertEqual(len(main), len(self.computed["items"]))
@@ -265,12 +267,12 @@ class AskedOfTheBankReconciliation(unittest.TestCase):
         # (the platform sends one of a group; should two arrive, the table still has one order — the last)
         res, path = self._render(["sort_by_amount", "sort_by_date"])
         self.assertEqual(res["asked"], {"applied": ["sort_by_date"], "refused": []})
-        dates = [self.BR._date_read(r[3]) for r in self._items(path)]
+        dates = [words.date_read(r[3]) for r in self._items(path)]
         self.assertEqual(dates, sorted(dates))
 
     def test_its_manifest_declares_what_its_renderer_applies(self):
         m = _manifest_says(self, "bank_reconciliation", self.BR.DIRECTIVES, grouped=True)
-        self.assertEqual(m["version"], "1.7.0")
+        self.assertEqual(m["version"], "1.8.0")
 
 
 class AskedOfTheInvoiceRegister(unittest.TestCase):

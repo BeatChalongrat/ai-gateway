@@ -47,12 +47,14 @@ from ..words import W
 SCHEMA = "bank.reconciliation.v1"
 SCRIPT = "packages/bank_reconciliation/scripts/reconcile.py"
 OUTSTANDING = ("outstanding_cheque", "outstanding_payment", "deposit_in_transit")
-ACCOUNTS = {
-    "bank_fee": "ค่าธรรมเนียมธนาคาร", "interest": "ดอกเบี้ยรับ", "wht_interest": "ภาษีเงินได้ถูกหัก ณ ที่จ่าย",
-    "returned_cheque": "ลูกหนี้การค้า (เช็คคืน)", "direct_debit": "ค่าใช้จ่ายหรือเจ้าหนี้ที่หักบัญชี (ระบุบัญชี)",
-    "unrecorded_receipt": "บัญชีพักรอตรวจสอบ", "unrecorded_payment": "บัญชีพักรอตรวจสอบ",
-    "posting_error": "บัญชีคู่ของรายการที่บันทึกคลาดเคลื่อน (ระบุบัญชี)", "book_error": "บัญชีคู่ของรายการที่บันทึกผิด (ระบุบัญชี)",
-}
+# the kinds whose contra account the draft cannot name: a person specifies it before posting
+SPECIFY_ACCOUNT = ("direct_debit", "posting_error", "book_error", "unrecorded_receipt", "unrecorded_payment")
+ACCOUNTS = W.table({
+    "bank_fee": "doc.account.bank_fee", "interest": "doc.account.interest", "wht_interest": "doc.account.wht_interest",
+    "returned_cheque": "doc.account.returned_cheque", "direct_debit": "doc.account.direct_debit",
+    "unrecorded_receipt": "doc.account.suspense", "unrecorded_payment": "doc.account.suspense",
+    "posting_error": "doc.account.posting_error", "book_error": "doc.account.book_error",
+})
 # why a person is shown an exception, and what they may answer: keys of the manifest's sentences, each said in
 # the language of the run when it is read (engine/words.py)
 REASON_TH = W.table({
@@ -158,7 +160,7 @@ def _lines(items: list[dict], side: str) -> list[dict]:
         if mine:
             total = sum((Decimal(i["effect"]) for i in mine), ZERO)
             out.append({"type": kind, "label": C.TYPE_TH[kind], "count": len(mine), "amount": f2(total),
-                        "sign": "บวก" if total >= ZERO else "หัก", "items": [i["id"] for i in mine]})
+                        "sign": W("doc.sign.add") if total >= ZERO else W("doc.sign.less"), "items": [i["id"] for i in mine]})
     return out
 
 
@@ -231,7 +233,7 @@ def journal_of(rv: Review, items: list[dict]) -> list[dict]:
     """One drafted entry per book-side item; interest and the tax withheld on it, of the same day,
     in one entry. Every entry balances. Drafts: a person reads and posts them."""
     code = rv.gl_code or account_settings(rv.defaults)["gl_code"]
-    bank_name = " ".join(x for x in ("เงินฝากธนาคาร", rv.account.get("bank"), rv.account.get("number")) if x)
+    bank_name = " ".join(x for x in (W("doc.account.cash_at_bank"), rv.account.get("bank"), rv.account.get("number")) if x)
     mine = [i for i in items if i["side"] == C.BOOK_SIDE]
     out, used = [], set()
 
@@ -240,7 +242,7 @@ def journal_of(rv: Review, items: list[dict]) -> list[dict]:
         for account, amount, acc_code in parts:            # amount > 0 is a debit
             lines.append({"account": account, "code": acc_code, "debit": f2(amount) if amount > ZERO else "0.00",
                           "credit": f2(-amount) if amount < ZERO else "0.00"})
-        out.append({"id": f"ร่าง-{len(out) + 1:02d}", "date": date, "memo": memo, "lines": lines, "items": ids, "draft": True,
+        out.append({"id": W("doc.journal.draft_id", n=len(out) + 1), "date": date, "memo": memo, "lines": lines, "items": ids, "draft": True,
                     "note": note})
 
     for i in mine:
@@ -260,18 +262,18 @@ def journal_of(rv: Review, items: list[dict]) -> list[dict]:
                     note += " " + W("journal.wht_unusual")
             parts.append((ACCOUNTS["interest"], -amount, ""))
             used.update([i["id"]] + [t["id"] for t in tax])
-            entry(i["date"], "บันทึกดอกเบี้ยรับจากธนาคาร" + (" และภาษีที่ถูกหัก" if withheld > ZERO else ""), parts,
+            entry(i["date"], W("doc.journal.memo_interest") + (W("doc.journal.memo_and_wht") if withheld > ZERO else ""), parts,
                   [i["id"]] + [t["id"] for t in tax], note)
             continue
         if i["type"] == "wht_interest" and any(t["type"] == "interest" and t["date"] == i["date"] for t in mine):
             continue                                        # entered with its interest
         used.add(i["id"])
         other = ACCOUNTS[i["type"]]
-        memo = {"book_error": "กลับรายการที่บันทึกผิด", "posting_error": "ปรับรายการที่บันทึกยอดคลาดเคลื่อน"}.get(
-            i["type"], f"บันทึก{i['type_label']}ตามรายการเดินบัญชี")
+        memo = {"book_error": W("doc.journal.memo_reverse"), "posting_error": W("doc.journal.memo_correct")}.get(
+            i["type"], W("doc.journal.memo_record", type_label=i["type_label"]))
         entry(i["date"], f"{memo}: {E3C.safe(i['description'])[:80]}".rstrip(": "),
               [(bank_name, amount, code), (other, -amount, "")], [i["id"]],
-              "ระบุบัญชีคู่ก่อนบันทึก" if "ระบุบัญชี" in other or other == "บัญชีพักรอตรวจสอบ" else "")
+              W("doc.journal.specify_note") if i["type"] in SPECIFY_ACCOUNT else "")
     return out
 
 

@@ -25,6 +25,7 @@ import unittest
 
 from agent_market.engine import words
 from agent_market.tests import bankkit as K
+from agent_market.tests import dockit
 from agent_market.tests import invoicekit as IK
 from agent_market.tests.test_manifest_english import ERROR_SHAPE, PLACEHOLDER, same_numbers, without_literals
 
@@ -319,6 +320,11 @@ class EnglishRuns:
 
     package = ""
     kit = None
+    # AM18: the package's documents are written in the run's language too — the file of an English run is the
+    # Thai run's file with every word of the document's own in English, and nothing else different
+    documents = False
+    # the person's own words the kit adds to every run (a preparer's name), which a paper prints as written
+    own_more = ()
 
     @classmethod
     def files_of(cls, case: dict) -> list:
@@ -361,11 +367,12 @@ class EnglishRuns:
     def test_a_person_who_reads_only_english_meets_no_thai_but_their_own_data_and_the_papers_own_words(self):
         left = []
         for cid, res in self.en.items():
-            paper = thai_only("\n".join(list(res.get("sheets") or {}) + strings_of(list((res.get("sheets") or {}).values()))))
+            # (a package whose documents are in both languages has no paper's-own Thai to excuse)
+            paper = "" if self.documents else thai_only("\n".join(list(res.get("sheets") or {}) + strings_of(list((res.get("sheets") or {}).values()))))
             for text in said_to_a_person(res):
                 for run in THAI_RUN.findall(text):
                     k = thai_only(run)
-                    if k not in self.own[cid] and k not in paper:
+                    if not dockit.is_own(run, self.own[cid]) and k not in paper:
                         left.append(f"{cid}: “{run}” in: {text[:140]}")
         self.assertEqual(left, [], "\n" + "\n".join(sorted(set(left))[:40]))
 
@@ -384,6 +391,8 @@ class EnglishRuns:
             self.assertEqual(self.kit.check(self.case(cid), th), [], cid)
 
     def test_the_paper_is_the_one_a_thai_run_writes(self):
+        if self.documents:
+            return self._the_paper_is_the_thai_papers_twin()
         # the documents' own pass has not been made: the file is written from the Thai table, whatever the run
         seen = 0
         for cid, en in self.en.items():
@@ -399,6 +408,26 @@ class EnglishRuns:
             seen += 1
         self.assertGreater(seen, 3)
 
+    def _the_paper_is_the_thai_papers_twin(self):
+        """AM18: on identical inputs the English run's file is the Thai run's file in English — compared cell
+        for cell: the same sheets, rows and columns, every number and every date the same, the person's own
+        data in the same places; only the document's own words differ, and none of those is left in Thai."""
+        w = words.of(f"agent_market.packages.{self.package}")
+        sheet_names = {w.strings[k]: w.english_of(k) for k in w.strings if k.startswith("doc.sheet.")}
+        seen, bad = 0, []
+        for cid, en in self.en.items():
+            th = self.th[cid]
+            if not th.get("computed"):
+                continue
+            self.assertNotIn("document", th["computed"], cid)   # one table, in the run's language, both ways
+            self.assertNotIn("document", en["computed"], cid)
+            own = self.own[cid] + thai_only("".join(self.own_more))
+            bad += [f"{cid}: {x}" for x in dockit.same_but_words(th["sheets"], en["sheets"], w, sheet_names)]
+            bad += [f"{cid}: Thai left — {x}" for x in dockit.thai_left(en["sheets"], own)]
+            seen += 1
+        self.assertEqual(bad, [], "\n" + "\n".join(bad[:60]))
+        self.assertGreater(seen, 3)
+
     def test_a_thai_run_after_an_english_one_is_thai(self):
         cid = next(c for c, r in self.th.items() if r.get("computed"))
         self.kit.run_case(self.case(cid), lang="en")
@@ -408,6 +437,8 @@ class EnglishRuns:
 
 class ABankRunInEnglish(EnglishRuns, unittest.TestCase):
     package, kit = "bank_reconciliation", K
+    documents = True   # AM18
+    own_more = ("ผู้จัดทำ ตัวอย่าง",)   # bankkit.run_files' preparer
 
     @classmethod
     def files_of(cls, case):

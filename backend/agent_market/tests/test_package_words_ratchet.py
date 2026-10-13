@@ -44,6 +44,33 @@ THAI = re.compile("[฀-๿]")
 PARTS = ["packages", "deliverables", "engine"]
 NL = chr(10)
 
+# AM18 — the documents' own words. Of the Thai a package's code may still hold, one kind is data and stays:
+# the words the engine READS from a person's files — the headings it looks for, the words it classifies a
+# line by, a bank's name. Those live in the files named here, and nowhere else. A package whose documents
+# are written in both languages (DOCUMENTS_DONE) holds Thai in no other file: what its working paper says
+# is in its manifest, under a key, in both languages, like what it says on a screen (AM14).
+READS = {
+    "bank_reconciliation": ("checks/inputs.py", "checks/classify.py", "checks/review.py"),
+    "invoice_processing": (),
+    "expense_audit": (),
+    "po_matching": (),
+    "financial_report": (),
+}
+DOCUMENTS_DONE = ("bank_reconciliation",)
+
+
+def documents_left(p: dict[str, dict[str, int]]) -> dict[str, int]:
+    """Per package: the Thai strings in files that are not its list of words read — the documents' pile."""
+    out: Counter = Counter()
+    for rel, marks in p.items():
+        bits = rel.split("/")
+        if bits[0] != "packages" or len(bits) < 3:
+            continue
+        pkg, inside = bits[1], "/".join(bits[2:])
+        if inside not in READS.get(pkg, ()):
+            out[pkg] += sum(marks.values())
+    return dict(sorted(out.items()))
+
 
 def literals(src: str) -> list[tuple[int, str]]:
     """Every string a file's code holds (not its docstrings, not its comments)."""
@@ -179,6 +206,23 @@ class ThePileDoesNotGrow(unittest.TestCase):
         self.assertEqual(doc["by_part"], totals(doc["files"]))
         self.assertEqual(doc["total"], sum(doc["by_part"].values()))
 
+    def test_a_package_whose_documents_speak_both_languages_holds_only_the_words_it_reads(self):
+        # AM18: the documents' own pass, one package at a time. Once a package is done, a Thai string in
+        # any file of it but the readers named in READS is a sentence that belongs in its manifest.
+        left = {}
+        for pkg in DOCUMENTS_DONE:
+            self.assertIn(pkg, READS, f"{pkg}: name the files that read a person's words")
+            for rel, marks in self.now.items():
+                if rel.startswith(f"packages/{pkg}/") and rel[len(f"packages/{pkg}/"):] not in READS[pkg]:
+                    left[rel] = sum(marks.values())
+        self.assertEqual(left, {}, "a document's words in the code of a package whose documents are in both languages — "
+                                   "they belong in agent.json under a key, in Thai and in English")
+
+    def test_the_files_that_read_a_persons_words_exist(self):
+        for pkg, files in READS.items():
+            for rel in files:
+                self.assertTrue(os.path.exists(os.path.join(ROOT, "packages", pkg, rel)), f"{pkg}/{rel}")
+
 
 class TheRatchetItself(unittest.TestCase):
     """The lint, tried on a tree of its own: it must bite both ways, or it holds nothing."""
@@ -245,6 +289,9 @@ def main(argv: list[str]) -> int:
         for part, n in totals(now).items():
             print(f"{n:6d}  {part}")
         print(f"{sum(sum(m.values()) for m in now.values()):6d}  in all, in {len(now)} files")
+        print("documents' own words left (strings outside the files that read a person's words):")
+        for pkg, n in documents_left(now).items():
+            print(f"{n:6d}  {pkg}{'  (done — must be 0)' if pkg in DOCUMENTS_DONE else ''}")
         return 0
     if "--shrink" in argv:
         done, said = shrink()

@@ -45,7 +45,11 @@ SHEET_EXT = (".xlsx", ".xlsm", ".csv", ".txt")
 PDF_EXT = (".pdf",)
 Q2 = Decimal("0.01")
 ZERO = Decimal("0.00")
-CARRIED_SHEET = "รายการค้างยกไป"
+CARRIED_SHEET = "doc.sheet.carried_out"   # the sheet of last month's paper this agent reads back (its key; W says it)
+
+
+def _carried_names() -> set:
+    return {_h(x) for x in W.both(CARRIED_SHEET).values()}
 HEADER_SCAN = 40
 
 # a header cell (spaces and punctuation removed, lower case) → the field it holds
@@ -93,6 +97,10 @@ CARRIED_KINDS = {"เช็คค้างจ่าย": "outstanding_cheque", "
                  "เงินฝากระหว่างทาง": "deposit_in_transit", "เงินฝากระหว่างทางยังไม่เข้าบัญชี": "deposit_in_transit",
                  "outstandingcheque": "outstanding_cheque", "outstandingcheck": "outstanding_cheque",
                  "outstandingpayment": "outstanding_payment", "depositintransit": "deposit_in_transit"}
+# AM18: and the words this agent's own paper prints for those kinds (its "Items carried forward" sheet comes back
+# next month), in whichever language the paper was written in
+CARRIED_KINDS.update({"".join(v.split()).lower(): k for k in ("outstanding_cheque", "outstanding_payment", "deposit_in_transit")
+                      for v in W.both(f"type.{k}").values()})
 
 
 @dataclass
@@ -152,7 +160,8 @@ def parse(path: str, name: str, mapping: dict | None = None) -> Upload:
     if wb.error:
         return Upload("other", key, name, sha, {"reason": "unreadable", "detail": wb.error, "say": "say.unreadable"})
     for i, sheet in enumerate(wb.sheets):
-        if _h(sheet.name) == _h(CARRIED_SHEET) or any(_h(c) == _h(CARRIED_SHEET) for r in sheet.rows[:6] for c in r):
+        # AM18: the sheet is written in the language of the run that made it, and read back by either name
+        if _h(sheet.name) in _carried_names() or any(_h(c) in _carried_names() for r in sheet.rows[:6] for c in r):
             got = _carried(sheet, i)
             if got is not None:
                 return Upload("carried", key, name, sha, got)

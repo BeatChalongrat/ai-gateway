@@ -68,7 +68,7 @@ def compute(files, roles, period, *, answers=None, defaults=None, today=None, an
     def table():
         return _rec.compute(files, roles, period, answers=answers, defaults=defaults, today=today, answered_by=answered_by)
 
-    return _words.with_document(table(), table)
+    return table()
 
 
 def postcompute(files, roles, period, computed, *, answers=None, defaults=None) -> dict:
@@ -107,17 +107,6 @@ def _as_asked(computed: dict, req: dict) -> tuple[dict, list[str]]:
     return dict(computed, items=items), [order]
 
 
-def _date_read(text) -> tuple | None:
-    """A date as the working paper prints it (“5 ก.ย. 2569”), read back."""
-    from ...engine.thai import BE_OFFSET, MONTHS_TH_ABBR
-
-    bits = str(text or "").split()
-    try:
-        return (int(bits[2]) - BE_OFFSET, MONTHS_TH_ABBR.index(bits[1]) + 1, int(bits[0])) if len(bits) == 3 else None
-    except ValueError:
-        return None
-
-
 def _asked_check(path: str, view: dict, applied: list[str]) -> dict:
     """What was asked, read back out of the finished workbook: the amounts, or the dates, on the items
     sheet from top to bottom, by what is in its own cells."""
@@ -132,11 +121,11 @@ def _asked_check(path: str, view: dict, applied: list[str]) -> dict:
     if applied == ["sort_by_amount"]:
         sizes = [abs(asked.number(r[6])) if isinstance(r[6], (int, float)) and not isinstance(r[6], bool) else None for r in rows]
         if not same or not asked.runs_down(sizes):
-            return asked.check(False, W("asked.amount.not", sheet=S_ITEMS))
+            return asked.check(False, W("asked.amount.not", sheet=W(S_ITEMS)))
         return asked.check(True, W("asked.amount.ok", n=len(rows)), len(rows))
-    dates = [_date_read(r[H_ITEMS.index("วันที่")]) for r in rows]
+    dates = [_words.date_read(r[H_ITEMS.of("doc.col.date")]) for r in rows]
     if not same or not asked.runs_up(dates):
-        return asked.check(False, W("asked.date.not", sheet=S_ITEMS))
+        return asked.check(False, W("asked.date.not", sheet=W(S_ITEMS)))
     return asked.check(True, W("asked.date.ok", n=len(rows)), len(rows))
 
 
@@ -147,17 +136,15 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     from ...deliverables.theme import resolve
     from .scripts.workbook import BankWorkbook, check
 
-    # the working paper is written from the table in the documents' language; what the gate then says of
-    # the file is said in the run's
-    view, applied = _as_asked(_words.for_document(computed), req)
+    # AM18: the working paper is written in the run's language, like everything the run says
+    view, applied = _as_asked(computed, req)
     theme = resolve(req.get("theme"))
     names = req.get("names") or {}
     artifacts, all_ok = [], True
     for fmt in [f for f in wanted_formats(req, ["xlsx"]) if f == "xlsx"]:
         name = os.path.basename(names.get(fmt) or "bank_reconciliation.xlsx")
         path = os.path.join(out_dir, name)
-        with _words.speaking(_words.DOCUMENT):
-            meta = BankWorkbook(view, theme, req.get("run")).write(path)
+        meta = BankWorkbook(view, theme, req.get("run")).write(path)
         checks = check(path, view, req.get("run"))
         if applied:
             checks.append(_asked_check(path, view, applied))
