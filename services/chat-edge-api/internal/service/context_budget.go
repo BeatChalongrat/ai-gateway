@@ -101,7 +101,7 @@ var ModelContextLimits = map[string]int{
 	// stated in its own refusal), recorded so that a gateway-down window
 	// still budgets these correctly instead of falling to the default.
 	// The catalogue carries the same measurements and still wins; see
-	// docs/MODEL_CONTEXT_WINDOWS.md for how each was established.
+	// (FIX101 Part B measured each against the running deployment on 2026-09-10.)
 	"Typhoon-S-ThaiLLM-8B-Instruct":         14500,  // 16,384
 	"OpenThaiGPT-ThaiLLM-8B-Instruct-v7.2":  14500,  // 16,384
 	"Pathumma-ThaiLLM-qwen3-8b-think-3.0.0": 14500,  // 16,384

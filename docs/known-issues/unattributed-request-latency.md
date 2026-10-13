@@ -77,6 +77,6 @@ Those documents also recommended against migrating the proxy path to Go on the
 grounds that it would "optimise the wrong layer". The Python bottlenecks were
 fixed *and* the Go gateway shipped, so the recommendation is spent. The RPS
 figures they quote describe a stack that no longer exists and should not be
-cited. Current capacity claims live in
-[`../CAPACITY_VALIDATION_150_250.md`](../CAPACITY_VALIDATION_150_250.md) and
-[`../LOAD_TEST_GROWTH_BASELINE.md`](../LOAD_TEST_GROWTH_BASELINE.md).
+cited. The capacity validation (150/250 concurrent streams) and the growth
+baseline are measurement records kept outside the repository; the tooling is
+`tools/loadtest/`.

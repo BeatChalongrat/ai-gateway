@@ -1,7 +1,7 @@
 // FIX112 Part A — texts both surfaces send, bound by tests instead of by
 // someone copying carefully.
 //
-// The register (docs/SYSTEM_PROMPT_COVERAGE.md) listed five texts that
+// FIX107's register of what each surface tells the model listed five texts that
 // matched "because someone ported them by hand". Read again at this tree:
 //   · temporary chat  — the three sentences match; only the envelope differs
 //                       → the body is chat-edge's prompt_temporary_chat.txt (pinned here)
