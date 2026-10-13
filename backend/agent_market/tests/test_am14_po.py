@@ -31,6 +31,8 @@ from agent_market.tests.test_manifest_english import ERROR_SHAPE
 
 class APoMatchingRunInEnglish(EnglishRuns, unittest.TestCase):
     package, kit = "po_matching", K
+    documents = True   # AM18
+    own_more = ("ผู้จัดทำ ตัวอย่าง", "สมหญิง ผู้ตรวจ")   # pokit.run_files' preparer, and the person who answers its cards
 
     @classmethod
     def files_of(cls, case):
@@ -172,12 +174,13 @@ class WhatTheSetDoesNotReach(unittest.TestCase):
         self.assertEqual(sorted(said), ["The file nothing_of_ours.xlsx was not used: it has no column headings of a purchase order, a goods "
                                         "receipt or an invoice",
                                         "The file the_same_again.xlsx was not used: it is the same file as one already sent; counted once"])
-        # the same round in Thai: the same files left out, for the manifest's own Thai reasons — and its paper is the English run's
+        # the same round in Thai: the same files left out, for the manifest's own Thai reasons — and one table each, in its own
+        # language (AM18: the paper follows the run; test_am14_words holds the two papers against each other cell for cell)
         for e, t in zip(en["computed"]["not_included"], th["computed"]["not_included"]):
             self.assertEqual((e["doc_key"], e["code"], e["can_restore"]), (t["doc_key"], t["code"], t["can_restore"]))
             self.assertTrue(all(THAI.search(t[k]) for k in ("reason", "detail", "how")), t)
-        self.assertEqual(en["computed"]["document"], th["computed"])
-        self.assertEqual(en["sheets"], th["sheets"])
+        self.assertNotIn("document", en["computed"])
+        self.assertEqual(list(en["sheets"]) != list(th["sheets"]), True)
         self.assertEqual(en["computed"]["totals"], th["computed"]["totals"])
 
     def test_a_document_that_is_left_out_is_said_why_in_the_runs_language(self):
@@ -243,11 +246,11 @@ class WhatTheSetDoesNotReach(unittest.TestCase):
         from agent_market.packages import po_matching as PM
         from agent_market.packages.po_matching.scripts.workbook import H_LINES
 
-        # the gate's line about the order of the lines says the heading of the column they are ordered by
-        self.assertIn(PM.VARIANCE, H_LINES)
+        # the gate's line about the order of the lines says the heading of the column they are ordered by — in both languages
+        self.assertIn(PM.VARIANCE, H_LINES.keys)
         for key in ("asked.variance.not", "asked.variance.ok"):
-            self.assertIn(PM.VARIANCE, W.strings[key], key)
-            self.assertIn("total price difference", W.english_of(key), key)
+            self.assertIn(W.strings[PM.VARIANCE], W.strings[key], key)
+            self.assertIn(W.english_of(PM.VARIANCE).lower(), W.english_of(key), key)
 
     def test_a_table_of_the_engine_says_its_words_when_it_is_read(self):
         # the tables other code reads by code: the same codes in both languages, each label said in the run's

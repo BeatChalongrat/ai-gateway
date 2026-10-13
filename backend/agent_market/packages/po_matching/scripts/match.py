@@ -991,7 +991,7 @@ def _files(rv: Review) -> list:
             x = d.out["document"]
             out.append({"name": d.upload.name, "sha256": d.upload.sha256, "kind": "invoice", "sheet": None,
                         "rows": len(d.out.get("line_items") or []), "header_row": None, "columns": {}, "skipped": 0,
-                        "said_by": [f"เอกสาร {x['tier']} · อ่านด้วย {d.out['method']}"]})
+                        "said_by": [W("doc.file.read", tier=x["tier"], method=d.out["method"])]})
     return out
 
 

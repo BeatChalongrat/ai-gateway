@@ -25,6 +25,7 @@ _MONTHS = "|".join(re.escape(m) for m in _MONTH_WORDS)
 DAY = re.compile(r"(?<!\d)(\d{1,2}) (%s) (\d{4})(?!\d)" % _MONTHS)
 MONTH = re.compile(r"(?<!\d)(%s) (\d{4}|\d{2})(?!\d)" % _MONTHS)
 NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
+WAYS = re.compile(r"(?<!\d)[23](?: ทาง|-way)")   # “3 ทาง” · “3-way”: the figure is the word's
 PLACE = re.compile(r"\{[^{}]*\}")
 
 
@@ -47,6 +48,8 @@ def numbers_of(text: str) -> list[str]:
     month (“5 ก.ย. 2569” is “5 Sep 2026”, “กันยายน 2569” is “September 2026”), thousands separators dropped."""
     text = DAY.sub(lambda m: f"{_year(m.group(2), int(m.group(3))):04d}-{_month(m.group(2)):02d}-{int(m.group(1)):02d}", str(text))
     text = MONTH.sub(lambda m: f"{_year(m.group(1), int(m.group(2))):04d}-{_month(m.group(1)):02d}", text)
+    # (the glossary's three-way / two-way match is a figure in Thai — “ตรวจ 3 ทาง” — and a word in English)
+    text = WAYS.sub("way", text)
     return [n.replace(",", "") for n in NUMBER.findall(text)]
 
 

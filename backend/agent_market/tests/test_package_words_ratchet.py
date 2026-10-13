@@ -54,10 +54,10 @@ READS = {
     "invoice_processing": (),
     # (audit.py keeps the words a policy paragraph is looked for by — TOPICS — and nothing it says)
     "expense_audit": ("checks/inputs.py", "checks/policy.py", "checks/rules.py", "scripts/audit.py"),
-    "po_matching": (),
+    "po_matching": ("checks/inputs.py", "checks/units.py", "checks/book.py"),
     "financial_report": (),
 }
-DOCUMENTS_DONE = ("bank_reconciliation", "invoice_processing", "expense_audit")
+DOCUMENTS_DONE = ("bank_reconciliation", "invoice_processing", "expense_audit", "po_matching")
 
 
 def documents_left(p: dict[str, dict[str, int]]) -> dict[str, int]:

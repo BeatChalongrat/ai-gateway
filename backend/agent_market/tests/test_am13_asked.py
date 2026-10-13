@@ -146,7 +146,7 @@ class AskedOfThePOMatching(unittest.TestCase):
         _, path = self._render(["sort_by_variance"])
         wb = load_workbook(path)
         ident = self.W.ID_COLS[self.W.S_LINES]
-        sheets = [[r[:ident] for r in wb[s].iter_rows(min_row=5, values_only=True) if r and r[0] is not None] for s in self.W.PARTS[self.W.S_LINES]]
+        sheets = [[r[:ident] for r in wb[self.W.W(s)].iter_rows(min_row=5, values_only=True) if r and r[0] is not None] for s in self.W.PARTS[self.W.S_LINES]]
         self.assertEqual(len(sheets), 3)
         self.assertEqual(sheets[0], sheets[1])
         self.assertEqual(sheets[0], sheets[2])
@@ -156,6 +156,7 @@ class AskedOfThePOMatching(unittest.TestCase):
         _, plain_path = self._render(None)
         _, path = self._render(["sort_by_variance"])
         for sheet in (self.W.S_SUMMARY, self.W.S_INVOICES, self.W.S_PO, self.W.S_EXC):
+            sheet = self.W.W(sheet)   # AM18: a sheet is named by key, said in the run's language
             self.assertEqual(_cells(path, sheet), _cells(plain_path, sheet), sheet)
 
     def test_a_workbook_left_in_the_files_order_fails_a_round_that_asked_for_the_difference(self):
@@ -173,7 +174,7 @@ class AskedOfThePOMatching(unittest.TestCase):
 
     def test_its_manifest_declares_what_its_renderer_applies(self):
         m = _manifest_says(self, "po_matching", self.PM.DIRECTIVES, grouped=False)
-        self.assertEqual(m["version"], "1.7.0")
+        self.assertEqual(m["version"], "1.8.0")
 
 
 class AskedOfTheBankReconciliation(unittest.TestCase):

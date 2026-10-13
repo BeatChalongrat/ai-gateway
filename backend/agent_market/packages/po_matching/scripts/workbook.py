@@ -38,72 +38,71 @@ MONEY = '#,##0.00;[Red](#,##0.00);"-"'
 QTY = '#,##0.######;[Red](#,##0.######);"-"'
 # The wide tables' columns in the order the data is built and read back (the checks read by name, from the
 # sheets of the table together — ``table(parts(wb, sheet), H_*)``)
-H_INVOICES = ["ลำดับ", "เลขที่", "วันที่", "ชนิดเอกสาร", "ผู้ขาย", "เลขประจำตัวผู้เสียภาษี", "PO ที่อ้างถึง", "สกุลเงิน", "ยอดก่อนภาษี",
-              "ภาษีมูลค่าเพิ่ม", "ยอดรวม", "สถานะ", "เหตุผล", "วิธีตรวจ", "ขอคืนภาษีซื้อ", "หมายเหตุ", "หลักฐาน"]
-H_LINES = ["ลำดับ", "ใบแจ้งหนี้", "บรรทัด", "รายการ", "จำนวน", "หน่วย", "ราคาต่อหน่วย", "จำนวนเงิน", "วิธีตรวจ", "เหตุที่ตรวจแบบนี้",
-           "PO", "บรรทัดของ PO", "รายการใน PO", "ราคาต่อหน่วยใน PO", "หลักฐาน (PO)", "ใบรับของที่ใช้ตรวจ", "สั่งซื้อ", "รับจริงสะสม",
-           "เรียกเก็บก่อนหน้า", "เรียกเก็บสะสม", "หน่วยที่เทียบ", "ส่วนต่างราคารวม", "สถานะ", "เหตุผล", "ข้อที่ไม่ผ่าน",
-           "ค่าที่ยอมรับได้ที่ใช้", "วิธีจับคู่", "ขั้น", "ผู้ยืนยัน", "หมายเหตุ", "หลักฐาน (ใบแจ้งหนี้)"]
-H_PO = ["PO", "บรรทัด", "รหัสสินค้า", "รายการ", "ประเภท", "สถานะ PO", "หน่วย", "ราคาต่อหน่วย", "สั่งซื้อ", "รับจริงสะสม",
-        "เรียกเก็บสะสม", "มูลค่าที่เรียกเก็บสะสม", "คงเหลือให้เรียกเก็บ", "เรียกเก็บเกิน", "วิธีตรวจ", "ใบแจ้งหนี้ที่เรียกเก็บ", "ใบรับของ",
-        "หลักฐาน (PO)"]
-H_LINKS = ["ลำดับ", "เรื่อง", "เอกสาร", "สถานะ", "วิธีจับคู่", "ขั้น", "ผู้ยืนยัน", "รายการ (ซ้าย)", "หลักฐาน (ซ้าย)", "รายการ (ขวา)",
-           "หลักฐาน (ขวา)", "ความคล้าย"]
-S_SUMMARY, S_INVOICES, S_LINES, S_PO, S_GRIR = "สรุป", "ผลตรวจใบแจ้งหนี้", "ผลตรวจรายบรรทัด", "ยอดสะสมตาม PO", "ค้างระหว่างรับของกับเรียกเก็บ"
-S_UNPLANNED, S_NOTES, S_LINKS, S_EXC, S_EVIDENCE, S_LEFT = ("ค่าใช้จ่ายที่ไม่ได้สั่งซื้อ", "ใบลดหนี้และใบเพิ่มหนี้", "การจับคู่", "ข้อยกเว้น",
-                                                           "หลักฐาน", "เอกสารที่ยังไม่ได้รวม")
+H_INVOICES = W.heads(["doc.col.no", "doc.col.number", "doc.col.date", "doc.col.doc_type", "doc.col.seller", "doc.col.tax_id", "doc.col.po_ref", "doc.col.currency", "doc.col.subtotal",
+              "doc.col.vat", "doc.col.total", "doc.col.status", "doc.col.reason", "doc.col.depth", "doc.col.vat_claim", "doc.col.note", "doc.col.evidence"])
+H_LINES = W.heads(["doc.col.no", "doc.col.invoice", "doc.col.line", "doc.col.item", "doc.col.quantity", "doc.col.unit", "doc.col.unit_price", "doc.col.amount", "doc.col.depth", "doc.col.why_depth",
+           "doc.col.po", "doc.col.po_line", "doc.col.po_item", "doc.col.po_unit_price", "doc.col.evidence_po", "doc.col.gr_used", "doc.col.ordered", "doc.col.received",
+           "doc.col.billed_before", "doc.col.billed", "doc.col.unit_compared", "doc.col.variance", "doc.col.status", "doc.col.reason", "doc.col.failed_on",
+           "doc.col.tolerance_used", "doc.col.pass", "doc.col.tier", "doc.col.confirmed_by", "doc.col.note", "doc.col.evidence_invoice"])
+H_PO = W.heads(["doc.col.po", "doc.col.line", "doc.col.item_code", "doc.col.item", "doc.col.kind", "doc.col.po_status", "doc.col.unit", "doc.col.unit_price", "doc.col.ordered", "doc.col.received",
+        "doc.col.billed", "doc.col.billed_value", "doc.col.left_to_bill", "doc.col.overbilled", "doc.col.depth", "doc.col.invoices_billing", "doc.col.gr",
+        "doc.col.evidence_po"])
+H_LINKS = W.heads(["doc.col.no", "doc.col.subject", "doc.col.document", "doc.col.status", "doc.col.pass", "doc.col.tier", "doc.col.confirmed_by", "doc.col.item_left", "doc.col.evidence_left", "doc.col.item_right",
+           "doc.col.evidence_right", "doc.col.similarity"])
+S_SUMMARY, S_INVOICES, S_LINES, S_PO, S_GRIR = "doc.sheet.summary", "doc.sheet.invoices", "doc.sheet.lines", "doc.sheet.po", "doc.sheet.grir"
+S_UNPLANNED, S_NOTES, S_LINKS, S_EXC, S_EVIDENCE, S_LEFT = ("doc.sheet.unplanned", "doc.sheet.notes", "doc.sheet.links", "doc.sheet.exceptions",
+                                                           "doc.sheet.evidence", "doc.sheet.left_out")
 # AM10: the wide tables' companion sheets — the same identity columns, then the evidence, read beside the main
 # sheet by row number; every one prints one page across
-S_INVOICES_EV, S_LINES_EV, S_LINES_CRIT = "ผลตรวจใบแจ้งหนี้ · หลักฐาน", "ผลตรวจรายบรรทัด · หลักฐาน", "ผลตรวจรายบรรทัด · เกณฑ์ที่ใช้"
-S_PO_EV, S_LINKS_EV = "ยอดสะสมตาม PO · หลักฐาน", "การจับคู่ · หลักฐาน"
+S_INVOICES_EV, S_LINES_EV, S_LINES_CRIT = "doc.sheet.invoices_ev", "doc.sheet.lines_ev", "doc.sheet.lines_crit"
+S_PO_EV, S_LINKS_EV = "doc.sheet.po_ev", "doc.sheet.links_ev"
 PARTS = {S_INVOICES: (S_INVOICES, S_INVOICES_EV), S_LINES: (S_LINES, S_LINES_EV, S_LINES_CRIT), S_PO: (S_PO, S_PO_EV),
          S_LINKS: (S_LINKS, S_LINKS_EV)}
 # What prints on each sheet of a wide table, in print order, with the column's width: the main sheet leads with
 # the row's identity (ID_COLS of them, repeated on the companions and on every page), then its amounts,
 # status and reason; a companion repeats the identity and holds the rest. Every column of H_* is on one of them.
 LAYOUT = {
-    S_INVOICES: [("ลำดับ", 7), ("เลขที่", 16), ("ผู้ขาย", 30), ("ยอดก่อนภาษี", 14), ("ภาษีมูลค่าเพิ่ม", 14), ("ยอดรวม", 14), ("สถานะ", 16),
-                 ("วันที่", 13), ("ชนิดเอกสาร", 16), ("PO ที่อ้างถึง", 14), ("สกุลเงิน", 8), ("เหตุผล", 28), ("วิธีตรวจ", 14)],
-    S_INVOICES_EV: [("ลำดับ", 7), ("เลขที่", 16), ("ผู้ขาย", 26), ("เลขประจำตัวผู้เสียภาษี", 15), ("ขอคืนภาษีซื้อ", 36), ("หมายเหตุ", 30),
-                    ("หลักฐาน", 36)],
-    S_LINES: [("ลำดับ", 7), ("ใบแจ้งหนี้", 16), ("บรรทัด", 8), ("รายการ", 30), ("จำนวน", 10), ("หน่วย", 8), ("ราคาต่อหน่วย", 12),
-              ("จำนวนเงิน", 14), ("ราคาต่อหน่วยใน PO", 12), ("ส่วนต่างราคารวม", 12), ("สถานะ", 16), ("วิธีตรวจ", 18), ("เหตุผล", 26)],
-    S_LINES_EV: [("ลำดับ", 6), ("ใบแจ้งหนี้", 14), ("บรรทัด", 7), ("รายการ", 20), ("PO", 13), ("บรรทัดของ PO", 8), ("รายการใน PO", 22),
-                 ("หลักฐาน (PO)", 30), ("ใบรับของที่ใช้ตรวจ", 32), ("หลักฐาน (ใบแจ้งหนี้)", 30), ("หมายเหตุ", 22)],
-    S_LINES_CRIT: [("ลำดับ", 6), ("ใบแจ้งหนี้", 14), ("บรรทัด", 7), ("รายการ", 20), ("เหตุที่ตรวจแบบนี้", 18), ("สั่งซื้อ", 9),
-                   ("รับจริงสะสม", 10), ("เรียกเก็บก่อนหน้า", 11), ("เรียกเก็บสะสม", 11), ("หน่วยที่เทียบ", 9), ("ข้อที่ไม่ผ่าน", 24),
-                   ("ค่าที่ยอมรับได้ที่ใช้", 30), ("วิธีจับคู่", 18), ("ขั้น", 12), ("ผู้ยืนยัน", 14)],
-    S_PO: [("PO", 14), ("บรรทัด", 8), ("รายการ", 30), ("ราคาต่อหน่วย", 12), ("มูลค่าที่เรียกเก็บสะสม", 14), ("รหัสสินค้า", 12), ("ประเภท", 10),
-           ("สถานะ PO", 10), ("หน่วย", 8), ("สั่งซื้อ", 10), ("รับจริงสะสม", 10), ("เรียกเก็บสะสม", 10), ("คงเหลือให้เรียกเก็บ", 12),
-           ("เรียกเก็บเกิน", 22), ("วิธีตรวจ", 9)],
-    S_PO_EV: [("PO", 14), ("บรรทัด", 8), ("รายการ", 26), ("ใบแจ้งหนี้ที่เรียกเก็บ", 40), ("ใบรับของ", 32), ("หลักฐาน (PO)", 40)],
-    S_LINKS: [("ลำดับ", 6), ("เรื่อง", 16), ("เอกสาร", 16), ("สถานะ", 16), ("วิธีจับคู่", 26), ("ขั้น", 14), ("ผู้ยืนยัน", 16),
-              ("รายการ (ซ้าย)", 30), ("รายการ (ขวา)", 30), ("ความคล้าย", 9)],
-    S_LINKS_EV: [("ลำดับ", 6), ("เรื่อง", 16), ("เอกสาร", 16), ("หลักฐาน (ซ้าย)", 44), ("หลักฐาน (ขวา)", 44)],
+    S_INVOICES: [("doc.col.no", 7), ("doc.col.number", 16), ("doc.col.seller", 30), ("doc.col.subtotal", 14), ("doc.col.vat", 14), ("doc.col.total", 14), ("doc.col.status", 16),
+                 ("doc.col.date", 13), ("doc.col.doc_type", 16), ("doc.col.po_ref", 14), ("doc.col.currency", 8), ("doc.col.reason", 28), ("doc.col.depth", 14)],
+    S_INVOICES_EV: [("doc.col.no", 7), ("doc.col.number", 16), ("doc.col.seller", 26), ("doc.col.tax_id", 15), ("doc.col.vat_claim", 36), ("doc.col.note", 30),
+                    ("doc.col.evidence", 36)],
+    S_LINES: [("doc.col.no", 7), ("doc.col.invoice", 16), ("doc.col.line", 8), ("doc.col.item", 30), ("doc.col.quantity", 10), ("doc.col.unit", 8), ("doc.col.unit_price", 12),
+              ("doc.col.amount", 14), ("doc.col.po_unit_price", 12), ("doc.col.variance", 12), ("doc.col.status", 16), ("doc.col.depth", 18), ("doc.col.reason", 26)],
+    S_LINES_EV: [("doc.col.no", 6), ("doc.col.invoice", 14), ("doc.col.line", 7), ("doc.col.item", 20), ("doc.col.po", 13), ("doc.col.po_line", 8), ("doc.col.po_item", 22),
+                 ("doc.col.evidence_po", 30), ("doc.col.gr_used", 32), ("doc.col.evidence_invoice", 30), ("doc.col.note", 22)],
+    S_LINES_CRIT: [("doc.col.no", 6), ("doc.col.invoice", 14), ("doc.col.line", 7), ("doc.col.item", 20), ("doc.col.why_depth", 18), ("doc.col.ordered", 9),
+                   ("doc.col.received", 10), ("doc.col.billed_before", 11), ("doc.col.billed", 11), ("doc.col.unit_compared", 9), ("doc.col.failed_on", 24),
+                   ("doc.col.tolerance_used", 30), ("doc.col.pass", 18), ("doc.col.tier", 12), ("doc.col.confirmed_by", 14)],
+    S_PO: [("doc.col.po", 14), ("doc.col.line", 8), ("doc.col.item", 30), ("doc.col.unit_price", 12), ("doc.col.billed_value", 14), ("doc.col.item_code", 12), ("doc.col.kind", 10),
+           ("doc.col.po_status", 10), ("doc.col.unit", 8), ("doc.col.ordered", 10), ("doc.col.received", 10), ("doc.col.billed", 10), ("doc.col.left_to_bill", 12),
+           ("doc.col.overbilled", 22), ("doc.col.depth", 9)],
+    S_PO_EV: [("doc.col.po", 14), ("doc.col.line", 8), ("doc.col.item", 26), ("doc.col.invoices_billing", 40), ("doc.col.gr", 32), ("doc.col.evidence_po", 40)],
+    S_LINKS: [("doc.col.no", 6), ("doc.col.subject", 16), ("doc.col.document", 16), ("doc.col.status", 16), ("doc.col.pass", 26), ("doc.col.tier", 14), ("doc.col.confirmed_by", 16),
+              ("doc.col.item_left", 30), ("doc.col.item_right", 30), ("doc.col.similarity", 9)],
+    S_LINKS_EV: [("doc.col.no", 6), ("doc.col.subject", 16), ("doc.col.document", 16), ("doc.col.evidence_left", 44), ("doc.col.evidence_right", 44)],
 }
 ID_COLS = {S_INVOICES: 3, S_LINES: 4, S_PO: 3, S_LINKS: 3}
 SHEETS = (S_SUMMARY, S_INVOICES, S_INVOICES_EV, S_LINES, S_LINES_EV, S_LINES_CRIT, S_PO, S_PO_EV, S_GRIR, S_UNPLANNED, S_NOTES,
           S_LINKS, S_LINKS_EV, S_EXC, S_EVIDENCE)
-L_COMPANY, L_PERIOD, L_PREPARER, L_PRACTICE, L_DEPTH, L_APPROVAL = ("นิติบุคคล", "งวด", "ผู้จัดทำ", "บริษัทออกใบรับของหรือไม่",
-                                                                   "วิธีตรวจของรอบนี้", "การอนุมัติจ่าย")
-L_INVOICES, L_LINES = "ใบแจ้งหนี้ที่ตรวจ (ฉบับ)", "บรรทัดที่ตรวจ"
-L_THREE, L_TWO, L_NONE = "บรรทัดที่ตรวจ 3 ทาง", "บรรทัดที่ตรวจ 2 ทาง", "บรรทัดที่ยังไม่ได้ตรวจกับ PO"
-L_ACCRUED, L_PREPAID = "รับของแล้วยังไม่ถูกเรียกเก็บ (บาท)", "เรียกเก็บแล้วยังไม่ได้รับของ (บาท)"
-TWO_WAY_WARNING = ("บรรทัดที่ตรวจ 2 ทางเทียบปริมาณกับที่สั่งซื้อเท่านั้น ไม่ได้ตรวจกับใบรับของ "
-                   "จึงไม่ได้ยืนยันว่าได้รับของแล้ว")
-APPROVAL = "agent ไม่ได้อนุมัติจ่ายใบแจ้งหนี้ใด “ผ่าน” หมายถึงพร้อมเสนออนุมัติ การอนุมัติและการจ่ายเป็นของคน"
+L_COMPANY, L_PERIOD, L_PREPARER, L_PRACTICE, L_DEPTH, L_APPROVAL = ("doc.face.company", "doc.face.period", "doc.face.preparer", "doc.face.practice",
+                                                                   "doc.face.depth", "doc.face.approval")
+L_INVOICES, L_LINES = "doc.face.invoices", "doc.face.lines"
+L_THREE, L_TWO, L_NONE = "doc.face.three_way", "doc.face.two_way", "doc.face.unlinked"
+L_ACCRUED, L_PREPAID = "doc.face.accrued", "doc.face.prepaid"
+TWO_WAY_WARNING = ("doc.note.two_way")
+APPROVAL = "doc.note.approval"
 # AM8: no placeholder stands in for the company or the preparer; a paper without one says it is a draft
-MISSING = "— ยังไม่มี —"
-HEADER_DRAFT = "ร่าง — หัวกระดาษทำการยังไม่ครบ ({}) ตั้งได้ที่การตั้งค่าของ agent นี้ ยังไม่ใช่กระดาษทำการที่ลงนามได้"
+MISSING = "doc.word.missing"
+HEADER_DRAFT = "doc.draft.header"
 
 
 def header_fields(c: dict, run: dict | None) -> list[tuple[str, str]]:
     run = run or {}
-    return [(L_COMPANY, str(c.get("company") or run.get("organisation") or "").strip()),
-            (L_PREPARER, str(run.get("preparer") or "").strip())]
-FROM_TH = {"history": "รอบก่อน", "round": "รอบนี้"}
-STATE_TH = {"linked": "จับคู่แล้ว", "waiting": "รอคนยืนยัน"}
-KIND_TH = {"receipt": "ใบรับของ ↔ PO", "invoice": "ใบแจ้งหนี้ ↔ PO", "duplicate": "ใบแจ้งหนี้ซ้ำ"}
+    return [(W(L_COMPANY), str(c.get("company") or run.get("organisation") or "").strip()),
+            (W(L_PREPARER), str(run.get("preparer") or "").strip())]
+FROM_TH = W.table({"history": "doc.from.history", "round": "doc.from.round"})
+STATE_TH = W.table({"linked": "doc.state.linked", "waiting": "doc.state.waiting"})
+KIND_TH = W.table({"receipt": "doc.kind.receipt", "invoice": "doc.kind.invoice", "duplicate": "doc.kind.duplicate"})
 
 
 def _num(v):
@@ -113,8 +112,8 @@ def _num(v):
 def _where(s: dict | None) -> str:
     s = s or {}
     cells = ", ".join(sorted(set((s.get("cells") or {}).values()))) if isinstance(s.get("cells"), dict) else ""
-    return " · ".join(str(x) for x in (s.get("file"), s.get("sheet"), f"แถว {s['row']}" if s.get("row") else "",
-                                       f"หน้า {s['page']}" if s.get("page") and not s.get("sheet") else "", cells) if x)
+    return " · ".join(str(x) for x in (s.get("file"), s.get("sheet"), W("doc.where.row", row=s["row"]) if s.get("row") else "",
+                                       W("doc.where.page", page=s["page"]) if s.get("page") and not s.get("sheet") else "", cells) if x)
 
 
 def who(kind: str, name: str) -> str:
@@ -127,7 +126,7 @@ def _tolerances(t: dict, labels: dict) -> str:
 
 def parts(wb, sheet: str) -> list:
     """The sheets a table prints on — the main sheet and the companions that are in the file — for ``table``."""
-    return sheets(wb, *PARTS.get(sheet, (sheet,)))
+    return sheets(wb, *(W(k) for k in PARTS.get(sheet, (sheet,))))
 
 
 class MatchWorkbook:
@@ -187,7 +186,7 @@ class MatchWorkbook:
     def _part(self, ws, heads: list, rows: list, layout: list, **cols):
         """One sheet of a wide table (AM10): the columns ``layout`` names, at its widths, picked from the whole
         table; ``cols`` are the writer's column tuples against ``heads``."""
-        picked, prow, cols = workpaper.pick(heads, rows, [h for h, _ in layout], **cols)
+        picked, prow, cols = workpaper.pick(list(heads), rows, [W(h) for h, _ in layout], **cols)
         self._table(ws, 4, picked, prow, [w for _, w in layout], **cols)
 
     def _pair(self, ws, r: int, label: str, value, *, money: bool = False, bold: bool = False, color: str | None = None):
@@ -213,62 +212,62 @@ class MatchWorkbook:
     # ── sheets ─────────────────────────────────────────────────────────────
     def summary(self):
         ws = self.wb.active
-        ws.title = S_SUMMARY
+        ws.title = W(S_SUMMARY)
         c, s, t = self.c, self.c["summary"], self.c["totals"]
         head = dict(header_fields(c, self.run))
-        self._title(ws, f"ผลตรวจใบแจ้งหนี้กับใบสั่งซื้อ · {c['period_label']}", head[L_COMPANY])
+        self._title(ws, W("doc.title.summary", period_label=c["period_label"]), head[W(L_COMPANY)])
         for col, w in zip("ABCD", (52, 40, 16, 22)):
             ws.column_dimensions[col].width = w
         missing = [k for k, v in head.items() if not v]
         if missing:
-            m = ws.cell(row=3, column=1, value=HEADER_DRAFT.format(", ".join(missing)))
+            m = ws.cell(row=3, column=1, value=W(HEADER_DRAFT).format(", ".join(missing)))
             m.font = Font(name=self.font, bold=True, size=11, color=self.p.get("negative", "B42318"))
-        preparer = head[L_PREPARER]
+        preparer = head[W(L_PREPARER)]
         made = E3C.date_th(self.run.get("date") or c["prepared_on"])
-        depth = f"ตรวจ 3 ทาง {t['three_way']} บรรทัด · ตรวจ 2 ทาง {t['two_way']} บรรทัด"
+        depth = W("doc.face.depth_line", three_way=t["three_way"], two_way=t["two_way"])
         if t["unlinked"]:
-            depth += f" · ยังไม่ได้ตรวจกับ PO {t['unlinked']} บรรทัด"
+            depth += W("doc.face.unlinked_line", unlinked=t["unlinked"])
         r = 4
-        for label, value in ((L_COMPANY, head[L_COMPANY] or MISSING), (L_PERIOD, c["period_label"]),
-                             (L_PREPARER, f"{preparer} · จัดทำวันที่ {made} · ด้วย agent รุ่น {self.run.get('agent_version') or ''}".rstrip(" ·")
-                              if preparer else MISSING),
-                             (L_PRACTICE, c["practice"]["label"]), (L_DEPTH, depth), (L_APPROVAL, APPROVAL)):
-            self._pair(ws, r, label, value, bold=label == L_DEPTH)
+        for label, value in ((W(L_COMPANY), head[W(L_COMPANY)] or W(MISSING)), (W(L_PERIOD), c["period_label"]),
+                             (W(L_PREPARER), W("doc.face.prepared_line", preparer=preparer, made=made, v=self.run.get("agent_version") or "").rstrip(" ·")
+                              if preparer else W(MISSING)),
+                             (W(L_PRACTICE), c["practice"]["label"]), (W(L_DEPTH), depth), (W(L_APPROVAL), W(APPROVAL))):
+            self._pair(ws, r, label, value, bold=label == W(L_DEPTH))
             r += 1
         if t["two_way"]:
-            self._note(ws, r, TWO_WAY_WARNING, color=self.p.get("negative", "B42318"), bold=True)
+            self._note(ws, r, W(TWO_WAY_WARNING), color=self.p.get("negative", "B42318"), bold=True)
             r += 1
         r += 1
-        self._section(ws, r, "ผลตรวจ")
-        rows = [[x["label"], x["count"], _num(x["value"]), f"ไม่รวม {x['without_value']} ฉบับที่ไม่มีอัตราแลกเปลี่ยน" if x["without_value"] else ""]
+        self._section(ws, r, W("doc.section.results"))
+        rows = [[x["label"], x["count"], _num(x["value"]), W("doc.face.without_value", without_value=x["without_value"]) if x["without_value"] else ""]
                 for x in s["by_status"]]
-        self._table(ws, r + 1, ["สถานะ", "จำนวน (ฉบับ)", f"มูลค่า ({s['currency']})", "หมายเหตุ"], rows, money_cols=(3,), freeze=False)
+        self._table(ws, r + 1, [W("doc.col.status"), W("doc.col.count_docs"), W("doc.col.value_in", currency=s["currency"]), W("doc.col.note")], rows, money_cols=(3,), freeze=False)
         r += len(rows) + 3
-        self._pair(ws, r, L_INVOICES, t["invoices"])
-        self._pair(ws, r + 1, L_LINES, t["lines"])
-        self._pair(ws, r + 2, L_THREE, t["three_way"])
-        self._pair(ws, r + 3, L_TWO, t["two_way"])
-        self._pair(ws, r + 4, L_NONE, t["unlinked"])
-        self._pair(ws, r + 5, L_ACCRUED, _num(t["received_not_billed"]), money=True)
-        self._pair(ws, r + 6, L_PREPAID, _num(t["billed_not_received"]), money=True)
+        self._pair(ws, r, W(L_INVOICES), t["invoices"])
+        self._pair(ws, r + 1, W(L_LINES), t["lines"])
+        self._pair(ws, r + 2, W(L_THREE), t["three_way"])
+        self._pair(ws, r + 3, W(L_TWO), t["two_way"])
+        self._pair(ws, r + 4, W(L_NONE), t["unlinked"])
+        self._pair(ws, r + 5, W(L_ACCRUED), _num(t["received_not_billed"]), money=True)
+        self._pair(ws, r + 6, W(L_PREPAID), _num(t["billed_not_received"]), money=True)
         r += 8
         if s["two_way_why"]:
-            self._section(ws, r, "ทำไมบรรทัดเหล่านี้ตรวจ 2 ทาง")
+            self._section(ws, r, W("doc.section.why_two_way"))
             rows = [[x["why"], x["lines"]] for x in s["two_way_why"]]
-            self._table(ws, r + 1, ["เหตุผล", "จำนวนบรรทัด"], rows, freeze=False)
+            self._table(ws, r + 1, [W("doc.col.reason"), W("doc.col.count_lines")], rows, freeze=False)
             r += len(rows) + 3
-        self._section(ws, r, "เหตุที่ติดเงื่อนไขหรือต้องให้คนตัดสิน")
+        self._section(ws, r, W("doc.section.why_blocked"))
         rows = [[x["label"], STATUS_TH[x["outcome"]], x["invoices"], x["lines"], _num(x["value"])] for x in s["by_reason"]]
-        self._table(ws, r + 1, ["เหตุผล", "ผล", "ใบแจ้งหนี้ (ฉบับ)", "บรรทัด", f"มูลค่า ({s['currency']})"],
-                    rows or [["ไม่มี", "", 0, 0, 0.0]], money_cols=(5,), freeze=False)
+        self._table(ws, r + 1, [W("doc.col.reason"), W("doc.col.result"), W("doc.col.invoices_count"), W("doc.col.line"), W("doc.col.value_in", currency=s["currency"])],
+                    rows or [[W("doc.word.none"), "", 0, 0, 0.0]], money_cols=(5,), freeze=False)
         r += max(len(rows), 1) + 3
         if s["other_currencies"]:
-            self._section(ws, r, "ใบแจ้งหนี้สกุลเงินอื่นที่ไม่มีอัตราแลกเปลี่ยน")
+            self._section(ws, r, W("doc.section.foreign"))
             rows = [[x["currency"], x["count"], _num(x["total"])] for x in s["other_currencies"]]
-            self._table(ws, r + 1, ["สกุลเงิน", "จำนวน (ฉบับ)", "ยอดรวมในสกุลเงินนั้น"], rows, money_cols=(3,), freeze=False)
+            self._table(ws, r + 1, [W("doc.col.currency"), W("doc.col.count_docs"), W("doc.col.total_in_currency")], rows, money_cols=(3,), freeze=False)
             r += len(rows) + 3
-        notes = ["ทุกบรรทัดของใบแจ้งหนี้ตรวจกับบรรทัดของ PO ไม่ได้เทียบเพียงยอดรวมของเอกสาร และเทียบยอดสะสมของทุกใบแจ้งหนี้ที่เรียกเก็บบรรทัดเดียวกัน",
-                 "ตัวเลขทุกตัวมาจากไฟล์ที่ส่งมาและคำนวณด้วยสคริปต์ การจับคู่ที่ไม่ตรงกันทุกตัวต้องมีคนยืนยัน ไม่มีโมเดลคำนวณตัวเลขหรือตัดสินการจับคู่ในไฟล์นี้",
+        notes = [W("doc.note.lines"),
+                 W("doc.note.figures"),
                  c["grir"]["note"]] + [a["text"] for a in c.get("assumptions") or []]
         for n in notes:
             self._note(ws, r, n)
@@ -280,12 +279,11 @@ class MatchWorkbook:
             rows.append([n, i["number"], E3C.date_th(i["date"]), i["doc_type_label"], i["supplier"]["name"], i["supplier"]["tax_id"],
                          ", ".join(i["po_named"]), i["currency"], _num(i["subtotal"]), _num(i["vat_amount"]), _num(i["total"]),
                          i["status_label"], " · ".join(i["reason_labels"]), i["depth_text"],
-                         ("ได้: " if i["vat"]["claimable"] else "ไม่ได้: ") + i["vat"]["why"], "\n".join(i["notes"]), _where(i)])
-        for sheet, sub in ((S_INVOICES, "หนึ่งแถวต่อหนึ่งเอกสาร · สถานะ เหตุผล และวิธีตรวจของบรรทัดในเอกสารนั้น"),
-                           (S_INVOICES_EV, f"หลักฐานของแต่ละแถวในชีต “{S_INVOICES}” อ่านเทียบกันตามลำดับ · เลขผู้เสียภาษี ภาษีซื้อ หมายเหตุ "
-                                           "และไฟล์ แผ่น แถวที่อ่าน")):
-            ws = self.wb.create_sheet(sheet)
-            self._title(ws, sheet, sub)
+                         (W("doc.vat.claimable") if i["vat"]["claimable"] else W("doc.vat.not_claimable")) + i["vat"]["why"], "\n".join(i["notes"]), _where(i)])
+        for sheet, sub in ((S_INVOICES, W("doc.sub.invoices")),
+                           (S_INVOICES_EV, W("doc.sub.invoices_ev", s_invoices=W(S_INVOICES)))):
+            ws = self.wb.create_sheet(W(sheet))
+            self._title(ws, W(sheet), sub)
             self._part(ws, H_INVOICES, rows, LAYOUT[sheet], money_cols=(9, 10, 11), wrap_cols=(4, 5, 12, 13, 15, 16, 17))
 
     def line_rows(self) -> list:
@@ -297,11 +295,11 @@ class MatchWorkbook:
             link = x["link"] or {}
             var = x.get("price_variance") or {}
             if x["unplanned"] is not None:
-                depth, why = "ค่าใช้จ่ายที่ไม่ได้สั่งซื้อ", x["unplanned"]["label"]
+                depth, why = W("doc.sheet.unplanned"), x["unplanned"]["label"]
             else:
                 depth, why = x["depth_label"], x["depth_why"]
             receipts = "\n".join(f"{g['gr']} {E3C.date_th(g['date'])} {g['quantity_in_po_unit']} · " +
-                                 (f"ยืนยันในระบบโดย {g['confirmed_by']}".rstrip("โดย ").strip() if g["in_system"] else _where(g))
+                                 ((W("doc.gr.confirmed_by", confirmed_by=g["confirmed_by"]) if g["confirmed_by"] else W("doc.gr.confirmed")) if g["in_system"] else _where(g))
                                  for g in x["receipts"])
             failed = "\n".join(f"{c['label']}: {c['detail'] or (str(c['actual']) + ' / ' + str(c['expected']))}"
                                for c in x["checks"] if not c["ok"])
@@ -318,15 +316,11 @@ class MatchWorkbook:
 
     def lines(self):
         rows = self.line_rows()
-        for sheet, sub in ((S_LINES, "ทุกบรรทัดบอกว่าตรวจ 3 ทางหรือ 2 ทาง สถานะ และเหตุผล · บรรทัดของ PO ใบรับของ และไฟล์ แผ่น แถวที่อ่าน "
-                                     f"อยู่ในชีต “{S_LINES_EV}” ยอดสะสม ข้อที่ไม่ผ่าน และค่าที่ยอมรับได้อยู่ในชีต “{S_LINES_CRIT}” "
-                                     "แถวเดียวกันคือบรรทัดเดียวกัน"),
-                           (S_LINES_EV, f"หลักฐานของแต่ละบรรทัดในชีต “{S_LINES}” อ่านเทียบกันตามลำดับ · ตรวจกับบรรทัดใดของ PO และใบรับของใด "
-                                        "พร้อมไฟล์ แผ่น และแถว"),
-                           (S_LINES_CRIT, f"เกณฑ์ที่ใช้ตรวจแต่ละบรรทัดในชีต “{S_LINES}” อ่านเทียบกันตามลำดับ · เหตุที่ตรวจแบบนี้ ยอดสะสม "
-                                          "ข้อที่ไม่ผ่าน ค่าที่ยอมรับได้ที่ใช้ และการจับคู่")):
-            ws = self.wb.create_sheet(sheet)
-            self._title(ws, sheet, sub)
+        for sheet, sub in ((S_LINES, W("doc.sub.lines", s_lines_ev=W(S_LINES_EV), s_lines_crit=W(S_LINES_CRIT))),
+                           (S_LINES_EV, W("doc.sub.lines_ev", s_lines=W(S_LINES))),
+                           (S_LINES_CRIT, W("doc.sub.lines_crit", s_lines=W(S_LINES)))):
+            ws = self.wb.create_sheet(W(sheet))
+            self._title(ws, W(sheet), sub)
             self._part(ws, H_LINES, rows, LAYOUT[sheet], money_cols=(7, 8, 14, 22), qty_cols=(5, 17, 18, 19, 20),
                        wrap_cols=(4, 9, 10, 13, 15, 16, 23, 24, 25, 26, 27, 29, 30, 31))
 
@@ -338,19 +332,18 @@ class MatchWorkbook:
             rows.append([p["po"], p["line_no"], p["item_code"], p["description"], p["kind_label"], p["status_label"], p["unit"],
                          _num(p["unit_price"]), _num(p["quantity"]), _num(p["received"]), _num(p["billed"]), _num(p["billed_amount"]),
                          _num(p["open_to_bill"]), p["over_billed_why"], DEPTH_SHORT[p["depth"]], invs, grs, _where(p)])
-        for sheet, title, sub in ((S_PO, "ยอดสะสมตามบรรทัดของ PO", "สั่งซื้อ รับจริง และเรียกเก็บสะสมของทุกใบแจ้งหนี้ ทั้งรอบนี้และรอบก่อน"),
-                                  (S_PO_EV, S_PO_EV, f"หลักฐานของแต่ละบรรทัดในชีต “{S_PO}” อ่านเทียบกันตามลำดับ · ใบแจ้งหนี้และใบรับของที่นับ "
-                                                     "และไฟล์ แผ่น แถวของ PO")):
-            ws = self.wb.create_sheet(sheet)
+        for sheet, title, sub in ((S_PO, W("doc.title.po"), W("doc.sub.po")),
+                                  (S_PO_EV, W(S_PO_EV), W("doc.sub.po_ev", s_po=W(S_PO)))):
+            ws = self.wb.create_sheet(W(sheet))
             self._title(ws, title, sub)
             self._part(ws, H_PO, rows, LAYOUT[sheet], money_cols=(8, 12), qty_cols=(9, 10, 11, 13), wrap_cols=(4, 14, 16, 17, 18))
 
     def grir(self):
-        ws = self.wb.create_sheet(S_GRIR)
+        ws = self.wb.create_sheet(W(S_GRIR))
         g = self.c["grir"]
-        self._title(ws, "รับของแล้วยังไม่ถูกเรียกเก็บ และเรียกเก็บแล้วยังไม่ได้รับของ", f"{g['covers']} · {g['note']}")
-        self._pair(ws, 4, L_ACCRUED, _num(g["received_not_billed"]), money=True, bold=True)
-        self._pair(ws, 5, L_PREPAID, _num(g["billed_not_received"]), money=True, bold=True)
+        self._title(ws, W("doc.title.grir"), f"{g['covers']} · {g['note']}")
+        self._pair(ws, 4, W(L_ACCRUED), _num(g["received_not_billed"]), money=True, bold=True)
+        self._pair(ws, 5, W(L_PREPAID), _num(g["billed_not_received"]), money=True, bold=True)
         ws.column_dimensions["A"].width = 44
         ws.column_dimensions["B"].width = 20
         rows = []
@@ -360,85 +353,85 @@ class MatchWorkbook:
             rows.append([p["po"], p["line_no"], p["description"], p["unit"], _num(p["unit_price"]), _num(p["received"]), _num(p["billed"]),
                          _num(p["received_not_billed"]), _num(p["received_not_billed_amount"]), _num(p["billed_not_received"]),
                          _num(p["billed_not_received_amount"]), _where(p)])
-        self._table(ws, 7, ["PO", "บรรทัด", "รายการ", "หน่วย", "ราคาต่อหน่วยใน PO", "รับจริงสะสม", "เรียกเก็บสะสม", "รับแล้วยังไม่เรียกเก็บ",
-                            "มูลค่า (รับแล้วยังไม่เรียกเก็บ)", "เรียกเก็บแล้วยังไม่รับ", "มูลค่า (เรียกเก็บแล้วยังไม่รับ)", "หลักฐาน (PO)"], rows,
+        self._table(ws, 7, ["PO", W("doc.col.line"), W("doc.col.item"), W("doc.col.unit"), W("doc.col.po_unit_price"), W("doc.col.received"), W("doc.col.billed"), W("doc.col.received_not_billed"),
+                            W("doc.col.received_not_billed_value"), W("doc.col.billed_not_received"), W("doc.col.billed_not_received_value"), W("doc.col.evidence_po")], rows,
                     money_cols=(5, 9, 11), qty_cols=(6, 7, 8, 10), wrap_cols=(3, 12), freeze=False)
 
     def unplanned(self):
-        ws = self.wb.create_sheet(S_UNPLANNED)
-        self._title(ws, S_UNPLANNED, "ค่าขนส่ง ค่าประกันภัย ค่าดำเนินการ และค่าธรรมเนียมที่ถูกเรียกเก็บโดยไม่อยู่ใน PO · ไม่นำไปรวมกับส่วนต่างราคาของบรรทัดใด")
-        rows = [[u["invoice_number"], u["supplier"], u["label"], _num(u["amount"]), "อยู่ในวงเงินที่ตั้งไว้" if u["within_limit"] else "เกินวงเงินที่ตั้งไว้"]
+        ws = self.wb.create_sheet(W(S_UNPLANNED))
+        self._title(ws, W(S_UNPLANNED), W("doc.sub.unplanned"))
+        rows = [[u["invoice_number"], u["supplier"], u["label"], _num(u["amount"]), W("doc.unplanned.within") if u["within_limit"] else W("doc.unplanned.over")]
                 for u in self.c["unplanned"]]
-        self._table(ws, 4, ["ใบแจ้งหนี้", "ผู้ขาย", "ประเภทค่าใช้จ่าย", "จำนวนเงิน", "ผล"], rows, [20, 40, 40, 18, 28], money_cols=(4,),
+        self._table(ws, 4, [W("doc.col.invoice"), W("doc.col.seller"), W("doc.col.charge_kind"), W("doc.col.amount"), W("doc.col.result")], rows, [20, 40, 40, 18, 28], money_cols=(4,),
                     wrap_cols=(2, 3))
 
     def notes(self):
-        ws = self.wb.create_sheet(S_NOTES)
-        self._title(ws, S_NOTES, "ใบลดหนี้ลดยอดที่เรียกเก็บสะสมของบรรทัดที่อ้างถึง ใบเพิ่มหนี้เพิ่มยอด · ทั้งสองต้องระบุใบแจ้งหนี้เดิม")
+        ws = self.wb.create_sheet(W(S_NOTES))
+        self._title(ws, W(S_NOTES), W("doc.sub.notes"))
         rows = [[x["number"], E3C.date_th(x["date"]), x["kind_label"], x["supplier"], _num(x["total"]), x["ref_invoice"],
-                 "พบ" if x["corrects"] else "ไม่พบ", x["status_label"], " · ".join(x["reasons"])] for x in self.c["notes"]]
-        self._table(ws, 4, ["เลขที่", "วันที่", "ชนิด", "ผู้ขาย", "ยอดรวม", "อ้างถึงใบแจ้งหนี้", "ใบแจ้งหนี้เดิม", "สถานะ", "เหตุผล"], rows,
-                    [18, 14, 16, 40, 16, 20, 14, 22, 44], money_cols=(5,), wrap_cols=(4, 9), first=["เลขที่", "ผู้ขาย", "ยอดรวม"])
+                 W("doc.word.found") if x["corrects"] else W("doc.word.not_found"), x["status_label"], " · ".join(x["reasons"])] for x in self.c["notes"]]
+        self._table(ws, 4, [W("doc.col.number"), W("doc.col.date"), W("doc.col.note_kind"), W("doc.col.seller"), W("doc.col.total"), W("doc.col.refers_to"), W("doc.col.original_invoice"), W("doc.col.status"), W("doc.col.reason")], rows,
+                    [18, 14, 16, 40, 16, 20, 14, 22, 44], money_cols=(5,), wrap_cols=(4, 9), first=[W("doc.col.number"), W("doc.col.seller"), W("doc.col.total")])
 
     def links(self):
         rows = []
         for n, m in enumerate(self.c["match"]["links"], start=1):
             def join(rs, f):
                 return "\n".join(str(f(r)) for r in rs)
-            state = STATE_TH[m["state"]] if m["state"] == "linked" or m["decision"] is None else "ข้ามคำถามไว้ รอคนตัดสิน"
+            state = STATE_TH[m["state"]] if m["state"] == "linked" or m["decision"] is None else W("doc.status.skipped")
             rows.append([n, KIND_TH[m["kind"]], m["document"], state, m["pass_label"], m["tier_label"],
                          who(m["confirmed"], m["confirmed_by"]) if m["state"] == "linked" else "",
                          join(m["left"], lambda r: f"{r['ref']} {r['name']}".strip()), join(m["left"], _where),
                          join(m["right"], lambda r: f"{r['ref']} {r['name']}".strip()), join(m["right"], _where),
                          _num(m["similarity"])])
-        for sheet, sub in ((S_LINKS, "ทุกคู่บอกวิธีที่จับได้ ขั้น และผู้ยืนยัน · ขั้นที่ไม่ใช่ “ตรงกันทุกตัว” ต้องมีคนยืนยันเสมอ"),
-                           (S_LINKS_EV, f"หลักฐานของแต่ละคู่ในชีต “{S_LINKS}” อ่านเทียบกันตามลำดับ · ไฟล์ แผ่น และแถวของทั้งสองข้าง")):
-            ws = self.wb.create_sheet(sheet)
-            self._title(ws, sheet, sub)
+        for sheet, sub in ((S_LINKS, W("doc.sub.links")),
+                           (S_LINKS_EV, W("doc.sub.links_ev", s_links=W(S_LINKS)))):
+            ws = self.wb.create_sheet(W(sheet))
+            self._title(ws, W(sheet), sub)
             self._part(ws, H_LINKS, rows, LAYOUT[sheet], wrap_cols=(4, 5, 6, 7, 8, 9, 10, 11))
 
     def exceptions(self):
-        ws = self.wb.create_sheet(S_EXC)
-        self._title(ws, "ข้อยกเว้น", "สิ่งที่คนต้องตัดสิน · ทุกข้อมีทางเลือก และไม่มีข้อใดถูกตัดสินแทนคน")
+        ws = self.wb.create_sheet(W(S_EXC))
+        self._title(ws, W("doc.sheet.exceptions"), W("doc.sub.exceptions"))
         rows = []
         for n, e in enumerate(self.c["run_exceptions"], start=1):
             src = "; ".join(_where(s) for s in (e["source_ref"].get("rows") or []) if s)
             rows.append([n, e["reason"], e["detail"], e["proposed_action"], " / ".join(ch["label"] for ch in e["choices"]), src])
-        self._table(ws, 4, ["ลำดับ", "เหตุผล", "รายละเอียด", "สิ่งที่เสนอให้ทำ", "ทางเลือก", "หลักฐาน"], rows, [6, 26, 50, 30, 40, 40],
+        self._table(ws, 4, [W("doc.col.no"), W("doc.col.reason"), W("doc.col.detail"), W("doc.col.proposed"), W("doc.col.options"), W("doc.col.evidence")], rows, [6, 26, 50, 30, 40, 40],
                     wrap_cols=(2, 3, 4, 5, 6))
 
     def evidence(self):
-        ws = self.wb.create_sheet(S_EVIDENCE)
+        ws = self.wb.create_sheet(W(S_EVIDENCE))
         c = self.c
-        self._title(ws, "หลักฐาน", "ไฟล์ที่ใช้ ลายนิ้วมือของไฟล์ ค่าที่ตั้งไว้ และขั้นของการจับคู่")
-        kinds = {"po": "ใบสั่งซื้อ", "gr": "ใบรับของ", "invoice": "ใบแจ้งหนี้"}
+        self._title(ws, W("doc.col.evidence"), W("doc.sub.evidence"))
+        kinds = {"po": W("doc.role.po"), "gr": W("doc.col.gr"), "invoice": W("doc.col.invoice")}
         rows = [[kinds.get(f["kind"], f["kind"]), f["name"], f["sheet"] or "", f["header_row"], f["rows"],
                  ", ".join(f"{k}={v}" for k, v in sorted((f["columns"] or {}).items())), " · ".join(f["said_by"]), f["sha256"]]
                 for f in c["files"]]
-        self._table(ws, 4, ["ใช้เป็น", "ไฟล์", "แผ่น", "แถวหัวตาราง", "จำนวนรายการ", "คอลัมน์ที่อ่าน", "รู้ได้จาก", "SHA-256"], rows,
+        self._table(ws, 4, [W("doc.col.used_as"), W("doc.col.file"), W("doc.col.sheet"), W("doc.col.header_row"), W("doc.col.count"), W("doc.col.columns_read"), W("doc.col.known_by"), "SHA-256"], rows,
                     [18, 30, 16, 10, 10, 40, 30, 36], wrap_cols=(2, 3, 6, 7, 8), freeze=False)
         r = 4 + len(rows) + 2
-        self._section(ws, r, "ค่าที่ตั้งไว้")
+        self._section(ws, r, W("doc.section.settings"))
         srows = [[c["practice"]["question"], c["practice"]["label"], ""]]
-        srows += [[self.labels[k], v, "ค่าที่ตั้งไว้ใช้ไม่ได้ จึงใช้ค่าตั้งต้น" if k in c["settings"]["unusable"] else ""]
+        srows += [[self.labels[k], v, W("doc.note.setting_unusable") if k in c["settings"]["unusable"] else ""]
                   for k, v in c["settings"]["tolerances"].items()]
-        srows += [["การแปลงหน่วยนับ", f"1 {x['from']} = {x['factor']} {x['to']}" + (f" (เฉพาะ {x['item']})" if x.get("item") else ""),
-                   "คุณตอบในรอบนี้" if x.get("answered") else "ตั้งไว้ใน agent"] for x in c["settings"]["conversions"]]
-        self._table(ws, r + 1, ["ค่า", "ที่ใช้ในรอบนี้", "หมายเหตุ"], srows, freeze=False)
+        srows += [[W("doc.setting.unit_conversion"), f"1 {x['from']} = {x['factor']} {x['to']}" + (W("doc.setting.only_item", item=x["item"]) if x.get("item") else ""),
+                   W("doc.setting.answered") if x.get("answered") else W("doc.setting.in_agent")] for x in c["settings"]["conversions"]]
+        self._table(ws, r + 1, [W("doc.col.setting"), W("doc.col.used_this_run"), W("doc.col.note")], srows, freeze=False)
         r += len(srows) + 3
-        self._section(ws, r, "ขั้นของการจับคู่")
+        self._section(ws, r, W("doc.section.tiers"))
         trows = [[t["label"], t["groups"], t["by_rule"], t["by_person"], t["waiting"]] for t in c["match"]["tiers"]]
-        self._table(ws, r + 1, ["ขั้น", "คู่ที่จับได้", "ตามกฎ", "คนยืนยัน", "รอคนยืนยัน"], trows, freeze=False)
+        self._table(ws, r + 1, [W("doc.col.tier"), W("doc.col.pairs_matched"), W("doc.col.by_rule"), W("doc.col.by_person"), W("doc.state.waiting")], trows, freeze=False)
         r += len(trows) + 3
-        prows = [[p["label"], "จับคู่เอง" if p["auto"] else "เสนอให้คนยืนยัน", p["by_rule"] + p["by_person"], p["waiting"]]
+        prows = [[p["label"], W("doc.pass.auto") if p["auto"] else W("doc.pass.proposed"), p["by_rule"] + p["by_person"], p["waiting"]]
                  for p in c["match"]["passes"]]
-        self._table(ws, r + 1, ["วิธีจับคู่ (ตามลำดับ)", "ผล", "คู่ที่จับได้", "รอคนยืนยัน"], prows, freeze=False)
+        self._table(ws, r + 1, [W("doc.col.pass_in_order"), W("doc.col.result"), W("doc.col.pairs_matched"), W("doc.state.waiting")], prows, freeze=False)
 
     def left_out(self):
-        ws = self.wb.create_sheet(S_LEFT)
-        self._title(ws, S_LEFT, "ไฟล์ของรอบนี้ที่ไม่ได้นำมาตรวจ เหตุผล และวิธีนำกลับมารวม")
+        ws = self.wb.create_sheet(W(S_LEFT))
+        self._title(ws, W(S_LEFT), W("doc.sub.left_out"))
         rows = [[e["name"], e["reason"], e["detail"], e["how"]] for e in self.c["not_included"]]
-        self._table(ws, 4, ["ไฟล์", "เหตุผล", "รายละเอียด", "นำกลับมารวมได้อย่างไร"], rows, [40, 40, 60, 50], wrap_cols=(2, 3, 4))
+        self._table(ws, 4, [W("doc.col.file"), W("doc.col.reason"), W("doc.col.detail"), W("doc.col.how_back")], rows, [40, 40, 60, 50], wrap_cols=(2, 3, 4))
 
     def write(self, path: str) -> dict:
         self.summary()
@@ -456,9 +449,10 @@ class MatchWorkbook:
         self.wb.properties.creator = "Agent Market · invoice and purchase order matching"
         # AM8: printable — the face on one page; the columns that say which invoice and line a row is repeat on
         # every page beside its figures (AM10: and open every companion sheet of a wide table)
-        id_cols = {s: ID_COLS[main] for main, names in PARTS.items() for s in names}
+        id_cols = {W(s): ID_COLS[main] for main, names in PARTS.items() for s in names}
         workpaper.setup_workbook(self.wb, doc_name=os.path.basename(path),
-                                 id_cols={**id_cols, S_NOTES: 2, S_UNPLANNED: 2, S_GRIR: 3, S_EXC: 2, S_EVIDENCE: 2, S_LEFT: 1})
+                                 id_cols={**id_cols, W(S_NOTES): 2, W(S_UNPLANNED): 2, W(S_GRIR): 3, W(S_EXC): 2, W(S_EVIDENCE): 2, W(S_LEFT): 1},
+                                 lang=words.lang())
         self.wb.save(path)
         t = self.c["totals"]
         return {"sheets": list(self.wb.sheetnames), "invoices": t["invoices"], "passed": t["passed"], "blocked": t["blocked"],
@@ -492,33 +486,34 @@ def check(path: str, computed: dict, run: dict | None = None) -> list:
 
     wb = load_workbook(path)
     t, s = computed["totals"], computed["summary"]
-    out = [ck("xlsx.sheets", set(SHEETS) <= set(wb.sheetnames), ", ".join(wb.sheetnames), W("check.sheets"))]
-    face = _labelled(wb[S_SUMMARY])
-    a3 = str(wb[S_SUMMARY]["A3"].value or "")
+    out = [ck("xlsx.sheets", {W(k) for k in SHEETS} <= set(wb.sheetnames), ", ".join(wb.sheetnames), W("check.sheets"))]
+    face = _labelled(wb[W(S_SUMMARY)])
+    a3 = str(wb[W(S_SUMMARY)]["A3"].value or "")
+    header_draft = W(HEADER_DRAFT).split("{}")[0]   # the mark on the face when a header field has no value
     h = Tally()
     for label, want in header_fields(computed, run):
         got = str(face.get(label) or "")
         h.n += 1
         if want and not got.startswith(want):
             h.bad.append(W("check.header.differs", label=label, got=got[:40], want=want))
-        elif not want and (got != MISSING or "หัวกระดาษทำการยังไม่ครบ" not in a3):
+        elif not want and (got != W(MISSING) or header_draft not in a3):
             h.bad.append(W("check.header.no_value", label=label, got=got))
-    for k in (L_PERIOD, L_PRACTICE, L_DEPTH, L_APPROVAL):
+    for k in (W(L_PERIOD), W(L_PRACTICE), W(L_DEPTH), W(L_APPROVAL)):
         h.n += 1
         if not face.get(k):
             h.bad.append(W("check.header.empty", k=k))
     out.append(h.result("xlsx.header", W("check.header"),
                         W("noun.header")))
-    depth = str(face.get(L_DEPTH) or "")
-    says = f"ตรวจ 3 ทาง {t['three_way']} บรรทัด" in depth and f"ตรวจ 2 ทาง {t['two_way']} บรรทัด" in depth
-    warned = any(r and r[0] == TWO_WAY_WARNING for r in wb[S_SUMMARY].iter_rows(min_row=1, max_col=1, values_only=True))
+    depth = str(face.get(W(L_DEPTH)) or "")
+    says = W("doc.face.depth_line", three_way=t["three_way"], two_way=t["two_way"]) in depth
+    warned = any(r and r[0] == W(TWO_WAY_WARNING) for r in wb[W(S_SUMMARY)].iter_rows(min_row=1, max_col=1, values_only=True))
     out.append(ck("xlsx.depth_on_face", says and warned == (t["two_way"] > 0), depth,
                   W("check.depth_on_face")))
-    ok = (_same(face.get(L_THREE), t["three_way"]) and _same(face.get(L_TWO), t["two_way"]) and _same(face.get(L_INVOICES), t["invoices"])
-          and _same(face.get(L_ACCRUED), t["received_not_billed"]) and _same(face.get(L_PREPAID), t["billed_not_received"]))
+    ok = (_same(face.get(W(L_THREE)), t["three_way"]) and _same(face.get(W(L_TWO)), t["two_way"]) and _same(face.get(W(L_INVOICES)), t["invoices"])
+          and _same(face.get(W(L_ACCRUED)), t["received_not_billed"]) and _same(face.get(W(L_PREPAID)), t["billed_not_received"]))
     for x in s["by_status"]:
         ok = ok and _same(face.get(x["label"]), x["count"])
-    out.append(ck("xlsx.summary", ok, W("check.n_invoices", n=face.get(L_INVOICES)), W("check.summary")))
+    out.append(ck("xlsx.summary", ok, W("check.n_invoices", n=face.get(W(L_INVOICES))), W("check.summary")))
     inv = table(parts(wb, S_INVOICES), H_INVOICES)
     invoices = computed["invoices"]
     ok = len(inv) == len(invoices) and all(r[11] == i["status_label"] and r[13] == i["depth_text"] and
@@ -528,7 +523,7 @@ def check(path: str, computed: dict, run: dict | None = None) -> list:
     ln = table(parts(wb, S_LINES), H_LINES)
     lines = computed["lines"]
     same = len(ln) == len(lines)
-    depth_ok = same and all(r[8] == (x["depth_label"] if x["unplanned"] is None else "ค่าใช้จ่ายที่ไม่ได้สั่งซื้อ") and r[9]
+    depth_ok = same and all(r[8] == (x["depth_label"] if x["unplanned"] is None else W("doc.sheet.unplanned")) and r[9]
                             for r, x in zip(ln, lines))
     out.append(ck("xlsx.line_depth", depth_ok, W("check.lines.detail", n=len(ln), want=len(lines)), W("check.line_depth")))
     linked = same and all((x["po_line"] is None) or (r[10] and r[14]) for r, x in zip(ln, lines))
@@ -545,7 +540,7 @@ def check(path: str, computed: dict, run: dict | None = None) -> list:
     ok = len(po) == len(computed["po_lines"]) and all(_same(r[10], p["billed"]) and (p["received"] is None or _same(r[9], p["received"]))
                                                       and bool(r[13]) == p["over_billed"] for r, p in zip(po, computed["po_lines"]))
     out.append(ck("xlsx.cumulative", ok, W("check.n_po_lines", n=len(po)), W("check.cumulative")))
-    ex = _rows(wb[S_EXC])
+    ex = _rows(wb[W(S_EXC)])
     run_ex = computed["run_exceptions"]
     ok = len(ex) == len(run_ex) and all(e["reason_code"] in REASON_TH and r[1] == e["reason"] and r[4] for r, e in zip(ex, run_ex))
     out.append(ck("xlsx.exceptions", ok, W("check.n_items", n=len(ex)), W("check.exceptions")))
@@ -554,10 +549,12 @@ def check(path: str, computed: dict, run: dict | None = None) -> list:
     ok = len(lk) == len(links) and all(r[4] and r[5] and (m["state"] != "linked" or r[6]) for r, m in zip(lk, links))
     ok = ok and all(m["confirmed"] == "person" for m in links if m["state"] == "linked" and m["tier"] != "exact")
     out.append(ck("xlsx.links", ok, W("check.n_pairs", n=len(lk)), W("check.links")))
-    approved = any("อนุมัติแล้ว" in str(c) or "จ่ายแล้ว" in str(c) for ws in wb.worksheets for r in ws.iter_rows(values_only=True) for c in r if c)
-    out.append(ck("xlsx.no_approval", not approved and face.get(L_APPROVAL) == APPROVAL, "", W("check.no_approval")))
+    # the words the paper must not say of any invoice, in either language
+    forbidden = [v for k in ("doc.word.approved", "doc.word.paid") for v in W.both(k).values()]
+    approved = any(w in str(c) for ws in wb.worksheets for r in ws.iter_rows(values_only=True) for c in r if c for w in forbidden)
+    out.append(ck("xlsx.no_approval", not approved and face.get(W(L_APPROVAL)) == W(APPROVAL), "", W("check.no_approval")))
     left = computed["not_included"]
-    n = len(_rows(wb[S_LEFT])) if S_LEFT in wb.sheetnames else 0
+    n = len(_rows(wb[W(S_LEFT)])) if W(S_LEFT) in wb.sheetnames else 0
     out.append(ck("xlsx.not_included", n == len(left), W("check.n_files", n=n), W("check.not_included")))
     f = Tally()
     for r, i in zip(inv, invoices):

@@ -34,6 +34,7 @@ from agent_market.packages.po_matching.checks import settings as S
 from agent_market.packages.po_matching.checks import units as U
 from agent_market.packages.po_matching.scripts import match as M
 from agent_market.packages.po_matching.scripts.workbook import TWO_WAY_WARNING
+from agent_market.packages.po_matching.scripts.workbook import W as WB_W   # AM18: the warning is a key, said when read
 from agent_market.tests import pokit as K
 from agent_market.tests import samplekit
 
@@ -120,7 +121,7 @@ class MatchDepth(unittest.TestCase):
         sheets = res["sheets"]
         face = {r[0]: r[1] for r in sheets["สรุป"] if r and isinstance(r[0], str)}
         self.assertEqual(face["วิธีตรวจของรอบนี้"], "ตรวจ 3 ทาง 0 บรรทัด · ตรวจ 2 ทาง 1 บรรทัด")
-        self.assertIn([TWO_WAY_WARNING], [[r[0]] for r in sheets["สรุป"] if r and r[0] == TWO_WAY_WARNING])
+        self.assertIn([WB_W(TWO_WAY_WARNING)], [[r[0]] for r in sheets["สรุป"] if r and r[0] == WB_W(TWO_WAY_WARNING)])
         # AM9: printed, the line's identity and amounts come first; the tables are read back by header name
         row = res["lines"][0]
         self.assertEqual((row[8], row[9], row[15]), ("ตรวจ 2 ทาง (PO · ใบแจ้งหนี้)", "เป็นบริการ ไม่มีใบรับของ", None))
@@ -129,7 +130,7 @@ class MatchDepth(unittest.TestCase):
 
     def test_a_round_that_is_all_three_way_has_no_warning(self):
         _, res = result("clean_three_way")
-        self.assertNotIn(TWO_WAY_WARNING, [r[0] for r in res["sheets"]["สรุป"] if r])
+        self.assertNotIn(WB_W(TWO_WAY_WARNING), [r[0] for r in res["sheets"]["สรุป"] if r])
         for x in res["computed"]["lines"]:
             self.assertEqual(x["depth"], "three_way")
             self.assertTrue(all(g["file"] and g["sheet"] and g["row"] for g in x["receipts"]))

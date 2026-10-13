@@ -328,8 +328,9 @@ def check(case: dict, res: dict) -> list:
         errors.append(f"the face says {face.get('วิธีตรวจของรอบนี้')!r}, expected {exp['depth_on_face']!r}")
     if "two_way_warning" in exp:
         from agent_market.packages.po_matching.scripts.workbook import TWO_WAY_WARNING
+        from agent_market.packages.po_matching.scripts.workbook import W as WBW
 
-        warned = any(r and r[0] == TWO_WAY_WARNING for r in res["sheets"]["สรุป"])
+        warned = any(r and r[0] == WBW(TWO_WAY_WARNING) for r in res["sheets"]["สรุป"])   # (AM18: a key, said when read)
         if warned != exp["two_way_warning"]:
             errors.append(f"the face warns about two-way lines: {warned}, expected {exp['two_way_warning']}")
     if "two_way_why" in exp:

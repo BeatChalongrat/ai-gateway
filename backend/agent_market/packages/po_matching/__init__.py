@@ -102,7 +102,7 @@ def compute(files, roles, period, *, answers=None, defaults=None, today=None, hi
         return _match.compute(files, roles, period, answers=answers, defaults=defaults, today=today, history=history,
                               proposals=proposals, answered_by=answered_by)
 
-    return _words.with_document(table(), table)
+    return table()
 
 
 def postcompute(files, roles, period, computed, *, answers=None, defaults=None) -> dict:
@@ -122,7 +122,7 @@ def summarize(computed: dict) -> dict:
 DIRECTIVES = ("sort_by_variance",)
 # the heading of the column the lines are ordered by — the working paper's own word, and the one the sentences
 # asked.variance.* of the manifest name it by
-VARIANCE = "ส่วนต่างราคารวม"
+VARIANCE = "doc.col.variance"
 
 
 def _as_asked(computed: dict, req: dict) -> tuple[dict, list[str]]:
@@ -150,10 +150,10 @@ def _asked_check(path: str, view: dict, applied: list[str]) -> dict:
     from .scripts.workbook import H_LINES, S_LINES, parts
 
     rows = table(parts(load_workbook(path), S_LINES), H_LINES)
-    col = H_LINES.index(VARIANCE)
+    col = H_LINES.of(VARIANCE)
     sizes = [abs(asked.number(r[col])) if isinstance(r[col], (int, float)) and not isinstance(r[col], bool) else None for r in rows]
     if len(rows) != len(view["lines"]) or not asked.runs_down(sizes):
-        return asked.check(False, W("asked.variance.not", sheet=S_LINES))
+        return asked.check(False, W("asked.variance.not", sheet=W(S_LINES)))
     return asked.check(True, W("asked.variance.ok", n=len(rows)), len(rows))
 
 
@@ -164,17 +164,15 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     from ...deliverables.theme import resolve
     from .scripts.workbook import MatchWorkbook, check
 
-    # the working paper is written from the table in the documents' language; what the gate then says of
-    # the file is said in the run's
-    view, applied = _as_asked(_words.for_document(computed), req)
+    # AM18: the working paper is written in the run's language, like everything the run says
+    view, applied = _as_asked(computed, req)
     theme = resolve(req.get("theme"))
     names = req.get("names") or {}
     artifacts, all_ok = [], True
     for fmt in [f for f in wanted_formats(req, ["xlsx"]) if f == "xlsx"]:
         name = os.path.basename(names.get(fmt) or "po_matching.xlsx")
         path = os.path.join(out_dir, name)
-        with _words.speaking(_words.DOCUMENT):
-            meta = MatchWorkbook(view, theme, req.get("run")).write(path)
+        meta = MatchWorkbook(view, theme, req.get("run")).write(path)
         checks = check(path, view, req.get("run"))
         if applied:
             checks.append(_asked_check(path, view, applied))
