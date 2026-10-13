@@ -187,28 +187,10 @@ jobs:
       # network beyond a loopback express upstream.
       - run: npm test
 
-  desktop-test:
-    name: SranDesktop (dotnet build + test, Windows)
-    # net8.0-windows / WPF cannot build on Linux — this job MUST stay on
-    # a Windows runner.
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
-      - name: Cache NuGet packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('SranDesktop/**/*.csproj') }}
-          restore-keys: nuget-${{ runner.os }}-
-      - name: Build (Release, warnings-as-informative but 0-error bar)
-        run: dotnet build SranDesktop/SranDesktop.sln -c Release
-      - name: Test
-        # Suite is self-contained: sqlite in temp dirs, loopback
-        # HttpListener fakes for MCP dials — no secrets, no live services.
-        run: dotnet test SranDesktop/SranDesktop.sln -c Release --no-build
+  # AM19 — SranDesktop/ (the earlier WPF client) is kept as code but is not shipped,
+  # so CI no longer builds or tests it: the Windows job (restore, build and test of
+  # the solution on a windows-latest runner, billed at twice a Linux minute) is gone.
+  # The desktop that ships is apps/desktop (Electron), tested by its own suite.
 
   repo-tracks:
     # AM19 — only what the code needs is tracked: a tracked file that

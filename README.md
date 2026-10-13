@@ -55,8 +55,9 @@ interpreter sandbox trust boundary.
 - **mock-provider** `:9090` — fake LLM for tests
 
 **Frontends / clients** — three Next.js apps: **admin-ui** `:3000`,
-**portal** `:3001`, **web-chat** `:3002` (`apps/web-chat/`); plus **SranDesktop**,
-a .NET 8 WPF desktop client (`SranDesktop/`).
+**portal** `:3001`, **web-chat** `:3002` (`apps/web-chat/`); the desktop app that
+ships is `apps/desktop/` (Electron, hosting the web chat). `SranDesktop/` is the
+earlier .NET 8 WPF client — kept as code, not shipped, not built by CI.
 
 ---
 
@@ -352,7 +353,7 @@ ai-gateway/
 ├── admin-ui/               # Next.js admin (:3000)
 ├── portal/                 # Next.js customer portal (:3001)
 ├── apps/web-chat/          # Next.js web chat (:3002)
-├── SranDesktop/            # .NET 8 WPF desktop client
+├── SranDesktop/            # earlier .NET 8 WPF desktop client (not shipped, not built by CI)
 ├── dlp-sidecar/            # Rust DLP gRPC sidecar
 ├── rate-limiter/           # Rust rate-limit gRPC sidecar
 ├── log-worker/             # Go log-writer gRPC sidecar
