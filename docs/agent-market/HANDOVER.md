@@ -11,10 +11,10 @@ the host and are **not in git**.
 - **Who gets in:** Google sign-in; the allowed address domain is set to `gbtech.co.th`. Agent Market is "listed people
   only"; the list holds two admins (the owner and the walk account `qa@`). **No ordinary member has
   used it on live yet.**
-- **Live images:** backend `67d9fc0` · chat-edge, runner, web-chat `9a1af45` · admin-ui `7065c18`.
-  `gitlab/main` = `fb66c5ac`.
-- **In the repo and not yet on live:** the admin's lists of who may receive documents (tip of `main`,
-  migration `011_am16b`). It is live when `agent_market.schema_migrations` holds `011_am16b`.
+- **Live images:** backend `67d9fc0` · chat-edge, runner, admin-ui `90fbe38` · web-chat `9a1af45`.
+  Everything on `main` is pushed and live; nothing waits in the repo.
+- **Live since 13 Oct, 10:58:** the admin's lists of who may receive documents (migration `011_am16b`).
+  Both lists are empty, so no agent reaches anybody outside.
 
 ## The six agents
 
@@ -33,13 +33,15 @@ person confirms. A run waits for a person's answer, and for its model when the m
 ## What an admin decides (admin app → Agent Market)
 
 Access and budgets · catalogue (publish, samples) · per agent: may its documents leave (off for all),
-are they masked (off for all) · all runs, reported problems, spend · every change in the audit log.
+are they masked (off for all), and to whom (nobody named, for the organisation or for any agent) · all
+runs, reported problems, spend · every change in the audit log.
 
 ## Known broken or weak — and where it is written
 
 1. **The in-house model can go away and nothing notices until 06:30.** Chat then waits ~40 s and
-   another model answers; agent runs wait. It was away on 9 Oct and again from 04:17 on 13 Oct —
-   `AM16_REPORT.md` §20, `AM15_REPORT.md` §12.
+   another model answers; agent runs wait. It was away on 9 Oct, and again on 13 Oct from about 04:17
+   until some time before 10:50 — the 06:30 check was red for it, and nobody has said why it went.
+   `AM16_REPORT.md` §20 and §23, `AM15_REPORT.md` §12.
 2. **A failed Agent Market smoke check pages nobody, and the live check runs as an admin** — it does
    not prove a member can reach an agent. `AM15_REPORT.md` §13.
 3. **65 backend tests fail by name and 17 run nowhere.** `scripts/gate/backend_marked_failing.txt`;
@@ -58,9 +60,10 @@ are they masked (off for all) · all runs, reported problems, spend · every cha
 
 ## Waiting on the owner
 
-The whole list, in one block, is `AM16_REPORT.md` §22. In short: the in-house model · a typed word
-for migration `011_am16b`, its deploy and push · one install to upgrade · the accountant's account and
-place on the list · direct keys, if a company should read a document without a router in between.
+The whole list, in one block, is `AM16_REPORT.md` §22. In short: why the in-house model went away on
+13 Oct · one install to upgrade · the accountant's account and place on the list · the desktop
+checklists nobody has walked · direct keys, if a company should read a document without a router in
+between.
 
 ## Where to start reading
 
