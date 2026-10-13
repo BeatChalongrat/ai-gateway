@@ -17,7 +17,7 @@ import (
 // is the server that reads a card's sentences before a person is sent them: a model's name is Latin
 // words nobody taught it, and a sentence it cannot read reaches a person as "…". So the real cards —
 // the tax-invoice agent's one-scan case, the page read by google/gemini-2.5-flash, in Thai and in
-// English (am16_reader_table_test.go, written by scripts/probes/AM16/dump_reader_cards.sh) — go through
+// English (am16_reader_table_test.go, written by scripts/agent-market/words/dump_reader_cards.sh) — go through
 // the thread's own door here and must come out as they went in.
 func TestAQuestionThatNamesAModelOutsideReadsAsWritten(t *testing.T) {
 	manifest, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "backend", "agent_market", "packages", "invoice_processing", "agent.json"))

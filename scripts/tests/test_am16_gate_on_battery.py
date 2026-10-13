@@ -132,7 +132,7 @@ class OnBattery(unittest.TestCase):
         self.assertNotRegex(r.stdout, r"(?i)battery")
 
     def test_the_swap_of_a_live_service_on_battery_touches_nothing(self):
-        r = self.run_it(BATTERY, "scripts/probes/AM10/swap.sh", "chat-edge-api", "health:nothing", "-p", "nothing")
+        r = self.run_it(BATTERY, "scripts/ops/swap.sh", "chat-edge-api", "health:nothing", "-p", "nothing")
         self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
         self.assertIn("the swap of chat-edge-api was not started", r.stdout)
         self.assertEqual(self.docker_calls(), "", "a refused swap called Docker")
@@ -141,7 +141,7 @@ class OnBattery(unittest.TestCase):
     def test_the_builds_the_lane_and_the_test_stack_refuse_the_same_way(self):
         for command in (("scripts/agent-market/build.sh", "HEAD"), ("scripts/agent-market/build-fetcher.sh", "HEAD"),
                         ("scripts/agent-market/build-converter.sh", "HEAD"), ("scripts/agent-market/python-lane.sh", "-k", "nothing"),
-                        ("scripts/probes/AM7/test_stack.sh", "up", "nothing"), ("scripts/probes/AM10/test_clients.sh", "build", "HEAD")):
+                        ("scripts/agent-market/test_stack.sh", "up", "nothing"), ("scripts/agent-market/test_clients.sh", "build", "HEAD")):
             r = self.run_it(BATTERY, *command)
             self.assertEqual(r.returncode, 3, f"{command}: {r.stdout}{r.stderr}")
             self.assertIn("REFUSED", r.stdout, command)

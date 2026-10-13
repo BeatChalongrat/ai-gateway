@@ -1,7 +1,0 @@
-# AM12 — laid over docker-compose.test-stack.yml by scripts/probes/AM12/test_stack.sh: the test backend's
-# mock search provider (a dev-only adapter, never registered in production) asks the stand-in web for
-# results instead of the mock model provider. Nothing else of the backend's service is changed.
-services:
-  backend:
-    environment:
-      MOCK_SEARCH_BASE_URL: http://am12-web

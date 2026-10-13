@@ -15,7 +15,7 @@
 
 import Link from "next/link";
 import { createContext, useContext, useMemo, useState } from "react";
-import { Check, ListChecks, RotateCcw } from "lucide-react";
+import { Check, ListChecks, RotateCw } from "lucide-react";
 
 import { KnowledgeSourcesRow } from "@/components/chat/KnowledgeSources";
 import { Markdown } from "@/components/chat/Markdown";
@@ -420,7 +420,7 @@ function FailedRound({ p }: { p: AgentTextPayload }) {
             ) : null}
             <div className="flex flex-wrap items-center gap-x-4 pl-6">
               {f?.can_retry && runId && !retried ? (
-                <ErrorCardAction testId="am-failed-retry" disabled={busy} icon={busy ? <Spinner size={14} /> : <RotateCcw size={14} className="shrink-0" aria-hidden />} onClick={retry}>
+                <ErrorCardAction testId="am-failed-retry" disabled={busy} icon={busy ? <Spinner size={14} /> : <RotateCw size={14} className="shrink-0" aria-hidden />} onClick={retry}>
                   {busy ? t("failed.retrying") : t("failed.retry")}
                 </ErrorCardAction>
               ) : null}

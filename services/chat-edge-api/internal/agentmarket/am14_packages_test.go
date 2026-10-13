@@ -14,7 +14,7 @@ import (
 // own sentences use (reads.go) — so an English sentence of a package that this plane did not know would
 // reach a person as "…". The rule is held on the real thing: every finding, summary, gate, quality check
 // and assumption of the packages' own eval sets, each case run in English
-// (am14_packages_table_test.go, written by scripts/probes/AM14/dump_english_texts.sh), goes through the
+// (am14_packages_table_test.go, written by scripts/agent-market/words/dump_english_texts.sh), goes through the
 // thread's own door and comes out as it went in.
 
 // englishPackages are the packages whose sentences are in their manifests (it grows with the card).

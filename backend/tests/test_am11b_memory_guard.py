@@ -31,9 +31,9 @@ def test_they_give_way_before_the_platforms_applications_and_long_before_a_datab
 
 
 def test_the_test_project_runs_the_same_three_and_there_they_go_first():
-    """The test stack starts these three from the same compose file, with scripts/probes/AM12/test-web.yml
+    """The test stack starts these three from the same compose file, with scripts/agent-market/test-web.yml
     laid over it. Without a word there they would be as protected as live's own, in the same VM."""
-    override = ROOT / "scripts/probes/AM12/test-web.yml"
+    override = ROOT / "scripts/agent-market/test-web.yml"
     if not override.is_file():
         pytest.skip("the test project's override is not reachable from this lane")
     over = (yaml.safe_load(override.read_text(encoding="utf-8")) or {}).get("services") or {}

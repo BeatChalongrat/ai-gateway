@@ -218,4 +218,4 @@ networks:
     # web-fetcher's way out to the public web, and nothing else is on it: the
     # fetcher shares no network with the core services, the databases or the
     # model gateway. (The test stack replaces this with a network that has no
-    # route out and holds stand-in sites: scripts/probes/AM12/test-web.yml.)
+    # route out and holds stand-in sites: scripts/agent-market/test-web.yml.)

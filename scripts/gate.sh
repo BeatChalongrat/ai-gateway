@@ -26,7 +26,8 @@
 #   bash scripts/gate.sh walk -- <command…>   one walk, with the lock held
 #   bash scripts/gate.sh smoke <sha>          smoke on the test stack: flag on, the model taken away (must be RED,
 #                                             naming it) and put back (must be GREEN), flag off, back on
-#   bash scripts/gate.sh drill                removal drill + gitleaks on the unpushed commits
+#   bash scripts/gate.sh drill                tracks (nothing tracked that .gitignore excludes) + removal drill +
+#                                             gitleaks on the unpushed commits
 #   bash scripts/gate.sh backup               a live backup with its restore drill (never recreates a dependency)
 #
 # A card says what is its own:  GATE_RESULTS (where the files go) · GATE_IT (its integration lane, run
@@ -51,7 +52,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-RESULTS="${GATE_RESULTS:-scripts/probes/gate/results}"
+RESULTS="${GATE_RESULTS:-scripts/gate/results}"
 MIN_FREE="${GATE_MIN_FREE_MB:-3000}"
 WAIT_S="${GATE_WAIT_S:-600}"
 LOCK="${GATE_LOCK:-${TMP:-/tmp}/sran-gate.lock}"
@@ -144,7 +145,7 @@ case "$phase" in
     # lanes [name…] — the named lanes only: one piece, in the foreground (the whole run is over an hour,
     # and a long run in the background is stopped on this host when memory is short, with no verdict).
     # A run of pieces says PARTIAL and names what it did not run: it is never a gate's verdict.
-    LANES="python_lane go_units go_vet gofmt backend_lane backend_marked host_tests smoke_units alert_rules gateway_go log_worker_go portal dlp_sidecar web_tsc web_vitest web_lints admin desktop"
+    LANES="tracks python_lane go_units go_vet gofmt backend_lane backend_marked host_tests smoke_units alert_rules gateway_go log_worker_go portal dlp_sidecar web_tsc web_vitest web_lints admin desktop"
     only=" $* "; ran=(); left=()
     for name in "$@"; do # (a name that is no lane is refused before anything is touched)
       case " $LANES " in *" $name "*) ;; *) say "REFUSED: no such lane: $name (the lanes are: $LANES)"; exit 2 ;; esac
@@ -155,8 +156,10 @@ case "$phase" in
       if want "$1"; then ran+=("$1"); room; one "$@" || rc=1; else left+=("$1"); fi
     }
     lock lanes; stack_stop; room; guard; rc=0
+    # AM19: only what the code needs is tracked — a tracked file that .gitignore excludes fails, by name
+    lane tracks 60 python scripts/gate/tracks.py
     lane python_lane 3000 bash scripts/agent-market/python-lane.sh
-    lane go_units 2700 bash scripts/probes/AM7/go_test.sh ./... -count=1
+    lane go_units 2700 bash scripts/gate/go_test.sh ./... -count=1
     lane go_vet 600 bash -c 'cd services/chat-edge-api && go vet ./...'
     lane gofmt 120 bash -c 'cd services/chat-edge-api && test -z "$(gofmt -l internal/agentmarket cmd/agent-runner)"'
     # AM15: the suite, not a list of its files — and the tests marked integration, by name
@@ -191,9 +194,9 @@ case "$phase" in
     out="$RESULTS/it_lane.txt"; : > "$out"; rc=0
     {
       date -u +"started %H:%M:%SZ at $(git rev-parse --short=7 HEAD)"
-      timeout 4200 bash scripts/probes/AM10/it_lane.sh | sed -u 's/^lane_exit=/am10_lane_exit=/'
-      timeout 2400 bash scripts/probes/AM12/it_lane.sh web | sed -u 's/^lane_exit=/am12_web_lane_exit=/'
-      [ -n "${GATE_IT:-scripts/probes/AM18/it_lane.sh}" ] && timeout 1800 bash ${GATE_IT:-scripts/probes/AM18/it_lane.sh} | sed -u 's/^lane_exit=/card_lane_exit=/'
+      timeout 4200 bash scripts/gate/it/am10.sh | sed -u 's/^lane_exit=/am10_lane_exit=/'
+      timeout 2400 bash scripts/gate/it/am12.sh web | sed -u 's/^lane_exit=/am12_web_lane_exit=/'
+      [ -n "${GATE_IT:-scripts/gate/it/am18.sh}" ] && timeout 1800 bash ${GATE_IT:-scripts/gate/it/am18.sh} | sed -u 's/^lane_exit=/card_lane_exit=/'
       date -u +"ended %H:%M:%SZ"
     } >> "$out" 2>&1
     grep -a -q -E '^(--- FAIL|FAIL|panic)' "$out" && rc=1
@@ -213,11 +216,11 @@ case "$phase" in
   stack)
     sha="${1:?the commit whose images the test stack runs}"
     lock stack; room; guard; rc=0
-    one stack_up 1200 env AM7_NO_NER=1 TS_BACKEND_TAG="${TS_BACKEND_TAG:-2fa9bb8}" AM_FETCHER_TAG="${AM_FETCHER_TAG:-$sha}" bash scripts/probes/AM7/test_stack.sh up "$sha" || rc=1
+    one stack_up 1200 env AM7_NO_NER=1 TS_BACKEND_TAG="${TS_BACKEND_TAG:-2fa9bb8}" AM_FETCHER_TAG="${AM_FETCHER_TAG:-$sha}" bash scripts/agent-market/test_stack.sh up "$sha" || rc=1
     # (the stand-in sites run on the fetcher's image: the card's own when it built one, else the one named)
-    one stack_web 600 bash scripts/probes/AM12/test_stack.sh web "${AM_FETCHER_TAG:-$sha}" || rc=1
-    one clients_build 1500 bash scripts/probes/AM10/test_clients.sh build "$sha" || rc=1
-    one clients_up 600 bash scripts/probes/AM10/test_clients.sh up "$sha" || rc=1
+    one stack_web 600 bash scripts/agent-market/test_stack_web.sh web "${AM_FETCHER_TAG:-$sha}" || rc=1
+    one clients_build 1500 bash scripts/agent-market/test_clients.sh build "$sha" || rc=1
+    one clients_up 600 bash scripts/agent-market/test_clients.sh up "$sha" || rc=1
     cache_back; exit $rc
     ;;
   stack-stop) stack_stop ;;
@@ -236,14 +239,15 @@ case "$phase" in
     one smoke_dead_primary_red 900 env SMOKE_TARGET=test DEAD_PRIMARY_OUT="$(pwd -W 2>/dev/null || pwd)/$RESULTS" node scripts/smoke/dead_primary.js red || rc=1
     one smoke_dead_primary_green 600 env SMOKE_TARGET=test DEAD_PRIMARY_OUT="$(pwd -W 2>/dev/null || pwd)/$RESULTS" node scripts/smoke/dead_primary.js green || rc=1
     sleep 95 # (the gateway's rate limit: 90 s of quiet between two runs)
-    bash scripts/probes/AM7/test_stack.sh edge "$sha" off > /dev/null 2>&1; docker stop sran-test-agent-runner > /dev/null 2>&1
+    bash scripts/agent-market/test_stack.sh edge "$sha" off > /dev/null 2>&1; docker stop sran-test-agent-runner > /dev/null 2>&1
     one smoke_test_off 600 env AGENT_MARKET_ENABLED=false SMOKE_TARGET=test SMOKE_DESKTOP=0 bash scripts/smoke.sh || rc=1
-    bash scripts/probes/AM7/test_stack.sh edge "$sha" on > /dev/null 2>&1; AM7_NO_NER=1 bash scripts/probes/AM7/test_stack.sh runner "$sha" > /dev/null 2>&1
+    bash scripts/agent-market/test_stack.sh edge "$sha" on > /dev/null 2>&1; AM7_NO_NER=1 bash scripts/agent-market/test_stack.sh runner "$sha" > /dev/null 2>&1
     exit $rc
     ;;
   drill)
     lock drill; rc=0
-    one removal_drill 1700 bash scripts/probes/AM2/removal_drill.sh || rc=1
+    one tracks 60 python scripts/gate/tracks.py || rc=1
+    one removal_drill 1700 bash scripts/agent-market/removal_drill.sh || rc=1
     one gitleaks 600 env MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd -W 2>/dev/null || pwd):/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git --config /repo/.gitleaks.toml --log-opts="gitlab/main..main" --no-banner --redact /repo || rc=1
     say "drill: $(grep -a 'diff reverted' "$RESULTS/removal_drill.txt" | tail -1) · gitleaks: $(grep -a -o -E 'no leaks found|leaks found: [0-9]+' "$RESULTS/gitleaks.txt" | tail -1)"; exit $rc
     ;;

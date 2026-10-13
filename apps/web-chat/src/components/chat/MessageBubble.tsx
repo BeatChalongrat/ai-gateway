@@ -16,7 +16,7 @@
 // rendering routes pay for it — see Markdown.tsx for the rationale.)
 
 import { memo, useEffect, useRef, useState } from "react";
-import { ArrowRightLeft, PenLine, RotateCcw } from "lucide-react";
+import { ArrowRightLeft, Pencil, PenLine, RotateCw } from "lucide-react";
 
 import { useRouter } from "next/navigation";
 
@@ -297,7 +297,7 @@ function MessageBubbleImpl({
                   ariaLabel={t("a11y.editMessage")}
                   onClick={() => setEditing(true)}
                 >
-                  <EditIcon />
+                  <Pencil width={14} height={14} aria-hidden />
                 </ActionButton>
               ) : null}
             </div>
@@ -660,7 +660,7 @@ function MessageBubbleImpl({
           ) : null}
           {showRegenerate && onRegenerate ? (
             <ActionButton ariaLabel={t("a11y.regenerate")} onClick={onRegenerate}>
-              <RegenerateIcon />
+              <RotateCw width={18} height={18} aria-hidden />
             </ActionButton>
           ) : null}
         </div>
@@ -807,7 +807,7 @@ function ErrorNotice({
             </ErrorCardAction>
           ) : null}
           {onRetry ? (
-            <ErrorCardAction testId="retry-interrupted" icon={<RotateCcw size={14} className="shrink-0" aria-hidden="true" />} onClick={onRetry}>
+            <ErrorCardAction testId="retry-interrupted" icon={<RotateCw size={14} className="shrink-0" aria-hidden="true" />} onClick={onRetry}>
               {t("common.retry")}
             </ErrorCardAction>
           ) : null}
@@ -933,40 +933,6 @@ function ImageAttachFailedNotice({ filenames }: { filenames: string[] }) {
 
 // Icon set — Lucide-style stroke icons, the same weight + cap as the copy
 // and check icons in MessageParts.
-function EditIcon() {
-  return (
-    <svg
-      width={14}
-      height={14}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.7}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M12 20h9M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
-    </svg>
-  );
-}
-function RegenerateIcon() {
-  return (
-    <svg
-      width={18}
-      height={18}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.5}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5" />
-    </svg>
-  );
-}
 // StreamingMarkdown renders an in-flight assistant message through the
 // SAME shared <Markdown> pipeline (plugins + component overrides) as
 // completed messages (Fix 2) so bullets / lists / headings / tables format live as

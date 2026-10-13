@@ -6,7 +6,7 @@
 // arrived after a finished round starts a new one.
 
 import { useState } from "react";
-import { ChevronDown, Download, RotateCcw } from "lucide-react";
+import { ChevronDown, Download, RotateCw } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
@@ -102,7 +102,7 @@ export function RoundDivider({ round, latest, started }: { round: RoundInfo; lat
       {latest && !started ? (
         <div className="flex flex-col items-center gap-1">
           <Button type="button" size="sm" onClick={start} loading={busy} data-testid="am-round-start">
-            {busy ? null : <RotateCcw width={13} height={13} aria-hidden />}
+            {busy ? null : <RotateCw width={13} height={13} aria-hidden />}
             <span>{busy ? t("round.starting") : t("round.start")}</span>
           </Button>
           <p className="text-center text-[11px] text-text-muted">{t("round.carry")}</p>
