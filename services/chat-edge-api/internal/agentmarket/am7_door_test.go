@@ -13,7 +13,7 @@ import (
 // Market admin handlers, and both apps read and write the one
 // agent_market.org_settings row: no copied setting, no second place to be
 // wrong. Until phase 4 the test compared the two admin doors field by field
-// (red run: scripts/probes/AM7/results/red_phase1_door.txt; both apps on the
+// (red run kept with the AM7 probes; both apps on the
 // test stack: results/surfaces/both.json). Phase 4 removed the chat app's
 // door; what stays true is that what the admin app sets is what the chat app
 // shows the people who use agents.

@@ -73,6 +73,35 @@ class ATrackedFileTheRulesExcludeIsNamed(unittest.TestCase):
         r = tracks(self.repo)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
+    def test_a_pointer_at_an_untracked_file_fails_by_file_and_line(self):
+        # the owner's rule: nothing is untracked while something still points at it
+        (self.repo / "app.py").write_text("# the budget is explained in docs/HOW.md (and docs/notes/why.md)\nprint('hi')\n", encoding="utf-8")
+        git(self.repo, "commit", "-q", "-am", "a comment cites two papers")
+        r = tracks(self.repo)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("point at a docs/ or scripts/ file that is not tracked", r.stdout)
+        self.assertIn("app.py:1  docs/HOW.md", r.stdout)
+        self.assertIn("app.py:1  docs/notes/why.md", r.stdout)
+        # track one, reword the other: green
+        (self.repo / "docs").mkdir()
+        (self.repo / "docs" / "HOW.md").write_text("# how\n", encoding="utf-8")
+        (self.repo / "app.py").write_text("# the budget is explained in docs/HOW.md (the first sizing note stays with its author)\nprint('hi')\n", encoding="utf-8")
+        git(self.repo, "add", "docs/HOW.md", "app.py")
+        git(self.repo, "commit", "-q", "-m", "one tracked, one said in words")
+        r = tracks(self.repo)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("nothing tracked points at", r.stdout)
+
+    def test_a_longer_path_is_not_read_as_a_docs_path(self):
+        # apps/desktop/docs/x.md is not docs/x.md; a line naming it must not fail for a file it does not name
+        (self.repo / "apps" / "desktop" / "docs").mkdir(parents=True)
+        (self.repo / "apps" / "desktop" / "docs" / "x.md").write_text("x\n", encoding="utf-8")
+        (self.repo / "app.py").write_text("# see apps/desktop/docs/x.md\n", encoding="utf-8")
+        git(self.repo, "add", "apps/desktop/docs/x.md", "app.py")
+        git(self.repo, "commit", "-q", "-m", "a nested docs folder")
+        r = tracks(self.repo)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
     def test_not_a_repository_is_said_not_crashed(self):
         r = tracks(Path(tempfile.gettempdir()))
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
@@ -80,9 +109,10 @@ class ATrackedFileTheRulesExcludeIsNamed(unittest.TestCase):
 
 
 class ThisRepositoryHoldsTheRule(unittest.TestCase):
-    def test_nothing_tracked_here_is_excluded_by_gitignore(self):
+    def test_nothing_tracked_here_is_excluded_by_gitignore_and_nothing_points_at_an_untracked_file(self):
         r = tracks(ROOT)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("nothing tracked points at", r.stdout)
 
     def test_the_rules_name_the_kinds_the_card_untracked(self):
         ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
