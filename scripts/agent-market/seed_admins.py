@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """AM7 — two admin-ui accounts on the TEST stack only: an admin and an
 agent_publisher (the scoped role of phase 2). Their passwords are made here,
-kept in scripts/probes/AM7/results/ts_admins.json (gitignored, test stack
+kept in scripts/agent-market/results/ts_admins.json (gitignored, test stack
 only) and never printed. The live stack is never touched: the SQL goes to
 the test stack's Postgres container, the hash is made in the test backend.
 
@@ -20,7 +20,7 @@ spec = importlib.util.spec_from_file_location("seed", ROOT / "scripts" / "test_s
 seed = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(seed)
 
-OUT = ROOT / "scripts" / "probes" / "AM7" / "results" / "ts_admins.json"
+OUT = ROOT / "scripts" / "agent-market" / "results" / "ts_admins.json"
 ACCOUNTS = [
     ("7a7a7a7a-0000-4000-8000-0000000000a1", "am7-it-admin", "am7-admin@fix128.test", "admin"),
     ("7a7a7a7a-0000-4000-8000-0000000000a2", "หัวหน้าบัญชี", "am7-publisher@fix128.test", "agent_publisher"),

@@ -148,7 +148,7 @@ class OnBattery(unittest.TestCase):
             self.assertEqual(self.docker_calls(), "", f"{command[0]} called Docker on battery")
 
     def test_the_swap_asks_the_runner_through_its_health_check(self):
-        swap = (ROOT / "scripts" / "probes" / "AM10" / "swap.sh").read_text(encoding="utf-8")
+        swap = (ROOT / "scripts" / "ops" / "swap.sh").read_text(encoding="utf-8")
         self.assertIn("health:*)", swap)
         self.assertLess(swap.index("power.sh"), swap.index(': > "$OUT"'), "the swap empties its result file before it asks")
 
