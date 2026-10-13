@@ -510,7 +510,8 @@ func validSettingKey(k string) bool {
 	switch k {
 	case "company", "formats", "currency", "language", "materiality", "mapping", "dc_convention", "theme", "fiscal_year_start",
 		"company_tax_id", "company_branch", // AM2: who tax invoices must be made out to
-		"policy", "holidays", "policy_kb": // AM2: the expense audit's policy table and calendar
+		"policy", "holidays", "policy_kb", // AM2: the expense audit's policy table and calendar
+		StandingKey: // AM18: the package directives a person asked for from now on
 		return true
 	}
 	if _, ok := matchSettings[k]; ok { // AM5: the tolerances of the matching engine
@@ -605,9 +606,14 @@ func validSettingValue(k string, raw json.RawMessage) bool {
 			}
 		}
 	case "language":
-		// AM10: the agents' documents are Thai and nothing else; a setting that
-		// offered "en" changed no document, so nothing but "th" is kept
-		return json.Unmarshal(raw, &s) == nil && s == "th"
+		// AM10 kept nothing but "th": a setting that offered "en" changed no document. Since AM18 the
+		// documents follow the run's language, and the install's own language is one of the two.
+		return json.Unmarshal(raw, &s) == nil && (s == "th" || s == "en")
+	case StandingKey:
+		// AM18: ids of the package's directives, kept by the runner from what a person asked; a person
+		// clears the row, never writes it
+		var ids []string
+		return json.Unmarshal(raw, &ids) == nil && len(ids) > 0
 	case "policy":
 		// the structured policy table: limits come from here only, never from a document
 		return len(PolicyProblems(Thai, raw)) == 0
@@ -673,6 +679,8 @@ func settingLabel(l Lang, k string) string {
 		return T(l, "ปฏิทินวันหยุด")
 	case "policy_kb":
 		return T(l, "เอกสารระเบียบ (ใช้เป็นบริบทเท่านั้น)")
+	case StandingKey:
+		return T(l, standingLabel)
 	}
 	if m, ok := matchSettings[k]; ok {
 		return T(l, m.label)

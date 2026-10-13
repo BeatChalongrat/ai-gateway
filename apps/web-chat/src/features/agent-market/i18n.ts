@@ -696,6 +696,7 @@ const thBase = {
   "dash.toSettings": "ไปหน้าการตั้งค่า",
   "time.days": "{n} วัน",
   "lang.th": "ไทย",
+  "lang.en": "อังกฤษ",
   "lang.thOnly": "ไทย — เอกสารของ agent มีภาษาไทยอย่างเดียวในตอนนี้",
   "lang.agentThai": "เอกสารที่ agent นี้ทำยังเป็นภาษาไทย ส่วนคำถาม ผลตรวจ และข้อความอื่นบนหน้าจอเป็นภาษาของหน้าจอ",
 
@@ -1479,6 +1480,7 @@ const enBase = {
   "dash.toSettings": "Go to settings",
   "time.days": "{n} d",
   "lang.th": "Thai",
+  "lang.en": "English",
   "lang.thOnly": "Thai — the agent's documents are available in Thai only for now",
   "lang.agentThai": "For now the documents this agent makes are written in Thai. Its questions, its checks and everything else on the screen are in English.",
 

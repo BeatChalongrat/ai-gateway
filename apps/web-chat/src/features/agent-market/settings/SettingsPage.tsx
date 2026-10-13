@@ -38,7 +38,7 @@ import { DeclaredSection } from "./DeclaredSettings";
 import { ModelSection, StorageSection } from "./ModelSection";
 import { RemindersSection } from "./Reminders";
 
-const INSTALL_KEYS = ["company", "formats", "currency", "materiality", "theme", "language", "fiscal_year_start"];
+const INSTALL_KEYS = ["company", "formats", "currency", "materiality", "theme", "language", "instructions", "fiscal_year_start"];
 const REMEMBERED_KEYS = new Set(["mapping", "dc_convention"]);
 // shown by their own sections, never as a generic row
 const OWN_SECTION_KEYS = new Set(["template"]);
@@ -73,9 +73,14 @@ export function describeValue(d: Default, t: AmT, manifest?: Manifest): string[]
   if (d.key === "materiality") return [formatMoney(v)];
   if (MATCH_MONEY.has(d.key)) return [formatMoney2(v)];
   if (d.key === "match_auto_same_day") return [v === true || v === "true" ? t("settings.yes") : t("settings.no")];
-  // AM10: the agents' documents are Thai and nothing else yet — the row says so and offers no choice
-  // (it used to offer "อังกฤษ", which no document ever followed)
-  if (d.key === "language") return [t("lang.thOnly")];
+  // AM18: the documents follow the run's language; the install's own is one of the two (asked for in
+  // the chat "from now on", or set here)
+  if (d.key === "language") return [v === "en" ? t("lang.en") : t("lang.th")];
+  // AM18: the package directives a person asked for from now on, by the package's own labels
+  if (d.key === "instructions" && Array.isArray(v)) {
+    const labels = new Map((manifest?.instructions?.can ?? []).map((c) => [c.id, c.label] as const));
+    return v.map((id) => labels.get(String(id)) ?? String(id));
+  }
   if (Array.isArray(v)) return [v.map(String).join(", ")];
   if (typeof v === "object") {
     const o = v as Record<string, unknown>;

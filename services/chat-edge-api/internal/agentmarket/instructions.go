@@ -33,6 +33,9 @@ import (
 type InstructionSpec struct {
 	Can    []Directive `json:"can"`
 	Cannot []Directive `json:"cannot"`
+	// languages (AM18): the languages the package's documents are written in — set by Speaking, from the
+	// manifest; not part of the spec's JSON, so the reading step's key does not change.
+	languages []string
 }
 
 // Directive is one thing a person may ask (Can) or is known to ask (Cannot).
@@ -94,6 +97,20 @@ type Asked struct {
 	Instead []AskedInstead `json:"instead,omitempty"`
 	// Tries: how many times a model was asked, when more than once (the first answer was no answer).
 	Tries int `json:"tries,omitempty"`
+	// Lang (AM18): the language the words ask the documents in ("th", "en"), when they ask one.
+	Lang string `json:"lang,omitempty"`
+	// Standing (AM18): what the words ask for from now on, not for this round only — ids of Apply, or the
+	// language's — recorded as the install's own way (StandingKey, LanguageKey).
+	Standing []string `json:"standing,omitempty"`
+	// Ask (AM18): what the words could mean two ways, among what can be done — asked back, never guessed.
+	Ask []AskedAmbiguous `json:"ask,omitempty"`
+}
+
+// AskedAmbiguous: one request that could be two or more things the agent can do, and the person's own
+// words for it (empty when the model's quote was not theirs).
+type AskedAmbiguous struct {
+	IDs   []string `json:"ids"`
+	Words string   `json:"words,omitempty"`
 }
 
 // AskedInstead: one directive that was asked and is not applied, because Kept — of the same group — was
@@ -112,7 +129,7 @@ type AskedCannot struct {
 
 // Nothing: the words asked nothing of the documents (and were read).
 func (a Asked) Nothing() bool {
-	return len(a.Apply) == 0 && len(a.Cannot) == 0 && len(a.Instead) == 0 && !a.Unread
+	return len(a.Apply) == 0 && len(a.Cannot) == 0 && len(a.Instead) == 0 && !a.Unread && a.Lang == "" && len(a.Ask) == 0
 }
 
 // OfARequest is a as it stands for an agent whose round starts from the words themselves (AM12): what
@@ -143,7 +160,9 @@ const askedSystem = `คุณอ่านข้อความที่ผู�
 - คำขอเกี่ยวกับเอกสารที่ไม่ตรงกับข้อใดเลยในสองรายการ ให้ใส่ใน cannot ด้วย id other และ words เป็นคำของผู้ใช้ส่วนนั้น
 - คำขอที่ไปในทางเดียวกับข้อใน “ทำได้” แม้ข้อนั้นจะทำได้ไม่ครบตามที่ขอ ให้เลือกข้อนั้น ระบบจะบอกผู้ใช้เองว่าทำได้แค่ไหน
 - ถ้าไม่แน่ใจว่าคำขอเป็นเรื่องเดียวกับข้อใน “ทำได้” หรือไม่ ให้ถือว่าไม่ตรง
-- ผู้ใช้อาจพิมพ์ภาษาไทยหรือภาษาอังกฤษ
+- ถ้าคำขอหนึ่งอาจหมายถึงข้อใน “ทำได้” ได้มากกว่าหนึ่งข้อ และข้อความไม่บอกว่าข้อไหน ให้ใส่ใน ask พร้อม ids ของข้อเหล่านั้นและ words เป็นคำของผู้ใช้ส่วนนั้น ไม่ต้องใส่ใน apply
+- ถ้าผู้ใช้บอกว่าต้องการแบบนั้นต่อไป ทุกครั้ง หรือตั้งแต่นี้ไป ให้ใส่ id ของข้อนั้นใน standing ด้วย ถ้าไม่ได้บอก ถือว่าขอเฉพาะครั้งนี้
+- ผู้ใช้อาจพิมพ์ภาษาไทยหรือภาษาอังกฤษ ภาษาที่พิมพ์ไม่ใช่คำขอเรื่องภาษาของเอกสาร
 
 ตอบเป็น JSON object เดียว ไม่มีข้อความอื่น`
 
@@ -170,6 +189,9 @@ func AskedPrompt(spec InstructionSpec, text string, request ...bool) (system, us
 		}
 		b.WriteString("\n")
 	}
+	for _, d := range spec.LanguagesAsked() { // AM18: the language of the documents, where the package speaks it
+		b.WriteString("- " + d.ID + ": " + d.Label.In(Thai) + "\n")
+	}
 	b.WriteString("\nทำไม่ได้:\n")
 	for _, d := range spec.Cannot {
 		b.WriteString("- " + d.ID + ": " + d.Label + "\n")
@@ -177,8 +199,11 @@ func AskedPrompt(spec InstructionSpec, text string, request ...bool) (system, us
 	for _, n := range NeverAsked() {
 		b.WriteString("- " + n.ID + ": " + n.Label.In(Thai) + "\n")
 	}
+	for _, n := range spec.LanguagesNotAsked() {
+		b.WriteString("- " + n.ID + ": " + n.Label.In(Thai) + "\n")
+	}
 	b.WriteString("\nข้อความของผู้ใช้:\n<<<\n" + strings.TrimSpace(text) + "\n>>>\n\n")
-	b.WriteString(`รูปแบบคำตอบ: {"apply": ["id"], "cannot": [{"id": "id", "words": "คำของผู้ใช้"}]} — ไม่มีข้อใดก็ให้เป็น [] ทั้งสองช่อง`)
+	b.WriteString(`รูปแบบคำตอบ: {"apply": ["id"], "cannot": [{"id": "id", "words": "คำของผู้ใช้"}], "standing": ["id"], "ask": [{"ids": ["id", "id"], "words": "คำของผู้ใช้"}]} — ไม่มีข้อใดก็ให้เป็น [] ทุกช่อง`)
 	return askedSystem, b.String()
 }
 
@@ -195,6 +220,11 @@ func ReadAsked(spec InstructionSpec, text string, raw json.RawMessage) Asked {
 			ID    string `json:"id"`
 			Words string `json:"words"`
 		} `json:"cannot"`
+		Standing []string `json:"standing"`
+		Ask      []struct {
+			IDs   []string `json:"ids"`
+			Words string   `json:"words"`
+		} `json:"ask"`
 	}
 	if json.Unmarshal(raw, &ans) != nil {
 		out.Unread = true
@@ -226,6 +256,28 @@ func ReadAsked(spec InstructionSpec, text string, raw json.RawMessage) Asked {
 		known[n.ID] = true
 	}
 	typed := squashSpace(text)
+	// AM18: the language asked for. One the package speaks is the round's; both at once is a question (a
+	// round is written in one); one it does not speak, or any other, cannot be done — with the reason.
+	var langs []string
+	for _, d := range spec.LanguagesAsked() {
+		if picked[d.ID] {
+			langs = append(langs, d.ID)
+		}
+	}
+	if len(langs) == 1 {
+		out.Lang = string(LangOfID(langs[0]))
+	} else if len(langs) > 1 {
+		out.Ask = append(out.Ask, AskedAmbiguous{IDs: langs})
+	}
+	for _, n := range spec.LanguagesNotAsked() {
+		known[n.ID] = true
+		if picked[n.ID] { // (answered as if it could be done: it is said as what cannot)
+			ans.Cannot = append(ans.Cannot, struct {
+				ID    string `json:"id"`
+				Words string `json:"words"`
+			}{ID: n.ID})
+		}
+	}
 	seen := map[string]bool{}
 	for _, c := range ans.Cannot {
 		id := strings.TrimSpace(c.ID)
@@ -241,6 +293,37 @@ func ReadAsked(spec InstructionSpec, text string, raw json.RawMessage) Asked {
 		}
 		seen[id+"\x00"+words] = true
 		out.Cannot = append(out.Cannot, AskedCannot{ID: id, Words: words})
+	}
+	// AM18: what is asked for from now on — only of what is applied, or the language that is the round's
+	for _, id := range ans.Standing {
+		id = strings.TrimSpace(id)
+		if (contains(out.Apply, id) || (out.Lang != "" && LangOfID(id) == Lang(out.Lang))) && !contains(out.Standing, id) {
+			out.Standing = append(out.Standing, id)
+		}
+	}
+	// AM18: what could mean two things the agent can do — each id declared, none already applied, the
+	// person's words only when they are theirs
+	for _, a := range ans.Ask {
+		var ids []string
+		for _, id := range a.IDs {
+			id = strings.TrimSpace(id)
+			_, can := spec.can(id)
+			if !can && !spec.speaksID(id) {
+				continue
+			}
+			if contains(out.Apply, id) || contains(ids, id) {
+				continue
+			}
+			ids = append(ids, id)
+		}
+		if len(ids) < 2 {
+			continue
+		}
+		words := strings.TrimSpace(a.Words)
+		if words == "" || len([]rune(words)) > 160 || !strings.Contains(typed, squashSpace(words)) {
+			words = ""
+		}
+		out.Ask = append(out.Ask, AskedAmbiguous{IDs: ids, Words: words})
 	}
 	return out
 }
@@ -356,6 +439,11 @@ func AskedNotDone(spec InstructionSpec, refused []string, cannot []AskedCannot) 
 			}
 		}
 		for _, n := range NeverAsked() {
+			if n.ID == c.ID {
+				what, why = n.Label, n.Why
+			}
+		}
+		for _, n := range spec.LanguagesNotAsked() { // AM18
 			if n.ID == c.ID {
 				what, why = n.Label, n.Why
 			}

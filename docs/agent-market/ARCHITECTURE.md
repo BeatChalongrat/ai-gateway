@@ -1175,6 +1175,66 @@ and written to the manifest by a script, never retyped; a module-level literal b
 function-level one `W("key", place=…)`.
 
 
+## The agent does what it is asked, in the person's own words (AM18, part B)
+
+AM11b and AM13 made an agent do what it is asked of its documents: a model reads the person's words
+into the directives the package declares, the code applies them, the thread says what was done and what
+could not be, with the reason. Nothing in the code is a list of words a person must type — the model
+reads their words, in either language; the package's list names what the code can *do*. Part B hears
+three things the words say that were not heard before, and reads the words at a different moment.
+
+**Read first.** The words typed with a round's files are read before any file is (`runner/asked_am18.go:
+readAsked`, at the top of the pipeline's loop; AM11b read them after compute). The reading never
+touched a figure and still does not — the table is computed the same with or without it — but what the
+words ask of the documents' *language* must set the round's before the first sentence is written, a
+request that cannot be done is refused before any work, and one that could mean two things is asked
+before the round goes on. The `instructions` step is therefore the first step on a run's page.
+
+**The language** (`instructions_am18.go`). The two languages a package's documents are written in
+(`languages` in its manifest) are two directives of the platform's — `lang_th`, `lang_en` — read with the
+package's own; a language the package does not speak, and any other (`lang_other`), is what cannot be
+done, with the reason, and no model translates a document at run time. The language of a round is
+decided when it starts: the screen's, unless the install keeps one (below), unless the words say
+otherwise — the words win (`takeLanguage` writes it on the run, `SetRunLang`, and every step after is in
+it). A finished round's files keep their language: asked for the other, the agent starts a new round from
+copies of the same files — a file belongs to one run and goes with it — and says so; the old file is not
+touched, and no file of a finished round is made again in another language (its computed table carries
+one language's words since part A). Both languages at once is a question, a round being written in one.
+
+**From now on, or this once.** The model says which it read (`Asked.Standing`: "ทุกครั้ง", "from now
+on"); what was asked for from now on is kept as the install's own way — the package directives under the
+default `instructions`, the language under `language` (the platform's own setting, which may now hold
+either language) — and a round starts with that way in force, merged with what its words ask
+(`InstructionSpec.Merge`, one of a group). The thread says what it recorded ("Kept as this agent's own
+way from now on: … — see or clear it on the agent's settings page") and, when the same words also asked
+for something this once, which that was; a later round made with the kept way says so too ("Made as
+asked earlier: …"). The two defaults have the source of a remembered answer: the settings page lists them
+among what is remembered, with the one button that clears them. Nothing is kept unless it was asked for
+from now on; a self-test keeps nothing.
+
+**What could mean two things.** A request that could be two directives of the list — "เรียงรายการใหม่" of
+a table that is ordered two ways — is not guessed: the model names the ids (`Asked.Ask`, each declared,
+none already applied, the person's words only when they are theirs), and the round asks with a blocking
+card of its own (`AskedChoiceFinding`, the question card every other decision uses, at the preflight
+moment); the answer is what the file is made with and what the gate reads back.
+
+**What holds it.** `am18_asked_test.go` — the reading: a language the package speaks is the round's and
+never a package directive; one it does not speak, or any other, is refused with a reason naming the
+languages it speaks; both at once is a question; "from now on" is kept only of what was applied; an
+ambiguous request becomes a card of declared options, the first the package lists as what a skipped card
+records. `am18_asked_it_test.go` (the IT lane, two chunks) — the bank agent end to end: a round asked in
+English, by date every time, is English (its sheets named in English, its gate's words English), kept,
+and the next round with no words is the same; asked for Thai, the finished round's file stays and a new
+Thai round runs from the same files; cleared on the settings page, a round is as the package makes it; a
+request that could mean two things parks the round on a card before any step of work, and the answer
+orders the file; another language is refused, with the reason, in the same breath.
+
+**Left as it was, and why.** The platform's older lists of words that route a message — a request for
+another format (AM3), for more files, a question — were not touched: they route to a render or an answer,
+not to a change of the documents, and the owner asked that nothing be touched that need not be. The one
+list that read "English" and answered that the documents are Thai only is gone.
+
+
 ## A run that cannot reach its model waits (AM15)
 
 What was found (test stack, 12 Oct 2026, the in-house model taken away — `scripts/smoke/primary.js

@@ -201,9 +201,6 @@ var moreFilesWords = []string{"ไฟล์อื่น", "แบบอื่น
 
 func wantsMoreFiles(text string) bool { return am.HasWord(text, moreFilesWords...) }
 
-// englishWords: what asks for the documents in English (read from what a person typed).
-var englishWords = []string{"ภาษาอังกฤษ", "english"}
-
 // replyJob answers a typed message that is not an answer to a card.
 func (r *Runner) replyJob(ctx context.Context, job am.Run, log *slog.Logger) error {
 	rc, err := r.load(ctx, job, log)
@@ -242,8 +239,6 @@ func (r *Runner) replyJob(ctx context.Context, job am.Run, log *slog.Logger) err
 		return handled || err != nil
 	}
 	switch {
-	case am.HasWord(text, englishWords...):
-		_ = post(am.Text("ตอนนี้ agent ตัวนี้ทำเอกสารเป็นภาษาไทยเท่านั้นครับ ภาษาอังกฤษจะมาในรุ่นถัดไป"))
 	case asksForPDF(text) && !rc.pdfOffered() && len(detectFormats(text)) == 0:
 		_ = post(am.Text("agent ตัวนี้ยังทำไฟล์ PDF ไม่ได้ในตอนนี้ครับ " +
 			"ระหว่างนี้เปิดไฟล์ที่ได้แล้วสั่ง “บันทึกเป็น PDF” ได้เลย"))
@@ -349,8 +344,25 @@ func (r *Runner) replyToAsked(ctx context.Context, rc *runCtx, job am.Run, paren
 	if err != nil {
 		return false, err
 	}
-	if asked.Nothing() || (question && len(asked.Apply) == 0) {
+	if asked.Nothing() || (question && len(asked.Apply) == 0 && asked.Lang == "") {
 		return false, nil
+	}
+	// AM18: the language asked of a finished round's documents. The files keep theirs; the other language
+	// is a new round from the same files (its words are read again by that round, which applies the rest).
+	if l := am.Lang(asked.Lang); l != "" {
+		rc.keepStanding(ctx, asked, rc.spec())
+		if l == parent.Lang() {
+			_ = post(am.AskedLanguageAlready(l))
+			if len(asked.Apply) == 0 {
+				rc.sayAsked(ctx, *parent, am.Asked{Text: asked.Text, Apply: []string{}, Cannot: asked.Cannot}, renderAsked{})
+				return true, nil
+			}
+		} else {
+			if err := r.newRoundInLanguage(ctx, *parent, text, l); err != nil {
+				return false, err
+			}
+			return true, post(am.AskedNewRoundInLanguage(l))
+		}
 	}
 	if len(asked.Apply) == 0 {
 		// nothing to make again: what was asked and cannot be done, each with its reason

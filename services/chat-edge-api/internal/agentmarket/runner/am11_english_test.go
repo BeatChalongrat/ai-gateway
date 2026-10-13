@@ -356,8 +356,8 @@ func TestWhatAPersonTypesInEnglishIsReadAsInThai(t *testing.T) {
 		{"questionWords", isQuestion, []string{"ทำไมกำไรลดลง", "How much is revenue", "what is the net profit", "Explain the margin", "which accounts moved"},
 			[]string{"show me the chart", "whatever", "send the files"}},
 		{"moreFilesWords", wantsMoreFiles, []string{"ขอไฟล์เพิ่ม", "I need more files", "in another format please"}, []string{"more file space", "the other day"}},
-		{"englishWords", func(s string) bool { return am.HasWord(s, englishWords...) }, []string{"ขอภาษาอังกฤษ", "In English please", "an english version"},
-			[]string{"englishman"}},
+		// (englishWords left with AM18: the language of the documents is read by the model with every other
+		// request, and is no longer a list of words)
 		{"whyWords", asksWhy, []string{"ทำไมยอดเป็นศูนย์", "Why is it zero", "what is the reason", "where does it come from", "how was it calculated"},
 			[]string{"reasonable", "resource", "becauseway"}},
 	} {

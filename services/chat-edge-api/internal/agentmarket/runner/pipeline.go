@@ -51,6 +51,8 @@ type runCtx struct {
 	// formOnly (AM10): this render job fills the round's own form and makes
 	// no other file.
 	formOnly bool
+	// standing (AM18): the directives the install keeps as its own way, in force on this round
+	standing []string
 	// instr (AM11b): the directives this round's documents are made with — read out of what the person
 	// typed (asked.go), ids of the package's own list.
 	instr []string
@@ -96,6 +98,7 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 	var computedRef blobRef
 	var computeKey, period string
 	var summary map[string]any
+	var asked am.Asked
 	for pass := 0; ; pass++ {
 		if pass > 12 {
 			return r.fail(ctx, run, "too_many_rounds", errors.New("the run did not settle after 12 rounds"))
@@ -114,6 +117,20 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 		}
 		if err := rc.reloadAnswers(ctx); err != nil {
 			return r.fail(ctx, run, "load", err)
+		}
+		// AM18: what the person typed with the files is read before any file is — what it asks of the
+		// documents' language sets the round's, what cannot be done is refused before any work, what could
+		// mean two things is asked. (AM11b read the words after compute; the reading never touched a figure,
+		// and still does not: the table is computed the same with or without it.)
+		var act int
+		if ctx, asked, act, err = rc.readAsked(ctx); err != nil {
+			return rc.stepFailed("instructions", err)
+		} else if act == actPark {
+			return r.park(rc, "waiting_instructions")
+		} else if act == actCancel {
+			return r.finish(rc, am.RunCancelled, "cancelled_by_answer")
+		} else if act == actAgain {
+			continue
 		}
 		if done, err := rc.consumeReplacements(ctx); err != nil {
 			return r.fail(ctx, run, "files", err)
@@ -192,7 +209,7 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 		if f := rc.outputSetFinding(ctx); f != nil {
 			post.Findings = append(post.Findings, *f)
 		}
-		act, err := rc.clarify(ctx, "postcompute", post.Findings, nil, postKey, pre)
+		act, err = rc.clarify(ctx, "postcompute", post.Findings, nil, postKey, pre)
 		if err != nil {
 			return r.fail(ctx, run, "clarify", err)
 		}
@@ -208,12 +225,8 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 		break
 	}
 	// AM11b: what the person typed with the files, read into what the package says can be asked of its
-	// documents. It changes how they are made, never a figure: the table is computed already.
-	asked, err := rc.asked(ctx, rc.run.Message, rc.pkg.Manifest.FromRequest())
-	if err != nil {
-		return rc.stepFailed("instructions", err)
-	}
-	rc.instr = asked.Apply
+	// documents (readAsked, at the top of the loop since AM18). It changes how they are made, never a
+	// figure: the table is computed already.
 	narrative, narrKey, err := rc.narrative(ctx, computedRef, computeKey)
 	if err != nil {
 		return rc.stepFailed("narrative", err)

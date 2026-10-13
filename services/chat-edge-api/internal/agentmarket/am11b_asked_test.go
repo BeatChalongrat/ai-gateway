@@ -77,7 +77,7 @@ func TestAM11bTheQuestionGivesAModelNothingToEchoAndOnlyTheTwoLists(t *testing.T
 	}
 	// (a directive is shown with how people ask for it when the package says, else with what it does)
 	for _, must := range []string{"no_charts: ไม่ใส่กราฟ — รายงานและสไลด์ไม่มีกราฟ", "brief: รายงานฉบับย่อ (คนมักขอว่า: ขอสั้นๆ · ขอหน้าเดียว)", "by_department: แยกตามแผนก",
-		"change_figures: ", "skip_checks: ", "change_rules: ", "<<<\nไม่ต้องใส่กราฟ\n>>>", `{"apply": ["id"], "cannot": [{"id": "id", "words": "คำของผู้ใช้"}]}`} {
+		"change_figures: ", "skip_checks: ", "change_rules: ", "<<<\nไม่ต้องใส่กราฟ\n>>>", `{"apply": ["id"], "cannot": [{"id": "id", "words": "คำของผู้ใช้"}], "standing": ["id"], "ask": [{"ids": ["id", "id"], "words": "คำของผู้ใช้"}]}`} { // (the shape grew in AM18)
 		if !strings.Contains(user, must) {
 			t.Fatalf("the user turn lacks %q:\n%s", must, user)
 		}

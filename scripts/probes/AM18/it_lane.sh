@@ -19,6 +19,8 @@ if [ "${1:-all}" != "new" ]; then
 fi
 CHUNKS=(
   '^(TestTheBankPaperPrintsEachRowsDescriptionBesideItsAmountsInEnglish)$'
+  '^(TestTheLanguageAndEveryTimeAreHeardKeptAndCleared)$'
+  '^(TestARequestThatCouldMeanTwoThingsIsAskedBeforeWorkAndAnotherLanguageIsRefused)$'
 )
 for c in "${CHUNKS[@]}"; do
   echo "== chunk $c"

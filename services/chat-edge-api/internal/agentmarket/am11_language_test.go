@@ -216,7 +216,6 @@ var notASentence = map[string]string{
 	"runner/jobs.go:pdfWords":               "reads a person's typed message: the words that ask for a PDF",
 	"runner/jobs.go:questionWords":          "reads a person's typed message: the words that make it a question",
 	"runner/jobs.go:moreFilesWords":         "reads a person's typed message: a request for more files without naming a kind",
-	"runner/jobs.go:englishWords":           "reads a person's typed message: a request for the documents in English",
 	"runner/explain.go:whyWords":            "reads a person's typed question: the words that ask for a reason or an origin",
 	// ── words that read a package's or a model's text ──
 	"clarify.go:Validate":              "reads a package's question: what a card may never ask for (a secret), in either language",

@@ -52,7 +52,7 @@ func (rc *runCtx) asked(ctx context.Context, text string, request bool) (am.Aske
 	if !m.TakesInstructions() || text == "" || am.SocialOnly(text) || rc.run.Kind == am.KindSelfTest {
 		return am.Asked{}, nil
 	}
-	spec := *m.Instructions
+	spec := (*m.Instructions).Speaking(m.Languages) // AM18: the languages the documents can be asked in
 	models := rc.textModels()
 	key := am.StepKey(rc.run.ID, "instructions", text, specHash(spec), strings.Join(models, "|"))
 	if request {
@@ -111,7 +111,7 @@ func (rc *runCtx) sayAsked(ctx context.Context, run am.Run, asked am.Asked, done
 	if !m.TakesInstructions() || asked.Nothing() {
 		return
 	}
-	spec := *m.Instructions
+	spec := (*m.Instructions).Speaking(m.Languages) // AM18: a refusal of a language names the ones it speaks
 	var lines []am.PersonText
 	if asked.Unread {
 		lines = append(lines, am.AskedUnread())
@@ -138,6 +138,7 @@ func (rc *runCtx) sayAsked(ctx context.Context, run am.Run, asked am.Asked, done
 	}
 	lines = append(lines, am.AskedOneAtATime(spec, asked.Instead)...)
 	lines = append(lines, am.AskedNotDone(spec, refused, asked.Cannot)...)
+	lines = append(lines, rc.moreAsked(asked, done)...) // AM18: the language, what is kept from now on
 	for _, line := range lines {
 		_ = rc.r.Store.PostText(ctx, run, line)
 	}

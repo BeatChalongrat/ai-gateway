@@ -64,7 +64,6 @@ func init() {
 		"ตรวจความครบถ้วน":                         "Checking completeness",
 		"ตรวจคุณภาพเอกสาร":                        "Checking document quality",
 		"ตรวจว่างานของรอบนี้ครบตามเกณฑ์ของ agent": "Checking that this run's work meets the agent's criteria",
-		"ตอนนี้ agent ตัวนี้ทำเอกสารเป็นภาษาไทยเท่านั้นครับ ภาษาอังกฤษจะมาในรุ่นถัดไป":                       "This agent makes documents in Thai only for now. English will come in the next version.",
 		"ตอนนี้ไม่มีโมเดลในองค์กรที่ตอบคำถามได้ (agent ตัวนี้ไม่ส่งข้อมูลของคุณให้โมเดลนอกองค์กร)":           "No model inside the organisation can answer questions at the moment (this agent does not send your data to models outside the organisation).",
 		"ตัวเลขทุกตัวอ่านจากเอกสารด้วยสคริปต์ หรือเป็นค่าที่คุณพิมพ์/ยืนยัน โมเดลไม่ได้เป็นผู้กำหนดตัวเลขใด": "Every figure was read from the documents by scripts, or is a value you typed or confirmed. No model set any figure.",
 		"ตัวเลขสรุป %s ค่าไม่ตรงกับที่รุ่นนี้กำหนด":                                                          "summary figures differ from what this version expects (%s of them)",

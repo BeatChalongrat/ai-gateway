@@ -95,7 +95,25 @@ func (e *itEnv) askedAnswer(body []byte) string {
 	if w := word("งบไม่เกิน"); w != "" { // (a model that takes a request's budget for a request about the document)
 		cannot = append(cannot, map[string]string{"id": "other", "words": w})
 	}
-	b, _ := json.Marshal(map[string]any{"apply": apply, "cannot": cannot})
+	// AM18: the language of the documents, what is asked for from now on, what could mean two things
+	if strings.Contains(typed, "ภาษาอังกฤษ") || strings.Contains(strings.ToLower(typed), "english") {
+		apply = append(apply, "lang_en")
+	}
+	if strings.Contains(typed, "ภาษาไทย") {
+		apply = append(apply, "lang_th")
+	}
+	if w := word("ญี่ปุ่น"); w != "" {
+		cannot = append(cannot, map[string]string{"id": "lang_other", "words": w})
+	}
+	standing := []string{}
+	if strings.Contains(typed, "ทุกครั้ง") {
+		standing = append(standing, apply...)
+	}
+	ask := []map[string]any{}
+	if w := word("เรียงรายการใหม่"); w != "" {
+		ask = append(ask, map[string]any{"ids": []string{"sort_by_amount", "sort_by_date"}, "words": w})
+	}
+	b, _ := json.Marshal(map[string]any{"apply": apply, "cannot": cannot, "standing": standing, "ask": ask})
 	return string(b)
 }
 
