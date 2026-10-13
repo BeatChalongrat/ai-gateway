@@ -14,7 +14,7 @@ lane, the `drill` phase, CI) fails by name if one is tracked anyway.
   `agent-sandbox`, `kb-models`.
 - `apps/web-chat/` — the chat app (Next.js); `apps/desktop/` — the Electron desktop app that hosts it.
 - `admin-ui/` — the admin console (Next.js); `portal/` — the user portal (Next.js).
-- `SranDesktop/` — the earlier .NET 8 WPF desktop client (still built by CI).
+- `SranDesktop/` — the earlier .NET 8 WPF desktop client (not shipped; CI no longer builds it).
 - `dlp-sidecar/`, `rate-limiter/` (Rust), `log-worker/` (Go) — sidecars of the gateway.
 - `infra/` — Caddy, Postgres, pgbouncer, Prometheus, Grafana, backup, nginx, k8s, Terraform.
 - `scripts/` — see below. `tools/loadtest/` — the load-test kit. `mock/` — the mock provider.
@@ -35,14 +35,12 @@ lane, the `drill` phase, CI) fails by name if one is tracked anyway.
 - Running it: `ops/` (deploy-backend, backups, monitoring, tls, scaling, knowledge-base),
   `SCALING_ACTIVATION_RUNBOOK.md`, `DEPLOY_SANDBOX.md`, `DLP_SIDECAR_FAILURE.md`, `HOST_MEMORY.md`,
   `SSO-GO-LIVE.md`, `CONNECTOR_SETUP.md`, `CONNECTOR_OAUTH.md`, `CI_RUNNER_SETUP.md`,
-  `MODEL_CONTEXT_WINDOWS.md`, `testing/test-stack.md`.
+  `testing/test-stack.md`.
 - Agent Market: `agent-market/ARCHITECTURE.md` (how it is built, by card), `OPERATIONS.md` (how it is
-  run), `REMOVAL.md` (how it is taken out), `GLOSSARY.md` (its words, Thai and English), `HANDOVER.md`,
-  `COLLEAGUE-TRIAL.md`, `TRIAL-WATCH.md`.
-- Records someone may need later: `OPEN_DECISIONS.md`, `DEFERRED_WORK.md`, `known-issues/`,
-  `DLP_DETECTOR_PARITY_MAP.md`, `PROVIDER_KEY_AUDIT.md`, `SYSTEM_PROMPT_COVERAGE.md`,
-  `TOOL_LESS_MODELS.md`, `AUTH_REDESIGN_DESIGN.md`, `DESKTOP_WEB_PARITY_SPEC.md`,
-  `SECURITY_17A_TOKEN_PURGE.md`, `ops/GITLAB_RUNNER_PROPOSAL.md`, `ops/agent-api-readiness.md`.
+  run), `REMOVAL.md` (how it is taken out), `GLOSSARY.md` (its words, Thai and English).
+- What the system does not do yet: `known-issues/`, `DEFERRED_WORK.md`, `OPEN_DECISIONS.md`;
+  the design behind the admin auth: `AUTH_REDESIGN_DESIGN.md`; the quarantined tests:
+  `backend/tests/QUARANTINE.md`.
 
 ## scripts/
 

@@ -16,7 +16,7 @@
 #   secret-leak-guard       -> secret-leak-guard
 #   (none — GitLab only)    -> gitleaks (FIX126: commit-range secret scan)
 #   security-audit          -> audit:pip / audit:npm / audit:go / audit:cargo
-#   desktop-test (Windows)  -> desktop-test (tags:[windows], manual+allow_failure)
+#   (desktop-test, the WPF client's Windows job, was removed on both hosts in AM19)
 
 stages:
   - test
@@ -365,26 +365,8 @@ audit:cargo:
       done
 
 # ─────────────────────────────────────────────────────────────────────────
-# desktop-test (SranDesktop, WINDOWS) — net8.0-windows / WPF CANNOT build on
-# Linux, so this job REQUIRES a Windows GitLab runner tagged `windows`.
-#
-# ⚠ ACTION REQUIRED: a Windows GitLab runner must be REGISTERED with the
-# `windows` tag for this job to execute. Until then it is a MANUAL job and is
-# allow_failure: true, so a MISSING Windows runner does NOT red the pipeline
-# and does NOT silently drop desktop coverage — the job stays visible in the
-# pipeline as a manual/optional lane. Once a runner exists, promote it to a
-# normal blocking lane (remove `when: manual` / `allow_failure`).
+# AM19 — SranDesktop/ (the earlier WPF client) is kept as code but is not
+# shipped, so CI no longer builds or tests it (the manual Windows-runner job
+# is gone; no Windows runner was ever registered). The desktop that ships is
+# apps/desktop (Electron), tested by its own suite.
 # ─────────────────────────────────────────────────────────────────────────
-desktop-test:
-  stage: test
-  tags:
-    - windows
-  when: manual
-  allow_failure: true
-  # image intentionally omitted — a Windows shell/dotnet runner is expected to
-  # provide the toolchain (the GitHub lane uses windows-latest + setup-dotnet).
-  script:
-    # Suite is self-contained: sqlite in temp dirs, loopback HttpListener fakes
-    # for MCP dials — no secrets, no live services.
-    - dotnet build SranDesktop/SranDesktop.sln -c Release
-    - dotnet test SranDesktop/SranDesktop.sln -c Release --no-build

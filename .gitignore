@@ -23,8 +23,8 @@ coverage/
 *.log
 logs/
 
-# Scratch/debug scratchpads — never commit (once held a real admin JWT; see
-# docs/SECURITY_17A_TOKEN_PURGE.md). Ignored everywhere in the tree.
+# Scratch/debug scratchpads — never commit (once held a real admin JWT; the
+# incident record is kept outside the repository). Ignored everywhere in the tree.
 .tmp_bugs/
 **/.tmp_bugs/
 tmp/
@@ -290,3 +290,17 @@ docs/PILOT_READINESS.md
 backend/tests/integration/fix_test_report.txt
 backend/evals/**/results/
 services/chat-edge-api/tests/phase1_results.json
+# records of finished rounds — audits, measurements, proposals, trial scripts, handovers (decided by the
+# same test in AM19: not needed to build, run, deploy or operate the system)
+docs/agent-market/HANDOVER.md
+docs/agent-market/COLLEAGUE-TRIAL.md
+docs/agent-market/TRIAL-WATCH.md
+docs/DLP_DETECTOR_PARITY_MAP.md
+docs/PROVIDER_KEY_AUDIT.md
+docs/SECURITY_17A_TOKEN_PURGE.md
+docs/DESKTOP_WEB_PARITY_SPEC.md
+docs/ops/GITLAB_RUNNER_PROPOSAL.md
+docs/SYSTEM_PROMPT_COVERAGE.md
+docs/TOOL_LESS_MODELS.md
+docs/MODEL_CONTEXT_WINDOWS.md
+docs/ops/agent-api-readiness.md

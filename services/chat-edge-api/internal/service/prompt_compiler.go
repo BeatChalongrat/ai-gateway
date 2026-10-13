@@ -236,7 +236,7 @@ func (pc *PromptCompiler) globalIdentity(in CompileContext) string {
 // DATE_TIME_RULE are the same bytes, pinned by fix113-date-time.test.ts).
 // The date, weekday, time and zone are each surface's own: here Bangkok,
 // because the server does not know where the user is; the desktop uses the
-// machine's zone, because it does (see docs/SYSTEM_PROMPT_COVERAGE.md).
+// machine's zone, because it does (FIX107 Part C's register of what each surface tells the model).
 //
 //go:embed prompt_date_time.txt
 var dateTimeAssetRaw string
