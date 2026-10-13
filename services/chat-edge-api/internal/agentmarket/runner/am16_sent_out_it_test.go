@@ -209,6 +209,11 @@ func TestAPageSentToAModelThatDidNotAnswerStillLeft(t *testing.T) {
 	e.nameRecipients(in.Slug, am16Recipient)
 
 	run := e.invoiceRun(am16Scan)
+	// (AM18: words typed with the files are read first, by a model — a round of files alone, so that the
+	// first thing this run needs the model for is the page)
+	if _, err := e.store.Pool.Exec(ctx, `UPDATE agent_market.agent_runs SET message = '' WHERE id = $1`, run.ID); err != nil {
+		t.Fatal(err)
+	}
 	e.away.Store(true)
 	got := e.drive(r, run.ID, 6*time.Minute, parkedOrTerminal)
 	if got.StatusReason != am.ReasonModelUnreachable {

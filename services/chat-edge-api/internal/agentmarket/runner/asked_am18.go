@@ -32,6 +32,11 @@ func (rc *runCtx) spec() am.InstructionSpec {
 // language, the choice cards, the standing requests. It returns the context in the round's language, the
 // reading, and what the round does next (actPark while a choice card waits, actNone to go on).
 func (rc *runCtx) readAsked(ctx context.Context) (context.Context, am.Asked, int, error) {
+	if rc.pkg.Manifest.UsesWeb() && !rc.docsMayLeave && rc.run.Kind != am.KindSelfTest {
+		// AM12: an agent that works on the web whose switch is off does nothing with the request — not even
+		// read it; the round stops at its brief (webBrief: web_closed) as it did before the words were read first
+		return ctx, am.Asked{}, actNone, nil
+	}
 	asked, err := rc.asked(ctx, rc.run.Message, rc.pkg.Manifest.FromRequest())
 	if err != nil {
 		return ctx, asked, actNone, err

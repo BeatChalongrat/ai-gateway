@@ -146,9 +146,14 @@ func TestARunWaitsForAModelThatCannotBeReachedAndGoesOnWhenItIsBack(t *testing.T
 			t.Fatalf("%s: the run that waited: %s %s", lang, got.Status, got.StatusReason)
 		}
 		after := e.am15StepIDs(run.ID)
+		// AM18: the words are read before any work, so a run that waits for the model to read them has
+		// done nothing yet; once the model is back it does each step, once
 		for _, name := range []string{"preflight/succeeded", "compute/succeeded", "postcompute/succeeded"} {
-			if before[name] == "" || before[name] != after[name] {
-				t.Fatalf("%s was run again (%s → %s): a run goes on from its first unfinished step", name, before[name], after[name])
+			if before[name] != "" {
+				t.Fatalf("%s was done before the words were read: the words are read first (AM18)", name)
+			}
+			if after[name] == "" {
+				t.Fatalf("%s: not done once the model was back", name)
 			}
 		}
 		var asked am.Asked
@@ -290,6 +295,11 @@ func TestAScanWaitsForTheModelThatReadsIt(t *testing.T) {
 	r.Model.VisionModel = "fake-vision"
 	r.Model.SelfHosted["fake-vision"] = true
 	run := e.invoiceRun("s01_scan300_full_tax_invoice.pdf")
+	// (AM18: words typed with the files are read first, by a model — a round of files alone, so that the
+	// first thing this run needs the model for is the scan)
+	if _, err := e.store.Pool.Exec(ctx, `UPDATE agent_market.agent_runs SET message = '' WHERE id = $1`, run.ID); err != nil {
+		t.Fatal(err)
+	}
 	e.away.Store(true)
 	got := e.drive(r, run.ID, 6*time.Minute, parkedOrTerminal)
 	e.am15Waiting(t, got, "vision:")
