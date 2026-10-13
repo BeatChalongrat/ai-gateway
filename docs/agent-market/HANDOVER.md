@@ -38,9 +38,12 @@ runs, reported problems, spend · every change in the audit log.
 
 ## Known broken or weak — and where it is written
 
-1. **The in-house model can go away and nothing notices until 06:30.** Chat then waits ~40 s and
-   another model answers; agent runs wait. It was away on 9 Oct, and again on 13 Oct from about 04:17
-   until some time before 10:50 — the 06:30 check was red for it, and nobody has said why it went.
+1. **The in-house model can go away and nothing notices until 06:30 — and then perhaps not at once.**
+   Chat then waits ~40 s and another model answers; agent runs wait. It was away on 9 Oct, and again
+   on 13 Oct from about 04:17 until some time before 10:50; nobody has said why. That morning's check
+   was red for it and paged only as a reminder at 10:19: the watcher's smoke incident had been open
+   since 11 Oct, and a new cause inside an open incident does not page as new. After a red or missed
+   daily check, run `scripts/smoke-daily.ps1` by hand once it is green, so the incident closes.
    `AM16_REPORT.md` §20 and §23, `AM15_REPORT.md` §12.
 2. **A failed Agent Market smoke check pages nobody, and the live check runs as an admin** — it does
    not prove a member can reach an agent. `AM15_REPORT.md` §13.
