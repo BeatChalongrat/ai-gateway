@@ -9,8 +9,8 @@ hours after the client is gone). Our runs live and die inside one turn.
 This contract only makes a run **resumable without gaps or duplicates**,
 and **honest about how it ended**.
 
-Written for FIX41. Baseline measurements that motivated every rule:
-`docs/fix41/A-baseline.md`.
+Written for FIX41. The baseline measurements that motivated every rule are FIX41
+Part A's record, kept outside the repository.
 
 ---
 
@@ -102,7 +102,7 @@ message_complete`. So:
 * a person pressing **Stop** was reported to every other viewer as a
   **crash**, and then as a **success**.
 
-Both are measured in `docs/fix41/A-baseline.md` (P3, P4).
+Both are measured in FIX41 Part A's baseline record (P3, P4).
 
 Under this contract the drain no longer writes its own `error` frame for
 a stream-level failure; the handler writes **one** terminal that names

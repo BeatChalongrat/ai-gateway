@@ -50,7 +50,7 @@ const resumeSubBuffer = 1024
 // throws the ORDER away: a run whose live stream was
 // content/tool/content/code/tool/content/code/content came back from a
 // resume as code/tool/content — eight frames as three, tool cards ahead
-// of all the text (docs/fix41/A-baseline.md, P1b). No replay code can
+// of all the text (FIX41 Part A's baseline record, P1b). No replay code can
 // recover that; the information was never stored.
 //
 // So the entry also keeps the frames it actually sent, in order, each

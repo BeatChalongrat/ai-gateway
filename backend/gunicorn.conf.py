@@ -117,7 +117,7 @@ forwarded_allow_ips = os.environ.get("FORWARDED_ALLOW_IPS", "*")
 proxy_protocol = False
 # Recycling a worker drains it WITHOUT heartbeats (see GUNICORN_TIMEOUT) and
 # interrupted SSE streams in waves in the capacity runs
-# (docs/CAPACITY_VALIDATION_150_250.md). Off.
+# (the 150/250-stream validation, a record kept outside the repository). Off.
 max_requests = 0
 # The heartbeat file on tmpfs: a heartbeat on the container's overlay disk can
 # stall behind disk I/O and get a healthy worker killed (gunicorn docs, "Blocking

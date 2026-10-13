@@ -3,7 +3,7 @@ package service
 // FIX41 chunk 2 — the run ledger that outlives the process.
 //
 // WHY REDIS, AND WHY OFF THE HOT PATH. Four options were measured before
-// anything was written (scripts/fix41-probe/results/E1-ledger-backends.json,
+// anything was written (FIX41's E1 ledger-backends probe,
 // 404-frame turn, budget: +15 ms p95 per turn):
 //
 //   L4  no ledger                          0 us/turn   resume after restart: NO

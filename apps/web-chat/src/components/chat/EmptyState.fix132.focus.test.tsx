@@ -1,7 +1,6 @@
 // FIX132 N7 — the starter chips' focus ring. NIGHT3 read no ring on
 // เรียนรู้ / โค้ด / วิเคราะห์ when reached with Tab. Measured again on the live
-// page (scripts/probes/FIX132/results/lanes/lane-ux/probe/n7.json and
-// n7-chips-1280.png): the ring faded in over 150 ms (the chip animates
+// page (the FIX132 UX lane's probe n7, its record and its picture): the ring faded in over 150 ms (the chip animates
 // `all`, the outline too), its top edge was cut off by the chip row's
 // overflow box, and the chip turned into a 6-px rounded rectangle while
 // focused. Now the outline is not animated, the row leaves room for it, and

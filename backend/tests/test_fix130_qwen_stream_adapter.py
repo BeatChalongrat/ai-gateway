@@ -3,7 +3,7 @@ fake vLLM transport (``real_adapter``) returns the sranai box's in-band
 thinking as reasoning, not as the answer.
 
 The wire bytes are the shape measured straight from the box in FIX130
-step 1 (scripts/probes/FIX130/results/ans/STEP1_raw_shape.txt): content
+step 1 (the raw-shape capture of the FIX130 probes): content
 deltas only, the thinking first, ``</think>`` as its own delta, then the
 answer; ``reasoning_content`` never populated. Before FIX130 the whole
 thing reached the caller as ``delta``.

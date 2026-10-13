@@ -1407,7 +1407,7 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 // Before FIX41 each of the three ended unconditionally on
 // message_complete, so the last frame of a failed turn was the success
 // terminator and a cancel was indistinguishable from a normal finish
-// (docs/fix41/A-baseline.md, P3 and P4).
+// (FIX41 Part A's baseline record, P3 and P4).
 func (h *MessageHandler) finishStream(
 	rw *runWriter,
 	flusher http.Flusher,
@@ -1919,7 +1919,7 @@ func (h *MessageHandler) serveResume(
 	// the same ledger. Nothing is re-derived, so nothing can be renumbered
 	// or reordered: replaying a folded snapshot is what turned eight
 	// frames into three and put the tool cards ahead of the text
-	// (docs/fix41/A-baseline.md, P1b).
+	// (FIX41 Part A's baseline record, P1b).
 	if att.Frames != nil {
 		h.resumeFromLedger(w, flusher, r, msgID, att)
 		return

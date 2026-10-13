@@ -534,7 +534,7 @@ func (s *DocService) ExecutePlan(
 // the generated file at outPath — the surrounding validate/upload/
 // versioning flow is UNCHANGED.
 //
-// scriptName is the "scripts/xxx_generator.py" const; the sandbox path
+// scriptName is the "scripts/<kind>_generator.py" const; the sandbox path
 // takes just its basename (the script is baked into the image).
 func (s *DocService) runGenerator(
 	ctx context.Context, scriptName string, planBytes []byte, planPath, srcPath, outPath, format string,

@@ -61,7 +61,7 @@ type Config struct {
 	// window and not a store.
 	//
 	// MaxEvents: the cap on one run's frames. Measured at ~177 bytes per
-	// frame (scripts/fix41-probe/results/E1-ledger-backends.json), so
+	// frame (FIX41's E1 ledger-backends probe), so
 	// 8000 is ~1.4 MB for a single runaway generation. Past the cap the
 	// OLDEST frames go — a reattaching client needs the live tail more
 	// than the beginning, and a cursor pointing into the dropped region

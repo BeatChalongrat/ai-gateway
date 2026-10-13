@@ -1,7 +1,7 @@
 // The turn (E3 chat-only → E4 the tool loop). Ported from
 // SranDesktop.Application/Services/ChatOrchestrator.cs and the WebView2
 // shell's ShellTurnCoordinator, with the host/sidecar boundary of
-// docs/E4_REPORT.md §1:
+// the E4 record, §1:
 //
 //   turn.submit → [system, …history (with tool chains)…, user] → gateway SSE
 //   → content deltas | tool_calls → per call: DLP marker → permission

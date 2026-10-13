@@ -6,9 +6,8 @@ capability probe DROVE both models with a real tool schema three times
 each and every run came back ``outcome: tool_call_emitted`` /
 ``observed_supports_tools: true``:
 
-    scripts/probes/capability-flags/results/2026-09-02T21-00-15Z.json
-    scripts/probes/capability-flags/results/2026-09-02T21-02-23Z.json
-    scripts/probes/capability-flags/results/2026-09-02T21-07-14Z.json
+    the capability-flags probe's three runs of 2026-09-02 (21:00:15Z, 21:02:23Z,
+    21:07:14Z), kept with the probes outside the repository.
 
 This flips the two flags to what the probe observed — evidence, not the
 vendor's documentation. ``openrouter:deepseek/deepseek-r1`` also emitted
