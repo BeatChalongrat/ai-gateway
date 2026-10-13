@@ -76,7 +76,7 @@ def compute(files, roles, period, *, answers=None, defaults=None, today=None, hi
         return _audit.compute(files, roles, period, answers=answers, defaults=defaults, today=today, history=history,
                               proposals=proposals)
 
-    return _words.with_document(table(), table)
+    return table()
 
 
 def postcompute(files, roles, period, computed, *, answers=None, defaults=None) -> dict:
@@ -136,9 +136,8 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     from ...deliverables.theme import resolve
     from .scripts.workbook import ExpenseWorkbook, check
 
-    # the workbook is written from the table in the documents' language; what the gate then says of the file is
-    # said in the run's
-    view, applied = _as_asked(_words.for_document(computed), req)
+    # AM18: the workbook is written in the run's language, like everything the run says
+    view, applied = _as_asked(computed, req)
 
     theme = resolve(req.get("theme"))
     names = req.get("names") or {}
@@ -146,8 +145,7 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     for fmt in [f for f in wanted_formats(req, ["xlsx"]) if f == "xlsx"]:
         name = os.path.basename(names.get(fmt) or "expense_audit.xlsx")
         path = os.path.join(out_dir, name)
-        with _words.speaking(_words.DOCUMENT):
-            meta = ExpenseWorkbook(view, theme, req.get("run")).write(path)
+        meta = ExpenseWorkbook(view, theme, req.get("run")).write(path)
         checks = check(path, view, req.get("run"))
         if applied:
             checks.append(_asked_check(path, view, applied))

@@ -100,8 +100,8 @@ FACT_CELL = {"claim_data": "amount", "category": "category", "within_claim_limit
              "weekend_holiday": "date", "purpose": "description"}
 TIER_TH = W.table({k: f"tier.{k}" for k in ("digital", "etax", "scan", "photo")})
 OUTCOME_TH = W.table({k: f"outcome.{k}" for k in R.OUTCOMES})
-RESOLUTION_TH = {"accepted": "ผู้ใช้ยืนยันว่ารับได้", "typed": "ผู้ใช้ระบุวัตถุประสงค์", "ask_employee": "ให้ถามพนักงาน",
-                 "review": "ส่งให้ผู้อนุมัติตัดสิน"}
+RESOLUTION_TH = W.table({"accepted": "doc.resolution.accepted", "typed": "doc.resolution.typed", "ask_employee": "doc.resolution.ask_employee",
+                         "review": "doc.resolution.review"})
 
 
 def _money(v) -> str:
@@ -209,9 +209,9 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
     answers = answers or {}
     rv = RV.review(uploads, defaults=defaults, answers=answers, today=today, history=history, proposals=proposals, final=True)
     if rv.policy is None:
-        raise ValueError("ยังไม่มีตารางนโยบายการเบิกที่ใช้ได้ ตรวจไม่ได้โดยไม่เดาวงเงิน: " + "; ".join(rv.problems))
+        raise ValueError(W("say.no_policy") + "; ".join(rv.problems))
     if not rv.sheets:
-        raise ValueError("ยังไม่มีไฟล์รายการเบิกค่าใช้จ่าย")
+        raise ValueError(W("say.no_claims"))
     claims, run_ex = [], []
     for a in rv.audits:
         c = a.claim

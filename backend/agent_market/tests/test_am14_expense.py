@@ -19,6 +19,7 @@ from agent_market.tests.test_am14_words import THAI, THAI_RUN, EnglishRuns, stri
 
 
 class AnExpenseRunInEnglish(EnglishRuns, unittest.TestCase):
+    documents = True   # AM18
     package, kit = "expense_audit", K
 
     @classmethod
@@ -78,9 +79,11 @@ class AnExpenseRunInEnglish(EnglishRuns, unittest.TestCase):
         self.assertEqual(cites["e1"]["aliases"][:3], ["total claimed", "amount claimed", "claimed in all"])
         thai = {c["id"]: c for c in self.th["golden_month_cards_skipped"]["computed"]["citations"]}
         self.assertEqual(cites["e1"]["aliases"][3:], [thai["e1"]["label"]] + thai["e1"]["aliases"])   # … and the workbook's own names
-        # a claim's weekday and the outcome a source line names are the run's words; the workbook keeps its own
+        # a claim's weekday and the outcome a source line names are the run's words — and so is the workbook (AM18:
+        # one table, in the run's language; no second table for the documents)
         self.assertIn(comp["claims"][0]["weekday"], ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
-        self.assertTrue(THAI.search(comp["document"]["claims"][0]["outcome_label"]))
+        self.assertNotIn("document", comp)
+        self.assertFalse(THAI.search(comp["claims"][0]["outcome_label"]), comp["claims"][0]["outcome_label"])
 
     def test_an_answer_given_on_a_card_is_said_in_english_where_the_run_records_it(self):
         res = self.en["golden_month_cards_answered"]

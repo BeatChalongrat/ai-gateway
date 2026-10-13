@@ -79,7 +79,8 @@ def own_runs(text, fragments: list[str]) -> list[str]:
         for f in fragments:
             if f in s:
                 s = s.replace(f, "\x00")
-        out += [p for p in s.split("\x00") if p]
+        # (a particle left between two of the document's words — นี้, ของ — is not the person's data)
+        out += [p for p in s.split("\x00") if len(p) > 3]
     return out
 
 
@@ -143,10 +144,11 @@ def same_but_words(th: dict, en: dict, w, sheet_names: dict | None = None, limit
                     if a != b:
                         say(f"{where}: {a!r} in Thai, {b!r} in English")
                     continue
-                if numbers_of(a) != numbers_of(b):
-                    say(f"{where}: the numbers differ — {a[:60]!r} / {b[:60]!r}")
+                # (the same numbers, whatever order the two languages' sentences put them in)
+                if sorted(numbers_of(a)) != sorted(numbers_of(b)):
+                    say(f"{where}: the numbers differ — {a[:120]!r} / {b[:120]!r}")
                 elif own_runs(a, fragments) != own_runs(b, fragments):
-                    say(f"{where}: the person's own data differs — {a[:60]!r} / {b[:60]!r}")
+                    say(f"{where}: the person's own data differs — {own_runs(a, fragments)} / {own_runs(b, fragments)} in {a[:120]!r} / {b[:120]!r}")
     return bad
 
 
