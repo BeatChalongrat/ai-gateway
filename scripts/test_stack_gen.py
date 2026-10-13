@@ -51,7 +51,7 @@ SERVICES: dict[str, int | None] = {
     "redis-webchat": 16380,
     "chat-edge-api": 14000,
     # FIX129 A5: the backup service, so a restore drill can run against the
-    # test stack (scripts/probes/FIX129/backup_drill_check.sh). Its /backups
+    # test stack (scripts/ops/backup_drill_check.sh). Its /backups
     # bind becomes the named volume ts_backups (see below). NOT included:
     # autoheal (needs the docker socket = a live reference).
     "backup": None,

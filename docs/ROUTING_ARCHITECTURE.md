@@ -70,7 +70,7 @@ Pass constraints via `metadata`:
 the request: behind a router (OpenRouter) a model is run by its maker or by a
 hosting company, and unless told otherwise the router picks one per request.
 Measured on 13 Oct 2026 with this deployment's own key
-(`scripts/probes/AM16/openrouter_pin.py`): `anthropic/claude-sonnet-4.5` was
+(`scripts/agent-market/openrouter_pin.py`): `anthropic/claude-sonnet-4.5` was
 answered by Amazon Bedrock, `openai/gpt-4o` by Azure, `deepseek/deepseek-chat`
 by DeepInfra, a Llama model by Parasail — only Google's models by their maker.
 So the company in a recipient is the one that **runs** the model. A caller that

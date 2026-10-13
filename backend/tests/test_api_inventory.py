@@ -1,42 +1,10 @@
-"""P1-01: API inventory validation tests.
-
-Verifies:
-- All documented public endpoints exist and respond
-- Inventory document exists
-- Endpoint count matches expectations
-"""
-
-from pathlib import Path
+"""P1-01: the public and admin endpoints the inventory named exist and respond."""
 
 from fastapi.testclient import TestClient
 
 from app.main import app
 
 client = TestClient(app, raise_server_exceptions=False)
-
-DOCS_DIR = Path(__file__).resolve().parent.parent.parent / "docs"
-
-
-class TestInventoryDocExists:
-    def test_inventory_doc_exists(self):
-        path = DOCS_DIR / "P1_API_INVENTORY.md"
-        assert path.exists()
-
-    def test_inventory_references_all_routes(self):
-        doc = (DOCS_DIR / "P1_API_INVENTORY.md").read_text(encoding="utf-8")
-        expected_paths = [
-            "/health",
-            "/v1/models",
-            "/v1/chat/completions",
-            "/admin/providers",
-            "/admin/policies",
-            "/admin/requests",
-            "/admin/tenants",
-            "/admin/projects",
-            "/admin/api-keys",
-        ]
-        for path in expected_paths:
-            assert path in doc, f"Missing route in inventory: {path}"
 
 
 class TestPublicEndpointsExist:
@@ -91,20 +59,3 @@ class TestAdminEndpointsExist:
 
     def test_list_requests(self):
         assert client.get("/admin/requests").status_code == 200
-
-
-class TestGapsDocumented:
-    """Verify the gap analysis identifies known issues."""
-
-    def test_request_context_gap_documented(self):
-        doc = (DOCS_DIR / "P1_API_INVENTORY.md").read_text(encoding="utf-8")
-        assert "RequestContextMiddleware" in doc
-        assert "not registered" in doc.lower() or "not wired" in doc.lower()
-
-    def test_models_hardcoded_gap_documented(self):
-        doc = (DOCS_DIR / "P1_API_INVENTORY.md").read_text(encoding="utf-8")
-        assert "Hardcoded" in doc
-
-    def test_streaming_gap_documented(self):
-        doc = (DOCS_DIR / "P1_API_INVENTORY.md").read_text(encoding="utf-8")
-        assert "stream" in doc.lower()

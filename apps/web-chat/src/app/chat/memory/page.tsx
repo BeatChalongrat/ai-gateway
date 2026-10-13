@@ -21,6 +21,7 @@ import {
   AlertTriangle,
   Brain,
   Download,
+  MessageSquareDashed,
   Plus,
   Search,
   Sparkles,
@@ -480,7 +481,7 @@ export default function MemorySettingsPage() {
             onClick={startTemporaryChat}
             className="focus-ring mt-3 inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-transparent px-3 py-1.5 text-xs text-text-primary transition-colors hover:bg-bg-elevated"
           >
-            <Brain className="h-3.5 w-3.5" />
+            <MessageSquareDashed className="h-3.5 w-3.5" aria-hidden />
             {t("memory.temporary.button")}
           </button>
         </section>

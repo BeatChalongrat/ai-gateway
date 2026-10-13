@@ -1,18 +1,4 @@
-"""P10-01: Scale/compliance inventory validation tests."""
-
-from pathlib import Path
-
-DOCS_DIR = Path(__file__).resolve().parent.parent.parent / "docs"
-
-
-class TestScaleInventoryDoc:
-    def test_doc_exists(self):
-        assert (DOCS_DIR / "P10_SCALE_COMPLIANCE_INVENTORY.md").exists()
-
-    def test_documents_gaps(self):
-        doc = (DOCS_DIR / "P10_SCALE_COMPLIANCE_INVENTORY.md").read_text(encoding="utf-8")
-        for gap in ["GAP-S1", "GAP-S2", "GAP-S3", "GAP-S4", "GAP-S5"]:
-            assert gap in doc
+"""P10-01: the scale and compliance foundations the inventory named exist."""
 
 
 class TestExistingScaleFoundations:

@@ -6,7 +6,7 @@ import {
   useSelectedLayoutSegments,
 } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BookOpen, Brain, MoreHorizontal } from "lucide-react";
+import { BookOpen, Brain, MessageSquarePlus, MoreHorizontal } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -348,7 +348,7 @@ function CollapsedRail({
         onClick={onNewChat}
         className="focus-ring tap-44 rounded-md p-2 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
       >
-        <NewChatIcon />
+        <MessageSquarePlus width={18} height={18} aria-hidden />
       </button>
     </div>
   );
@@ -401,7 +401,7 @@ function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
         onClick={onNewChat}
         className={SUBTLE_TOPBAR_BTN}
       >
-        <ChatBubblePlusIcon />
+        <MessageSquarePlus width={22} height={22} aria-hidden />
       </button>
 
       <button
@@ -450,24 +450,6 @@ function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
   );
 }
 
-function ChatBubblePlusIcon() {
-  // Chat-bubble-with-plus — the "compose a new conversation" mark.
-  // currentColor so it inherits the button's text-secondary→primary.
-  return (
-    <svg width={40} height={40} viewBox="0 0 36 36" fill="none" aria-hidden>
-      <path
-        d="M10 12C10 10.3 11.3 9 13 9H23C24.7 9 26 10.3 26 12V19C26 20.7 24.7 22 23 22H20L16 26V22H13C11.3 22 10 20.7 10 19V12Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <line x1="18" y1="13" x2="18" y2="18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <line x1="15.5" y1="15.5" x2="20.5" y2="15.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 function HamburgerIcon() {
   return (
     <svg width={20} height={20} viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -475,27 +457,6 @@ function HamburgerIcon() {
         d="M3 6h18M3 12h18M3 18h18"
         stroke="currentColor"
         strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function NewChatIcon() {
-  // Pencil-in-square — the ChatGPT-equivalent "compose new" mark.
-  return (
-    <svg width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M15.5 3.5a2.12 2.12 0 1 1 3 3L7 18l-4 1 1-4 11.5-11.5Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M14 4l6 6"
-        stroke="currentColor"
-        strokeWidth="1.8"
         strokeLinecap="round"
       />
     </svg>

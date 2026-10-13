@@ -25,9 +25,10 @@ scripts/test-stack.sh reset     # stop and delete the test volumes
 Override an image for one run, e.g. a backend built from a branch:
 `TS_BACKEND_TAG=<sha> scripts/test-stack.sh up` (also `TS_GATEWAY_TAG`, `TS_CHAT_EDGE_TAG`).
 
-Checks written against it: `scripts/probes/FIX128/teststack.js` (Auto skips a
-dead model, rescue by the closest model + credits + request_logs, titles after
-a failed turn and with a dead title model).
+Checks were written against it in FIX128 (Auto skips a dead model, rescue by the
+closest model + credits + request_logs, titles after a failed turn and with a
+dead title model); today `scripts/gate.sh smoke` takes the model away and puts
+it back on this stack.
 
 ## What it is
 
