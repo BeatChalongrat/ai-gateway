@@ -429,7 +429,7 @@ bash scripts/gate.sh preflight          # live's memory guard, free memory, the 
 bash scripts/gate.sh lanes              # engine · go · backend · web · admin · desktop, test stack stopped
 bash scripts/gate.sh it                 # the integration lane, alone, each chunk's verdict as it ends
 bash scripts/gate.sh build <sha>        # the five images; the VM's cache is handed back after
-bash scripts/gate.sh stack <sha>        # test stack + stand-in web + built clients
+bash scripts/gate.sh stack <sha>        # test stack + stand-in web + built clients; red when an image is missing or a service is not healthy
 bash scripts/gate.sh stack-stop         # stop the test stack (nothing is removed)
 bash scripts/gate.sh walk -- <command>  # one walk
 bash scripts/gate.sh smoke <sha>        # flag on, flag off, back on
@@ -462,6 +462,18 @@ docker-compose.agent-market.yml --profile agent-market`), the runner's, fetcher'
 builds, the engine's Python lane, bringing the test stack up and building its clients. To run one of
 them on battery anyway: `RUN_ON_BATTERY=yes` on that command — it says on its output that it did.
 `scripts/tests/test_am16_gate_on_battery.py` holds it, with six ways of breaking the rule shown red.
+
+**A step passes on what is true, not on what it intended (AM19b).** On 14 Oct 2026 `gate.sh stack` was
+given an 8-character sha: Compose tried to pull a tag that does not exist, the chat-edge stayed down, and
+the step said ok. Now the test stack's `up` refuses, before Compose is asked anything, when an image it
+would run is not on the host (exit 6, the images named), and ends with `test_stack.sh check <tag>`: red,
+naming the container, when one the stack started is not running or not healthy, or when the edge, the
+runner or the backend runs an image other than the one asked (exit 7); the test clients' `up` is red when
+a door does not answer. The swap of a live service is not started when its measurement cannot be written
+(exit 5), says `NOT MEASURED` when its poll recorded nothing (exit 8), and is red when the service never
+answered 200 ten times in a row after the swap (exit 9) — the swap of the web chat on 14 Oct had printed
+"0 requests, 0 not 200" as if it were a pass. `scripts/tests/test_am19b_steps_assert.py` holds all of it
+with stand-ins for Docker, curl and sleep.
 
 **The backend lane is the suite, not a list (AM15).** A card used to name the backend files its lane
 ran (`GATE_BACKEND_TESTS`); a test in any other file could fail for months with no lane to say so.

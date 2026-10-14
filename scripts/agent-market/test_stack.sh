@@ -14,6 +14,7 @@
 # Nothing here names a container, volume or port of the live project.
 #
 #   bash scripts/agent-market/test_stack.sh up <tag>        # backend + chat-edge + runner at <tag>, sink, flag on
+#   bash scripts/agent-market/test_stack.sh check <tag>     # red unless every container runs, healthy, on the images asked
 #   bash scripts/agent-market/test_stack.sh edge <tag> [on|off]
 #   bash scripts/agent-market/test_stack.sh runner <tag>
 #   bash scripts/agent-market/test_stack.sh seed            # the test stack's owner, models, and three admin-ui accounts
@@ -47,6 +48,45 @@ runner() {
     AGENT_RUNNER_GATEWAY_API_KEY="$(tr -d '\r\n' < scripts/probes/AM1/results/runner_key.test)" \
     docker compose -p sran-agent-market-test -f docker-compose.agent-market.yml -f scripts/agent-market/test-web.yml       --profile agent-market "${@:2}" 2>&1 | grep -v "level=warning"
 }
+need_images() { # AM19b: every image the stack would run is on this host, or nothing is started
+  # (14 Oct 2026: an 8-character sha made Compose pull a tag that does not exist; the edge stayed down and
+  # the step still said ok. A missing image is an error, named here, before anything is touched.)
+  local missing=() img
+  for img; do docker image inspect "$img" > /dev/null 2>&1 || missing+=("$img"); done
+  [ "${#missing[@]}" = 0 ] && return 0
+  echo "RED: not on this host: ${missing[*]} — the stack was not started (a tag is the 7-character sha of a commit whose images were built: gate.sh build <sha>)"
+  exit 6
+}
+check() { # <tag> — AM19b: the stack is what was asked, or this is red naming what is not
+  # Every container the stack started is running (a one-shot that exited 0 is done, not down), every
+  # health check says healthy, and the edge, the runner and the backend run the images asked for.
+  local tag="$1" red=0 names n line status code health image want running=0 healthy=0
+  names=$( { docker ps -a --filter label=com.docker.compose.project=sran-test --format '{{.Names}}'
+             docker ps -a --filter label=com.docker.compose.project=sran-agent-market-test --format '{{.Names}}'; } | sort -u )
+  for n in sran-test-chat-edge-api-1 sran-test-agent-runner sran-test-backend-1; do
+    case " $(echo $names) " in *" $n "*) ;; *) echo "RED: $n is not there"; red=1 ;; esac
+  done
+  for n in $names; do
+    line=$(docker inspect -f '{{.Name}} {{.State.Status}} {{.State.ExitCode}} {{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}} {{.Config.Image}}' "$n" 2>/dev/null)
+    read -r _ status code health image <<< "$line"
+    want=
+    case "$n" in
+      sran-test-chat-edge-api-1) want="ai-gateway-chat-edge-api:$tag" ;;
+      sran-test-agent-runner) want="ai-gateway-agent-runner:$tag" ;;
+      sran-test-backend-1) want="ai-gateway-backend:${TS_BACKEND_TAG:-$tag}" ;;
+    esac
+    if [ "${status:-}" = exited ] && [ "${code:-}" = 0 ] && [ "${health:-}" = - ]; then :  # a one-shot (the schema init): done
+    elif [ "${status:-}" != running ]; then echo "RED: $n is ${status:-gone} (exit ${code:-?}), not running"; red=1
+    elif [ "${health:-}" != - ] && [ "${health:-}" != healthy ]; then echo "RED: $n is ${health:-?}"; red=1
+    else running=$((running + 1)); [ "$health" = healthy ] && healthy=$((healthy + 1)); fi
+    [ -n "$want" ] && [ "${image:-}" != "$want" ] && { echo "RED: $n runs ${image:-nothing}, not $want"; red=1; }
+  done
+  if [ "$red" = 0 ]; then
+    echo "stack check: ok — $(echo $names | wc -w | tr -d ' ') containers, $running running, $healthy healthy; edge and runner at $tag, backend at ${TS_BACKEND_TAG:-$tag}"
+    return 0
+  fi
+  return 7
+}
 edge() { # <tag> <on|off>
   local flag=true
   [ "${2:-on}" = "off" ] && flag=false
@@ -60,6 +100,7 @@ case "${1:-status}" in
     # on battery the stack is not brought up (scripts/ops/power.sh); RUN_ON_BATTERY=yes on the command does it anyway
     bash "$ROOT/scripts/ops/power.sh" need "bringing the test stack up" || exit 3
     export TS_BACKEND_TAG="${TS_BACKEND_TAG:-$TAG}" TS_CHAT_EDGE_TAG="$TAG"
+    need_images "ai-gateway-chat-edge-api:$TAG" "ai-gateway-backend:$TS_BACKEND_TAG" "ai-gateway-agent-runner:$TAG" "ai-gateway-web-fetcher:${AM_FETCHER_TAG:-$TAG}"
     docker tag "$SANDBOX_FROM" "$SANDBOX_TAG"
     # AM12: bounded — a sync that blocks inside the VM (seen once: 30 minutes, unkillable) must not hold the stack up
     timeout 90 docker run --rm --privileged alpine:3.20 sh -c 'echo 3 > /proc/sys/vm/drop_caches; free -m | head -2' || echo "cache drop skipped"
@@ -73,7 +114,9 @@ case "${1:-status}" in
     edge "$TAG" on
     docker logs sran-test-agent-runner --since 3m 2>&1 | grep -E "schema migrated|package registered|agent-runner started|ERROR" | cut -c1-200 | tail -12
     echo "backend $(docker inspect -f '{{.Config.Image}}' sran-test-backend-1) · mail-sink $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18025/api/v1/messages)"
+    check "$TAG"; exit $?  # (AM19b: up is not ok because it ran — it is ok because the stack is what was asked)
     ;;
+  check) check "${2:?tag}"; exit $? ;;
   edge) edge "${2:?tag}" "${3:-on}" ;;
   runner)
     docker tag "$SANDBOX_FROM" "$SANDBOX_TAG"
@@ -110,5 +153,5 @@ case "${1:-status}" in
     ts down --remove-orphans | tail -3
     docker rmi "$SANDBOX_TAG" 2>/dev/null | tail -1
     ;;
-  *) echo "usage: $0 up <tag>|edge <tag> [on|off]|runner <tag>|seed|web|admin|fresh|status|down" >&2; exit 2 ;;
+  *) echo "usage: $0 up <tag>|check <tag>|edge <tag> [on|off]|runner <tag>|seed|web|admin|fresh|status|down" >&2; exit 2 ;;
 esac

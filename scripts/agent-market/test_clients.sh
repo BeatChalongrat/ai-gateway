@@ -58,6 +58,11 @@ case "${1:-}" in
       sleep 1
     done
     echo "web-chat $WEB_IMG → :13002 /chat $w · admin-ui $ADMIN_IMG → :13000 /login $a"
+    # AM19b: a door that does not answer is red — not a code on a line that passed
+    red=0
+    case "${w:-000}" in 2*|3*) ;; *) echo "RED: web-chat's door :13002 /chat answered ${w:-nothing}"; red=1 ;; esac
+    case "${a:-000}" in 2*|3*) ;; *) echo "RED: admin-ui's door :13000 /login answered ${a:-nothing}"; red=1 ;; esac
+    [ "$red" = 0 ] || exit 7
     ;;
   down)
     docker rm -f sran-test-am10-web sran-test-am10-admin 2>/dev/null | tr '\n' ' '

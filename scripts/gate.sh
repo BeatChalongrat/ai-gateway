@@ -21,7 +21,8 @@
 #   bash scripts/gate.sh lanes <name…>        those lanes only, one piece in the foreground — says PARTIAL, never a verdict
 #   bash scripts/gate.sh it                   the integration lane, alone, each chunk's verdict as it ends
 #   bash scripts/gate.sh build <sha>          the five images, then the VM's cache handed back
-#   bash scripts/gate.sh stack <sha>          test stack + stand-in web + built clients (a walk needs them)
+#   bash scripts/gate.sh stack <sha>          test stack + stand-in web + built clients (a walk needs them); red when an
+#                                             image of <sha> is missing or a service it started is not healthy
 #   bash scripts/gate.sh stack-stop           stop the test stack (nothing is removed)
 #   bash scripts/gate.sh walk -- <command…>   one walk, with the lock held
 #   bash scripts/gate.sh smoke <sha>          smoke on the test stack: flag on, the model taken away (must be RED,
@@ -221,7 +222,8 @@ case "$phase" in
     one stack_web 600 bash scripts/agent-market/test_stack_web.sh web "${AM_FETCHER_TAG:-$sha}" || rc=1
     one clients_build 1500 bash scripts/agent-market/test_clients.sh build "$sha" || rc=1
     one clients_up 600 bash scripts/agent-market/test_clients.sh up "$sha" || rc=1
-    cache_back; exit $rc
+    # AM19b: the phase is ok because the stack is what was asked (test_stack.sh check), not because it ran
+    cache_back; say "stack: $([ $rc = 0 ] && echo ok || echo FAILED) · $(grep -a -E '^(stack check:|RED:)' "$RESULTS/stack_up.txt" | head -3 | tr '\n' ' ' | cut -c1-220)"; exit $rc
     ;;
   stack-stop) stack_stop ;;
   walk)
