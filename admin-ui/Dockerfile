@@ -5,7 +5,10 @@ RUN npm ci
 COPY . .
 ARG NEXT_PUBLIC_API_BASE_URL
 ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
-RUN npm run build
+# The build has everything it needs in the context (the fonts are vendored,
+# app/fonts.ts): it runs with no network, so a build that fetched anything
+# from a third party would fail here instead of passing while that party is up.
+RUN --network=none npm run build
 
 FROM node:20-alpine AS runner
 WORKDIR /app

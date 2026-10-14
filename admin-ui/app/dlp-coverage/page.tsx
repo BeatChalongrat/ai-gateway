@@ -1,15 +1,13 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Outfit } from "next/font/google";
+import { outfit } from "../fonts";
 import { useApi } from "../../lib/useApi";
 import { api, ApiError } from "../../lib/api";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { Icon } from "../../components/ui/Icon";
 import { useT, type DictKey } from "../../lib/i18n";
 import { DETECTION_METHOD, DLP_CATEGORY, codeWord } from "../../lib/codeWords";
-
-const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
 
 /* ── Types ────────────────────────────────────────────────────────── */
 

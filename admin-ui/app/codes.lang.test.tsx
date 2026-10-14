@@ -16,7 +16,7 @@ vi.mock("../lib/api", async () => {
   return { ...real, api };
 });
 // next/font is a build-time loader; under vitest it is only a class name
-vi.mock("next/font/google", () => ({ Outfit: () => ({ className: "outfit", style: {} }) }));
+vi.mock("next/font/local", () => ({ default: () => ({ className: "outfit", variable: "outfit", style: {} }) }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
   useSearchParams: () => new URLSearchParams(""),

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Outfit } from "next/font/google";
+import { outfit } from "../fonts";
 import ErrorState from "../../components/ui/ErrorState";
 import EmptyState from "../../components/ui/EmptyState";
 import { Icon } from "../../components/ui/Icon";
@@ -12,8 +12,6 @@ import { api } from "../../lib/api";
 import { useToast } from "../../components/ui/Toast";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { useT } from "../../lib/i18n";
-
-const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
 
 // Theme-reactive tokens. Values resolve from CSS vars set on <html data-theme>
 // so the whole page re-tints on theme toggle without re-rendering.

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Outfit } from "next/font/google";
+import { outfit } from "../fonts";
 import Modal from "../../components/ui/Modal";
 import ConfirmModal from "../../components/ui/ConfirmModal";
 import ErrorState from "../../components/ui/ErrorState";
@@ -14,8 +14,6 @@ import { useToast } from "../../components/ui/Toast";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { useT, type DictKey } from "../../lib/i18n";
 import ProjectDetailModal from "./_components/ProjectDetailModal";
-
-const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
 
 /* ── Tokens ───────────────────────────────────────────────────────── */
 

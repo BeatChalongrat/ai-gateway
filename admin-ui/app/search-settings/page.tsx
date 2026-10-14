@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { Outfit } from "next/font/google";
+import { outfit } from "../fonts";
 import Modal from "../../components/ui/Modal";
 import ConfirmModal from "../../components/ui/ConfirmModal";
 import { useApi } from "../../lib/useApi";
@@ -11,8 +11,6 @@ import { ThemeToggle } from "../../components/ThemeToggle";
 import { useT, type DictKey } from "../../lib/i18n";
 
 type Translate = (key: DictKey, vars?: Record<string, string | number>) => string;
-
-const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
 
 const T = {
   bg: "var(--bg-base)", card: "var(--bg-surface)",

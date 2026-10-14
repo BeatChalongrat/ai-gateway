@@ -1,16 +1,9 @@
 import "./globals.css";
-import { Outfit } from "next/font/google";
+import { outfit } from "./fonts";
 import { ToastProvider } from "../components/ui/Toast";
 import ShellWrapper from "../components/ShellWrapper";
 import { ThemeProvider } from "../components/ThemeProvider";
 import { I18nProvider } from "../lib/i18n";
-
-const outfit = Outfit({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
-  variable: "--font-outfit",
-  display: "swap",
-});
 
 export const metadata = {
   title: "SRAN AI Gateway",

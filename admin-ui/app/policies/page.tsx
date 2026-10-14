@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
-import { Outfit } from "next/font/google";
+import { outfit } from "../fonts";
 import ErrorState from "../../components/ui/ErrorState";
 import EmptyState from "../../components/ui/EmptyState";
 import { Icon } from "../../components/ui/Icon";
@@ -12,8 +12,6 @@ import { ThemeToggle } from "../../components/ThemeToggle";
 import AgentMarketPointer from "../../components/AgentMarketPointer";
 import { useT, type DictKey } from "../../lib/i18n";
 import { DLP_CATEGORY, codeWord, profileName } from "../../lib/codeWords";
-
-const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
 
 type Action = "allow" | "mask" | "block";
 type SaveState = "idle" | "saving" | "saved" | "error";
