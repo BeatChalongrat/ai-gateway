@@ -295,6 +295,8 @@ services/chat-edge-api/tests/phase1_results.json
 docs/agent-market/HANDOVER.md
 docs/agent-market/COLLEAGUE-TRIAL.md
 docs/agent-market/TRIAL-WATCH.md
+# AM20a: the survey of how the admin console looks today (its pictures are under scripts/ops/results/)
+docs/agent-market/ADMIN-LOOK.md
 docs/DLP_DETECTOR_PARITY_MAP.md
 docs/PROVIDER_KEY_AUDIT.md
 docs/SECURITY_17A_TOKEN_PURGE.md
