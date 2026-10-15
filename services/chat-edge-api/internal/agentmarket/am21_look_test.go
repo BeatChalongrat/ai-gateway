@@ -10,12 +10,12 @@ import (
 // colour that fails contrast is refused with the ratio and the theme's own stays.
 func TestTheLookSettingRefusesWhatWouldHurtTheDocument(t *testing.T) {
 	ok := LookPatch{ID: "teal", Company: "บริษัท ทดสอบ จำกัด"}
-	if why := lookRefusal(ok); why != "" {
-		t.Fatalf("a plain choice is refused: %s", why)
+	if why := lookRefusal(ok); !why.Empty() {
+		t.Fatalf("a plain choice is refused: %s", why.In(Thai))
 	}
 	primary := "1B3A5C"
-	if why := lookRefusal(LookPatch{ID: "navy", Company: "x", Primary: &primary}); why != "" {
-		t.Fatalf("a dark brand colour is refused: %s", why)
+	if why := lookRefusal(LookPatch{ID: "navy", Company: "x", Primary: &primary}); !why.Empty() {
+		t.Fatalf("a dark brand colour is refused: %s", why.In(Thai))
 	}
 	cases := map[string]LookPatch{
 		"a theme that does not exist": {ID: "pink", Company: "x"},
@@ -25,14 +25,14 @@ func TestTheLookSettingRefusesWhatWouldHurtTheDocument(t *testing.T) {
 		"too light to read on":        {ID: "navy", Company: "x", Primary: strPtr("FFFF99")},
 	}
 	for name, p := range cases {
-		why := lookRefusal(p)
+		why := lookRefusal(p).In(Thai)
 		if why == "" {
 			t.Errorf("%s: not refused", name)
 		}
-		if name == "a marker in the name" && !strings.Contains(string(why), "[AM1b]") {
+		if name == "a marker in the name" && !strings.Contains(why, "[AM1b]") {
 			t.Errorf("the marker is named: %s", why)
 		}
-		if name == "too light to read on" && !strings.Contains(string(why), "คอนทราสต์") {
+		if name == "too light to read on" && !strings.Contains(why, "คอนทราสต์") {
 			t.Errorf("the contrast is said: %s", why)
 		}
 	}
@@ -51,11 +51,11 @@ func TestTheLookPatchIsKeptAsTheRendererReadsIt(t *testing.T) {
 }
 
 func TestTheChatAppsOwnThemeSettingRefusesAMarkerToo(t *testing.T) {
-	if why := themeCompanyRefusal(nil, json.RawMessage(`{"id":"navy","company":"[AM1b] บริษัท ตัวอย่าง จำกัด"}`)); why == "" {
+	if why := themeCompanyRefusal(json.RawMessage(`{"id":"navy","company":"[AM1b] บริษัท ตัวอย่าง จำกัด"}`)); why.Empty() {
 		t.Fatal("a marker typed into the chat app's theme setting must be refused")
 	}
-	if why := themeCompanyRefusal(nil, json.RawMessage(`{"id":"navy","company":"บริษัท ตัวอย่าง จำกัด"}`)); why != "" {
-		t.Fatalf("a plain name refused: %s", why)
+	if why := themeCompanyRefusal(json.RawMessage(`{"id":"navy","company":"บริษัท ตัวอย่าง จำกัด"}`)); !why.Empty() {
+		t.Fatalf("a plain name refused: %s", why.In(Thai))
 	}
 }
 

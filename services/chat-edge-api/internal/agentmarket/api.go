@@ -2093,8 +2093,8 @@ func (a *API) putTheme(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// AM21: no build or card marker in the name that goes on every document
-	if why := themeCompanyRefusal(r.Context(), body); why != "" {
-		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", forReq(w, why))
+	if why := themeCompanyRefusal(body); !why.Empty() {
+		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", why.In(langOfWriter(w)))
 		return
 	}
 	v, err := a.store.SaveTheme(r.Context(), c.TenantUUID, c.UserID, body, nil)

@@ -225,7 +225,7 @@ class AReportRunInEnglish(EnglishRuns, unittest.TestCase):
         self.assertRegex(checks["citations"]["detail"], r"^\d+ reference numbers printed in the report, every one with a source$")
         self.assertRegex(checks["assumptions"]["detail"], r"^\d+ items$")
         self.assertRegex(checks["pptx.slide_count"]["detail"], r"^\d+ slides$")
-        self.assertEqual(checks["pptx.slide_count"]["label"], "8–12 slides")
+        self.assertEqual(checks["pptx.slide_count"]["label"], "8–24 slides")
         self.assertEqual(checks["pptx.overflow"]["detail"], "None (estimated from the type size, not rendered)")
         self.assertEqual(checks["xlsx.sheets"]["label"], "Every sheet is there")
         self.assertRegex(checks["xlsx.figures"]["detail"], r"^Read the figures back from the file: \d+ values, every one as computed$")

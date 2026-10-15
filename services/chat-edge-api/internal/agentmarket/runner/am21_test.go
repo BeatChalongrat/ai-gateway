@@ -13,13 +13,13 @@ func TestTheModelIsToldTheLayoutsLimitsBeforeItWrites(t *testing.T) {
 	cv := computedView{PeriodLabel: "กันยายน 2569", Figures: map[string]figureView{"revenue": {Text: "12,480,300", Cite: "c61", Label: "รายได้"}},
 		WritingLimits: map[string]int{"summary_chars": 480, "bullet_chars": 110, "bullets_max": 4, "sentence_chars": 160}}
 	p := narrativePrompt(am.Thai, cv)
-	for _, want := range []string{"summary ไม่เกิน 480", "รายการละไม่เกิน 110 ตัวอักษร", "ไม่เกิน 4 รายการ"} {
+	for _, want := range []string{"สรุปไม่เกิน 480", "แต่ละข้อในรายการไม่เกิน 110 ตัวอักษร", "ไม่เกิน 4 ข้อ"} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("the prompt does not tell the model %q:\n%s", want, p)
 		}
 	}
 	// the limits come before the final instruction, so the model reads them with the task
-	if strings.Index(p, "summary ไม่เกิน 480") > strings.Index(p, "เขียนคำอธิบายตามรูปแบบ JSON") {
+	if strings.Index(p, "สรุปไม่เกิน 480") > strings.Index(p, "เขียนคำอธิบายตามรูปแบบ JSON") {
 		t.Fatal("the limits are after the instruction")
 	}
 	old := computedView{PeriodLabel: "กันยายน 2569", Figures: cv.Figures}

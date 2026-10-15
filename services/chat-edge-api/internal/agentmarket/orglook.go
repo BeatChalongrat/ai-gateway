@@ -1,7 +1,6 @@
 package agentmarket
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -46,6 +45,9 @@ var lookPresets = []LookPreset{
 // lookContrastMin is the least contrast a brand colour must have against what it sits on (WCAG AA).
 const lookContrastMin = 4.5
 
+// lookCompanyMax is the longest an organisation's name on a document may be.
+const lookCompanyMax = 120
+
 var hex6 = regexp.MustCompile(`^#?[0-9A-Fa-f]{6}$`)
 
 // LookPatch is what an admin may set.
@@ -72,7 +74,7 @@ func lookPreset(id string) *LookPreset {
 	return nil
 }
 
-// luminance and contrast are WCAG's, as the renderer computes them (look/tokens.py).
+// lookLuminance and lookContrast are WCAG's, as the renderer computes them (look/tokens.py).
 func lookLuminance(hex string) float64 {
 	hex = strings.TrimPrefix(hex, "#")
 	ch := func(i int) float64 {
@@ -93,16 +95,17 @@ func lookContrast(a, b string) float64 {
 	return math.Round((hi+0.05)/(lo+0.05)*100) / 100
 }
 
-// lookRefusal says why a patch cannot be taken — in Thai, for forReq — or "".
-func lookRefusal(p LookPatch) wording {
+// lookRefusal says why a patch cannot be taken — a text for a person, in the request's language — or
+// an empty text.
+func lookRefusal(p LookPatch) PersonText {
 	if lookPreset(p.ID) == nil {
-		return "ธีมต้องเป็นหนึ่งในธีมที่มี: กรมท่า เขียวหยก ถ่านหิน"
+		return Text("ธีมต้องเป็นหนึ่งในธีมที่มี: กรมท่า เขียวหยก ถ่านหิน")
 	}
-	if len(p.Company) > 120 {
-		return "ชื่อองค์กรบนเอกสารต้องไม่เกิน 120 ตัวอักษร"
+	if len([]rune(p.Company)) > lookCompanyMax {
+		return Text("ชื่อองค์กรบนเอกสารต้องไม่เกิน %s ตัวอักษร", Count(lookCompanyMax))
 	}
 	if m := MarkerIn(p.Company); m != "" {
-		return wording("ชื่อองค์กรบนเอกสารต้องไม่มีรหัสงานหรือรหัสรุ่น เช่น " + m + " — เอกสารนี้ผู้ตรวจสอบของลูกค้าจะอ่าน")
+		return Text("ชื่อองค์กรบนเอกสารต้องไม่มีรหัสงานหรือรหัสรุ่น เช่น %s — เอกสารนี้ผู้ตรวจสอบของลูกค้าจะอ่าน", Typed(m, 24))
 	}
 	for _, c := range []struct {
 		what  string
@@ -111,16 +114,18 @@ func lookRefusal(p LookPatch) wording {
 		if c.value == nil || strings.TrimSpace(*c.value) == "" {
 			continue
 		}
+		what := c.what
 		if !hex6.MatchString(strings.TrimSpace(*c.value)) {
-			return wording("สี" + c.what + "ต้องเป็นรหัสฐานสิบหก 6 หลัก เช่น 12264A")
+			return Text("สี %s ต้องเป็นรหัสฐานสิบหก 6 หลัก เช่น 12264A", Each(func(Lang) string { return what }))
 		}
 		v := strings.ToUpper(strings.TrimPrefix(strings.TrimSpace(*c.value), "#"))
-		against := map[string]string{"primary": "FFFFFF", "accent": "FFFFFF"}[c.what]
-		if r := lookContrast(v, against); r < lookContrastMin {
-			return wording(fmt.Sprintf("สี%s %s มีคอนทราสต์ %.1f กับพื้นขาว ต่ำกว่า %.1f ที่อ่านได้ จึงรับไม่ได้", c.what, v, r, lookContrastMin))
+		if r := lookContrast(v, "FFFFFF"); r < lookContrastMin {
+			return Text("สี %s %s มีคอนทราสต์ %s กับพื้นขาว ต่ำกว่า %s ที่อ่านได้ จึงรับไม่ได้",
+				Each(func(Lang) string { return what }), Each(func(Lang) string { return v }),
+				Number(r), Number(lookContrastMin))
 		}
 	}
-	return ""
+	return PersonText{}
 }
 
 func (p LookPatch) theme() lookTheme {
@@ -173,8 +178,8 @@ func (a *API) adminPutLook(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "BAD_JSON")
 		return
 	}
-	if why := lookRefusal(body); why != "" {
-		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", forReq(w, why))
+	if why := lookRefusal(body); !why.Empty() {
+		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", why.In(langOfWriter(w)))
 		return
 	}
 	after := body.theme()
@@ -207,14 +212,13 @@ func (a *API) adminPutLook(w http.ResponseWriter, r *http.Request) {
 
 // themeCompanyRefusal (the chat app's own theme setting, PUT /theme) applies the same rule to the name
 // a person types: no marker on a customer's document.
-func themeCompanyRefusal(ctx context.Context, body json.RawMessage) wording {
+func themeCompanyRefusal(body json.RawMessage) PersonText {
 	var t struct {
 		Company string `json:"company"`
 	}
 	_ = json.Unmarshal(body, &t)
 	if m := MarkerIn(t.Company); m != "" {
-		return wording("ชื่อองค์กรบนเอกสารต้องไม่มีรหัสงานหรือรหัสรุ่น เช่น " + m)
+		return Text("ชื่อองค์กรบนเอกสารต้องไม่มีรหัสงานหรือรหัสรุ่น เช่น %s", Typed(m, 24))
 	}
-	_ = ctx
-	return ""
+	return PersonText{}
 }

@@ -301,7 +301,7 @@ func writingLimitsLine(cv computedView) string {
 	if lim["summary_chars"] == 0 || lim["bullet_chars"] == 0 || lim["bullets_max"] == 0 {
 		return ""
 	}
-	return fmt.Sprintf("\nความยาวที่เอกสารรับได้ (นับตัวอักษร): summary ไม่เกิน %d · movements, watch และ next_steps รายการละไม่เกิน %d ตัวอักษร และไม่เกิน %d รายการต่อหัวข้อ · เขียนให้พอดี ส่วนที่ยาวกว่านี้จะถูกปฏิเสธ\n",
+	return fmt.Sprintf("\nความยาวที่เอกสารรับได้ (นับตัวอักษร): สรุปไม่เกิน %d · แต่ละข้อในรายการไม่เกิน %d ตัวอักษร และไม่เกิน %d ข้อต่อหัวข้อ · เขียนให้พอดี ส่วนที่ยาวกว่านี้จะถูกปฏิเสธ\n",
 		lim["summary_chars"], lim["bullet_chars"], lim["bullets_max"])
 }
 

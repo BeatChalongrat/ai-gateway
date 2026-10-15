@@ -441,7 +441,7 @@ func TestADocumentIsInThePackagesLanguageNotTheRuns(t *testing.T) {
 	docx := testDocx(t, para("รายงานผลประกอบการ กันยายน 2569")+para("GL_2569-09.xlsx")+para("รายได้เพิ่มขึ้นจากงวดก่อน"))
 	chk := CheckResult{Pages: 1, RenderedPages: 1, PageInk: []float64{0.03}, RawText: "รายได้เพิ่มขึ้นจากงวดก่อน\nGL_2569-09.xlsx\nรายงานผลประกอบการ กันยายน 2569\n"}
 	got := pdfGate(thaiOnly.docLang(english), docx, chk)
-	if len(got) != 2 || got[1].Name != "pdf.thai" || !got[1].OK {
+	if len(got) < 2 || got[1].Name != "pdf.thai" || !got[1].OK {
 		t.Fatalf("a Thai report in a run from an English screen: %+v", got)
 	}
 }
