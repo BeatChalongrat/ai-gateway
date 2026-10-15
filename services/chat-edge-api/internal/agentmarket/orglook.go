@@ -36,10 +36,14 @@ type LookPreset struct {
 	Surface string     `json:"surface"`
 }
 
-var lookPresets = []LookPreset{
-	{ID: "navy", Name: Text("กรมท่า"), Primary: "12264A", Accent: "2F6FD6", Surface: "F3F5F9"},
-	{ID: "teal", Name: Text("เขียวหยก"), Primary: "0F4C4C", Accent: "1C8C84", Surface: "F2F7F6"},
-	{ID: "charcoal", Name: Text("ถ่านหิน"), Primary: "24272E", Accent: "D9642B", Surface: "F4F4F5"},
+// lookPresets are built when asked, not at package level: a sentence (Text) is made only once the
+// English catalogue is registered (AM11).
+func lookPresets() []LookPreset {
+	return []LookPreset{
+		{ID: "navy", Name: Text("กรมท่า"), Primary: "12264A", Accent: "2F6FD6", Surface: "F3F5F9"},
+		{ID: "teal", Name: Text("เขียวหยก"), Primary: "0F4C4C", Accent: "1C8C84", Surface: "F2F7F6"},
+		{ID: "charcoal", Name: Text("ถ่านหิน"), Primary: "24272E", Accent: "D9642B", Surface: "F4F4F5"},
+	}
 }
 
 // lookContrastMin is the least contrast a brand colour must have against what it sits on (WCAG AA).
@@ -66,9 +70,10 @@ type lookTheme struct {
 }
 
 func lookPreset(id string) *LookPreset {
-	for i := range lookPresets {
-		if lookPresets[i].ID == id {
-			return &lookPresets[i]
+	all := lookPresets()
+	for i := range all {
+		if all[i].ID == id {
+			return &all[i]
 		}
 	}
 	return nil
@@ -159,9 +164,9 @@ func (a *API) adminLook(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(raw, &t)
 	}
 	if t.ID == "" {
-		t.ID = lookPresets[0].ID
+		t.ID = lookPresets()[0].ID
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"theme": t, "version": version, "logo": logo != nil, "presets": lookPresets,
+	writeJSON(w, http.StatusOK, map[string]any{"theme": t, "version": version, "logo": logo != nil, "presets": lookPresets(),
 		// the one file a person opens to change the look of everything (said on the page)
 		"file": "backend/agent_market/deliverables/look/look.json"})
 }
