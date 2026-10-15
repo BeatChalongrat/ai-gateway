@@ -177,7 +177,7 @@
         "height_in": 7.5,
         "margin_in": 0.6,
         "title_in": 1.1,
-        "footer_in": 0.45
+        "footer_in": 0.6
       },
       "catalogue": {
         "title": {
@@ -231,14 +231,14 @@
           "refuses": "more than seven columns, or a cell over 40 characters"
         },
         "chart": {
-          "for": "one chart with its title and a one-line caption",
+          "for": "one chart with its title and a caption of up to two lines at the small size",
           "takes": {
             "title": 60,
             "series": 4,
             "categories": 12,
-            "caption": 140
+            "caption": 300
           },
-          "refuses": "more than four series or twelve categories, or two charts"
+          "refuses": "more than four series or twelve categories, two charts, or a caption over 300 characters"
         },
         "bullets": {
           "for": "a heading and up to four points of up to two lines, with an optional lead sentence",
@@ -332,9 +332,9 @@
           "for": "the appendices: two columns of small entries",
           "takes": {
             "title": 80,
-            "entry": 600
+            "entry": 1000
           },
-          "refuses": "an entry over 600 characters"
+          "refuses": "an entry over 1,000 characters"
         }
       }
     },
@@ -357,7 +357,7 @@
             "columns": 26,
             "cell": 2000
           },
-          "refuses": "a sheet name over 31 characters or with [ ] : * ? / \\ in it, or a table wider than a page at 60 percent"
+          "refuses": "a sheet name over 31 characters or with [ ] : * ? / \\ in it, or a table still wider than a page at 67 percent after its text columns are narrowed and wrapped"
         },
         "notes": {
           "for": "a sheet of notes and assumptions",

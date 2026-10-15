@@ -126,6 +126,8 @@ class DeckWriter:
         for ph in list(slide.placeholders):
             if ph.has_text_frame and not ph.text_frame.text.strip():
                 ph._element.getparent().remove(ph._element)
+            elif not ph.has_text_frame and ph._element.find(".//{%s}blip" % A_NS) is None and ph._element.tag.endswith("}sp"):
+                ph._element.getparent().remove(ph._element)   # a picture placeholder with no picture
         if layout in potx.CHROME_LAYOUTS:
             self._footer(slide, layout)
         self.cites.append(list(dict.fromkeys(c for c in cites if c)))
@@ -155,7 +157,7 @@ class DeckWriter:
         return ch
 
     # ── the slides ───────────────────────────────────────────────────
-    def title(self):
+    def title(self, logo: str | None = None):
         m = self.m
         content = {"title": S("docs.deck.title"), "subtitle": self.c["period_label"],
                    "lines": [m["prepared"]] + list(m["cover_lines"]) + [" · ".join(x for x in (m["company"], S("docs.deck.audience")) if x)]}
@@ -166,6 +168,9 @@ class DeckWriter:
         if m["company"]:
             self._text(self._ph(s, 10), m["company"])
         self._lines(self._ph(s, 11), content["lines"])
+        if logo and os.path.exists(logo):
+            # the customer's mark on the deck's cover (AM21 §6.3), in the layout's picture placeholder
+            self._ph(s, potx.FIELDS["title"]["logo"]).insert_picture(logo)
         self._finish(s, "title", [], S("docs.deck.title"))
 
     @staticmethod
@@ -299,6 +304,18 @@ class DeckWriter:
 
     def closing(self, lines: list[str]):
         title = S("docs.deck.assumptions")
+        # a line wider than the frame at the small size is broken between words into continuation lines
+        # (indented) before the catalogue counts them: nothing is cut, and a long English source line or
+        # model line takes two lines instead of refusing the slide
+        avail_pt = potx.CW * 72 - 2 * 7.2
+        size = LOOK.pt(FMT, "small")
+        broken: list[str] = []
+        for line in lines:
+            lead = len(line) - len(line.lstrip(" "))
+            parts = measure.break_lines(line.strip(" "), size, avail_pt - lead * 3.0) or [""]
+            broken.append(" " * lead + parts[0])
+            broken += ["    " + part for part in parts[1:]]
+        lines = broken
         ch = self._choose("closing", {"title": title, "lines": lines}, title)
         for n, part in enumerate(ch.parts, start=1):
             s = self._slide("closing")
@@ -307,10 +324,10 @@ class DeckWriter:
             self._finish(s, "closing", [], title)
 
     # ── assemble ─────────────────────────────────────────────────────
-    def write(self, path: str, organisation: str = "") -> dict:
+    def write(self, path: str, organisation: str = "", logo: str | None = None) -> dict:
         c, m = self.c, self.m
         nar, nc = m["narrative"], (m.get("narrative_cites") or {})
-        self.title()
+        self.title(logo)
         kpis = {k["key"]: k for k in m["kpis"]}
         self.figure(kpis["net_profit"])
         self.figures([k for k in m["kpis"] if k["key"] != "net_profit"])

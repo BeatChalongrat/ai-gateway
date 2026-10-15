@@ -143,7 +143,7 @@ func (s *Store) adminAccess(ctx context.Context, cfg Config, email, role string)
 
 // Sections of the admin app's Agent Market page, in its order.
 var (
-	adminSections     = []string{"access", "departments", "spend", "models", "web", "catalog", "problems", "runs", "mail"}
+	adminSections     = []string{"access", "departments", "spend", "models", "web", "look", "catalog", "problems", "runs", "mail"}
 	publisherSections = []string{"catalog", "problems"}
 )
 
@@ -197,5 +197,8 @@ func (a *API) AdminRoutes(r chi.Router) {
 	a.adminWebRoutes(r) // AM12: agents that work on the web (web.go)
 	r.Get("/mail", a.adminMail)
 	r.Put("/mail", a.adminPutMail)
+	// AM21: the organisation's look — the theme every agent's documents take, and its brand
+	r.Get("/look", a.adminLook)
+	r.Put("/look", a.adminPutLook)
 	r.Post("/mail/test", a.adminTestMail)
 }

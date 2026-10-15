@@ -1,7 +1,7 @@
 {
   "schema_version": "agent.market.v1",
   "id": "sran.procurement",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "name": "จัดซื้อ: เทียบราคาและร่างใบขอซื้อ",
   "name_en": "Procurement: Price Comparison and Purchase Request Draft",
   "short_name": "จัดซื้อ",

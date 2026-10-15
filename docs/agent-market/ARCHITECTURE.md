@@ -1290,3 +1290,82 @@ itself when the model is back.**
 - **The integration lane is a list of names**: a sandbox test no chunk names runs nowhere, and a
   renamed test leaves a chunk that matches nothing and passes. `runner/am15_lane_test.go`, in the unit
   lane, fails for either.
+
+## The content and the layout of a deliverable are separate (AM21)
+
+Until this card the code that wrote the words placed them: every slide of the deck sat on the Blank
+layout with hand-placed boxes, the report set a size on every run, and each package's workbook writer
+carried its own copy of a header style and a list of column widths. A box at a fixed coordinate overflows
+when the text is longer than guessed and leaves a hole when it is shorter: the cover's last sentence ran
+off the right edge, most pages stopped at half height, and "[AM1b]" sat on the owner's own report for a
+month because a company name typed during a walkthrough was the only place a name came from.
+
+- **One file holds the look**: `backend/agent_market/deliverables/look/look.json`. It holds the type
+  scale (five roles: display, heading, subheading, body, small; a size per format, a weight per role),
+  the themes (navy, teal, charcoal: a palette, a chart palette in a fixed series order, a cover
+  treatment, a table style) and the layout catalogue per format, each layout declaring what it takes
+  (characters in a heading, items, rows before it breaks, chart series) and so what it refuses. The
+  colour of a table header is `themes.<theme>.table.header` in that file. Changing the file re-skins
+  every agent's output; no code is touched.
+- **The renderer is `deliverables/look`** (tokens, catalogue, measure, dotx, potx, xlsx_styles, markers)
+  with the format writers (`report_docx.py`, `deck_pptx.py`, `table_xlsx.py`, `charts.py`,
+  `workpaper.py`). `tokens.LOOK` refuses a size or a colour that is not in the file. Nothing outside the
+  renderer may set a font, a size, a colour, a coordinate or a box: `tests/test_am21_contract.py` reads
+  the generators' code and fails naming the file and line. The five packages' workbook writers and the
+  procurement draft write through `xlsx_styles.Book` and `report_docx.ReportWriter`, handing over
+  content and its meaning (money, count, text, wrap) and nothing else.
+- **The catalogue chooses** (`look/catalogue.py`): content in, the layouts that take it scored by how
+  full they are, the best out with a recorded reason (the render's `meta.layouts`); a tie breaks the
+  same way every time. Too long for the layout, in order: the next size down the scale (a layout marked
+  `shrink`), a break across slides or pages where the layout counts items, rows or lines, and when
+  nothing holds it `DoesNotFit`: the run says the content does not fit and names the section
+  (`look.fit`), and no file is written for that format (the runner reads `refused` and fails the run
+  with the line). The model is told the limits before it writes (`writing_limits` in computed.json,
+  then a line of the narrative prompt).
+- **The document** is written in the named styles of a Word template built from the file
+  (`look/dotx.py`); no run carries a size, a colour or a font of its own (`docx.styles` reads that
+  back). The headline figures are printed once, on the cover. A figure in a sentence carries nothing
+  inline; the paragraph's references are listed under it (`docx.narrative` holds the list to the
+  figures). Every text in a fixed frame, the cover, the tiles, a table cell, is measured in the embedded
+  Sarabun and broken between words (`look/measure.py`, libthai).
+- **The deck** is made from a PowerPoint template with a master and the catalogue as real layouts with
+  real placeholders (`look/potx.py`), 13.333 x 7.5 in, one family named in every part and embedded. A
+  slide on a layout outside the catalogue, or a shape outside a placeholder, fails `pptx.layout`; a run
+  size outside the scale or a colour outside the palette fails `pptx.scale`. One idea per slide: the
+  headline figure, a row of figures, the summary as one statement, at most four points of at most two
+  lines with a hanging indent, a table of at most ten rows, a chart large enough to read across a room.
+  The footer carries the source file's name; the hashes and references move to a closing slide. The
+  chart is the same picture the report carries, drawn at the chart layout's frame; the gate draws it
+  again and compares the bytes.
+- **The workbooks** (`look/xlsx_styles.py`): one header style, one cell style, number formats by
+  meaning (money, quantity, percent, count, text; a negative in parentheses, as the report prints it),
+  widths measured from the content so no cell shows `####`. A sheet wider than a page at a readable
+  scale has its text columns narrowed and wrapped so it still prints one page across (AM10). A sheet
+  name over 31 characters is refused, never renamed. The file opens on its first sheet at A1, and its
+  author is the organisation. `xlsx.look` reads all of that back.
+- **The PDF** (`runner/pdf.go`): the converter's check reports the fonts and whether each is embedded,
+  the ink in each page's outer 0.3 in, and the metadata. `pdf.margins`, `pdf.fonts` and `pdf.meta` fail
+  a page with text past its margin, a font not embedded, and an author that is empty, a build marker
+  or our own name. A converter that did not measure the margins fails the check.
+- **Charts** (`charts.py`): the theme's palette in a fixed series order; colour carries identity only
+  and a negative is a sign. No boxed plot area; a baseline and faint horizontal rules; direct labels
+  instead of a legend up to four series; values on marks selectively; 300 dpi; one axis.
+- **No marker, no product name** on a customer's document: `look/markers.py` reads every text and the
+  metadata of a finished file (`look.markers`); the edge's `MarkerIn` refuses a company name with one in
+  the admin's look setting and in the chat app's own theme setting, and strips it from an e-mail draft.
+- **Seeing the file before sending it** (part 4): `POST /artifacts/{id}/pages` queues a `pages` job
+  once; the runner converts the stored file with the same converter and keeps the first pages as PNGs
+  beside it (`PageKey`, a manifest); `GET .../pages/{n}` serves them; the files card shows them on
+  demand in the web app and the desktop, which renders the same page. The picture is of the delivered
+  file itself, never a re-render from the data.
+- **Themes and the brand** (part 6.2, 6.3): an admin picks the organisation's theme, its name and its
+  brand colours on the admin app's "Look of documents" page (`orglook.go`, audited as
+  `agent_market.org.look`). A colour that fails contrast, a typeface the sandbox lacks or a logo too
+  small for the cover is refused with the reason, and the theme's own value stays (`theme.resolve`,
+  said on the run as `refused`). The same run under navy and teal is the same document cell for cell
+  (`tests/test_am21_themes.py`).
+- **The gallery** (part 6.5: `tools/look_gallery.py`, `scripts/agent-market/look-gallery.sh`, the
+  gate's `look_gallery` lane): every layout with short, typical, long and absurd content, in both
+  languages under two themes, rendered, rasterised by the converter and compared with the approved
+  pictures in `tests/fixtures/look_gallery`; a difference beyond the threshold fails with both pictures
+  side by side; the absurd case must be refused.

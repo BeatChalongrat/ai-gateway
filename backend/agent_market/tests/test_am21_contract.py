@@ -36,7 +36,7 @@ GEOMETRY = re.compile(
     r"\b(?:Pt|Inches|Cm|Emu|Mm)\(|\bRGBColor\b|\bFont\(|\bPatternFill\(|\bSide\(|\bBorder\(|\bAlignment\(|\bNamedStyle\(|"
     r"\.font\.(?:size|name|color|bold)\s*=|\.(?:width|height|left|top)\s*=|column_dimensions\[|row_dimensions\[|"
     r"add_textbox\(|add_shape\(|add_picture\(|slide_layouts\[|number_format\s*=|freeze_panes\s*=|"
-    r"[\"'][0-9A-F]{6}[\"']"
+    r"[\"'](?=[0-9A-F]*[A-F])[0-9A-F]{6}[\"']"
 )
 # not read: the tests and tools; the engine's readers of a customer's files (e2 reads scans, e3 matches, e4 reads
 # snapshots: they measure what they read, they place nothing); the gate and the re-reader, which read sizes back

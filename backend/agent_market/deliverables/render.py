@@ -18,7 +18,7 @@ from . import quality
 from .charts import render_png
 from .formats import wanted_formats
 from .look.catalogue import DoesNotFit
-from .theme import resolve
+from .theme import logo_refusal, resolve
 
 # No PDF: its Thai shaping was wrong (AM1b). It returns in AM-2 as the
 # finished .docx converted by LibreOffice, not as a second renderer.
@@ -41,6 +41,11 @@ def render_all(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     formats = [f for f in wanted_formats(req, ["docx", "pptx"]) if f in FORMATS]
     names = req.get("names") or {}
     logo = os.path.join(in_dir, os.path.basename(req["logo"])) if req.get("logo") else None
+    # AM21 §6.3: a logo that would not render at the size the cover needs is refused with the reason, and
+    # the documents go out without it (the theme's own look stays)
+    if logo and (why := logo_refusal(logo)):
+        theme.setdefault("refused", []).append(why)
+        logo = None
 
     chart_files: dict[str, str] = {}
     chart_bindings: list[dict] = []
@@ -84,12 +89,12 @@ def render_all(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
             elif fmt == "pptx":
                 from .deck_pptx import DeckWriter
 
-                meta = DeckWriter(model, computed, theme, deck_charts).write(path, organisation=organisation)
+                meta = DeckWriter(model, computed, theme, deck_charts).write(path, organisation=organisation, logo=logo)
                 checks = quality.check_pptx(path, meta, computed, theme, asked=model["asked"]["applied"])
             else:
                 from .table_xlsx import XlsxWriter
 
-                meta = XlsxWriter(model, computed, theme).write(path)
+                meta = XlsxWriter(model, computed, theme).write(path, organisation=organisation)
                 checks = quality.check_xlsx(path, computed)
         except DoesNotFit as e:
             # the run says the content does not fit and names the section; nothing is written past a frame

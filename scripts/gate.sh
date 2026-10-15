@@ -146,7 +146,7 @@ case "$phase" in
     # lanes [name…] — the named lanes only: one piece, in the foreground (the whole run is over an hour,
     # and a long run in the background is stopped on this host when memory is short, with no verdict).
     # A run of pieces says PARTIAL and names what it did not run: it is never a gate's verdict.
-    LANES="tracks python_lane go_units go_vet gofmt backend_lane backend_marked host_tests smoke_units alert_rules gateway_go log_worker_go portal dlp_sidecar web_tsc web_vitest web_lints admin desktop"
+    LANES="tracks python_lane look_gallery go_units go_vet gofmt backend_lane backend_marked host_tests smoke_units alert_rules gateway_go log_worker_go portal dlp_sidecar web_tsc web_vitest web_lints admin desktop"
     only=" $* "; ran=(); left=()
     for name in "$@"; do # (a name that is no lane is refused before anything is touched)
       case " $LANES " in *" $name "*) ;; *) say "REFUSED: no such lane: $name (the lanes are: $LANES)"; exit 2 ;; esac
@@ -160,6 +160,8 @@ case "$phase" in
     # AM19: only what the code needs is tracked — a tracked file that .gitignore excludes fails, by name
     lane tracks 60 python scripts/gate/tracks.py
     lane python_lane 3000 bash scripts/agent-market/python-lane.sh
+    # AM21: every layout at every content length, rendered and compared with the approved pictures
+    lane look_gallery 1500 bash scripts/agent-market/look-gallery.sh
     lane go_units 2700 bash scripts/gate/go_test.sh ./... -count=1
     lane go_vet 600 bash -c 'cd services/chat-edge-api && go vet ./...'
     lane gofmt 120 bash -c 'cd services/chat-edge-api && test -z "$(gofmt -l internal/agentmarket cmd/agent-runner)"'

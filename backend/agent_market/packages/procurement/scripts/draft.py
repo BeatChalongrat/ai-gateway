@@ -6,6 +6,10 @@ heading, everything the draft could not fill in and why. A draft never says
 more than was found: an amount that could not be worked out is written as
 unknown with its reason, never as zero and never left looking finished.
 
+AM21: the draft is laid out by the look's Word renderer — the template's
+named styles, tables sized from their content, the one typeface embedded —
+and this package sets no size, colour, font or width of its own.
+
 ``check`` opens the finished file again: the lines and their amounts are the
 computed ones, every gap of the request is on the page under the gaps'
 heading, and no figure stands in the document that is not one of the
@@ -16,13 +20,10 @@ from __future__ import annotations
 
 import os
 import re
-from decimal import Decimal
 
 from docx import Document
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml.ns import qn
-from docx.shared import Cm, Pt, RGBColor
 
+from ....deliverables.report_docx import ReportWriter, embed_fonts
 from ....deliverables.reread import check as _check
 from ....deliverables.reread import squash
 from ..words import t
@@ -31,68 +32,26 @@ from . import wording
 LINE_COLS = ("no", "description", "quantity", "unit", "unit_price", "amount")
 
 
-def _font(run, face: str, size: float, bold: bool = False, color: str | None = None):
-    run.font.name = face
-    run.font.size = Pt(size)
-    run.font.bold = bold
-    rpr = run._r.get_or_add_rPr()
-    fonts = rpr.find(qn("w:rFonts"))
-    if fonts is None:
-        fonts = rpr.makeelement(qn("w:rFonts"), {})
-        rpr.append(fonts)
-    for attr in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
-        fonts.set(qn(attr), face)
-    if color:
-        run.font.color.rgb = RGBColor.from_string(color)
-
-
 class RequestDraft:
     def __init__(self, computed: dict, theme: dict, run: dict | None = None):
         self.c, self.theme, self.run = computed, theme, run or {}
         self.lang = computed.get("lang") or "th"
-        self.font = theme["fonts"]["thai"]
-        self.p = theme["palette"]
-        self.doc = Document()
-        for section in self.doc.sections:
-            section.page_width, section.page_height = Cm(21.0), Cm(29.7)
-            section.left_margin = section.right_margin = Cm(2.0)
-            section.top_margin = section.bottom_margin = Cm(1.8)
-        normal = self.doc.styles["Normal"]
-        normal.font.name = self.font
-        normal.font.size = Pt(11)
+        self.r = ReportWriter({}, theme, {})   # the renderer: its styles, its measured tables
+        self.doc = self.r.doc
 
     def w(self, key: str, **kw) -> str:
         return t(self.lang, key, **kw)
 
-    def para(self, text: str, size: float = 11, bold: bool = False, color: str | None = None, align=None, after: float = 4):
-        p = self.doc.add_paragraph()
-        p.paragraph_format.space_after = Pt(after)
-        p.paragraph_format.space_before = Pt(0)
-        if align:
-            p.alignment = align
-        _font(p.add_run(text), self.font, size, bold, color)
-        return p
+    def para(self, text: str, style: str = "AM Body"):
+        return self.r._para(style, text)
 
     def heading(self, text: str):
-        p = self.para(text, 13, True, self.p["primary"], after=3)
-        p.paragraph_format.space_before = Pt(10)
-        p.paragraph_format.keep_with_next = True
+        self.r.heading(text, 2)
 
-    def table(self, heads: list[str] | None, rows: list[list[str]], widths: list[float], right: tuple = ()):
-        tb = self.doc.add_table(rows=(1 if heads else 0) + len(rows), cols=len(widths))
-        tb.style = "Table Grid"
-        tb.autofit = False
-        grid = ([heads] if heads else []) + rows
-        for i, row in enumerate(grid):
-            for j, v in enumerate(row):
-                cell = tb.cell(i, j)
-                cell.width = Cm(widths[j])
-                p = cell.paragraphs[0]
-                p.paragraph_format.space_after = Pt(1)
-                if j in right and not (heads and i == 0):
-                    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                _font(p.add_run("" if v is None else str(v)), self.font, 10, bold=bool(heads) and i == 0)
-        return tb
+    def table(self, heads: list[str] | None, rows: list[list[str]], right: tuple = (), section: str = ""):
+        block = {"columns": heads or [""] * (len(rows[0]) if rows else 2), "rows": rows, "numeric_from": (min(right) if right else None),
+                 "cite_col": None, "strong_rows": [], "small": True, "no_header": heads is None}
+        self.r.table(block, section or self.w("pr.title"))
 
     def money(self, v, why_key: str = "unknown") -> str:
         return wording.amount(v) if v not in (None, "") else self.w(why_key)
@@ -101,8 +60,8 @@ class RequestDraft:
         c, lang = self.c, self.lang
         req = c.get("request") or {}
         need = c.get("need") or {}
-        self.para(self.w("pr.title"), 18, True, self.p["primary"], after=0)
-        self.para(self.w("pr.sub"), 9, False, self.p["muted"], after=8)
+        self.r.heading(self.w("pr.title"), 1)
+        self.para(self.w("pr.sub"), "AM Small Muted")
         place = need.get("delivery_place") or (self.w("pr.pickup") if need.get("delivery_place_from") == "pickup" else self.w("pr.blank"))
         rows = [[self.w("pr.date"), wording.date(lang, c.get("today"))],
                 [self.w("pr.requester"), self.run.get("preparer") or self.w("pr.blank")],
@@ -110,36 +69,35 @@ class RequestDraft:
                 [self.w("pr.delivery_place"), place],
                 [self.w("pr.needed_by"), need.get("needed_by") or self.w("pr.blank")],
                 [self.w("pr.seller"), (req.get("seller") or self.w("pr.sellers.several")) if req.get("lines") else self.w("pr.blank")]]
-        self.table(None, rows, [5.0, 12.0])
+        self.table(None, rows)
         self.heading(self.w("pr.lines.title"))
         lines = []
         for ln in req.get("lines") or []:
             lines.append([str(ln["no"]), ln["description"], ln["quantity"] or self.w("unknown"), ln["unit"] or self.w("item.unit"),
                           self.money(ln["unit_price"]), self.money(ln["amount"])])
-        self.table([self.w(f"pr.col.{k}") for k in LINE_COLS], lines, [1.0, 7.4, 1.6, 1.6, 2.7, 2.7], right=(2, 4, 5))
+        self.table([self.w(f"pr.col.{k}") for k in LINE_COLS], lines, right=(2, 4, 5), section=self.w("pr.lines.title"))
         tot = req.get("totals")
         cur = (tot or {}).get("currency") or ""
         sums = [[self.w("pr.subtotal", currency=cur), self.money((tot or {}).get("subtotal"))],
                 [self.w("pr.vat", rate=str((tot or {}).get("vat_rate") or c.get("vat_rate") or "")), self.money((tot or {}).get("vat"), "pr.vat.unknown")],
                 [self.w("pr.total", currency=cur), self.money((tot or {}).get("total"), "pr.total.unknown")]]
-        self.para("", 4, after=0)
-        self.table(None, sums, [12.0, 5.0], right=(1,))
+        self.table(None, sums, right=(1,))
         # on the face of the draft: what could not be filled in, and why
         self.heading(self.w("gaps.title"))
-        self.para(self.w("gaps.lead"), 9, False, self.p["muted"])
+        self.para(self.w("gaps.lead"), "AM Small Muted")
         many = len(req.get("lines") or []) > 1
         gaps = []
         for g in req.get("gaps") or []:
             what, why = wording.gap(lang, g)
             gaps.append([(self.w("gaps.line", n=str(g["line"])) + " · " if many and g.get("line") else "") + what, why])
-        self.table([self.w("gaps.col.what"), self.w("gaps.col.why")], gaps, [6.0, 11.0])
+        self.table([self.w("gaps.col.what"), self.w("gaps.col.why")], gaps, section=self.w("gaps.title"))
         notes = [a["text"] for a in c.get("assumptions") or []] + [self.w("pr.passed", item=n) for n in req.get("passed") or []]
         if notes:
             self.heading(self.w("assumptions.title"))
             for line in notes:
-                self.para("• " + line, 10)
+                self.para(line, "AM Bullet")
         self.heading(self.w("pr.evidence.title"))
-        self.para(self.w("pr.evidence.lead"), 9, False, self.p["muted"])
+        self.para(self.w("pr.evidence.lead"), "AM Small Muted")
         items = {it["key"]: it for it in c["items"]}
         for ln in req.get("lines") or []:
             cand = next((x for x in items[ln["item"]]["candidates"] if x["key"] == ln["candidate"]), {})
@@ -149,25 +107,27 @@ class RequestDraft:
                   [self.w("pr.ev.beside"), " | ".join(price.get("beside") or [])],
                   [self.w("pr.ev.snapshot"), wording.snapshot_of(c, cand.get("source") or "")]]
             if many:
-                self.para(self.w("gaps.line", n=str(ln["no"])), 10, True)
-            self.table(None, ev, [4.0, 13.0])
+                self.para(self.w("gaps.line", n=str(ln["no"])), "AM Body Strong")
+            self.table(None, ev)
             pic = (cand.get("picture") or {}).get("name")
             if pic and out_dir and os.path.exists(os.path.join(out_dir, pic)):
-                self.doc.add_picture(os.path.join(out_dir, pic), width=Cm(15.5))
+                self.r.picture(os.path.join(out_dir, pic))
         self.heading(self.w("pr.sign.title"))
-        self.table(None, [[self.w("pr.sign.requester"), ""], [self.w("pr.sign.approver"), ""]], [5.0, 12.0])
-        self.para(self.w("pr.footer"), 8, False, self.p["muted"], after=0)
+        self.table(None, [[self.w("pr.sign.requester"), ""], [self.w("pr.sign.approver"), ""]])
+        self.para(self.w("pr.footer"), "AM Small Muted")
 
     def write(self, path: str, out_dir: str | None = None) -> dict:
         self.build(out_dir)
+        props = self.doc.core_properties
+        props.title = self.w("pr.title")
+        props.author = str(self.run.get("organisation") or "")
         self.doc.save(path)
         try:
-            from ....deliverables.report_docx import embed_fonts
-
-            embed_fonts(path, self.font)
+            embed_fonts(path, self.r.doc.styles["Normal"].font.name)
         except Exception:  # noqa: BLE001 — a document without its font embedded still reads; the check below is what matters
             pass
-        return {"lines": len((self.c.get("request") or {}).get("lines") or []), "gaps": len((self.c.get("request") or {}).get("gaps") or [])}
+        return {"lines": len((self.c.get("request") or {}).get("lines") or []), "gaps": len((self.c.get("request") or {}).get("gaps") or []),
+                "layouts": self.r.layouts}
 
 
 _NUMBER = re.compile(r"\d[\d,]*\.\d{2}")
@@ -185,7 +145,10 @@ def check(path: str, computed: dict) -> list[dict]:
     bad: list[str] = []
     n = 0
     heads = [w(f"pr.col.{k}") for k in LINE_COLS]
-    grid = next((tb for tb in tables if tb and tb[0] == heads), None)
+    # (the renderer breaks a Thai header between words with a line break where the column is narrow —
+    # a layout decision, not content — so a header is matched with its whitespace taken out)
+    flat = lambda cells: [squash(c) for c in cells]  # noqa: E731
+    grid = next((tb for tb in tables if tb and flat(tb[0]) == flat(heads)), None)
     if grid is None:
         bad.append(w("check.draft.no_lines"))
     else:
@@ -205,7 +168,7 @@ def check(path: str, computed: dict) -> list[dict]:
     n += 1
     if w("gaps.title") not in text:
         bad.append(w("check.draft.no_gaps_heading"))
-    gap_table = next((tb for tb in tables if tb and tb[0] == [w("gaps.col.what"), w("gaps.col.why")]), None)
+    gap_table = next((tb for tb in tables if tb and flat(tb[0]) == flat([w("gaps.col.what"), w("gaps.col.why")])), None)
     listed = "\n".join(squash(" ".join(r)) for r in (gap_table or [])[1:])
     missing = []
     for g in req.get("gaps") or []:

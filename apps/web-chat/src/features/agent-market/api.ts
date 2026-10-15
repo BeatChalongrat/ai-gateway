@@ -58,6 +58,7 @@ import type {
   ThreadItem,
   UpgradeInfo,
   WebCall,
+  PagesStatus,
 } from "./types";
 
 const BASE = "/agent-market";
@@ -266,6 +267,10 @@ export const amApi = {
   formats: (runId: string, formats: string[]) => send<{ job: Run }>("POST", `/runs/${id(runId)}/formats`, { formats }),
 
   downloadArtifact: (artifactId: string, filename: string) => saveBlob(`/artifacts/${id(artifactId)}/download`, filename),
+  /** AM21: the finished file's pages as pictures (of the delivered file itself), made on demand and kept. */
+  artifactPages: (artifactId: string) => send<PagesStatus>("POST", `/artifacts/${id(artifactId)}/pages`),
+  artifactPagesStatus: (artifactId: string) => call<PagesStatus>(`/artifacts/${id(artifactId)}/pages`),
+  artifactPage: (artifactId: string, n: number) => blobUrl(`/artifacts/${id(artifactId)}/pages/${n}`),
   downloadFile: (fileId: string, filename: string) => saveBlob(`/files/${id(fileId)}/download`, filename),
 
   /** The customer's own template: upload a (new version of the) file → an inspect job; save the confirmed mapping; stop using it. */

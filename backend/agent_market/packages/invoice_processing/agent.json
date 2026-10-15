@@ -1,7 +1,7 @@
 {
   "schema_version": "agent.market.v1",
   "id": "sran.invoice-processing",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "name": "อ่านใบกำกับภาษี / ใบเสร็จ ทำทะเบียนซื้อ",
   "name_en": "Invoice Processing",
   "short_name": "ทะเบียนเอกสารซื้อ",

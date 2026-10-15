@@ -55,7 +55,10 @@ func TestDocxThaiParagraphsInOrder(t *testing.T) {
 func TestPdfGate(t *testing.T) {
 	docx := testDocx(t, `<w:p><w:r><w:t>`+thRevenue+`</w:t></w:r></w:p><w:p><w:r><w:t>`+thCost+`</w:t></w:r></w:p>`)
 	good := CheckResult{Pages: 2, RenderedPages: 2, PageInk: []float64{0.03, 0.01},
-		RawText: "รายได้ จากการขาย\n12,480,300\n" + thCost + "\n"}
+		RawText: "รายได้ จากการขาย\n12,480,300\n" + thCost + "\n",
+		// AM21: paper at every margin, every font embedded, the organisation as author
+		MarginInk: []float64{0, 0}, Fonts: []PDFFont{{Name: "AAAAAA+Sarabun", Embedded: true}},
+		Meta: map[string]string{"author": "บริษัท ทดสอบ จำกัด", "title": "รายงานผลประกอบการ"}}
 	for _, c := range pdfGate(am.Thai, docx, good) {
 		if !c.OK {
 			t.Fatalf("a faithful PDF passes: %+v", c)
@@ -67,6 +70,14 @@ func TestPdfGate(t *testing.T) {
 		"reordered Thai": {Pages: 2, RenderedPages: 2, PageInk: []float64{0.03, 0.01},
 			RawText: thRevenue + "\n" + "คา่ใช้จ่าย"},
 		"Thai missing": {Pages: 2, RenderedPages: 2, PageInk: []float64{0.03, 0.01}, RawText: thRevenue},
+		// AM21: text past the right edge is ink in the margin; a font not embedded; our marker as the author
+		"ink in the margin":  {Pages: 2, RenderedPages: 2, PageInk: good.PageInk, RawText: good.RawText, MarginInk: []float64{0, 0.02}, Fonts: good.Fonts, Meta: good.Meta},
+		"margins unmeasured": {Pages: 2, RenderedPages: 2, PageInk: good.PageInk, RawText: good.RawText, Fonts: good.Fonts, Meta: good.Meta},
+		"font not embedded":  {Pages: 2, RenderedPages: 2, PageInk: good.PageInk, RawText: good.RawText, MarginInk: good.MarginInk, Fonts: []PDFFont{{Name: "Sarabun", Embedded: false}}, Meta: good.Meta},
+		"our marker as author": {Pages: 2, RenderedPages: 2, PageInk: good.PageInk, RawText: good.RawText, MarginInk: good.MarginInk, Fonts: good.Fonts,
+			Meta: map[string]string{"author": "[AM1b] บริษัท ตัวอย่าง จำกัด"}},
+		"the product as author": {Pages: 2, RenderedPages: 2, PageInk: good.PageInk, RawText: good.RawText, MarginInk: good.MarginInk, Fonts: good.Fonts,
+			Meta: map[string]string{"author": "Agent Market"}},
 	}
 	for name, chk := range cases {
 		failed := 0

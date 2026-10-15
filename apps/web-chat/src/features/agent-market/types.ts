@@ -614,6 +614,16 @@ export interface OutputArtifact {
   quality?: Quality | null;
 }
 
+/** AM21: whether the pictures of a file's pages are there, being made, or cannot be made. */
+export interface PagesStatus {
+  status: "ready" | "pending" | "unavailable" | "none";
+  pages?: number;
+  available?: number;
+  dpi?: number;
+  reason?: string;
+  job?: string;
+}
+
 export interface OutputsPayload {
   run_id: string;
   period_label?: string;

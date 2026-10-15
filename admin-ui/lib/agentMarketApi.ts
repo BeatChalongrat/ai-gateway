@@ -19,7 +19,7 @@ const seg = (s: string) => encodeURIComponent(s).replace(/%40/g, "@");
 
 export type AccessMode = "off" | "list" | "everyone";
 export type OrgRole = "member" | "publisher" | "admin";
-export type Section = "access" | "departments" | "spend" | "models" | "web" | "catalog" | "problems" | "runs" | "mail";
+export type Section = "access" | "departments" | "spend" | "models" | "web" | "look" | "catalog" | "problems" | "runs" | "mail";
 
 /** GET agent-market/me — who is signed in and which sections they may open. */
 export interface AmMe {
@@ -262,6 +262,30 @@ export interface RunDetail {
   access_log?: AccessEntry[] | null;
 }
 
+/** AM21: the organisation's look — the theme every agent's documents take, and its brand on them. */
+export interface LookPreset {
+  id: string;
+  name: string;
+  primary: string;
+  accent: string;
+  surface: string;
+}
+
+export interface LookTheme {
+  id: string;
+  company?: string;
+  palette?: { primary?: string; accent?: string };
+}
+
+export interface LookState {
+  theme: LookTheme | null;
+  version: number;
+  logo: boolean;
+  presets: LookPreset[];
+  /** the one file a person opens to change the look of everything */
+  file: string;
+}
+
 /** The organisation's mail relay (AM7 phase 5). The password never leaves .env. */
 export interface MailSettings {
   host: string;
@@ -405,6 +429,10 @@ export const amAdmin = {
   // AM16 — the agent's masking switch: its own request, and its own line in the audit log
   putMasked: (slug: string, masked: boolean): Promise<{ slug: string; egress: AgentEgressRow }> =>
     chatEdge.put(`${AM}/egress/${seg(slug)}`, { masked }),
+  // AM21 — the organisation's look: the theme and the brand every agent's documents take (audited)
+  look: (): Promise<LookState> => chatEdge.get(`${AM}/look`),
+  putLook: (body: { id: string; company: string; primary?: string; accent?: string }): Promise<{ theme: LookTheme; version: number; presets: LookPreset[] }> =>
+    chatEdge.put(`${AM}/look`, body),
   // AM12 — agents that work on the web: one run's ceilings, the sites never opened, the organisation's
   // suppliers, and where each run went
   web: (): Promise<AdminWeb> => chatEdge.get(`${AM}/web`),

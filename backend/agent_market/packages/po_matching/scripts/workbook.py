@@ -23,19 +23,16 @@ from __future__ import annotations
 import os
 from decimal import Decimal
 
-from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
+from openpyxl import load_workbook
 
 from ....deliverables import workpaper
+from ....deliverables.look.xlsx_styles import Book
 from ....deliverables.reread import Tally, sheets, table
 from ....engine import words
 from ....engine.e3 import cards as E3C
 from ..words import W
 from .match import CONFIRMED_TH, DEPTH_SHORT, DEPTH_TH, PASS, REASON_TH, STATUS_TH, THREE, TWO
 
-MONEY = '#,##0.00;[Red](#,##0.00);"-"'
-QTY = '#,##0.######;[Red](#,##0.######);"-"'
 # The wide tables' columns in the order the data is built and read back (the checks read by name, from the
 # sheets of the table together — ``table(parts(wb, sheet), H_*)``)
 H_INVOICES = W.heads(["doc.col.no", "doc.col.number", "doc.col.date", "doc.col.doc_type", "doc.col.seller", "doc.col.tax_id", "doc.col.po_ref", "doc.col.currency", "doc.col.subtotal",
@@ -62,24 +59,24 @@ PARTS = {S_INVOICES: (S_INVOICES, S_INVOICES_EV), S_LINES: (S_LINES, S_LINES_EV,
 # the row's identity (ID_COLS of them, repeated on the companions and on every page), then its amounts,
 # status and reason; a companion repeats the identity and holds the rest. Every column of H_* is on one of them.
 LAYOUT = {
-    S_INVOICES: [("doc.col.no", 7), ("doc.col.number", 16), ("doc.col.seller", 30), ("doc.col.subtotal", 14), ("doc.col.vat", 14), ("doc.col.total", 14), ("doc.col.status", 16),
-                 ("doc.col.date", 13), ("doc.col.doc_type", 16), ("doc.col.po_ref", 14), ("doc.col.currency", 8), ("doc.col.reason", 28), ("doc.col.depth", 14)],
-    S_INVOICES_EV: [("doc.col.no", 7), ("doc.col.number", 16), ("doc.col.seller", 26), ("doc.col.tax_id", 15), ("doc.col.vat_claim", 36), ("doc.col.note", 30),
-                    ("doc.col.evidence", 36)],
-    S_LINES: [("doc.col.no", 7), ("doc.col.invoice", 16), ("doc.col.line", 8), ("doc.col.item", 30), ("doc.col.quantity", 10), ("doc.col.unit", 8), ("doc.col.unit_price", 12),
-              ("doc.col.amount", 14), ("doc.col.po_unit_price", 12), ("doc.col.variance", 12), ("doc.col.status", 16), ("doc.col.depth", 18), ("doc.col.reason", 26)],
-    S_LINES_EV: [("doc.col.no", 6), ("doc.col.invoice", 14), ("doc.col.line", 7), ("doc.col.item", 20), ("doc.col.po", 13), ("doc.col.po_line", 8), ("doc.col.po_item", 22),
-                 ("doc.col.evidence_po", 30), ("doc.col.gr_used", 32), ("doc.col.evidence_invoice", 30), ("doc.col.note", 22)],
-    S_LINES_CRIT: [("doc.col.no", 6), ("doc.col.invoice", 14), ("doc.col.line", 7), ("doc.col.item", 20), ("doc.col.why_depth", 18), ("doc.col.ordered", 9),
-                   ("doc.col.received", 10), ("doc.col.billed_before", 11), ("doc.col.billed", 11), ("doc.col.unit_compared", 9), ("doc.col.failed_on", 24),
-                   ("doc.col.tolerance_used", 30), ("doc.col.pass", 18), ("doc.col.tier", 12), ("doc.col.confirmed_by", 14)],
-    S_PO: [("doc.col.po", 14), ("doc.col.line", 8), ("doc.col.item", 30), ("doc.col.unit_price", 12), ("doc.col.billed_value", 14), ("doc.col.item_code", 12), ("doc.col.kind", 10),
-           ("doc.col.po_status", 10), ("doc.col.unit", 8), ("doc.col.ordered", 10), ("doc.col.received", 10), ("doc.col.billed", 10), ("doc.col.left_to_bill", 12),
-           ("doc.col.overbilled", 22), ("doc.col.depth", 9)],
-    S_PO_EV: [("doc.col.po", 14), ("doc.col.line", 8), ("doc.col.item", 26), ("doc.col.invoices_billing", 40), ("doc.col.gr", 32), ("doc.col.evidence_po", 40)],
-    S_LINKS: [("doc.col.no", 6), ("doc.col.subject", 16), ("doc.col.document", 16), ("doc.col.status", 16), ("doc.col.pass", 26), ("doc.col.tier", 14), ("doc.col.confirmed_by", 16),
-              ("doc.col.item_left", 30), ("doc.col.item_right", 30), ("doc.col.similarity", 9)],
-    S_LINKS_EV: [("doc.col.no", 6), ("doc.col.subject", 16), ("doc.col.document", 16), ("doc.col.evidence_left", 44), ("doc.col.evidence_right", 44)],
+    S_INVOICES: ["doc.col.no", "doc.col.number", "doc.col.seller", "doc.col.subtotal", "doc.col.vat", "doc.col.total", "doc.col.status",
+                 "doc.col.date", "doc.col.doc_type", "doc.col.po_ref", "doc.col.currency", "doc.col.reason", "doc.col.depth"],
+    S_INVOICES_EV: ["doc.col.no", "doc.col.number", "doc.col.seller", "doc.col.tax_id", "doc.col.vat_claim", "doc.col.note",
+                    "doc.col.evidence"],
+    S_LINES: ["doc.col.no", "doc.col.invoice", "doc.col.line", "doc.col.item", "doc.col.quantity", "doc.col.unit", "doc.col.unit_price",
+              "doc.col.amount", "doc.col.po_unit_price", "doc.col.variance", "doc.col.status", "doc.col.depth", "doc.col.reason"],
+    S_LINES_EV: ["doc.col.no", "doc.col.invoice", "doc.col.line", "doc.col.item", "doc.col.po", "doc.col.po_line", "doc.col.po_item",
+                 "doc.col.evidence_po", "doc.col.gr_used", "doc.col.evidence_invoice", "doc.col.note"],
+    S_LINES_CRIT: ["doc.col.no", "doc.col.invoice", "doc.col.line", "doc.col.item", "doc.col.why_depth", "doc.col.ordered",
+                   "doc.col.received", "doc.col.billed_before", "doc.col.billed", "doc.col.unit_compared", "doc.col.failed_on",
+                   "doc.col.tolerance_used", "doc.col.pass", "doc.col.tier", "doc.col.confirmed_by"],
+    S_PO: ["doc.col.po", "doc.col.line", "doc.col.item", "doc.col.unit_price", "doc.col.billed_value", "doc.col.item_code", "doc.col.kind",
+           "doc.col.po_status", "doc.col.unit", "doc.col.ordered", "doc.col.received", "doc.col.billed", "doc.col.left_to_bill",
+           "doc.col.overbilled", "doc.col.depth"],
+    S_PO_EV: ["doc.col.po", "doc.col.line", "doc.col.item", "doc.col.invoices_billing", "doc.col.gr", "doc.col.evidence_po"],
+    S_LINKS: ["doc.col.no", "doc.col.subject", "doc.col.document", "doc.col.status", "doc.col.pass", "doc.col.tier", "doc.col.confirmed_by",
+              "doc.col.item_left", "doc.col.item_right", "doc.col.similarity"],
+    S_LINKS_EV: ["doc.col.no", "doc.col.subject", "doc.col.document", "doc.col.evidence_left", "doc.col.evidence_right"],
 }
 ID_COLS = {S_INVOICES: 3, S_LINES: 4, S_PO: 3, S_LINKS: 3}
 SHEETS = (S_SUMMARY, S_INVOICES, S_INVOICES_EV, S_LINES, S_LINES_EV, S_LINES_CRIT, S_PO, S_PO_EV, S_GRIR, S_UNPLANNED, S_NOTES,
@@ -132,96 +129,20 @@ def parts(wb, sheet: str) -> list:
 class MatchWorkbook:
     def __init__(self, computed: dict, theme: dict, run: dict | None = None):
         self.c, self.t, self.run = computed, theme, run or {}
-        self.p = theme["palette"]
-        self.font = theme["fonts"]["thai"]
-        self.wb = Workbook()
+        self.book = Book(theme, words.lang())
+        self.wb = self.book.wb
         self.inv = {i["key"]: i for i in computed["invoices"]}
         self.labels = computed["settings"]["labels"]
 
-    # ── styling ────────────────────────────────────────────────────────────
-    def _title(self, ws, text: str, sub: str = ""):
-        ws["A1"] = text
-        ws["A1"].font = Font(name=self.font, bold=True, size=14, color=self.p["primary"])
-        if sub:
-            ws["A2"] = sub
-            ws["A2"].font = Font(name=self.font, size=9, color=self.p["muted"])
-
-    def _table(self, ws, top: int, headers: list, rows: list, widths: list | None = None, money_cols=(), qty_cols=(),
-               wrap_cols=(), freeze: bool = True, first: list | None = None):
-        if first:
-            headers, rows, widths, cols = workpaper.lead(headers, rows, widths, first, money_cols=money_cols, qty_cols=qty_cols,
-                                                         wrap_cols=wrap_cols)
-            money_cols, qty_cols, wrap_cols = cols["money_cols"], cols["qty_cols"], cols["wrap_cols"]
-        fill = PatternFill("solid", fgColor=self.p["primary"])
-        thin = Side(style="thin", color=self.p["rule"])
-        zebra = PatternFill("solid", fgColor=self.p["surface"])
-        for j, h in enumerate(headers, start=1):
-            c = ws.cell(row=top, column=j, value=h)
-            c.font = Font(name=self.font, bold=True, color=self.p["on_primary"], size=10)
-            c.fill = fill
-            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        for i, row in enumerate(rows):
-            r = top + 1 + i
-            for j, v in enumerate(row, start=1):
-                c = ws.cell(row=r, column=j, value=v)
-                c.font = Font(name=self.font, size=10, color=self.p["ink"])
-                c.border = Border(bottom=thin)
-                if i % 2 == 1:
-                    c.fill = zebra
-                if j in money_cols:
-                    c.number_format = MONEY
-                elif j in qty_cols:
-                    c.number_format = QTY
-                if j in wrap_cols:
-                    c.alignment = Alignment(wrap_text=True, vertical="top")
-                elif isinstance(v, str):
-                    c.alignment = Alignment(vertical="top")
-        for j, w in enumerate(widths or [], start=1):
-            ws.column_dimensions[get_column_letter(j)].width = w
-        if freeze:
-            ws.freeze_panes = ws.cell(row=top + 1, column=1)
-            if rows:
-                ws.auto_filter.ref = f"A{top}:{get_column_letter(len(headers))}{top + len(rows)}"
-
-    def _part(self, ws, heads: list, rows: list, layout: list, **cols):
-        """One sheet of a wide table (AM10): the columns ``layout`` names, at its widths, picked from the whole
-        table; ``cols`` are the writer's column tuples against ``heads``."""
-        picked, prow, cols = workpaper.pick(list(heads), rows, [W(h) for h, _ in layout], **cols)
-        self._table(ws, 4, picked, prow, [w for _, w in layout], **cols)
-
-    def _pair(self, ws, r: int, label: str, value, *, money: bool = False, bold: bool = False, color: str | None = None):
-        a = ws.cell(row=r, column=1, value=label)
-        b = ws.cell(row=r, column=2, value=value)
-        for c in (a, b):
-            c.font = Font(name=self.font, size=10, bold=bold, color=color or self.p["ink"])
-            c.border = Border(bottom=Side(style="thin", color=self.p["rule"]))
-        b.alignment = Alignment(wrap_text=True, vertical="top", horizontal="right" if money else "left")
-        if money:
-            b.number_format = MONEY
-
-    def _section(self, ws, r: int, text: str):
-        ws.cell(row=r, column=1, value=text).font = Font(name=self.font, bold=True, size=11, color=self.p["primary"])
-
-    def _note(self, ws, r: int, text: str, cols: int = 4, height: int = 30, color: str | None = None, bold: bool = False):
-        cell = ws.cell(row=r, column=1, value=text)
-        cell.font = Font(name=self.font, size=9, color=color or self.p["muted"], bold=bold)
-        cell.alignment = Alignment(wrap_text=True, vertical="top")
-        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=cols)
-        ws.row_dimensions[r].height = height
-
     # ── sheets ─────────────────────────────────────────────────────────────
     def summary(self):
-        ws = self.wb.active
-        ws.title = W(S_SUMMARY)
+        ws = self.book.sheet(W(S_SUMMARY))
         c, s, t = self.c, self.c["summary"], self.c["totals"]
         head = dict(header_fields(c, self.run))
-        self._title(ws, W("doc.title.summary", period_label=c["period_label"]), head[W(L_COMPANY)])
-        for col, w in zip("ABCD", (52, 40, 16, 22)):
-            ws.column_dimensions[col].width = w
+        self.book.title(ws, W("doc.title.summary", period_label=c["period_label"]), head[W(L_COMPANY)])
         missing = [k for k, v in head.items() if not v]
         if missing:
-            m = ws.cell(row=3, column=1, value=W(HEADER_DRAFT).format(", ".join(missing)))
-            m.font = Font(name=self.font, bold=True, size=11, color=self.p.get("negative", "B42318"))
+            self.book.mark(ws, 3, W(HEADER_DRAFT).format(", ".join(missing)))
         preparer = head[W(L_PREPARER)]
         made = E3C.date_th(self.run.get("date") or c["prepared_on"])
         depth = W("doc.face.depth_line", three_way=t["three_way"], two_way=t["two_way"])
@@ -232,45 +153,45 @@ class MatchWorkbook:
                              (W(L_PREPARER), W("doc.face.prepared_line", preparer=preparer, made=made, v=self.run.get("agent_version") or "").rstrip(" ·")
                               if preparer else W(MISSING)),
                              (W(L_PRACTICE), c["practice"]["label"]), (W(L_DEPTH), depth), (W(L_APPROVAL), W(APPROVAL))):
-            self._pair(ws, r, label, value, bold=label == W(L_DEPTH))
+            self.book.pair(ws, r, label, value, strong=label == W(L_DEPTH))
             r += 1
         if t["two_way"]:
-            self._note(ws, r, W(TWO_WAY_WARNING), color=self.p.get("negative", "B42318"), bold=True)
+            self.book.note(ws, r, W(TWO_WAY_WARNING), bad=True)
             r += 1
         r += 1
-        self._section(ws, r, W("doc.section.results"))
+        self.book.section(ws, r, W("doc.section.results"))
         rows = [[x["label"], x["count"], _num(x["value"]), W("doc.face.without_value", without_value=x["without_value"]) if x["without_value"] else ""]
                 for x in s["by_status"]]
-        self._table(ws, r + 1, [W("doc.col.status"), W("doc.col.count_docs"), W("doc.col.value_in", currency=s["currency"]), W("doc.col.note")], rows, money_cols=(3,), freeze=False)
+        self.book.table(ws, r + 1, [W("doc.col.status"), W("doc.col.count_docs"), W("doc.col.value_in", currency=s["currency"]), W("doc.col.note")], rows, money_cols=(3,), freeze=False)
         r += len(rows) + 3
-        self._pair(ws, r, W(L_INVOICES), t["invoices"])
-        self._pair(ws, r + 1, W(L_LINES), t["lines"])
-        self._pair(ws, r + 2, W(L_THREE), t["three_way"])
-        self._pair(ws, r + 3, W(L_TWO), t["two_way"])
-        self._pair(ws, r + 4, W(L_NONE), t["unlinked"])
-        self._pair(ws, r + 5, W(L_ACCRUED), _num(t["received_not_billed"]), money=True)
-        self._pair(ws, r + 6, W(L_PREPAID), _num(t["billed_not_received"]), money=True)
+        self.book.pair(ws, r, W(L_INVOICES), t["invoices"])
+        self.book.pair(ws, r + 1, W(L_LINES), t["lines"])
+        self.book.pair(ws, r + 2, W(L_THREE), t["three_way"])
+        self.book.pair(ws, r + 3, W(L_TWO), t["two_way"])
+        self.book.pair(ws, r + 4, W(L_NONE), t["unlinked"])
+        self.book.pair(ws, r + 5, W(L_ACCRUED), _num(t["received_not_billed"]), money=True)
+        self.book.pair(ws, r + 6, W(L_PREPAID), _num(t["billed_not_received"]), money=True)
         r += 8
         if s["two_way_why"]:
-            self._section(ws, r, W("doc.section.why_two_way"))
+            self.book.section(ws, r, W("doc.section.why_two_way"))
             rows = [[x["why"], x["lines"]] for x in s["two_way_why"]]
-            self._table(ws, r + 1, [W("doc.col.reason"), W("doc.col.count_lines")], rows, freeze=False)
+            self.book.table(ws, r + 1, [W("doc.col.reason"), W("doc.col.count_lines")], rows, freeze=False)
             r += len(rows) + 3
-        self._section(ws, r, W("doc.section.why_blocked"))
+        self.book.section(ws, r, W("doc.section.why_blocked"))
         rows = [[x["label"], STATUS_TH[x["outcome"]], x["invoices"], x["lines"], _num(x["value"])] for x in s["by_reason"]]
-        self._table(ws, r + 1, [W("doc.col.reason"), W("doc.col.result"), W("doc.col.invoices_count"), W("doc.col.line"), W("doc.col.value_in", currency=s["currency"])],
+        self.book.table(ws, r + 1, [W("doc.col.reason"), W("doc.col.result"), W("doc.col.invoices_count"), W("doc.col.line"), W("doc.col.value_in", currency=s["currency"])],
                     rows or [[W("doc.word.none"), "", 0, 0, 0.0]], money_cols=(5,), freeze=False)
         r += max(len(rows), 1) + 3
         if s["other_currencies"]:
-            self._section(ws, r, W("doc.section.foreign"))
+            self.book.section(ws, r, W("doc.section.foreign"))
             rows = [[x["currency"], x["count"], _num(x["total"])] for x in s["other_currencies"]]
-            self._table(ws, r + 1, [W("doc.col.currency"), W("doc.col.count_docs"), W("doc.col.total_in_currency")], rows, money_cols=(3,), freeze=False)
+            self.book.table(ws, r + 1, [W("doc.col.currency"), W("doc.col.count_docs"), W("doc.col.total_in_currency")], rows, money_cols=(3,), freeze=False)
             r += len(rows) + 3
         notes = [W("doc.note.lines"),
                  W("doc.note.figures"),
                  c["grir"]["note"]] + [a["text"] for a in c.get("assumptions") or []]
         for n in notes:
-            self._note(ws, r, n)
+            self.book.note(ws, r, n)
             r += 1
 
     def invoices(self):
@@ -282,9 +203,9 @@ class MatchWorkbook:
                          (W("doc.vat.claimable") if i["vat"]["claimable"] else W("doc.vat.not_claimable")) + " " + i["vat"]["why"], "\n".join(i["notes"]), _where(i)])
         for sheet, sub in ((S_INVOICES, W("doc.sub.invoices")),
                            (S_INVOICES_EV, W("doc.sub.invoices_ev", s_invoices=W(S_INVOICES)))):
-            ws = self.wb.create_sheet(W(sheet))
-            self._title(ws, W(sheet), sub)
-            self._part(ws, H_INVOICES, rows, LAYOUT[sheet], money_cols=(9, 10, 11), wrap_cols=(4, 5, 12, 13, 15, 16, 17))
+            ws = self.book.sheet(W(sheet))
+            self.book.title(ws, W(sheet), sub)
+            self.book.part(ws, H_INVOICES, rows, [W(h) for h in LAYOUT[sheet]], money_cols=(9, 10, 11), wrap_cols=(4, 5, 12, 13, 15, 16, 17))
 
     def line_rows(self) -> list:
         rows = []
@@ -319,9 +240,9 @@ class MatchWorkbook:
         for sheet, sub in ((S_LINES, W("doc.sub.lines", s_lines_ev=W(S_LINES_EV), s_lines_crit=W(S_LINES_CRIT))),
                            (S_LINES_EV, W("doc.sub.lines_ev", s_lines=W(S_LINES))),
                            (S_LINES_CRIT, W("doc.sub.lines_crit", s_lines=W(S_LINES)))):
-            ws = self.wb.create_sheet(W(sheet))
-            self._title(ws, W(sheet), sub)
-            self._part(ws, H_LINES, rows, LAYOUT[sheet], money_cols=(7, 8, 14, 22), qty_cols=(5, 17, 18, 19, 20),
+            ws = self.book.sheet(W(sheet))
+            self.book.title(ws, W(sheet), sub)
+            self.book.part(ws, H_LINES, rows, [W(h) for h in LAYOUT[sheet]], money_cols=(7, 8, 14, 22), qty_cols=(5, 17, 18, 19, 20),
                        wrap_cols=(4, 9, 10, 13, 15, 16, 23, 24, 25, 26, 27, 29, 30, 31))
 
     def po(self):
@@ -334,18 +255,16 @@ class MatchWorkbook:
                          _num(p["open_to_bill"]), p["over_billed_why"], DEPTH_SHORT[p["depth"]], invs, grs, _where(p)])
         for sheet, title, sub in ((S_PO, W("doc.title.po"), W("doc.sub.po")),
                                   (S_PO_EV, W(S_PO_EV), W("doc.sub.po_ev", s_po=W(S_PO)))):
-            ws = self.wb.create_sheet(W(sheet))
-            self._title(ws, title, sub)
-            self._part(ws, H_PO, rows, LAYOUT[sheet], money_cols=(8, 12), qty_cols=(9, 10, 11, 13), wrap_cols=(4, 14, 16, 17, 18))
+            ws = self.book.sheet(W(sheet))
+            self.book.title(ws, title, sub)
+            self.book.part(ws, H_PO, rows, [W(h) for h in LAYOUT[sheet]], money_cols=(8, 12), qty_cols=(9, 10, 11, 13), wrap_cols=(4, 14, 16, 17, 18))
 
     def grir(self):
-        ws = self.wb.create_sheet(W(S_GRIR))
+        ws = self.book.sheet(W(S_GRIR))
         g = self.c["grir"]
-        self._title(ws, W("doc.title.grir"), f"{g['covers']} · {g['note']}")
-        self._pair(ws, 4, W(L_ACCRUED), _num(g["received_not_billed"]), money=True, bold=True)
-        self._pair(ws, 5, W(L_PREPAID), _num(g["billed_not_received"]), money=True, bold=True)
-        ws.column_dimensions["A"].width = 44
-        ws.column_dimensions["B"].width = 20
+        self.book.title(ws, W("doc.title.grir"), f"{g['covers']} · {g['note']}")
+        self.book.pair(ws, 4, W(L_ACCRUED), _num(g["received_not_billed"]), money=True, strong=True)
+        self.book.pair(ws, 5, W(L_PREPAID), _num(g["billed_not_received"]), money=True, strong=True)
         rows = []
         for p in self.c["po_lines"]:
             if p["id"] not in g["lines"]:
@@ -353,24 +272,24 @@ class MatchWorkbook:
             rows.append([p["po"], p["line_no"], p["description"], p["unit"], _num(p["unit_price"]), _num(p["received"]), _num(p["billed"]),
                          _num(p["received_not_billed"]), _num(p["received_not_billed_amount"]), _num(p["billed_not_received"]),
                          _num(p["billed_not_received_amount"]), _where(p)])
-        self._table(ws, 7, ["PO", W("doc.col.line"), W("doc.col.item"), W("doc.col.unit"), W("doc.col.po_unit_price"), W("doc.col.received"), W("doc.col.billed"), W("doc.col.received_not_billed"),
+        self.book.table(ws, 7, ["PO", W("doc.col.line"), W("doc.col.item"), W("doc.col.unit"), W("doc.col.po_unit_price"), W("doc.col.received"), W("doc.col.billed"), W("doc.col.received_not_billed"),
                             W("doc.col.received_not_billed_value"), W("doc.col.billed_not_received"), W("doc.col.billed_not_received_value"), W("doc.col.evidence_po")], rows,
                     money_cols=(5, 9, 11), qty_cols=(6, 7, 8, 10), wrap_cols=(3, 12), freeze=False)
 
     def unplanned(self):
-        ws = self.wb.create_sheet(W(S_UNPLANNED))
-        self._title(ws, W(S_UNPLANNED), W("doc.sub.unplanned"))
+        ws = self.book.sheet(W(S_UNPLANNED))
+        self.book.title(ws, W(S_UNPLANNED), W("doc.sub.unplanned"))
         rows = [[u["invoice_number"], u["supplier"], u["label"], _num(u["amount"]), W("doc.unplanned.within") if u["within_limit"] else W("doc.unplanned.over")]
                 for u in self.c["unplanned"]]
-        self._table(ws, 4, [W("doc.col.invoice"), W("doc.col.seller"), W("doc.col.charge_kind"), W("doc.col.amount"), W("doc.col.result")], rows, [20, 40, 40, 18, 28], money_cols=(4,),
+        self.book.table(ws, 4, [W("doc.col.invoice"), W("doc.col.seller"), W("doc.col.charge_kind"), W("doc.col.amount"), W("doc.col.result")], rows, money_cols=(4,),
                     wrap_cols=(2, 3))
 
     def notes(self):
-        ws = self.wb.create_sheet(W(S_NOTES))
-        self._title(ws, W(S_NOTES), W("doc.sub.notes"))
+        ws = self.book.sheet(W(S_NOTES))
+        self.book.title(ws, W(S_NOTES), W("doc.sub.notes"))
         rows = [[x["number"], E3C.date_th(x["date"]), x["kind_label"], x["supplier"], _num(x["total"]), x["ref_invoice"],
                  W("doc.word.found") if x["corrects"] else W("doc.word.not_found"), x["status_label"], " · ".join(x["reasons"])] for x in self.c["notes"]]
-        self._table(ws, 4, [W("doc.col.number"), W("doc.col.date"), W("doc.col.note_kind"), W("doc.col.seller"), W("doc.col.total"), W("doc.col.refers_to"), W("doc.col.original_invoice"), W("doc.col.status"), W("doc.col.reason")], rows,
+        self.book.table(ws, 4, [W("doc.col.number"), W("doc.col.date"), W("doc.col.note_kind"), W("doc.col.seller"), W("doc.col.total"), W("doc.col.refers_to"), W("doc.col.original_invoice"), W("doc.col.status"), W("doc.col.reason")], rows,
                     [18, 14, 16, 40, 16, 20, 14, 22, 44], money_cols=(5,), wrap_cols=(4, 9), first=[W("doc.col.number"), W("doc.col.seller"), W("doc.col.total")])
 
     def links(self):
@@ -386,52 +305,52 @@ class MatchWorkbook:
                          _num(m["similarity"])])
         for sheet, sub in ((S_LINKS, W("doc.sub.links")),
                            (S_LINKS_EV, W("doc.sub.links_ev", s_links=W(S_LINKS)))):
-            ws = self.wb.create_sheet(W(sheet))
-            self._title(ws, W(sheet), sub)
-            self._part(ws, H_LINKS, rows, LAYOUT[sheet], wrap_cols=(4, 5, 6, 7, 8, 9, 10, 11))
+            ws = self.book.sheet(W(sheet))
+            self.book.title(ws, W(sheet), sub)
+            self.book.part(ws, H_LINKS, rows, [W(h) for h in LAYOUT[sheet]], wrap_cols=(4, 5, 6, 7, 8, 9, 10, 11))
 
     def exceptions(self):
-        ws = self.wb.create_sheet(W(S_EXC))
-        self._title(ws, W("doc.sheet.exceptions"), W("doc.sub.exceptions"))
+        ws = self.book.sheet(W(S_EXC))
+        self.book.title(ws, W("doc.sheet.exceptions"), W("doc.sub.exceptions"))
         rows = []
         for n, e in enumerate(self.c["run_exceptions"], start=1):
             src = "; ".join(_where(s) for s in (e["source_ref"].get("rows") or []) if s)
             rows.append([n, e["reason"], e["detail"], e["proposed_action"], " / ".join(ch["label"] for ch in e["choices"]), src])
-        self._table(ws, 4, [W("doc.col.no"), W("doc.col.reason"), W("doc.col.detail"), W("doc.col.proposed"), W("doc.col.options"), W("doc.col.evidence")], rows, [6, 26, 50, 30, 40, 40],
+        self.book.table(ws, 4, [W("doc.col.no"), W("doc.col.reason"), W("doc.col.detail"), W("doc.col.proposed"), W("doc.col.options"), W("doc.col.evidence")], rows,
                     wrap_cols=(2, 3, 4, 5, 6))
 
     def evidence(self):
-        ws = self.wb.create_sheet(W(S_EVIDENCE))
+        ws = self.book.sheet(W(S_EVIDENCE))
         c = self.c
-        self._title(ws, W("doc.col.evidence"), W("doc.sub.evidence"))
+        self.book.title(ws, W("doc.col.evidence"), W("doc.sub.evidence"))
         kinds = {"po": W("doc.role.po"), "gr": W("doc.col.gr"), "invoice": W("doc.col.invoice")}
         rows = [[kinds.get(f["kind"], f["kind"]), f["name"], f["sheet"] or "", f["header_row"], f["rows"],
                  ", ".join(f"{k}={v}" for k, v in sorted((f["columns"] or {}).items())), " · ".join(f["said_by"]), f["sha256"]]
                 for f in c["files"]]
-        self._table(ws, 4, [W("doc.col.used_as"), W("doc.col.file"), W("doc.col.sheet"), W("doc.col.header_row"), W("doc.col.count"), W("doc.col.columns_read"), W("doc.col.known_by"), "SHA-256"], rows,
+        self.book.table(ws, 4, [W("doc.col.used_as"), W("doc.col.file"), W("doc.col.sheet"), W("doc.col.header_row"), W("doc.col.count"), W("doc.col.columns_read"), W("doc.col.known_by"), "SHA-256"], rows,
                     [18, 30, 16, 10, 10, 40, 30, 36], wrap_cols=(2, 3, 6, 7, 8), freeze=False)
         r = 4 + len(rows) + 2
-        self._section(ws, r, W("doc.section.settings"))
+        self.book.section(ws, r, W("doc.section.settings"))
         srows = [[c["practice"]["question"], c["practice"]["label"], ""]]
         srows += [[self.labels[k], v, W("doc.note.setting_unusable") if k in c["settings"]["unusable"] else ""]
                   for k, v in c["settings"]["tolerances"].items()]
         srows += [[W("doc.setting.unit_conversion"), f"1 {x['from']} = {x['factor']} {x['to']}" + (" " + W("doc.setting.only_item", item=x["item"]) if x.get("item") else ""),
                    W("doc.setting.answered") if x.get("answered") else W("doc.setting.in_agent")] for x in c["settings"]["conversions"]]
-        self._table(ws, r + 1, [W("doc.col.setting"), W("doc.col.used_this_run"), W("doc.col.note")], srows, freeze=False)
+        self.book.table(ws, r + 1, [W("doc.col.setting"), W("doc.col.used_this_run"), W("doc.col.note")], srows, freeze=False)
         r += len(srows) + 3
-        self._section(ws, r, W("doc.section.tiers"))
+        self.book.section(ws, r, W("doc.section.tiers"))
         trows = [[t["label"], t["groups"], t["by_rule"], t["by_person"], t["waiting"]] for t in c["match"]["tiers"]]
-        self._table(ws, r + 1, [W("doc.col.tier"), W("doc.col.pairs_matched"), W("doc.col.by_rule"), W("doc.col.by_person"), W("doc.state.waiting")], trows, freeze=False)
+        self.book.table(ws, r + 1, [W("doc.col.tier"), W("doc.col.pairs_matched"), W("doc.col.by_rule"), W("doc.col.by_person"), W("doc.state.waiting")], trows, freeze=False)
         r += len(trows) + 3
         prows = [[p["label"], W("doc.pass.auto") if p["auto"] else W("doc.pass.proposed"), p["by_rule"] + p["by_person"], p["waiting"]]
                  for p in c["match"]["passes"]]
-        self._table(ws, r + 1, [W("doc.col.pass_in_order"), W("doc.col.result"), W("doc.col.pairs_matched"), W("doc.state.waiting")], prows, freeze=False)
+        self.book.table(ws, r + 1, [W("doc.col.pass_in_order"), W("doc.col.result"), W("doc.col.pairs_matched"), W("doc.state.waiting")], prows, freeze=False)
 
     def left_out(self):
-        ws = self.wb.create_sheet(W(S_LEFT))
-        self._title(ws, W(S_LEFT), W("doc.sub.left_out"))
+        ws = self.book.sheet(W(S_LEFT))
+        self.book.title(ws, W(S_LEFT), W("doc.sub.left_out"))
         rows = [[e["name"], e["reason"], e["detail"], e["how"]] for e in self.c["not_included"]]
-        self._table(ws, 4, [W("doc.col.file"), W("doc.col.reason"), W("doc.col.detail"), W("doc.col.how_back")], rows, [40, 40, 60, 50], wrap_cols=(2, 3, 4))
+        self.book.table(ws, 4, [W("doc.col.file"), W("doc.col.reason"), W("doc.col.detail"), W("doc.col.how_back")], rows, wrap_cols=(2, 3, 4))
 
     def write(self, path: str) -> dict:
         self.summary()
@@ -446,14 +365,10 @@ class MatchWorkbook:
         self.evidence()
         if self.c["not_included"]:
             self.left_out()
-        self.wb.properties.creator = "Agent Market · invoice and purchase order matching"
         # AM8: printable — the face on one page; the columns that say which invoice and line a row is repeat on
         # every page beside its figures (AM10: and open every companion sheet of a wide table)
         id_cols = {W(s): ID_COLS[main] for main, names in PARTS.items() for s in names}
-        workpaper.setup_workbook(self.wb, doc_name=os.path.basename(path),
-                                 id_cols={**id_cols, W(S_NOTES): 2, W(S_UNPLANNED): 2, W(S_GRIR): 3, W(S_EXC): 2, W(S_EVIDENCE): 2, W(S_LEFT): 1},
-                                 lang=words.lang())
-        self.wb.save(path)
+        self.book.finish(path, id_cols={**id_cols, W(S_NOTES): 2, W(S_UNPLANNED): 2, W(S_GRIR): 3, W(S_EXC): 2, W(S_EVIDENCE): 2, W(S_LEFT): 1}, author=str(self.c.get("company") or self.run.get("organisation") or ""))
         t = self.c["totals"]
         return {"sheets": list(self.wb.sheetnames), "invoices": t["invoices"], "passed": t["passed"], "blocked": t["blocked"],
                 "person": t["person"], "three_way": t["three_way"], "two_way": t["two_way"], "run_exceptions": t["run_exceptions"]}

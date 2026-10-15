@@ -310,6 +310,48 @@ class ConvertToPdfTest(unittest.TestCase):
         png = base64.b64decode(json.loads(body)["first_png_base64"])
         self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
 
+    def test_check_reports_fonts_margins_and_metadata(self):
+        # AM21 §3.4: the fonts the PDF carries (embedded by LibreOffice's export), the ink in each page's outer
+        # margins (a blank strip on a plain page), and the metadata a reader sees (the title a document set)
+        import docx
+
+        d = docx.Document()
+        d.core_properties.title = "รายงานผลประกอบการ"
+        d.core_properties.author = "บริษัท ทดสอบ จำกัด"
+        d.add_paragraph("ข้อความธรรมดาในหน้ากระดาษ")
+        buf = io.BytesIO()
+        d.save(buf)
+        status, _h, pdf = _post(_Main.base, "/convert?to=pdf", buf.getvalue(), {"X-Filename": "meta.docx"})
+        self.assertEqual(status, 200)
+        status, _h, body = _post(_Main.base, "/check", pdf)
+        self.assertEqual(status, 200)
+        chk = json.loads(body)
+        self.assertEqual(len(chk["margin_ink"]), chk["pages"])
+        self.assertLessEqual(chk["margin_ink"][0], 0.001, chk["margin_ink"])
+        self.assertTrue(chk["fonts"], "pdffonts lists the font")
+        self.assertTrue(all(f["embedded"] for f in chk["fonts"]), chk["fonts"])
+        self.assertEqual(chk["meta"].get("title"), "รายงานผลประกอบการ")
+        self.assertEqual(chk["meta"].get("author"), "บริษัท ทดสอบ จำกัด")
+
+    def test_pages_returns_the_pages_as_pictures(self):
+        # AM21 part 4: the pictures a person sees before sending a file, from the delivered file itself
+        import base64
+
+        status, _h, pdf = _post(_Main.base, "/convert?to=pdf", filled("pptx_theme_chart.pptx"), {"X-Filename": "deck.pptx"})
+        self.assertEqual(status, 200)
+        status, _h, body = _post(_Main.base, "/pages?from=1&to=2&dpi=72", pdf)
+        self.assertEqual(status, 200, body[:200])
+        res = json.loads(body)
+        self.assertGreaterEqual(res["pages"], 1)
+        self.assertEqual(res["from"], 1)
+        self.assertEqual(len(res["png_base64"]), min(2, res["pages"]))
+        for b64 in res["png_base64"]:
+            self.assertTrue(base64.b64decode(b64).startswith(b"\x89PNG\r\n\x1a\n"))
+        # a page past the end is nothing, not an error
+        status, _h, body = _post(_Main.base, f"/pages?from={res['pages'] + 5}&to={res['pages'] + 6}", pdf)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["png_base64"], [])
+
     def test_check_reads_content_order_text_and_page_ink(self):
         # AM2 gate: -raw keeps a table cell's lines together (-layout interleaves cells side by side),
         # and page_ink tells a page with text from a blank one.

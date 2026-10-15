@@ -1,0 +1,220 @@
+package agentmarket
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math"
+	"net/http"
+	"regexp"
+	"strings"
+
+	"github.com/jackc/pgx/v5"
+)
+
+// ── the organisation's look: an admin's setting, audited (AM21 §6.2, §6.3) ──
+//
+// A product has several complete themes a customer picks from; the choice
+// re-skins every deliverable of every agent and touches no content. The
+// organisation's own brand — its name on every document, a primary and an
+// accent colour — is laid over the theme. The name may not carry a build or
+// card marker ("[AM1b]" sat on the owner's own report for a month), and a
+// colour that fails contrast against what it sits on is refused here, with
+// the ratio, so the document stays readable. The choice is written to the
+// admin audit log like every other admin setting.
+//
+//	GET /admin/agent-market/look   the theme in force, its version, the presets
+//	PUT /admin/agent-market/look   {id, company, primary?, accent?}
+
+// LookPreset is one built-in theme as the admin app shows it: its colours, to pick by eye. (The themes
+// themselves are the renderer's: backend/agent_market/deliverables/look/look.json.)
+type LookPreset struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Primary string `json:"primary"`
+	Accent  string `json:"accent"`
+	Surface string `json:"surface"`
+}
+
+var lookPresets = []LookPreset{
+	{ID: "navy", Name: "กรมท่า", Primary: "12264A", Accent: "2F6FD6", Surface: "F3F5F9"},
+	{ID: "teal", Name: "เขียวหยก", Primary: "0F4C4C", Accent: "1C8C84", Surface: "F2F7F6"},
+	{ID: "charcoal", Name: "ถ่านหิน", Primary: "24272E", Accent: "D9642B", Surface: "F4F4F5"},
+}
+
+// lookContrastMin is the least contrast a brand colour must have against what it sits on (WCAG AA).
+const lookContrastMin = 4.5
+
+var hex6 = regexp.MustCompile(`^#?[0-9A-Fa-f]{6}$`)
+
+// LookPatch is what an admin may set.
+type LookPatch struct {
+	ID      string  `json:"id"`
+	Company string  `json:"company"`
+	Primary *string `json:"primary,omitempty"`
+	Accent  *string `json:"accent,omitempty"`
+}
+
+// lookTheme is the theme as the registry keeps it (the renderer reads id, company and palette).
+type lookTheme struct {
+	ID      string            `json:"id"`
+	Company string            `json:"company,omitempty"`
+	Palette map[string]string `json:"palette,omitempty"`
+}
+
+func lookPreset(id string) *LookPreset {
+	for i := range lookPresets {
+		if lookPresets[i].ID == id {
+			return &lookPresets[i]
+		}
+	}
+	return nil
+}
+
+// luminance and contrast are WCAG's, as the renderer computes them (look/tokens.py).
+func lookLuminance(hex string) float64 {
+	hex = strings.TrimPrefix(hex, "#")
+	ch := func(i int) float64 {
+		var v int
+		fmt.Sscanf(hex[i:i+2], "%02x", &v)
+		c := float64(v) / 255
+		if c <= 0.03928 {
+			return c / 12.92
+		}
+		return math.Pow((c+0.055)/1.055, 2.4)
+	}
+	return 0.2126*ch(0) + 0.7152*ch(2) + 0.0722*ch(4)
+}
+
+func lookContrast(a, b string) float64 {
+	la, lb := lookLuminance(a), lookLuminance(b)
+	hi, lo := math.Max(la, lb), math.Min(la, lb)
+	return math.Round((hi+0.05)/(lo+0.05)*100) / 100
+}
+
+// lookRefusal says why a patch cannot be taken — in Thai, for forReq — or "".
+func lookRefusal(p LookPatch) wording {
+	if lookPreset(p.ID) == nil {
+		return "ธีมต้องเป็นหนึ่งในธีมที่มี: กรมท่า เขียวหยก ถ่านหิน"
+	}
+	if len(p.Company) > 120 {
+		return "ชื่อองค์กรบนเอกสารต้องไม่เกิน 120 ตัวอักษร"
+	}
+	if m := MarkerIn(p.Company); m != "" {
+		return wording("ชื่อองค์กรบนเอกสารต้องไม่มีรหัสงานหรือรหัสรุ่น เช่น " + m + " — เอกสารนี้ผู้ตรวจสอบของลูกค้าจะอ่าน")
+	}
+	for _, c := range []struct {
+		what  string
+		value *string
+	}{{"primary", p.Primary}, {"accent", p.Accent}} {
+		if c.value == nil || strings.TrimSpace(*c.value) == "" {
+			continue
+		}
+		if !hex6.MatchString(strings.TrimSpace(*c.value)) {
+			return wording("สี" + c.what + "ต้องเป็นรหัสฐานสิบหก 6 หลัก เช่น 12264A")
+		}
+		v := strings.ToUpper(strings.TrimPrefix(strings.TrimSpace(*c.value), "#"))
+		against := map[string]string{"primary": "FFFFFF", "accent": "FFFFFF"}[c.what]
+		if r := lookContrast(v, against); r < lookContrastMin {
+			return wording(fmt.Sprintf("สี%s %s มีคอนทราสต์ %.1f กับพื้นขาว ต่ำกว่า %.1f ที่อ่านได้ จึงรับไม่ได้", c.what, v, r, lookContrastMin))
+		}
+	}
+	return ""
+}
+
+func (p LookPatch) theme() lookTheme {
+	t := lookTheme{ID: p.ID, Company: strings.TrimSpace(p.Company)}
+	for _, c := range []struct {
+		what  string
+		value *string
+	}{{"primary", p.Primary}, {"accent", p.Accent}} {
+		if c.value != nil && strings.TrimSpace(*c.value) != "" {
+			if t.Palette == nil {
+				t.Palette = map[string]string{}
+			}
+			t.Palette[c.what] = strings.ToUpper(strings.TrimPrefix(strings.TrimSpace(*c.value), "#"))
+		}
+	}
+	return t
+}
+
+func (a *API) adminLook(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAdmin(w, r) {
+		return
+	}
+	c, _ := caller(r)
+	raw, version, logo, err := a.store.LatestTheme(r.Context(), c.TenantUUID)
+	if err != nil {
+		a.fail(w, err, "look")
+		return
+	}
+	var t lookTheme
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &t)
+	}
+	if t.ID == "" {
+		t.ID = lookPresets[0].ID
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"theme": t, "version": version, "logo": logo != nil, "presets": lookPresets,
+		// the one file a person opens to change the look of everything (said on the page)
+		"file": "backend/agent_market/deliverables/look/look.json"})
+}
+
+func (a *API) adminPutLook(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAdmin(w, r) {
+		return
+	}
+	c, _ := caller(r)
+	var body LookPatch
+	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<14))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		badRequest(w, "BAD_JSON")
+		return
+	}
+	if why := lookRefusal(body); why != "" {
+		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", forReq(w, why))
+		return
+	}
+	after := body.theme()
+	ctx := r.Context()
+	var version int
+	err := a.audited(ctx, func(tx pgx.Tx) ([]AuditEntry, error) {
+		raw, _, logo, err := a.store.LatestTheme(ctx, c.TenantUUID)
+		if err != nil {
+			return nil, err
+		}
+		var before lookTheme
+		if len(raw) > 0 {
+			_ = json.Unmarshal(raw, &before)
+		}
+		data, _ := json.Marshal(after)
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_market.agent_themes (tenant_id, version, theme, logo_key, created_by)
+			VALUES ($1, COALESCE((SELECT max(version) FROM agent_market.agent_themes WHERE tenant_id = $1), 0) + 1, $2, $3, $4)
+			RETURNING version`, c.TenantUUID, data, logo, c.UserID).Scan(&version); err != nil {
+			return nil, err
+		}
+		return []AuditEntry{entry(r, "agent_market.org.look", "agent_market_theme", c.TenantUUID.String(),
+			map[string]any{"from": before, "to": after, "version": version})}, nil
+	})
+	if err != nil {
+		a.fail(w, err, "look")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"theme": after, "version": version, "presets": lookPresets})
+}
+
+// themeCompanyRefusal (the chat app's own theme setting, PUT /theme) applies the same rule to the name
+// a person types: no marker on a customer's document.
+func themeCompanyRefusal(ctx context.Context, body json.RawMessage) wording {
+	var t struct {
+		Company string `json:"company"`
+	}
+	_ = json.Unmarshal(body, &t)
+	if m := MarkerIn(t.Company); m != "" {
+		return wording("ชื่อองค์กรบนเอกสารต้องไม่มีรหัสงานหรือรหัสรุ่น เช่น " + m)
+	}
+	_ = ctx
+	return ""
+}

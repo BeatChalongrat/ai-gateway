@@ -20,18 +20,16 @@ import os
 import re
 from decimal import Decimal
 
-from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
+from openpyxl import load_workbook
 
 from ....deliverables import workpaper
+from ....deliverables.look.xlsx_styles import Book
 from ....deliverables.reread import sheets, table
 from ....engine import words
 from ....engine.e2.cards import CHECK_TH, FIELD_TH
 from ..words import W
 from .register import DOC_TYPE_TH, REASON_TH
 
-MONEY = '#,##0.00;[Red](#,##0.00);"-"'
 NOT_INCLUDED = "doc.sheet.not_included"
 S_REGISTER, S_REGISTER_EV = "doc.sheet.register", "doc.sheet.register_ev"
 SHEETS = ("doc.sheet.summary", S_REGISTER, S_REGISTER_EV, NOT_INCLUDED, "doc.sheet.items", "doc.sheet.provenance", "doc.sheet.exceptions", "doc.sheet.checks")
@@ -45,11 +43,11 @@ PARTS = {S_REGISTER: (S_REGISTER, S_REGISTER_EV)}
 # with the row's identity (ID_COLS of them, repeated on the companion and on every page), then the seller and
 # every amount; the companion repeats the identity and holds the rest. Every column of H_REGISTER is on one.
 LAYOUT = {
-    S_REGISTER: [("doc.col.no", 6), ("doc.col.date", 11), ("doc.col.number", 15), ("doc.col.seller", 24), ("doc.col.seller_tax_id", 15), ("doc.col.doc_type", 14), ("doc.col.currency", 7),
-                 ("doc.col.subtotal", 12), ("doc.col.vat", 12), ("doc.col.total", 12), ("doc.col.wht", 12), ("doc.col.payable", 12), ("doc.col.fx_rate", 9),
-                 ("doc.col.subtotal_thb", 13), ("doc.col.vat_thb", 12), ("doc.col.total_thb", 13)],
-    S_REGISTER_EV: [("doc.col.no", 6), ("doc.col.date", 11), ("doc.col.number", 15), ("doc.col.branch", 7), ("doc.col.buyer", 26), ("doc.col.buyer_tax_id", 15), ("doc.sheet.provenance", 15),
-                    ("doc.col.file", 30)],
+    S_REGISTER: ["doc.col.no", "doc.col.date", "doc.col.number", "doc.col.seller", "doc.col.seller_tax_id", "doc.col.doc_type", "doc.col.currency",
+                 "doc.col.subtotal", "doc.col.vat", "doc.col.total", "doc.col.wht", "doc.col.payable", "doc.col.fx_rate",
+                 "doc.col.subtotal_thb", "doc.col.vat_thb", "doc.col.total_thb"],
+    S_REGISTER_EV: ["doc.col.no", "doc.col.date", "doc.col.number", "doc.col.branch", "doc.col.buyer", "doc.col.buyer_tax_id", "doc.sheet.provenance",
+                    "doc.col.file"],
 }
 ID_COLS = {S_REGISTER: 3}
 DECIDED_TH = W.table({"document": "doc.decided.document", "typed_by_person": "doc.decided.typed", "confirmed_by_person": "doc.decided.confirmed",
@@ -200,53 +198,14 @@ def item_status(line: dict) -> str:
 class InvoiceWorkbook:
     def __init__(self, computed: dict, theme: dict, run: dict | None = None):
         self.c, self.t, self.run = computed, theme, run or {}
-        self.p = theme["palette"]
-        self.font = theme["fonts"]["thai"]
-        self.wb = Workbook()
-
-    # ── styling ────────────────────────────────────────────────────────────
-    def _title(self, ws, text: str, sub: str = ""):
-        ws["A1"] = text
-        ws["A1"].font = Font(name=self.font, bold=True, size=14, color=self.p["primary"])
-        if sub:
-            ws["A2"] = sub
-            ws["A2"].font = Font(name=self.font, size=9, color=self.p["muted"])
-
-    def _table(self, ws, top: int, headers: list[str], rows: list[list], widths: list[int], money_cols=(), wrap_cols=()):
-        fill = PatternFill("solid", fgColor=self.p["primary"])
-        thin = Side(style="thin", color=self.p["rule"])
-        zebra = PatternFill("solid", fgColor=self.p["surface"])
-        for j, h in enumerate(headers, start=1):
-            c = ws.cell(row=top, column=j, value=h)
-            c.font = Font(name=self.font, bold=True, color=self.p["on_primary"], size=10)
-            c.fill = fill
-            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        for i, row in enumerate(rows):
-            r = top + 1 + i
-            for j, v in enumerate(row, start=1):
-                c = ws.cell(row=r, column=j, value=v)
-                c.font = Font(name=self.font, size=10, color=self.p["ink"])
-                c.border = Border(bottom=thin)
-                if i % 2 == 1:
-                    c.fill = zebra
-                if j in money_cols:
-                    c.number_format = MONEY
-                if j in wrap_cols:
-                    c.alignment = Alignment(wrap_text=True, vertical="top")
-                elif isinstance(v, str):
-                    c.alignment = Alignment(vertical="top")
-        for j, w in enumerate(widths, start=1):
-            ws.column_dimensions[get_column_letter(j)].width = w
-        ws.freeze_panes = ws.cell(row=top + 1, column=1)
-        if rows:
-            ws.auto_filter.ref = f"A{top}:{get_column_letter(len(headers))}{top + len(rows)}"
+        self.book = Book(theme, words.lang())
+        self.wb = self.book.wb
 
     # ── sheets ─────────────────────────────────────────────────────────────
     def summary(self):
-        ws = self.wb.active
-        ws.title = W("doc.sheet.summary")
+        ws = self.book.sheet(W("doc.sheet.summary"))
         c, t = self.c, self.c["totals"]
-        self._title(ws, W("doc.title.summary", period_label=c["period_label"]),
+        self.book.title(ws, W("doc.title.summary", period_label=c["period_label"]),
                     " · ".join(x for x in (c.get("company"), W("doc.face.tax_id", company_tax_id=c["company_tax_id"]) if c.get("company_tax_id") else None,
                                             W("doc.face.prepared", prepared_on=c["prepared_on"])) if x))
         rows = [
@@ -257,9 +216,9 @@ class InvoiceWorkbook:
             [W("doc.col.total_thb"), _num(t["thb"]["total"])], [W("doc.face.wht_thb"), _num(t["thb"]["wht_amount"])],
             [W("doc.face.payable_thb"), _num(t["thb"].get("payable", t["thb"]["net_payable"]))],
         ]
-        self._table(ws, 4, [W("doc.col.item"), W("doc.col.value")], rows, [36, 22])
+        self.book.table(ws, 4, [W("doc.col.item"), W("doc.col.value")], rows)
         for r in range(10, 15):           # the five baht rows (the counts stay integers)
-            ws.cell(row=r, column=2).number_format = MONEY
+            self.book.fmt(ws, r, 2, "money")
         r = 4 + len(rows) + 2
         notes = [W("doc.note.figures"),
                  W("doc.note.payable"),
@@ -272,11 +231,7 @@ class InvoiceWorkbook:
         if any(d["tier"] == "photo" for d in self.c["documents"]):
             notes.append(W("doc.note.photo"))
         for n in notes:
-            cell = ws.cell(row=r, column=1, value=n)
-            cell.font = Font(name=self.font, size=9, color=self.p["muted"])
-            cell.alignment = Alignment(wrap_text=True, vertical="top")
-            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
-            ws.row_dimensions[r].height = 30
+            self.book.note(ws, r, n, cols=6)
             r += 1
 
     def register(self):
@@ -290,36 +245,36 @@ class InvoiceWorkbook:
                          _num(d["thb_total"]), d["tier_label"], d["name"]])
         for sheet, title, sub in ((S_REGISTER, W("doc.title.register"), W("doc.sub.register", s_register_ev=W(S_REGISTER_EV))),
                                   (S_REGISTER_EV, W(S_REGISTER_EV), W("doc.sub.register_ev", s_register=W(S_REGISTER)))):
-            ws = self.wb.create_sheet(W(sheet))
-            self._title(ws, title, sub)
-            picked, prow, cols = workpaper.pick(list(H_REGISTER), rows, [W(h) for h, _ in LAYOUT[sheet]], money_cols=(11, 12, 13, 14, 15, 17, 18, 19),
+            ws = self.book.sheet(W(sheet))
+            self.book.title(ws, title, sub)
+            picked, prow, cols = workpaper.pick(list(H_REGISTER), rows, [W(h) for h in LAYOUT[sheet]], money_cols=(11, 12, 13, 14, 15, 17, 18, 19),
                                                 wrap_cols=(4, 5, 8, 21))
-            self._table(ws, 4, picked, prow, [w for _, w in LAYOUT[sheet]], **cols)
+            self.book.table(ws, 4, picked, prow, **cols)
             # a tax ID is text, never a number
             for j, h in enumerate(picked, start=1):
                 if h in (W("doc.col.seller_tax_id"), W("doc.col.buyer_tax_id")):
                     for r in range(5, 5 + len(rows)):
-                        ws.cell(row=r, column=j).number_format = "@"
+                        self.book.fmt(ws, r, j, "text")
 
     def not_included(self):
-        ws = self.wb.create_sheet(W(NOT_INCLUDED))
+        ws = self.book.sheet(W(NOT_INCLUDED))
         rows = [[e["name"], e["reason"], e.get("detail") or "", e["how"]] for e in self.c.get("not_included") or []]
-        self._title(ws, W(NOT_INCLUDED),
+        self.book.title(ws, W(NOT_INCLUDED),
                     W("doc.sub.not_included")
                     if rows else W("doc.sub.none_left_out"))
-        self._table(ws, 4, [W("doc.col.file"), W("doc.col.reason"), W("doc.col.detail"), W("doc.col.how_back")], rows, [36, 30, 64, 44], wrap_cols=(3, 4))
+        self.book.table(ws, 4, [W("doc.col.file"), W("doc.col.reason"), W("doc.col.detail"), W("doc.col.how_back")], rows, wrap_cols=(3, 4))
 
     def line_items(self):
-        ws = self.wb.create_sheet(W("doc.sheet.items"))
-        self._title(ws, W("doc.title.items"), W("doc.sub.items"))
+        ws = self.book.sheet(W("doc.sheet.items"))
+        self.book.title(ws, W("doc.title.items"), W("doc.sub.items"))
         rows = [[l["name"], l["row"], l["description"], _num(l["quantity"]), _num(l["unit_price"]), _num(l["amount"]),
                  l["confidence"], item_status(l)] for l in self.c["line_items"]]
-        self._table(ws, 4, [W("doc.col.file"), W("doc.key.row"), W("doc.col.item"), W("doc.col.quantity"), W("doc.col.unit_price"), W("doc.col.amount"), W("doc.col.confidence"), W("doc.col.status")], rows,
+        self.book.table(ws, 4, [W("doc.col.file"), W("doc.key.row"), W("doc.col.item"), W("doc.col.quantity"), W("doc.col.unit_price"), W("doc.col.amount"), W("doc.col.confidence"), W("doc.col.status")], rows,
                     [30, 8, 44, 10, 14, 14, 10, 30], money_cols=(5, 6), wrap_cols=(3, 8))
 
     def provenance(self):
-        ws = self.wb.create_sheet(W("doc.sheet.provenance"))
-        self._title(ws, W("doc.title.provenance"), W("doc.sub.provenance"))
+        ws = self.book.sheet(W("doc.sheet.provenance"))
+        self.book.title(ws, W("doc.title.provenance"), W("doc.sub.provenance"))
         rows = []
         for p in self.c["provenance"]:
             # (a party the model read is shown as the name and its legal form, not as the engine wrote it down)
@@ -328,22 +283,22 @@ class InvoiceWorkbook:
                          p["confidence"], method_th(p["method"]), p["page"], p["bbox"], p["raw_text"],
                          DECIDED_TH.get(p["decided_by"], p["decided_by"]),
                          ", ".join(CHECK_NAME_TH.get(c, c) for c in p["checks"] if c in CHECK_NAME_TH) or None, vision or None])
-        self._table(ws, 4, [W("doc.col.file"), W("doc.col.field"), W("doc.col.value"), W("doc.col.confidence"), W("doc.col.read_by"), W("doc.col.page"), W("doc.col.position"), W("doc.col.doc_text"),
+        self.book.table(ws, 4, [W("doc.col.file"), W("doc.col.field"), W("doc.col.value"), W("doc.col.confidence"), W("doc.col.read_by"), W("doc.col.page"), W("doc.col.position"), W("doc.col.doc_text"),
                             W("doc.col.decided_by"), W("doc.col.checks_passed"), W("doc.col.model_read")], rows,
                     [22, 15, 24, 9, 13, 6, 20, 28, 15, 28, 22], wrap_cols=(1, 2, 3, 5, 7, 8, 9, 10, 11))
 
     def exceptions(self):
-        ws = self.wb.create_sheet(W("doc.sheet.exceptions"))
-        self._title(ws, W("doc.sheet.exceptions"), W("doc.sub.exceptions"))
+        ws = self.book.sheet(W("doc.sheet.exceptions"))
+        self.book.title(ws, W("doc.sheet.exceptions"), W("doc.sub.exceptions"))
         who = {"person": W("doc.who.person"), "card": W("doc.who.card"), "rule": W("doc.who.rule")}
         rows = [[e["name"], e["code"], e["reason"], W("doc.result.excluded") if e["severity"] == "excluded" else W("doc.result.noted"),
                  e.get("detail") or "", who.get(e["decided_by"], e["decided_by"])] for e in self.c["exceptions"]]
-        self._table(ws, 4, [W("doc.col.file"), W("doc.col.reason_code"), W("doc.col.reason"), W("doc.col.result"), W("doc.col.detail"), W("doc.col.decided")], rows,
+        self.book.table(ws, 4, [W("doc.col.file"), W("doc.col.reason_code"), W("doc.col.reason"), W("doc.col.result"), W("doc.col.detail"), W("doc.col.decided")], rows,
                     [30, 24, 34, 18, 60, 14], wrap_cols=(5,))
 
     def checks(self):
-        ws = self.wb.create_sheet(W("doc.sheet.checks"))
-        self._title(ws, W("doc.title.checks"), W("doc.sub.checks"))
+        ws = self.book.sheet(W("doc.sheet.checks"))
+        self.book.title(ws, W("doc.title.checks"), W("doc.sub.checks"))
         def note(c):
             m = msg_th(c.get("message")) or ""
             try:
@@ -356,7 +311,7 @@ class InvoiceWorkbook:
         rows = [[c["name"], check_name(c["code"]), STATUS_TH.get(c["status"], c["status"]),
                  None if c.get("expected") is None else msg_th(c["expected"]), None if c.get("actual") is None else msg_th(c["actual"]),
                  note(c), c["code"]] for c in self.c["checks"]]
-        self._table(ws, 4, [W("doc.col.file"), W("doc.col.what"), W("doc.col.result"), W("doc.key.expected"), W("doc.col.found"), W("doc.col.note"), W("doc.col.code")], rows,
+        self.book.table(ws, 4, [W("doc.col.file"), W("doc.col.what"), W("doc.col.result"), W("doc.key.expected"), W("doc.col.found"), W("doc.col.note"), W("doc.col.code")], rows,
                     [30, 30, 10, 22, 22, 44, 20], wrap_cols=(6,))
 
     def write(self, path: str) -> dict:
@@ -367,13 +322,9 @@ class InvoiceWorkbook:
         self.provenance()
         self.exceptions()
         self.checks()
-        self.wb.properties.creator = "Agent Market · invoice processing"
         # AM8: printable — the register's row number, date and document number repeat on every page (AM10: and
         # open its companion sheet)
-        workpaper.setup_workbook(self.wb, doc_name=os.path.basename(path),
-                                 id_cols={W(S_REGISTER): ID_COLS[S_REGISTER], W(S_REGISTER_EV): ID_COLS[S_REGISTER], W("doc.sheet.provenance"): 2},
-                                 lang=words.lang())
-        self.wb.save(path)
+        self.book.finish(path, id_cols={W(S_REGISTER): ID_COLS[S_REGISTER], W(S_REGISTER_EV): ID_COLS[S_REGISTER], W("doc.sheet.provenance"): 2}, author=str(self.c.get("company") or self.run.get("organisation") or ""))
         return {"sheets": list(self.wb.sheetnames), "register_rows": self.c["totals"]["included"]}
 
 

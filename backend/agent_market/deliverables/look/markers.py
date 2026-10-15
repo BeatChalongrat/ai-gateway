@@ -19,7 +19,7 @@ from ..reread import check as _check
 # [AM1b] · [FIX122] · [AM-21] · [NIGHT2] · [HOTFIX]: a bracketed build or card marker
 MARKER = re.compile(r"\[(?:AM|FIX|NIGHT|HOTFIX|TEST|E)[- ]?\d*[A-Za-z]?\]")
 # the product's own name on a customer's paper
-PRODUCT = re.compile(r"\bSRAN\b|\bAgent Market\b", re.I)
+PRODUCT = re.compile(r"\bSRAN\b|(?i:\bAgent Market\b)")
 CHECK = "look.markers"
 
 

@@ -268,10 +268,11 @@ func (a *API) buildDraft(ctx context.Context, run Run) (EmailDraft, error) {
 	if err != nil {
 		return d, err
 	}
-	agentName := SanitizeMailText(in.Title)
+	// AM21: a build or card marker typed into an install's title never reaches a mail a person sends
+	agentName := StripMarkers(SanitizeMailText(in.Title))
 	if agentName == "" {
 		if def, err := a.store.DefinitionByID(ctx, in.DefinitionID); err == nil {
-			agentName = SanitizeMailText(def.Name)
+			agentName = StripMarkers(SanitizeMailText(def.Name))
 		}
 	}
 	agent := LabelFromPackage(agentName, Text("agent ของคุณ"))
@@ -303,7 +304,7 @@ func (a *API) buildDraft(ctx context.Context, run Run) (EmailDraft, error) {
 	head = append(head, Text("สถานะ: %s", Words(outcome)))
 	if g, ok := summary["gate"].(map[string]any); ok {
 		if what, ok := g["what"].(string); ok {
-			head = append(head, FromPackage(SanitizeMailText(what), NoText))
+			head = append(head, FromPackage(StripMarkers(SanitizeMailText(what)), NoText))
 		}
 	}
 	var figures []PersonText

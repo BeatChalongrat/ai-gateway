@@ -43,7 +43,7 @@ CHART_BOX = (CW, 4.9)
 HANG_IN = 0.35
 # placeholder indexes a renderer fills, by layout: {layout: {field: idx}} (0 is the title)
 FIELDS = {
-    "title": {"title": 0, "subtitle": 1, "company": 10, "lines": 11},
+    "title": {"title": 0, "subtitle": 1, "company": 10, "lines": 11, "logo": 12},
     "section": {"title": 0},
     "figure": {"title": 0, "label": 10, "value": 11, "sentence": 12},
     "figures": {"title": 0, "label": (10, 13, 16), "value": (11, 14, 17), "delta": (12, 15, 18)},
@@ -90,12 +90,13 @@ def _boxes() -> dict:
         figs[11 + 3 * i] = (x, 2.9, cw, 1.1)
         figs[12 + 3 * i] = (x, 4.05, cw, 0.9)
     return {
-        "title": {0: (0.9, 1.9, W - 1.8, 1.7), 1: (0.9, 3.65, W - 1.8, 0.8), 10: (0.9, 1.1, W - 1.8, 0.6), 11: (0.9, 5.1, W - 1.8, 1.4)},
+        "title": {0: (0.9, 1.9, W - 1.8, 1.7), 1: (0.9, 3.65, W - 1.8, 0.8), 10: (0.9, 1.1, W - 1.8, 0.6), 11: (0.9, 5.1, W - 1.8, 1.4),
+                  12: (W - 0.9 - 2.4, 0.5, 2.4, 0.8)},
         "section": {0: (0.9, 2.8, W - 1.8, 1.6)},
         "figure": {**title, 10: (1.6, 1.9, W - 3.2, 0.7), 11: (1.6, 2.55, W - 3.2, 1.7), 12: (1.6, 4.4, W - 3.2, 1.3)},
         "figures": {**title, **figs},
         "table": {**title, 10: (M, 1.55, CW, 4.9), 11: (M, 6.45, CW, 0.4)},
-        "chart": {**title, 10: (M, 1.45, CW, CHART_BOX[1]), 11: (M, 6.4, CW, 0.4)},
+        "chart": {**title, 10: (M, 1.45, CW, CHART_BOX[1]), 11: (M, 6.35, CW, 0.5)},
         "bullets": {**title, 10: (M, 1.55, CW, 0.9), 11: (M, 2.5, CW, 4.1)},
         "statement": {**title, 10: (0.9, 1.9, W - 1.8, 4.5)},
         "closing": {**title, 10: (M, 1.55, CW, 5.0)},
@@ -177,7 +178,7 @@ class Potx:
         if name in CHROME_LAYOUTS:
             parts.append(self._rect(40, "Accent mark", (M, 0.36, 0.5, 0.06), "accent"))
             parts.append(self._rect(41, "Rule", (M, FOOT_Y - 0.12, CW, 0.012), "rule"))
-        kinds = {"table": {10: "tbl"}, "chart": {10: "pic"}}.get(name, {})
+        kinds = {"table": {10: "tbl"}, "chart": {10: "pic"}, "title": {12: "pic"}}.get(name, {})
         for idx, box in boxes.items():
             kind = kinds.get(idx, "ctrTitle" if (idx == 0 and name in BAND_LAYOUTS) else ("subTitle" if idx == 1 else "body"))
             style = roles.get(idx)
@@ -185,6 +186,10 @@ class Potx:
             parts.append(self._ph(idx, kind, f"{name} {idx}", box, style, bullets))
         if name in CHROME_LAYOUTS:
             parts.append(self._footer())
+        if name == "title":
+            # a footer placeholder at the foot of the band that the deck leaves empty: the review stamp
+            # (signoff.py) is laid into it, so a signed deck still holds nothing outside a placeholder
+            parts.append(self._ph(FOOTER_IDX, "ftr", "title stamp", (M, H - 0.95, CW, 0.75), ("small", False, "on_primary", "l", "b")))
         return "".join(parts), ("primary" if name in BAND_LAYOUTS else None)
 
     # ── the template ─────────────────────────────────────────────────

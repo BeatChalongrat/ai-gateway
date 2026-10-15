@@ -111,6 +111,11 @@ def stamp_docx(src: str, dst: str, review: dict) -> dict:
     sec = doc.sections[0]
     width = sec.page_width - sec.left_margin - sec.right_margin
     table = doc.add_table(rows=1, cols=1)
+    # AM21: a report written in the look's styles takes the stamp in them too (no run formats itself);
+    # a file without them (a customer's own form) gets the stamp drawn as before
+    styled = "AM Plain" in {st.name for st in doc.styles}
+    if styled:
+        table.style = doc.styles["AM Plain"]
     _borders(table, "5F6B7A", inside_h=False, outer=True)
     _cell_margins(table, top=80, bottom=80, left=120, right=120)
     tblPr = table._tbl.tblPr
@@ -123,6 +128,20 @@ def stamp_docx(src: str, dst: str, review: dict) -> dict:
     text = lines(review)
     for i, line in enumerate(text):
         p = cell.paragraphs[0] if i == 0 else cell.add_paragraph()
+        if styled:
+            from .look import measure
+            from .look.tokens import LOOK
+
+            p.style = doc.styles["AM Body Strong" if i == 0 else "AM Small Muted"]
+            role = "body" if i == 0 else "small"
+            # the pad is the cell's own margins (120 twips a side = 12 pt); Thai is broken between words here
+            pieces = measure.break_lines(line, LOOK.pt("docx", role), width / 12700 - 24.0, i == 0) if measure.is_thai(line) else [line]
+            r = None
+            for k, piece in enumerate(pieces):
+                if k:
+                    r.add_break()
+                r = p.add_run(piece)
+            continue
         pf = p.paragraph_format
         pf.space_before = 0
         pf.space_after = 0
@@ -170,6 +189,35 @@ def stamp_pptx(src: str, dst: str, review: dict) -> dict:
     # the band below the lowest text on the slide; the content column when there is one
     boxes = [sh for sh in slide.shapes if sh.has_text_frame and sh.text_frame.text.strip()]
     lowest = max((sh.top + sh.height for sh in boxes), default=0)
+    stamp_ph = next((ph for ph in slide.slide_layout.placeholders if ph.placeholder_format.type is not None
+                     and str(ph.placeholder_format.type).startswith("FOOTER")), None)
+    if stamp_ph is not None:
+        # AM21: a deck on the look's layouts takes the stamp in the title layout's footer placeholder — a
+        # signed deck still holds nothing outside a placeholder, in the one family, at a size of the scale
+        import copy
+
+        from .look.tokens import LOOK
+
+        el = copy.deepcopy(stamp_ph._element)
+        for cnv in el.iter("{http://schemas.openxmlformats.org/presentationml/2006/main}cNvPr"):
+            cnv.set("name", PPTX_SHAPE)
+            break
+        slide.shapes._spTree.append(el)
+        tb = slide.shapes[-1]
+        left, top, width, height = tb.left, tb.top, tb.width, tb.height
+        tf = tb.text_frame
+        size = Pt(LOOK.pt("pptx", "small"))
+        for i, line in enumerate(lines(review)):
+            p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+            r = p.add_run()
+            r.text = line
+            r.font.size = size
+            r.font.bold = i == 0
+        prs.save(dst)
+        inside = left >= 0 and top >= 0 and left + width <= sw and top + height <= shh
+        overlaps = [sh.text_frame.text[:30] for sh in boxes
+                    if not (sh.top + sh.height <= top or sh.top >= top + height or sh.left + sh.width <= left or sh.left >= left + width)]
+        return {"inside_slide": inside, "overlaps": overlaps, "below_text": lowest <= top, "font": _pptx_font(slide), "replaced": replaced}
     left = min((sh.left for sh in boxes), default=int(sw * 0.05))
     width = max((sh.width for sh in boxes), default=int(sw * 0.9))
     left = max(left, int(sw * 0.03))

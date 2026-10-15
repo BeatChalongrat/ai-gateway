@@ -19,17 +19,15 @@ from __future__ import annotations
 import os
 from decimal import Decimal
 
-from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
+from openpyxl import load_workbook
 
 from ....deliverables import workpaper
+from ....deliverables.look.xlsx_styles import Book
 from ....deliverables.reread import Tally, sheets, table
 from ....engine import words
 from ..words import W
 from .audit import CHOICES, OUTCOME_TH, REASON_TH, RESOLUTION_TH
 
-MONEY = '#,##0.00;[Red](#,##0.00);"-"'
 S_CLAIMS, S_FACTS, S_EXC, S_RECEIPTS, S_POLICY = "doc.sheet.claims", "doc.sheet.facts", "doc.sheet.exceptions", "doc.sheet.receipts", "doc.sheet.policy"
 # AM10: the wide tables' companion sheets — the same identity columns, then the rest, read beside the main sheet
 # by row number; every one prints one page across
@@ -56,20 +54,20 @@ H_RECEIPTS = W.heads(["doc.col.file", "doc.col.file_type", "doc.col.read_by", "d
 # on every page), then its amounts, outcome and reason; a companion repeats the identity and holds the rest.
 # Every column of H_* is on one of them.
 LAYOUT = {
-    S_CLAIMS: [("doc.col.no", 6), ("doc.col.claim_no", 10), ("doc.col.employee", 16), ("doc.col.description", 28), ("doc.col.amount", 13), ("doc.col.receipt_amount", 13),
-               ("doc.fact.wht", 11), ("doc.col.outcome", 18), ("doc.col.date", 11), ("doc.col.category", 16), ("doc.col.merchant", 22), ("doc.sheet.receipts", 12),
-               ("doc.col.reason_code", 26)],
-    S_CLAIMS_EV: [("doc.col.no", 6), ("doc.col.claim_no", 10), ("doc.col.employee", 16), ("doc.col.description", 28), ("doc.col.row_in_file", 8), ("doc.col.employee_id", 11),
-                  ("doc.col.card_answer", 40)],
-    S_CLAIMS_RULES: [("doc.col.no", 6), ("doc.col.claim_no", 10), ("doc.col.employee", 16), ("doc.col.description", 28), ("doc.col.day", 9), ("doc.col.vat_claim", 8)]
-                    + [(FACT_KEYS[f], 9) for f in FACT_KEYS],
-    S_EXC: [("doc.col.no", 6), ("doc.col.item", 10), ("doc.col.reason", 24), ("doc.col.limit_from_table", 13), ("doc.col.status", 12), ("doc.col.description", 40),
-            ("doc.col.proposed", 36), ("doc.col.options", 36), ("doc.col.policy_ref", 26)],
-    S_EXC_EV: [("doc.col.no", 6), ("doc.col.item", 10), ("doc.col.reason", 24), ("doc.col.reason_code", 22), ("doc.col.source", 40), ("doc.col.also_flagged", 24),
-               ("doc.col.kb_context", 50)],
-    S_RECEIPTS: [("doc.col.file", 20), ("doc.col.seller", 26), ("doc.col.total", 13), ("doc.col.file_type", 12), ("doc.col.read_by", 13), ("doc.col.doc_type", 16), ("doc.col.tax_id", 15),
-                 ("doc.col.date", 11), ("doc.col.status", 14), ("doc.sheet.claims", 13), ("doc.col.amount_decided_by", 16)],
-    S_RECEIPTS_EV: [("doc.col.file", 20), ("doc.col.seller", 26), ("doc.col.page", 6), ("doc.col.position", 22), ("doc.col.doc_text", 30), ("doc.col.confidence", 10), ("doc.col.note", 36)],
+    S_CLAIMS: ["doc.col.no", "doc.col.claim_no", "doc.col.employee", "doc.col.description", "doc.col.amount", "doc.col.receipt_amount",
+               "doc.fact.wht", "doc.col.outcome", "doc.col.date", "doc.col.category", "doc.col.merchant", "doc.sheet.receipts",
+               "doc.col.reason_code"],
+    S_CLAIMS_EV: ["doc.col.no", "doc.col.claim_no", "doc.col.employee", "doc.col.description", "doc.col.row_in_file", "doc.col.employee_id",
+                  "doc.col.card_answer"],
+    S_CLAIMS_RULES: ["doc.col.no", "doc.col.claim_no", "doc.col.employee", "doc.col.description", "doc.col.day", "doc.col.vat_claim"]
+                    + [FACT_KEYS[f] for f in FACT_KEYS],
+    S_EXC: ["doc.col.no", "doc.col.item", "doc.col.reason", "doc.col.limit_from_table", "doc.col.status", "doc.col.description",
+            "doc.col.proposed", "doc.col.options", "doc.col.policy_ref"],
+    S_EXC_EV: ["doc.col.no", "doc.col.item", "doc.col.reason", "doc.col.reason_code", "doc.col.source", "doc.col.also_flagged",
+               "doc.col.kb_context"],
+    S_RECEIPTS: ["doc.col.file", "doc.col.seller", "doc.col.total", "doc.col.file_type", "doc.col.read_by", "doc.col.doc_type", "doc.col.tax_id",
+                 "doc.col.date", "doc.col.status", "doc.sheet.claims", "doc.col.amount_decided_by"],
+    S_RECEIPTS_EV: ["doc.col.file", "doc.col.seller", "doc.col.page", "doc.col.position", "doc.col.doc_text", "doc.col.confidence", "doc.col.note"],
 }
 ID_COLS = {S_CLAIMS: 4, S_EXC: 3, S_RECEIPTS: 2}
 STATUS_TH = W.table({"pass": "doc.status.pass", "fail": "doc.status.fail", "skip": "doc.status.skip"})
@@ -122,76 +120,15 @@ def parts(wb, sheet: str) -> list:
 class ExpenseWorkbook:
     def __init__(self, computed: dict, theme: dict, run: dict | None = None):
         self.c, self.t, self.run = computed, theme, run or {}
-        self.p = theme["palette"]
-        self.font = theme["fonts"]["thai"]
-        self.wb = Workbook()
-
-    # ── styling ────────────────────────────────────────────────────────────
-    def _title(self, ws, text: str, sub: str = ""):
-        ws["A1"] = text
-        ws["A1"].font = Font(name=self.font, bold=True, size=14, color=self.p["primary"])
-        if sub:
-            ws["A2"] = sub
-            ws["A2"].font = Font(name=self.font, size=9, color=self.p["muted"])
-
-    def _table(self, ws, top: int, headers: list[str], rows: list[list], widths: list[int] | None = None, money_cols=(),
-               wrap_cols=(), freeze: bool = True, first: list[str] | None = None):
-        if first:
-            headers, rows, widths, cols = workpaper.lead(headers, rows, widths, first, money_cols=money_cols, wrap_cols=wrap_cols)
-            money_cols, wrap_cols = cols["money_cols"], cols["wrap_cols"]
-        fill = PatternFill("solid", fgColor=self.p["primary"])
-        thin = Side(style="thin", color=self.p["rule"])
-        zebra = PatternFill("solid", fgColor=self.p["surface"])
-        for j, h in enumerate(headers, start=1):
-            c = ws.cell(row=top, column=j, value=h)
-            c.font = Font(name=self.font, bold=True, color=self.p["on_primary"], size=10)
-            c.fill = fill
-            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        for i, row in enumerate(rows):
-            r = top + 1 + i
-            for j, v in enumerate(row, start=1):
-                c = ws.cell(row=r, column=j, value=v)
-                c.font = Font(name=self.font, size=10, color=self.p["ink"])
-                c.border = Border(bottom=thin)
-                if i % 2 == 1:
-                    c.fill = zebra
-                if j in money_cols:
-                    c.number_format = MONEY
-                if j in wrap_cols:
-                    c.alignment = Alignment(wrap_text=True, vertical="top")
-                elif isinstance(v, str):
-                    c.alignment = Alignment(vertical="top")
-        for j, w in enumerate(widths or [], start=1):
-            ws.column_dimensions[get_column_letter(j)].width = w
-        if freeze:
-            ws.freeze_panes = ws.cell(row=top + 1, column=1)
-            if rows:
-                ws.auto_filter.ref = f"A{top}:{get_column_letter(len(headers))}{top + len(rows)}"
-
-    def _part(self, ws, heads: list, rows: list, layout: list, **cols):
-        """One sheet of a wide table (AM10): the columns ``layout`` names, at its widths, picked from the whole
-        table; ``cols`` are the writer's column tuples against ``heads``."""
-        picked, prow, cols = workpaper.pick(list(heads), rows, [W(h) for h, _ in layout], **cols)
-        self._table(ws, 4, picked, prow, [w for _, w in layout], **cols)
-
-    def _note(self, ws, r: int, text: str, cols: int = 6, height: int = 30):
-        cell = ws.cell(row=r, column=1, value=text)
-        cell.font = Font(name=self.font, size=9, color=self.p["muted"])
-        cell.alignment = Alignment(wrap_text=True, vertical="top")
-        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=cols)
-        ws.row_dimensions[r].height = height
-
-    def _section(self, ws, r: int, text: str):
-        cell = ws.cell(row=r, column=1, value=text)
-        cell.font = Font(name=self.font, bold=True, size=11, color=self.p["primary"])
+        self.book = Book(theme, words.lang())
+        self.wb = self.book.wb
 
     # ── sheets ─────────────────────────────────────────────────────────────
     def summary(self):
-        ws = self.wb.active
-        ws.title = W("doc.sheet.summary")
+        ws = self.book.sheet(W("doc.sheet.summary"))
         c, t = self.c, self.c["totals"]
         pol = c["policy"]
-        self._title(ws, W("doc.title.summary", period_label=c["period_label"]),
+        self.book.title(ws, W("doc.title.summary", period_label=c["period_label"]),
                     " · ".join(x for x in (c.get("company"), W("doc.face.prepared", prepared_on=c["prepared_on"])) if x))
         by = t["claimed_by_outcome"]
         rows = [[W("doc.face.all_claims"), t["claims"]], [W("doc.face.passed"), t["pass"]], [W("doc.face.exceptions_review"), t["exception"]],
@@ -199,9 +136,9 @@ class ExpenseWorkbook:
                 [W("doc.face.total_passed"), _num(by["pass"])], [W("doc.face.total_exceptions"), _num(by["exception"])],
                 [W("doc.face.total_judgement"), _num(by["question"])], [W("doc.face.exceptions_rows"), t["review"]],
                 [W("doc.face.noted"), t["info"]], [W("doc.face.receipts_read"), t["receipts"]]]
-        self._table(ws, 4, [W("doc.col.item"), W("doc.col.value")], rows, [44, 22], freeze=False)
+        self.book.table(ws, 4, [W("doc.col.item"), W("doc.col.value")], rows, freeze=False)
         for r in range(9, 13):
-            ws.cell(row=r, column=2).number_format = MONEY
+            self.book.fmt(ws, r, 2, "money")
         r = 4 + len(rows) + 2
         src = (W("doc.policy.came_with_agent") if pol["source"] == "package_sample"
                else W("doc.policy.set"))
@@ -218,7 +155,7 @@ class ExpenseWorkbook:
             if a["code"] in ("kb_differs_from_table", "holiday_calendar_missing_year", "receipt_files_missing", "same_file_twice"):
                 notes.append(a["text"])
         for n in notes:
-            self._note(ws, r, n)
+            self.book.note(ws, r, n)
             r += 1
 
     def claims(self):
@@ -236,13 +173,13 @@ class ExpenseWorkbook:
         for sheet, title, sub in ((S_CLAIMS, W("doc.title.claims"), W("doc.sub.claims", s_claims_rules=W(S_CLAIMS_RULES), s_claims_ev=W(S_CLAIMS_EV))),
                                   (S_CLAIMS_EV, W(S_CLAIMS_EV), W("doc.sub.claims_ev", s_claims=W(S_CLAIMS))),
                                   (S_CLAIMS_RULES, W(S_CLAIMS_RULES), W("doc.sub.claims_rules", s_claims=W(S_CLAIMS)))):
-            ws = self.wb.create_sheet(W(sheet))
-            self._title(ws, title, sub)
-            self._part(ws, H_CLAIMS, rows, LAYOUT[sheet], money_cols=(10, 12, 14), wrap_cols=(8, 9, 15, 16, 17, 18))
+            ws = self.book.sheet(W(sheet))
+            self.book.title(ws, title, sub)
+            self.book.part(ws, H_CLAIMS, rows, [W(h) for h in LAYOUT[sheet]], money_cols=(10, 12, 14), wrap_cols=(8, 9, 15, 16, 17, 18))
 
     def facts(self):
-        ws = self.wb.create_sheet(W(S_FACTS))
-        self._title(ws, W("doc.title.facts"), W("doc.sub.facts"))
+        ws = self.book.sheet(W(S_FACTS))
+        self.book.title(ws, W("doc.title.facts"), W("doc.sub.facts"))
         rows = []
         cats = self.c["policy"]["table"].get("categories") or {}
         for c in self.c["claims"]:
@@ -251,7 +188,7 @@ class ExpenseWorkbook:
                 rows.append([c["id"] or c["key"], FACT_TH[f], f, STATUS_TH[fd["status"]], fd.get("code"),
                              DISPOSITION_TH.get(fd.get("disposition")) if fd["status"] == "fail" else None, fd.get("detail") or None,
                              policy_ref_th(ev.get("policy_ref"), cats), _num(ev.get("limit")), _num(ev.get("amount"))])
-        self._table(ws, 4, [W("doc.col.claim_no"), W("doc.col.rule"), W("doc.col.rule_code"), W("doc.col.result"), W("doc.col.reason_code"), W("doc.col.consequence"), W("doc.col.description"), W("doc.col.policy_ref"),
+        self.book.table(ws, 4, [W("doc.col.claim_no"), W("doc.col.rule"), W("doc.col.rule_code"), W("doc.col.result"), W("doc.col.reason_code"), W("doc.col.consequence"), W("doc.col.description"), W("doc.col.policy_ref"),
                             W("doc.col.limit_from_table"), W("doc.col.amount_checked")], rows,
                     [10, 16, 18, 9, 22, 20, 44, 30, 14, 13], money_cols=(9, 10), wrap_cols=(5, 7, 8))
 
@@ -270,9 +207,9 @@ class ExpenseWorkbook:
                          where or None, policy_ref_th(s.get("policy_ref"), cats), _num(s.get("limit")), also or None, kb or None])
         for sheet, title, sub in ((S_EXC, W("doc.sheet.exceptions"), W("doc.sub.exceptions", s_exc_ev=W(S_EXC_EV))),
                                   (S_EXC_EV, W(S_EXC_EV), W("doc.sub.exceptions_ev", s_exc=W(S_EXC)))):
-            ws = self.wb.create_sheet(W(sheet))
-            self._title(ws, title, sub)
-            self._part(ws, H_EXC, rows, LAYOUT[sheet], money_cols=(11,), wrap_cols=(4, 6, 7, 8, 9, 10, 12, 13))
+            ws = self.book.sheet(W(sheet))
+            self.book.title(ws, title, sub)
+            self.book.part(ws, H_EXC, rows, [W(h) for h in LAYOUT[sheet]], money_cols=(11,), wrap_cols=(4, 6, 7, 8, 9, 10, 12, 13))
 
     def receipts(self):
         rows = []
@@ -285,29 +222,29 @@ class ExpenseWorkbook:
                          ", ".join(r["claims"]) or W("doc.receipt.unreferenced"), r["note"] or None])
         for sheet, title, sub in ((S_RECEIPTS, W("doc.face.receipts_read"), W("doc.sub.receipts", s_receipts_ev=W(S_RECEIPTS_EV))),
                                   (S_RECEIPTS_EV, W(S_RECEIPTS_EV), W("doc.sub.receipts_ev", s_receipts=W(S_RECEIPTS)))):
-            ws = self.wb.create_sheet(W(sheet))
-            self._title(ws, title, sub)
-            self._part(ws, H_RECEIPTS, rows, LAYOUT[sheet], money_cols=(8,), wrap_cols=(4, 5, 11, 13, 14, 16))
+            ws = self.book.sheet(W(sheet))
+            self.book.title(ws, title, sub)
+            self.book.part(ws, H_RECEIPTS, rows, [W(h) for h in LAYOUT[sheet]], money_cols=(8,), wrap_cols=(4, 5, 11, 13, 14, 16))
         ws = self.wb[W(S_RECEIPTS)]
         tax_col = [c.value for c in ws[4]].index(W("doc.col.tax_id")) + 1
         for i in range(len(rows)):
-            ws.cell(row=5 + i, column=tax_col).number_format = "@"
+            self.book.fmt(ws, 5 + i, tax_col, "text")
 
     def policy(self):
-        ws = self.wb.create_sheet(W(S_POLICY))
+        ws = self.book.sheet(W(S_POLICY))
         pol = self.c["policy"]
         table = pol["table"]
         src = (W("doc.policy.sample_title") if pol["source"] == "package_sample"
                else W("doc.policy.set"))
-        self._title(ws, W("doc.title.policy"), W("doc.sub.policy", src=src, v=pol["sha256"][:16]))
+        self.book.title(ws, W("doc.title.policy"), W("doc.sub.policy", src=src, v=pol["sha256"][:16]))
         cats = table["categories"]
         rows = [[c.get("label") or code, code, _num(c.get("per_claim")), _num(c.get("per_person_month")),
                  W("doc.word.yes") if c.get("needs_purpose") else None, _num(c.get("wht_rate")), _num(c.get("wht_from"))]
                 for code, c in cats.items()]
-        self._table(ws, 4, [W("doc.col.category"), W("doc.col.code"), W("doc.fact.within_claim_limit"), W("doc.policy.per_person_month"), W("doc.policy.needs_purpose"), W("doc.policy.wht_rate"),
-                            W("doc.policy.wht_from")], rows, [30, 18, 16, 20, 18, 16, 16], money_cols=(3, 4, 7), freeze=False)
+        self.book.table(ws, 4, [W("doc.col.category"), W("doc.col.code"), W("doc.fact.within_claim_limit"), W("doc.policy.per_person_month"), W("doc.policy.needs_purpose"), W("doc.policy.wht_rate"),
+                            W("doc.policy.wht_from")], rows, money_cols=(3, 4, 7), freeze=False)
         r = 4 + len(rows) + 2
-        self._section(ws, r, W("doc.section.other_settings"))
+        self.book.section(ws, r, W("doc.section.other_settings"))
         settings = [[W("doc.policy.receipt_required_above_thb"), _num(table.get("receipt_required_above"))],
                     [W("doc.policy.approval_threshold_thb"), _num(table.get("approval_threshold"))],
                     [W("doc.policy.weekend_holiday"), {"flag": W("doc.policy.flag"), "exception": W("doc.policy.exception"), "allow": W("doc.policy.allow")}.get(
@@ -315,31 +252,29 @@ class ExpenseWorkbook:
                     [W("doc.policy.vat_claim_requires"), {"full_tax_invoice": W("doc.policy.full_tax_invoice"), "abbreviated_tax_invoice": W("doc.policy.abbreviated_ok")}.get(
                         table.get("vat_claim_requires", "full_tax_invoice"))],
                     [W("doc.policy.prohibited_words"), ", ".join(table.get("prohibited_merchants") or []) or "-"]]
-        self._table(ws, r + 1, [W("doc.col.setting"), W("doc.col.value")], settings, freeze=False)
-        ws.cell(row=r + 2, column=2).number_format = MONEY
-        ws.cell(row=r + 3, column=2).number_format = MONEY
+        self.book.table(ws, r + 1, [W("doc.col.setting"), W("doc.col.value")], settings, freeze=False)
+        self.book.fmt(ws, r + 2, 2, "money")
+        self.book.fmt(ws, r + 3, 2, "money")
         r = r + 1 + len(settings) + 2
         cal = pol["calendar"]
         if cal.get("active"):
-            self._section(ws, r, W("doc.section.holidays") + " " + (cal.get("note") or W("doc.calendar.company")))
+            self.book.section(ws, r, W("doc.section.holidays") + " " + (cal.get("note") or W("doc.calendar.company")))
             hol = [[d, n] for d, n in cal["dates"].items()] or [["-", W("doc.calendar.none")]]
         else:
-            self._section(ws, r, W("doc.section.calendar_off"))
+            self.book.section(ws, r, W("doc.section.calendar_off"))
             hol = [["-", W("doc.calendar.not_checked", v=cal.get("note") or W("doc.calendar.unset"))]]
-        self._table(ws, r + 1, [W("doc.col.date"), W("doc.col.holiday")], hol, freeze=False)
+        self.book.table(ws, r + 1, [W("doc.col.date"), W("doc.col.holiday")], hol, freeze=False)
         r = r + 1 + len(hol) + 2
-        self._section(ws, r, W(KB_TITLE))
+        self.book.section(ws, r, W(KB_TITLE))
         ctx = [[k["file"], k["paragraph"], k["text"],
                 ", ".join(str((cats.get(x) or {}).get("label") or x) for x in k["categories"]) or None, ", ".join(k["numbers"]) or None,
                 W(NOT_A_LIMIT)] for k in pol["context"]]
-        self._table(ws, r + 1, [W("doc.col.file"), W("doc.col.paragraph"), W("doc.col.text"), W("doc.col.category_mentioned"), W("doc.col.numbers_in_text"), W("doc.col.used_as_limit")],
+        self.book.table(ws, r + 1, [W("doc.col.file"), W("doc.col.paragraph"), W("doc.col.text"), W("doc.col.category_mentioned"), W("doc.col.numbers_in_text"), W("doc.col.used_as_limit")],
                     ctx or [["-", None, W("doc.kb.none"), None, None, W(NOT_A_LIMIT)]], freeze=False, wrap_cols=(3,))
-        for j, w in enumerate([30, 18, 70, 20, 20, 22], start=1):
-            ws.column_dimensions[get_column_letter(j)].width = max(ws.column_dimensions[get_column_letter(j)].width or 0, w)
         r = r + 2 + max(len(ctx), 1) + 1
         for cf in pol["conflicts"]:
             table_says = W("doc.kb.table_sets", table=cf["table"]) if cf["table"] else W("doc.kb.table_no_limit")
-            self._note(ws, r, W("doc.kb.differs", file=cf["file"], paragraph=cf["paragraph"], label=cf["label"], document=cf["document"], table_says=table_says, policy_ref=policy_ref_th(cf["policy_ref"], cats)), cols=6, height=24)
+            self.book.note(ws, r, W("doc.kb.differs", file=cf["file"], paragraph=cf["paragraph"], label=cf["label"], document=cf["document"], table_says=table_says, policy_ref=policy_ref_th(cf["policy_ref"], cats)), cols=6)
             r += 1
 
     def write(self, path: str) -> dict:
@@ -349,12 +284,10 @@ class ExpenseWorkbook:
         self.exceptions()
         self.receipts()
         self.policy()
-        self.wb.properties.creator = "Agent Market · expense audit"
         # AM8: printable — the claim's number and its person repeat on every page (AM10: and open every companion
         # sheet of a wide table)
         id_cols = {W(s): ID_COLS[main] for main, names in PARTS.items() for s in names}
-        workpaper.setup_workbook(self.wb, doc_name=os.path.basename(path), id_cols={**id_cols, W(S_FACTS): 2}, lang=words.lang())
-        self.wb.save(path)
+        self.book.finish(path, id_cols={**id_cols, W(S_FACTS): 2}, author=str(self.c.get("company") or self.run.get("organisation") or ""))
         return {"sheets": list(self.wb.sheetnames), "claims": self.c["totals"]["claims"],
                 "run_exceptions": self.c["totals"]["run_exceptions"]}
 

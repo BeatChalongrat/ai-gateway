@@ -227,6 +227,10 @@ func (a *API) Routes(r chi.Router) {
 		r.Post("/runs/{id}/formats", a.formats)
 		a.webRoutes(r) // AM12: what a round on the web searched, opened and kept (web.go)
 		r.Get("/artifacts/{id}/download", a.downloadArtifact)
+		// AM21: the finished file's pages as pictures, before a person sends it
+		r.Post("/artifacts/{id}/pages", a.requestPages)
+		r.Get("/artifacts/{id}/pages", a.getPages)
+		r.Get("/artifacts/{id}/pages/{n}", a.getPage)
 		r.Get("/files/{id}/download", a.downloadFile)
 		r.Get("/theme", a.getTheme)
 		r.Put("/theme", a.putTheme)
@@ -2086,6 +2090,11 @@ func (a *API) putTheme(w http.ResponseWriter, r *http.Request) {
 	var body json.RawMessage
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil {
 		badRequest(w, "BAD_JSON")
+		return
+	}
+	// AM21: no build or card marker in the name that goes on every document
+	if why := themeCompanyRefusal(r.Context(), body); why != "" {
+		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", forReq(w, why))
 		return
 	}
 	v, err := a.store.SaveTheme(r.Context(), c.TenantUUID, c.UserID, body, nil)

@@ -23,6 +23,7 @@ import { ChatEdgeApiError } from "../../lib/chatEdgeApi";
 import AccessSection from "./_sections/Access";
 import CatalogSection from "./_sections/Catalog";
 import DepartmentsSection from "./_sections/Departments";
+import LookSection from "./_sections/Look";
 import MailSection from "./_sections/Mail";
 import ModelsSection from "./_sections/Models";
 import ProblemsSection from "./_sections/Problems";
@@ -37,6 +38,7 @@ const SECTIONS: { id: Section; label: DictKey }[] = [
   { id: "spend", label: "am.tab.spend" },
   { id: "models", label: "am.tab.models" },
   { id: "web", label: "am.tab.web" },
+  { id: "look", label: "am.tab.look" },
   { id: "catalog", label: "am.tab.catalog" },
   { id: "problems", label: "am.tab.problems" },
   { id: "runs", label: "am.tab.runs" },
@@ -149,6 +151,8 @@ function AgentMarket() {
             <ModelsSection />
           ) : current === "web" ? (
             <WebSection />
+          ) : current === "look" ? (
+            <LookSection />
           ) : current === "catalog" ? (
             <CatalogSection canDisable={!!me.can_disable} />
           ) : current === "problems" ? (

@@ -369,7 +369,7 @@ func (r *Runner) execute(parent context.Context, run agentmarket.Run) {
 	}()
 	log := r.Log.With("run", run.ID, "kind", run.Kind, "attempt", run.Attempts)
 	log.Info("run claimed")
-	if run.Kind != agentmarket.KindMappingPreview && r.disabledStop(ctx, run) {
+	if run.Kind != agentmarket.KindMappingPreview && run.Kind != agentmarket.KindPages && r.disabledStop(ctx, run) {
 		log.Info("run stopped: the agent is disabled")
 		return
 	}
@@ -383,6 +383,8 @@ func (r *Runner) execute(parent context.Context, run agentmarket.Run) {
 		err = r.replyJob(ctx, run, log)
 	case agentmarket.KindMappingPreview:
 		err = r.previewJob(ctx, run, log)
+	case agentmarket.KindPages:
+		err = r.pagesJob(ctx, run, log)
 	case agentmarket.KindReview:
 		err = r.reviewJob(ctx, run, log)
 	default:

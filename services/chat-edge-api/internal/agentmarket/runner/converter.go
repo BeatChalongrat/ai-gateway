@@ -116,6 +116,19 @@ type CheckResult struct {
 	PageInk []float64 `json:"page_ink"`
 	// FirstPNG is page 1 as a PNG (CheckWithFirstPNG only).
 	FirstPNG []byte `json:"first_png_base64,omitempty"`
+	// AM21: the share of dark pixels in each page's outer 0.3 in (text past a frame shows up there), the
+	// fonts the file carries and whether each is embedded, and the metadata a reader sees.
+	MarginInk []float64         `json:"margin_ink"`
+	Fonts     []PDFFont         `json:"fonts"`
+	Meta      map[string]string `json:"meta"`
+}
+
+// PDFFont is one font of a PDF as pdffonts lists it.
+type PDFFont struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Embedded bool   `json:"embedded"`
+	Subset   bool   `json:"subset"`
 }
 
 // PagePNGSize is one rendered page: pixels at 72 DPI and the PNG's size.
@@ -153,6 +166,36 @@ func (c *Converter) check(ctx context.Context, pdf []byte, firstPNG bool) (Check
 	}
 	if res.Pages < 0 || len(res.PagePNGSizes) > res.Pages {
 		return CheckResult{}, fmt.Errorf("bad converter response: %d pages, %d renders", res.Pages, len(res.PagePNGSizes))
+	}
+	return res, nil
+}
+
+// PagesResult is what the service renders of a PDF's pages (AM21 part 4): PNGs, base64 in the JSON.
+type PagesResult struct {
+	Pages int      `json:"pages"`
+	From  int      `json:"from"`
+	To    int      `json:"to"`
+	DPI   int      `json:"dpi"`
+	PNGs  []string `json:"png_base64"`
+}
+
+// Pages renders pages from..to of a PDF as pictures at dpi (the service caps both), so a person can see
+// the delivered file before sending it. The picture is of the file itself, never drawn again from data.
+func (c *Converter) Pages(ctx context.Context, pdf []byte, from, to, dpi int) (PagesResult, error) {
+	if !c.Available() {
+		return PagesResult{}, ErrNoConverter
+	}
+	p := fmt.Sprintf("/pages?from=%d&to=%d&dpi=%d", from, to, dpi)
+	raw, err := c.post(ctx, p, pdf, http.Header{"Content-Type": {"application/pdf"}}, maxCheckBytes)
+	if err != nil {
+		return PagesResult{}, err
+	}
+	var res PagesResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return PagesResult{}, fmt.Errorf("bad converter response: %v", err)
+	}
+	if res.Pages < 0 || len(res.PNGs) > to-from+1 {
+		return PagesResult{}, fmt.Errorf("bad converter response: %d pages, %d pictures", res.Pages, len(res.PNGs))
 	}
 	return res, nil
 }

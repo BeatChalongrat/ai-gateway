@@ -9,7 +9,7 @@
 // a finished round's card offers "ร่างอีเมล" (./EmailDraftCard).
 
 import { useEffect, useId, useRef, useState } from "react";
-import { BadgeCheck, ChevronDown, CircleCheck, Download, Plus, TriangleAlert } from "lucide-react";
+import { BadgeCheck, ChevronDown, CircleCheck, Download, Eye, EyeOff, Plus, TriangleAlert } from "lucide-react";
 
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
@@ -26,6 +26,7 @@ import { cls, Pill } from "../ui";
 import { SignOffButton } from "../review/SignOff";
 import { provenanceHref, useWorkspace } from "./context";
 import { DraftEmailButton } from "./EmailDraftCard";
+import { PagesPreview } from "./PagesPreview";
 import { personText } from "./personText";
 import { PO_KIND, PoSummary, ReceiptOffers } from "./PoMatch";
 
@@ -424,6 +425,9 @@ export function ArtifactRow({
   const t = useAmT();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // AM21: the file's pages as pictures, before a person sends it (the office files and the PDF)
+  const [preview, setPreview] = useState(false);
+  const previewable = PREVIEWABLE.has(artifact.format) && !downloadWith;
   const download = () => {
     setBusy(true);
     setError(null);
@@ -443,7 +447,7 @@ export function ArtifactRow({
   // data, shown as written (the server sends it as the person's); the reason is the package's words
   const unfilled = (artifact.quality?.unfilled ?? []).filter((u) => typeof u.label === "string" && u.label.trim());
   return (
-    <li className="flex items-center gap-3 px-3 py-2" data-testid="am-artifact" data-format={artifact.format}>
+    <li className="flex flex-wrap items-center gap-3 px-3 py-2" data-testid="am-artifact" data-format={artifact.format}>
       <FileTypeBadge extension={artifactExtension(artifact)} filename={artifact.name} size="sm" />
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm text-text-primary" title={artifact.name}>
@@ -479,6 +483,19 @@ export function ArtifactRow({
           </div>
         ) : null}
       </div>
+      {previewable ? (
+        <button
+          type="button"
+          onClick={() => setPreview((v) => !v)}
+          aria-pressed={preview}
+          aria-label={preview ? t("outputs.previewHide") : t("outputs.preview")}
+          title={preview ? t("outputs.previewHide") : t("outputs.preview")}
+          className="focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+          data-testid="am-artifact-preview"
+        >
+          {preview ? <EyeOff width={16} height={16} aria-hidden /> : <Eye width={16} height={16} aria-hidden />}
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={download}
@@ -488,9 +505,17 @@ export function ArtifactRow({
       >
         {busy ? <Spinner size={15} /> : <Download width={16} height={16} aria-hidden />}
       </button>
+      {preview ? (
+        <div className="w-full basis-full">
+          <PagesPreview artifactId={artifact.id} name={artifact.name} />
+        </div>
+      ) : null}
     </li>
   );
 }
+
+// the files whose pages the converter can picture: the office files and the PDF (a filled template too)
+const PREVIEWABLE = new Set(["docx", "pptx", "xlsx", "pdf", "template"]);
 
 function MoreFilesMenu({ runId, formats }: { runId: string; formats: string[] }) {
   const t = useAmT();

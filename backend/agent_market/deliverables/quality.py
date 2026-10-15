@@ -28,7 +28,7 @@ What each check asserts, and nothing more:
   - ``assumptions``: the assumptions list is not empty, and lists a defaulted
     answer when the run had one.
 * สไลด์ (.pptx)
-  - ``pptx.valid``; ``pptx.slide_count`` (8–12); ``pptx.overflow`` (an
+  - ``pptx.valid``; ``pptx.slide_count`` (8–24: one idea per slide, a long list breaks across slides); ``pptx.overflow`` (an
     estimate from font metrics, not a render); ``pptx.fonts``.
   - ``pptx.figures``: every chart's categories and plotted values (read from
     the chart in the file), the P&L table and the KPI values equal the
@@ -568,7 +568,7 @@ def check_pptx(path: str, deck: dict, computed: dict, theme: dict, asked=()) -> 
     n = info.get("slide_count", 0)
     no_charts = "no_charts" in asked
     least = 8 - (len(content_mod.charts(computed)) if no_charts else 0)
-    out.append(_check("pptx.slide_count", least <= n <= 16, (S("gate.pptx.slides.no_charts", n=n) if no_charts else S("gate.pptx.slides", n=n)),
+    out.append(_check("pptx.slide_count", least <= n <= 24, (S("gate.pptx.slides.no_charts", n=n) if no_charts else S("gate.pptx.slides", n=n)),
                       S("gate.pptx.slides.label", least=least)))
     prs = Presentation(path)
     w_in, h_in = prs.slide_width / 914400, prs.slide_height / 914400

@@ -16,6 +16,7 @@ can say them.
 from __future__ import annotations
 
 import copy
+import os
 import re
 
 from .look.tokens import LOOK, LookError, contrast
@@ -123,3 +124,33 @@ def rgb(hex6: str) -> tuple[int, int, int]:
 
 def mpl(hex6: str) -> str:
     return "#" + hex6.lstrip("#")
+
+
+def logo_refusal(path: str | None) -> dict | None:
+    """AM21 §6.3: the organisation's logo, refused with its reason when it would not render at the size
+    the cover needs — too small, too large a file, or not a picture that opens. None when it is fine."""
+    from ..engine.words import SHARED as S
+
+    if not path:
+        return None
+    b = LOOK.brand()
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return {"what": "logo", "value": os.path.basename(path), "why": S("brand.refuse.logo_type")}
+    if size > b["logo_max_bytes"]:
+        return {"what": "logo", "value": os.path.basename(path), "why": S("brand.refuse.logo_big", max=f"{b['logo_max_bytes'] // 1_000_000} MB")}
+    try:
+        from PIL import Image
+
+        with Image.open(path) as im:
+            fmt, (w, h) = im.format, im.size
+    except Exception:  # noqa: BLE001 — not a picture Pillow opens
+        return {"what": "logo", "value": os.path.basename(path), "why": S("brand.refuse.logo_type")}
+    if fmt not in ("PNG", "JPEG"):
+        return {"what": "logo", "value": os.path.basename(path), "why": S("brand.refuse.logo_type")}
+    need = b["logo_min_px"]
+    if w < need["width"] or h < need["height"]:
+        return {"what": "logo", "value": os.path.basename(path),
+                "why": S("brand.refuse.logo_small", w=w, h=h, min_w=need["width"], min_h=need["height"])}
+    return None

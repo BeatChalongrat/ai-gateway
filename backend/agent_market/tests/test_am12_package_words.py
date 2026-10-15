@@ -210,7 +210,7 @@ class TheSampleGivesWhatItsVersionSays(unittest.TestCase):
             failed = [(a["name"], c["name"], c["detail"]) for a in made["artifacts"] for c in a["quality"]["checks"] if not c["ok"]]
             self.assertEqual((made["passed"], failed), (True, []), lang)
             self.assertEqual({c["name"] for a in made["artifacts"] for c in a["quality"]["checks"]},
-                             {"xlsx.figures", "xlsx.print", "xlsx.print.one_across", "docx.request"}, lang)
+                             {"xlsx.figures", "xlsx.print", "xlsx.print.one_across", "xlsx.look", "look.markers", "docx.request"}, lang)
             if lang == "en":
                 from docx import Document
                 from openpyxl import load_workbook

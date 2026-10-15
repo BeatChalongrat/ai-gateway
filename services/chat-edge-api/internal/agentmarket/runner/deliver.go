@@ -39,6 +39,8 @@ type computedView struct {
 	Citations   []json.RawMessage     `json:"citations"`
 	Materiality string                `json:"materiality"`
 	Script      string                `json:"script"`
+	// AM21 §6.1: the layout catalogue's limits (characters, counts), told to the model before it writes
+	WritingLimits map[string]int `json:"writing_limits"`
 }
 
 type figureView struct {
@@ -272,6 +274,7 @@ func narrativePrompt(l am.Lang, cv computedView) string {
 			f := cv.Figures[k]
 			fmt.Fprintf(&b, "- {%s} = %s · %s\n", k, f.Text, f.Label)
 		}
+		b.WriteString(writingLimitsLine(cv))
 		b.WriteString("\nเขียนคำอธิบายตามรูปแบบ JSON ใน instructions " + languageName(l) + " ทุกตัวเลขเขียนเป็น {ชื่อ} จากรายการด้านบน " +
 			"(ถ้าบอกทิศทางเป็นคำแล้ว เช่น " + directionWord(l) + " ใช้ {ชื่อ:abs} เพื่อพิมพ์โดยไม่มีเครื่องหมาย)" + answerIn(l))
 		return b.String()
@@ -287,6 +290,19 @@ func narrativePrompt(l am.Lang, cv computedView) string {
 	}
 	b.WriteString("\nเขียนคำอธิบายตามรูปแบบ JSON ใน instructions " + languageName(l) + " ใช้ตัวเลขจากรายการด้านบนเท่านั้น" + answerIn(l))
 	return b.String()
+}
+
+// writingLimitsLine (AM21 §6.1) tells the model, before it writes, how much the layouts take: the
+// summary's paragraph, a point of a list, how many points. A model that writes to fit is not refused
+// afterwards; one that is not told writes freely and ends up truncated or refused. An engine from
+// before this card sends no limits, and the prompt is as it was.
+func writingLimitsLine(cv computedView) string {
+	lim := cv.WritingLimits
+	if lim["summary_chars"] == 0 || lim["bullet_chars"] == 0 || lim["bullets_max"] == 0 {
+		return ""
+	}
+	return fmt.Sprintf("\nความยาวที่เอกสารรับได้ (นับตัวอักษร): summary ไม่เกิน %d · movements, watch และ next_steps รายการละไม่เกิน %d ตัวอักษร และไม่เกิน %d รายการต่อหัวข้อ · เขียนให้พอดี ส่วนที่ยาวกว่านี้จะถูกปฏิเสธ\n",
+		lim["summary_chars"], lim["bullet_chars"], lim["bullets_max"])
 }
 
 // ── render (+ quality gate) ──────────────────────────────────────────────
@@ -305,6 +321,26 @@ type renderedArt struct {
 	Quality       json.RawMessage `json:"quality"`
 	Meta          json.RawMessage `json:"meta"`
 	ChartBindings json.RawMessage `json:"chart_bindings"`
+}
+
+// refusedFormat (AM21) is a file the renderer did not write: its content fits no layout of the
+// catalogue, and the check says which section.
+type refusedFormat struct {
+	Format string `json:"format"`
+	Name   string `json:"name"`
+	Check  struct {
+		Label  string `json:"label"`
+		Detail string `json:"detail"`
+	} `json:"check"`
+}
+
+// refusedLines are the gate's lines for the files the renderer refused: the run fails naming the section.
+func refusedLines(l am.Lang, refused []refusedFormat) []string {
+	var out []string
+	for _, r := range refused {
+		out = append(out, checkLine(l, r.Format, r.Check.Label, r.Check.Detail))
+	}
+	return out
 }
 
 type renderOut struct {
@@ -474,6 +510,9 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 				Artifacts []json.RawMessage `json:"artifacts"`
 				Theme     json.RawMessage   `json:"theme"`
 				Asked     renderAsked       `json:"asked"`
+				// AM21: a format whose content fits no layout of the catalogue — refused, no file written,
+				// the check naming the section
+				Refused []refusedFormat `json:"refused"`
 			}
 			if err := json.Unmarshal(mustJSON(res.Result), &r); err != nil {
 				return nil, 0, "", "", err
@@ -574,6 +613,7 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 					Size: meta.Size, SHA256: meta.SHA256, Version: versions[meta.Format], Quality: meta.Quality, Meta: meta.Meta,
 					ChartBindings: meta.ChartBindings})
 			}
+			failed = append(failed, refusedLines(am.LangOf(ctx), r.Refused)...)
 			if wantPDF && len(failed) == 0 {
 				pdfArt, why, err := rc.deliverPDF(ctx, artifactRun, docxPath, names, versions)
 				if err != nil {

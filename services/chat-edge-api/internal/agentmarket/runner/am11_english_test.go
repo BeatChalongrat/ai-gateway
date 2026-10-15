@@ -283,8 +283,10 @@ func TestThePdfGateOfAnEnglishReport(t *testing.T) {
 		para("Revenue rose in the office segment.")+para("บริษัท ตัวอย่าง จำกัด")+para("Net profit is final."))
 	good := CheckResult{Pages: 1, RenderedPages: 1, PageInk: []float64{0.03},
 		RawText: "Income statement for September 2026\n12,480,300.00\nRevenue rose in the ofﬁce\nsegment.\nบริษัท ตัวอย่าง จํากัด\nNet proﬁt is ﬁnal.\n"}
+	// AM21: paper at the margins, the font embedded, the organisation as author
+	good.MarginInk, good.Fonts, good.Meta = []float64{0}, []PDFFont{{Name: "AAAAAA+Sarabun", Embedded: true}}, map[string]string{"author": "Example Co., Ltd."}
 	checks := pdfGate(am.English, docx, good)
-	if len(checks) != 2 || checks[1].Name != "pdf.text" || !checks[0].OK || !checks[1].OK {
+	if len(checks) != 5 || checks[1].Name != "pdf.text" || !checks[0].OK || !checks[1].OK || !checks[2].OK || !checks[3].OK || !checks[4].OK {
 		t.Fatalf("an English report whose PDF holds its text: %+v", checks)
 	}
 	if got := checks[1].Label.In(am.English) + " · " + checks[1].Detail.In(am.English); got != "The text in the PDF is the same as in the report · Paragraphs that are the same: 4 of 4" {
@@ -310,7 +312,7 @@ func TestThePdfGateOfAnEnglishReport(t *testing.T) {
 	}
 	// the Thai rule is as it was: the same English report, as a Thai run's, has one Thai paragraph to find …
 	th := pdfGate(am.Thai, docx, good)
-	if len(th) != 2 || th[1].Name != "pdf.thai" || !th[1].OK || th[1].Detail.String() != "ตรง 1 จาก 1 ย่อหน้า" || th[1].Label.String() != "ภาษาไทยใน PDF ตรงกับรายงาน" {
+	if len(th) != 5 || th[1].Name != "pdf.thai" || !th[1].OK || th[1].Detail.String() != "ตรง 1 จาก 1 ย่อหน้า" || th[1].Label.String() != "ภาษาไทยใน PDF ตรงกับรายงาน" {
 		t.Fatalf("the Thai rule changed: %+v", th)
 	}
 	// … and a report with no Thai in it does not pass a Thai run's gate

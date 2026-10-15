@@ -55,6 +55,60 @@ def _shade(cell, hex6: str) -> None:
     tcPr.append(shd)
 
 
+def _borders(table, color: str, inside_h=True, outer=False) -> None:
+    """(kept for the review stamp, signoff.py, which is laid over a finished file)"""
+    tblPr = table._element.tblPr
+    b = OxmlElement("w:tblBorders")
+    for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        el = OxmlElement(f"w:{side}")
+        on = (side == "insideH" and inside_h) or (outer and side in ("top", "bottom"))
+        el.set(qn("w:val"), "single" if on else "nil")
+        if on:
+            el.set(qn("w:sz"), "4")
+            el.set(qn("w:color"), color)
+        b.append(el)
+    tblPr.append(b)
+
+
+def _cell_margins(table, top=60, bottom=60, left=90, right=90) -> None:
+    """(kept for the review stamp, signoff.py)"""
+    tblPr = table._element.tblPr
+    mar = OxmlElement("w:tblCellMar")
+    for side, v in (("top", top), ("bottom", bottom), ("left", left), ("right", right)):
+        el = OxmlElement(f"w:{side}")
+        el.set(qn("w:w"), str(v))
+        el.set(qn("w:type"), "dxa")
+        mar.append(el)
+    tblPr.append(mar)
+
+
+def _cell_text(p, text: str, font: str, size: float, width_emu: int, bold=False, color=None, pad_pt=CELL_PAD_PT):
+    """(kept for the review stamp, signoff.py: a stamp laid over a finished file sets its own look) Text in a
+    cell that Word never has to wrap: Thai broken between words here, at the size given."""
+    from docx.shared import Pt, RGBColor
+
+    from .theme import rgb
+
+    def run(t):
+        r = p.add_run(t)
+        r.font.size = Pt(size)
+        r.font.bold = bold
+        if color:
+            r.font.color.rgb = RGBColor(*rgb(color))
+        return r
+
+    if not measure.is_thai(text):
+        return run(text)
+    avail = width_emu / EMU_PER_PT - pad_pt
+    lines = measure.break_lines(text, size, avail, bold)
+    r = None
+    for i, line in enumerate(lines):
+        if i:
+            r.add_break()
+        r = run(line)
+    return r
+
+
 def _field(p, instr: str) -> None:
     """A Word field (PAGE, NUMPAGES) as runs with no formatting of their own: the paragraph's style is theirs."""
     for kind, text in (("begin", None), (None, instr), ("end", None)):
@@ -262,9 +316,10 @@ class ReportWriter:
             return
         self._choose(section, {"rows": rows, "columns": len(cols)}, kinds=("table",), block="table")
         small = bool(block.get("small"))
-        t = doc.add_table(rows=1 + len(rows), cols=len(cols))
+        no_header = bool(block.get("no_header"))   # a label-and-value table has no header row (the columns still size it)
+        t = doc.add_table(rows=(0 if no_header else 1) + len(rows), cols=len(cols))
         t.alignment = WD_TABLE_ALIGNMENT.CENTER
-        t.style = doc.styles["AM Table"]
+        t.style = doc.styles["AM Plain" if no_header else "AM Table"]
         num_from, cite_col = block.get("numeric_from"), block.get("cite_col")
         role = "small" if small else "body"
         widths = self._widths(t, block, role)
@@ -274,17 +329,18 @@ class ReportWriter:
             small = True
             widths = self._widths(t, block, role)
             self.layouts[-1]["role"] = role
-        hdr = t.rows[0]
-        _repeat_header(hdr)
-        for j, name in enumerate(cols):
-            cp = hdr.cells[j].paragraphs[0]
-            numeric = num_from is not None and j >= num_from and j != cite_col
-            cp.style = doc.styles[dotx.cell_style("Head Number" if numeric else "Head", small)]
-            self._broken(cp, str(name), role, widths[j] / EMU_PER_PT - CELL_PAD_PT, bold=True)
+        if not no_header:
+            hdr = t.rows[0]
+            _repeat_header(hdr)
+            for j, name in enumerate(cols):
+                cp = hdr.cells[j].paragraphs[0]
+                numeric = num_from is not None and j >= num_from and j != cite_col
+                cp.style = doc.styles[dotx.cell_style("Head Number" if numeric else "Head", small)]
+                self._broken(cp, str(name), role, widths[j] / EMU_PER_PT - CELL_PAD_PT, bold=True)
         strong = set(block.get("strong_rows") or [])
         strong_fill = self._color(self.t["table"]["strong"])
         for i, row in enumerate(rows):
-            tr = t.rows[i + 1]
+            tr = t.rows[i + (0 if no_header else 1)]
             _no_split(tr)
             for j, val in enumerate(row):
                 c = tr.cells[j]
@@ -332,14 +388,16 @@ class ReportWriter:
         small = LOOK.pt(FMT, "small")
 
         def texts(j):
-            return [(str(cols[j]), size, True)] + [("" if r[j] is None else str(r[j]), small if j == cite_col else size, False) for r in block["rows"]]
+            head = [] if block.get("no_header") else [(str(cols[j]), size, True)]
+            return head + [("" if r[j] is None else str(r[j]), small if j == cite_col else size, False) for r in block["rows"]]
 
         def need(j) -> int:
             pt = max(measure.widest_word_pt(w, s, b) for w, s, b in texts(j)) + CELL_PAD_PT
             return int(pt * EMU_PER_PT) + 100   # (a hundred EMU over: never a point short by rounding)
 
         def one_line(j) -> int:
-            pt = max([measure.width_pt(w, s, b) for w, s, b in texts(j)[1:]] or [0.0]) + CELL_PAD_PT
+            body_texts = texts(j) if block.get("no_header") else texts(j)[1:]
+            pt = max([measure.width_pt(w, s, b) for w, s, b in body_texts] or [0.0]) + CELL_PAD_PT
             return max(need(j), int(pt * EMU_PER_PT))
 
         widths: list = [None] * len(cols)
@@ -377,6 +435,11 @@ class ReportWriter:
             for j, cell in enumerate(row.cells):
                 cell.width = Emu(widths[j])
         return widths
+
+    def picture(self, path: str, width_emu: int | None = None):
+        """A picture across the text width (or narrower), on its own line."""
+        pp = self._para("AM Picture")
+        pp.add_run().add_picture(path, width=Emu(min(width_emu or self.text_width, self.text_width)))
 
     def chart(self, chart_id: str, section: str):
         spec = next((c for c in self.m["charts"] if c["id"] == chart_id), None)

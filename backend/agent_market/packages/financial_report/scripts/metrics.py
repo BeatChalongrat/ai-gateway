@@ -689,10 +689,14 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
                r.description[:120], str(r.debit), str(r.credit), r.doc_no, r.cost_center]
               for r in cur_rows]
 
+    from ....deliverables.look.catalogue import writing_limits
+
     computed = {
         "format": FORMAT,
         "script": SCRIPT_VERSION,
         "rules": RULES_VERSION,
+        # AM21 §6.1: the catalogue's limits, told to the model before it writes (the runner puts them in its prompt)
+        "writing_limits": writing_limits(),
         "period": period,
         "period_label": _words.period(period),
         "prior_period": prep["prior_period"],

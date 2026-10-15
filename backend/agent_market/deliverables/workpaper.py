@@ -477,5 +477,8 @@ def one_across(path: str, lang: str | None = None) -> dict:
 
 
 def checks(path: str, lang: str | None = None) -> list[dict]:
-    """The print gate's checks on a finished file: the page setup (``check``) and AM10's one page across."""
-    return [check(path, lang), one_across(path, lang)]
+    """The print gate's checks on a finished file: the page setup (``check``), AM10's one page across, and
+    AM21's look (sheet names, opens at A1, formats by meaning, no ####, no marker or product name)."""
+    from .look import xlsx_styles
+
+    return [check(path, lang), one_across(path, lang)] + xlsx_styles.check(path, lang)

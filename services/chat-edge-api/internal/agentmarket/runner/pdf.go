@@ -34,6 +34,7 @@ import (
 const (
 	minPageInk        = 0.0002 // a blank page is exactly 0
 	maxPageInk        = 0.95   // an all-dark page is a failed render
+	maxMarginInk      = 0.001  // AM21: the outer 0.3 in of a page is paper; ink there is text past its frame
 	maxCheckedPages   = 50     // the converter renders at most this many (CHECK_MAX_PAGES)
 	maxThaiParagraphs = 400
 )
@@ -142,8 +143,9 @@ func pdfGate(l am.Lang, docx []byte, chk CheckResult) []gateCheck {
 	if len(bad) > 0 {
 		pages.Detail = am.Text("%s · หน้าว่างหรือผิดปกติ: %s", am.Words(pages.Detail), am.Name(strings.Join(bad, ", ")))
 	}
+	look := pdfLookChecks(chk)
 	if l == am.English {
-		return []gateCheck{pages, pdfTextCheck(docx, chk)}
+		return append([]gateCheck{pages, pdfTextCheck(docx, chk)}, look...)
 	}
 	paras := docxThaiParagraphs(docx)
 	text := thaiKey(chk.RawText)
@@ -161,7 +163,53 @@ func pdfGate(l am.Lang, docx []byte, chk CheckResult) []gateCheck {
 	if len(paras) == 0 {
 		thai.Detail = am.Text("ไม่พบข้อความภาษาไทยในรายงาน")
 	}
-	return []gateCheck{pages, thai}
+	return append([]gateCheck{pages, thai}, look...)
+}
+
+// pdfLookChecks (AM21 §3.4): nothing clipped at a margin — the outer 0.3 in of every page is paper;
+// every font embedded, so the file reads the same on a machine without Sarabun; the metadata carries
+// the organisation's name, never a build marker or our own. A converter that did not measure the
+// margins fails the check rather than passing it unmeasured.
+func pdfLookChecks(chk CheckResult) []gateCheck {
+	var inked []string
+	for i, ink := range chk.MarginInk {
+		if ink > maxMarginInk {
+			inked = append(inked, fmt.Sprint(i+1))
+		}
+	}
+	margins := gateCheck{Name: "pdf.margins", Label: am.Text("ไม่มีข้อความเลยขอบกระดาษ"),
+		OK:     len(chk.MarginInk) > 0 && len(inked) == 0,
+		Detail: am.Text("ขอบกระดาษทุกหน้า (%s หน้า) ว่าง", am.Count(len(chk.MarginInk)))}
+	if len(chk.MarginInk) == 0 {
+		margins.Detail = am.Text("ตัวแปลงเอกสารไม่ได้วัดขอบกระดาษ")
+	} else if len(inked) > 0 {
+		margins.Detail = am.Text("มีหมึกในขอบกระดาษของหน้า %s", am.Name(strings.Join(inked, ", ")))
+	}
+	var loose []string
+	for _, f := range chk.Fonts {
+		if !f.Embedded {
+			loose = append(loose, f.Name)
+		}
+	}
+	fonts := gateCheck{Name: "pdf.fonts", Label: am.Text("ฝังฟอนต์ทุกแบบในไฟล์"),
+		OK:     len(chk.Fonts) > 0 && len(loose) == 0,
+		Detail: am.Text("ฟอนต์ %s แบบ ฝังครบ", am.Count(len(chk.Fonts)))}
+	if len(chk.Fonts) == 0 {
+		fonts.Detail = am.Text("ไม่พบฟอนต์ในไฟล์")
+	} else if len(loose) > 0 {
+		fonts.Detail = am.Text("ไม่ได้ฝัง: %s", am.Name(strings.Join(loose, ", ")))
+	}
+	author := strings.TrimSpace(chk.Meta["author"])
+	mark := am.MarkerIn(author + " " + chk.Meta["title"] + " " + chk.Meta["subject"])
+	meta := gateCheck{Name: "pdf.meta", Label: am.Text("ข้อมูลกำกับไฟล์เป็นชื่อองค์กร ไม่มีรหัสงานหรือชื่อผู้ผลิตระบบ"),
+		OK:     author != "" && mark == "",
+		Detail: am.Text("ผู้จัดทำ: %s", am.Name(author))}
+	if author == "" {
+		meta.Detail = am.Text("ไฟล์ไม่มีชื่อผู้จัดทำ")
+	} else if mark != "" {
+		meta.Detail = am.Text("พบ “%s” ในข้อมูลกำกับไฟล์", am.Name(mark))
+	}
+	return []gateCheck{margins, fonts, meta}
 }
 
 // countsAsText: a paragraph long enough to be looked for in the PDF.

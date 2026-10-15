@@ -27,6 +27,7 @@ import tempfile
 import unittest
 from decimal import Decimal
 
+from agent_market.deliverables.reread import squash
 from agent_market.engine.e4 import money, refind, snapshot
 from agent_market.packages import procurement as P
 from agent_market.packages.procurement.scripts import compare, request, wording
@@ -467,7 +468,9 @@ class TheFilesOfAPersuadedRound(unittest.TestCase):
         self.assertIn(P.words.t("th", "gaps.title"), text)
         for key in ("gap.price.inside_text", "gap.vat.not_stated", "gap.tax_id.not_stated", "gap.supplier_listed.not_on_list",
                     "gap.price_validity.never_on_a_page", "gap.payment_terms.never_on_a_page"):
-            self.assertIn(P.words.t("th", key).rstrip(":").strip(), text, key)
+            # (the renderer breaks a Thai sentence between words with line breaks where a cell is narrow —
+            # a layout decision, AM21 — so the sentence is looked for with its whitespace taken out)
+            self.assertIn(squash(P.words.t("th", key).rstrip(":").strip()), squash(text), key)
         # and the table says the price is not known, with the reason the code recorded
         self.assertIn(P.words.t("th", "notfound.inside_text"), "\n".join(cells))
 

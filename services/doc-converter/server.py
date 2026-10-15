@@ -9,8 +9,13 @@ by openpyxl comes back with every formula recalculated. Python stdlib only.
                                    extension picks the filter) -> the bytes
     POST /check[?first_png=1]      raw PDF body -> {"pages", "text" (-layout),
                                    "raw_text" (content order), "page_png_sizes",
-                                   "page_ink" (dark share per page),
-                                   ["first_png_base64"]}
+                                   "page_ink" (dark share per page), "margin_ink"
+                                   (dark share of the outer 0.3 in of each page),
+                                   "fonts" (pdffonts: name, embedded), "meta"
+                                   (title, author, …), ["first_png_base64"]}
+    POST /pages?from=1&to=6&dpi=96 raw PDF body -> {"pages", "from", "to",
+                                   "png_base64": [...]} (AM21: the pictures a
+                                   person sees of a finished file before sending it)
 
 Every conversion runs in a fresh LibreOffice profile and a fresh work
 directory under /tmp, both deleted afterwards; one heavy job (conversion or
@@ -301,15 +306,133 @@ def check(pdf: bytes, first_png: bool) -> dict:
             raise Failure(422, f"pdftoppm failed ({_short(err)})")
         pgms = sorted((p for p in os.listdir(ink_dir) if p.endswith(".pgm")),
                       key=lambda p: int(re.sub(r"\D", "", p) or 0))
+        # AM21: the fonts the file carries and whether each is embedded (pdffonts), the ink in the page's
+        # outer margins (text that ran past a frame shows up there), and the metadata a reader sees
+        code, fonts_out, _err = _run(["pdffonts", src], env, left())
+        fonts = _fonts(fonts_out) if code == 0 else []
+        code, info_out, _err = _run(["pdfinfo", src], env, left())
+        meta = _meta(info_out) if code == 0 else {}
         result = {"pages": pages, "text": text.decode("utf-8", "replace"),
                   "raw_text": raw_text.decode("utf-8", "replace"),
                   "rendered_pages": len(pngs),
                   "page_png_sizes": [_png_size(os.path.join(png_dir, p)) for p in pngs],
-                  "page_ink": [_ink(os.path.join(ink_dir, p)) for p in pgms]}
+                  "page_ink": [_ink(os.path.join(ink_dir, p)) for p in pgms],
+                  "margin_ink": [_margin_ink(os.path.join(ink_dir, p)) for p in pgms],
+                  "fonts": fonts, "meta": meta}
         if first_png and pngs:
             with open(os.path.join(png_dir, pngs[0]), "rb") as f:
                 result["first_png_base64"] = base64.b64encode(f.read()).decode("ascii")
         return result
+
+
+def _pgm(path: str) -> tuple[int, int, int, bytes]:
+    with open(path, "rb") as f:
+        data = f.read()
+    fields, i = [], 0
+    while len(fields) < 4:
+        while data[i:i + 1].isspace():
+            i += 1
+        if data[i:i + 1] == b"#":
+            i = data.index(b"\n", i) + 1
+            continue
+        j = i
+        while not data[j:j + 1].isspace():
+            j += 1
+        fields.append(data[i:j])
+        i = j
+    if fields[0] != b"P5":
+        raise Failure(422, "unexpected page render")
+    w, h, maxval = int(fields[1]), int(fields[2]), int(fields[3])
+    return w, h, maxval, data[i + 1:i + 1 + w * h]
+
+
+# the strip at each edge of a page that must stay blank (inches): text past a frame shows up here
+MARGIN_IN = 0.3
+MARGIN_DPI = 36
+
+
+def _margin_ink(path: str) -> float:
+    """The share of dark pixels in the page's outer margin strips (0..1): a report whose text ran past the
+    right edge, or a slide past its frame, puts ink where a reader expects paper."""
+    w, h, maxval, px = _pgm(path)
+    if not px or maxval > 255:
+        raise Failure(422, "unexpected page render")
+    m = max(1, int(MARGIN_IN * MARGIN_DPI))
+    dark = total = 0
+    for y in range(h):
+        row = px[y * w:(y + 1) * w]
+        if y < m or y >= h - m:
+            cells = row
+        else:
+            cells = row[:m] + row[w - m:]
+        total += len(cells)
+        dark += sum(1 for b in cells if b < maxval * 9 // 10)
+    return round(dark / total, 5) if total else 0.0
+
+
+def _fonts(out: bytes) -> list:
+    """pdffonts' table as [{name, type, embedded, subset}]."""
+    fonts = []
+    lines = out.decode("utf-8", "replace").splitlines()
+    for line in lines[2:]:
+        parts = line.split()
+        if len(parts) < 6:
+            continue
+        # name type encoding emb sub uni object ID — the name may hold spaces; the last six fields are fixed
+        name = " ".join(parts[:-6]) if len(parts) > 6 else parts[0]
+        kind, emb, sub = parts[-6], parts[-4], parts[-3]
+        fonts.append({"name": name, "type": kind, "embedded": emb == "yes", "subset": sub == "yes"})
+    return fonts
+
+
+def _meta(out: bytes) -> dict:
+    """pdfinfo's Title, Author, Subject, Creator and Producer."""
+    meta = {}
+    for line in out.decode("utf-8", "replace").splitlines():
+        if ":" in line:
+            k, v = line.split(":", 1)
+            if k.strip() in ("Title", "Author", "Subject", "Creator", "Producer", "Keywords"):
+                meta[k.strip().lower()] = v.strip()
+    return meta
+
+
+PAGES_MAX, PAGES_DPI_MAX = 20, 150
+
+
+def pages(pdf: bytes, first: int, last: int, dpi: int) -> dict:
+    """AM21 part 4: the pages of a finished file as pictures, for a person to see before sending it —
+    rendered from the delivered file itself (its PDF), never drawn again from the data."""
+    if not pdf.startswith(b"%PDF-"):
+        raise Failure(415, "body is not a PDF")
+    first, last, dpi = max(1, first), max(1, last), max(24, min(dpi, PAGES_DPI_MAX))
+    if last - first + 1 > PAGES_MAX:
+        last = first + PAGES_MAX - 1
+    with _Job() as job:
+        src = os.path.join(job.dir, "in", "document.pdf")
+        with open(src, "wb") as f:
+            f.write(pdf)
+        env = _job_env(os.path.join(job.dir, "home"))
+        deadline = time.monotonic() + TIMEOUT
+        code, out, err = _run(["pdfinfo", src], env, max(1.0, deadline - time.monotonic()))
+        m = re.search(rb"^Pages:\s+(\d+)", out, re.M)
+        if code != 0 or not m:
+            raise Failure(422, f"not a readable PDF ({_short(err) or 'pdfinfo failed'})")
+        total = int(m.group(1))
+        last = min(last, total)
+        if first > total:
+            return {"pages": total, "from": first, "to": first - 1, "png_base64": []}
+        png_dir = os.path.join(job.dir, "out")
+        code, _o, err = _run(["pdftoppm", "-r", str(dpi), "-png", "-f", str(first), "-l", str(last), src,
+                              os.path.join(png_dir, "page")], env, max(1.0, deadline - time.monotonic()))
+        if code != 0:
+            raise Failure(422, f"pdftoppm failed ({_short(err)})")
+        pngs = sorted((p for p in os.listdir(png_dir) if p.endswith(".png")),
+                      key=lambda p: int(re.sub(r"\D", "", p) or 0))
+        out = []
+        for p in pngs:
+            with open(os.path.join(png_dir, p), "rb") as f:
+                out.append(base64.b64encode(f.read()).decode("ascii"))
+        return {"pages": total, "from": first, "to": last, "dpi": dpi, "png_base64": out}
 
 
 def _short(b: bytes | str, n: int = 160) -> str:
@@ -397,7 +520,7 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         q = parse_qs(url.query)
         size = 0
-        if url.path not in ("/convert", "/check"):
+        if url.path not in ("/convert", "/check", "/pages"):
             self._json(404, {"error": "not found"}, close=True)
             return self._done(404, started)
         if not _pending.acquire(blocking=False):
@@ -414,6 +537,13 @@ class Handler(BaseHTTPRequestHandler):
                     name = self.headers.get("X-Filename") or ""
                     body, ctype = convert(os.path.basename(name.replace("\\", "/")), data, to)
                     self._send(200, body, ctype)
+                elif url.path == "/pages":
+                    def num(key, default):
+                        try:
+                            return int((q.get(key) or [default])[0])
+                        except ValueError:
+                            raise Failure(400, f"{key} must be a number")
+                    self._json(200, pages(data, num("from", 1), num("to", 6), num("dpi", 96)))
                 else:
                     first = (q.get("first_png") or ["0"])[0] in ("1", "true", "yes")
                     self._json(200, check(data, first))

@@ -196,7 +196,7 @@ func TestEngineZipIsDeterministicAndChecksummed(t *testing.T) {
 		t.Fatal(err)
 	}
 	pkg := e.Packages["sran.financial-report"]
-	if pkg == nil || pkg.Version != "1.10.0" || len(pkg.Checksum) != 64 || pkg.Instructions == "" || len(pkg.SelfTest) == 0 {
+	if pkg == nil || pkg.Version != "1.11.0" || len(pkg.Checksum) != 64 || pkg.Instructions == "" || len(pkg.SelfTest) == 0 {
 		t.Fatalf("package not loaded: %+v", pkg)
 	}
 	if _, err := e.PackageFile(pkg, "sample-data/GL_2569-09.xlsx"); err != nil {
