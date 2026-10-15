@@ -29,17 +29,17 @@ import (
 // LookPreset is one built-in theme as the admin app shows it: its colours, to pick by eye. (The themes
 // themselves are the renderer's: backend/agent_market/deliverables/look/look.json.)
 type LookPreset struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Primary string `json:"primary"`
-	Accent  string `json:"accent"`
-	Surface string `json:"surface"`
+	ID      string     `json:"id"`
+	Name    PersonText `json:"name"` // said in the language of the request that reads it (AM11)
+	Primary string     `json:"primary"`
+	Accent  string     `json:"accent"`
+	Surface string     `json:"surface"`
 }
 
 var lookPresets = []LookPreset{
-	{ID: "navy", Name: "กรมท่า", Primary: "12264A", Accent: "2F6FD6", Surface: "F3F5F9"},
-	{ID: "teal", Name: "เขียวหยก", Primary: "0F4C4C", Accent: "1C8C84", Surface: "F2F7F6"},
-	{ID: "charcoal", Name: "ถ่านหิน", Primary: "24272E", Accent: "D9642B", Surface: "F4F4F5"},
+	{ID: "navy", Name: Text("กรมท่า"), Primary: "12264A", Accent: "2F6FD6", Surface: "F3F5F9"},
+	{ID: "teal", Name: Text("เขียวหยก"), Primary: "0F4C4C", Accent: "1C8C84", Surface: "F2F7F6"},
+	{ID: "charcoal", Name: Text("ถ่านหิน"), Primary: "24272E", Accent: "D9642B", Surface: "F4F4F5"},
 }
 
 // lookContrastMin is the least contrast a brand colour must have against what it sits on (WCAG AA).
