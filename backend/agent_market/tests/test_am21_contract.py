@@ -189,5 +189,38 @@ class NoMarkerOnADocument(unittest.TestCase):
         self.assertTrue(markers.check(path)["ok"])
 
 
+class TheLookIsReadFromTheEngineZip(unittest.TestCase):
+    """In the sandbox the engine runs from a zip on sys.path (the runner's am_engine.zip): a data file the
+    renderer opens by path is not there. On 15 Oct 2026 every run's render failed with NotADirectoryError
+    on look.json while every unit test passed from the checkout. The look is read through the package's
+    loader, and this test proves it from a zip built the way the runner builds one."""
+
+    def test_the_look_and_the_catalogue_load_from_a_zip(self):
+        import subprocess
+        import sys
+        import zipfile
+
+        from agent_market import __file__ as pkg_file
+
+        root = os.path.dirname(os.path.abspath(pkg_file))
+        path = os.path.join(tempfile.mkdtemp(), "am_engine.zip")
+        skip = {"__pycache__", "tests", "fixtures", "nasty", "tools", ".pytest_cache"}
+        with zipfile.ZipFile(path, "w") as z:
+            for folder, dirs, files in os.walk(root):
+                dirs[:] = [d for d in dirs if d not in skip]
+                for name in files:
+                    if name.endswith(".pyc") or name.startswith("."):
+                        continue
+                    full = os.path.join(folder, name)
+                    z.write(full, "agent_market/" + os.path.relpath(full, root).replace(os.sep, "/"))
+        code = ("from agent_market.deliverables.look.tokens import LOOK; from agent_market.deliverables.look import catalogue; "
+                "from agent_market.deliverables import theme; "
+                "print(LOOK.theme('teal')['palette']['primary'], len(catalogue.listing('pptx')), theme.resolve({'id': 'navy'})['id'])")
+        env = dict(os.environ, PYTHONPATH=path, PYTHONDONTWRITEBYTECODE="1")
+        out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, cwd=tempfile.gettempdir())
+        self.assertEqual(out.returncode, 0, out.stderr[-800:])
+        self.assertEqual(out.stdout.split(), ["0F4C4C", "9", "navy"])
+
+
 if __name__ == "__main__":
     unittest.main()

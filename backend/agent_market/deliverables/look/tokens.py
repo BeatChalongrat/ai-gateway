@@ -25,8 +25,11 @@ class LookError(ValueError):
 
 @functools.lru_cache(maxsize=1)
 def _data() -> dict:
-    with open(PATH, encoding="utf-8") as f:
-        return json.load(f)
+    # read through the package's loader, not a path: in the sandbox the engine runs from a zip
+    # (am_engine.zip on sys.path), where there is no file to open — words.json is read the same way
+    from importlib.resources import files
+
+    return json.loads(files(__package__).joinpath("look.json").read_text(encoding="utf-8"))
 
 
 class Look:
