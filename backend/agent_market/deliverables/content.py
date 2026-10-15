@@ -477,7 +477,6 @@ def build(computed: dict, req: dict) -> dict:
     sections = [
         {"key": "summary", "title": S("docs.section.summary"), "blocks": [
             {"type": "paragraph", "runs": cite_runs(narrative["summary"], computed), "narrative": True},
-            {"type": "kpis"},
         ]},
         {"key": "pl", "title": S("docs.section.pl"), "blocks": [pl_table(computed)]},
         {"key": "charts", "title": SECTION_TITLES["charts"], "blocks": chart_blocks},

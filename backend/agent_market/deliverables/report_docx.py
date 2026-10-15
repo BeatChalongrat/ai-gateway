@@ -1,47 +1,49 @@
-"""The report (.docx) — cover, executive summary, tables, charts,
-exceptions, assumptions and the source/citation appendices.
+"""The report (.docx): the content model laid out by the layout catalogue, in the template's styles (AM21).
 
-Reuses docx_generator.py (Thai font wiring, page setup, the paged footer)
-by import; nothing in that shared script is changed for this path.
-Sarabun is embedded in the file so the report looks the same on a machine
-that does not have the font installed.
+The writer applies named styles — "AM Body", "AM Cell Number", "AM Table" — from the Word template that
+look/dotx.py builds out of look.json, and never direct formatting: no run of the file carries a size, a
+colour or a font of its own (the gate reads that back, ``docx.styles``). Every text whose frame is fixed
+(the cover band, the headline tiles, a table column) is measured in the real typeface before it is
+placed (look/measure.py), and broken between words where a reader's Word would break a Thai word
+anywhere. A section is laid out by the layout the catalogue chose for it (look/catalogue.py); content
+too long for every layout is refused naming the section, and no file is written.
+
+The headline figures are printed once, on the cover. A figure in a sentence is followed by nothing: the
+references of a paragraph or a list are listed under it ("References: c61, c101"), and a table keeps its
+reference column. Sarabun is embedded so the report looks the same on a machine without the font.
 """
 
 from __future__ import annotations
 
 import os
-import re
 import uuid
 import zipfile
 
-from docx import Document
 from docx.enum.section import WD_SECTION
-from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
+from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
+from docx.enum.text import WD_BREAK
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Cm, Pt, RGBColor
-
-import docx_generator as dg  # /sandbox/scripts — shared, imported, not modified
+from docx.shared import Cm, Emu
 
 from ..engine.words import SHARED as S
-from . import thai_break
-from .fit import SAFETY, text_width_pt
-from .theme import FONT_FILES, rgb
+from .look import catalogue, dotx, measure
+from .look.tokens import LOOK
 
-BODY_PT = 10.5
-SMALL_PT = 8.5
-APPENDIX_PT = 7.5          # AM9: the appendix's entries, two columns to a page
-APPENDIX_HEADING_PT = 13
-APPENDIX_GAP_CM = 0.7
-# A table cell's left + right margins (_cell_margins: 90 twips each), in points.
-CELL_PAD_PT = 9.0
-MIN_CELL_PT = 6.5
+FMT = "docx"
 EMU_PER_PT = 12700
+# a table cell's left + right margins ("AM Table": 90 twips each), in points; the tiles' (120 each)
+CELL_PAD_PT = 9.0
+TILE_PAD_PT = 12.0
+BAND_PAD_PT = 9.0
 
 
-def _rgb(hex6: str) -> RGBColor:
-    return RGBColor(*rgb(hex6))
+def _no_split(row) -> None:
+    row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
+
+
+def _repeat_header(row) -> None:
+    row._tr.get_or_add_trPr().append(OxmlElement("w:tblHeader"))
 
 
 def _shade(cell, hex6: str) -> None:
@@ -53,123 +55,34 @@ def _shade(cell, hex6: str) -> None:
     tcPr.append(shd)
 
 
-def _cell_margins(table, top=60, bottom=60, left=90, right=90) -> None:
-    tblPr = table._element.tblPr
-    mar = OxmlElement("w:tblCellMar")
-    for side, v in (("top", top), ("bottom", bottom), ("left", left), ("right", right)):
-        el = OxmlElement(f"w:{side}")
-        el.set(qn("w:w"), str(v))
-        el.set(qn("w:type"), "dxa")
-        mar.append(el)
-    tblPr.append(mar)
-
-
-def _borders(table, color: str, inside_h=True, outer=False) -> None:
-    tblPr = table._element.tblPr
-    b = OxmlElement("w:tblBorders")
-    for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
-        el = OxmlElement(f"w:{side}")
-        on = (side == "insideH" and inside_h) or (outer and side in ("top", "bottom"))
-        el.set(qn("w:val"), "single" if on else "nil")
-        if on:
-            el.set(qn("w:sz"), "4")
-            el.set(qn("w:color"), color)
-        b.append(el)
-    tblPr.append(b)
-
-
-def _no_split(row) -> None:
-    trPr = row._tr.get_or_add_trPr()
-    el = OxmlElement("w:cantSplit")
-    trPr.append(el)
-
-
-def _repeat_header(row) -> None:
-    trPr = row._tr.get_or_add_trPr()
-    el = OxmlElement("w:tblHeader")
-    trPr.append(el)
-
-
-def _run(p, text, font, size=None, bold=False, color=None, superscript=False, italic=False):
-    r = p.add_run(text)
-    dg._set_run_cs_font(r, font)
-    if size:
-        r.font.size = Pt(size)
-        rPr = r._element.get_or_add_rPr()
-        szcs = OxmlElement("w:szCs")
-        szcs.set(qn("w:val"), str(int(size * 2)))
-        rPr.append(szcs)
-    if bold:
-        r.bold = True
-        rPr = r._element.get_or_add_rPr()
-        rPr.append(OxmlElement("w:bCs"))
-    r.italic = italic
-    if color:
-        r.font.color.rgb = _rgb(color)
-    if superscript:
-        r.font.superscript = True
-    return r
-
-
-# ── Thai in table cells (AM-1b → AM-2) ────────────────────────────────────
-# Word without its Thai proofing tools treats every boundary between two Thai
-# characters as a place to break a line, so any Thai text Word has to wrap
-# in a table cell can break mid-word ("อ้างอิ|ง", "บริ|หาร"). The report
-# therefore never lets Word wrap Thai: each column is at least as wide as its
-# widest word, and a cell whose Thai text is wider than its column is broken
-# here — between words, found by libthai's dictionary (deliverables/
-# thai_break.py), or at spaces — into lines ending in an explicit line
-# break. A single word wider than its column gets a smaller size (down to
-# MIN_CELL_PT).
-
-
-def _is_thai(text: str) -> bool:
-    return any(0x0E00 <= ord(ch) <= 0x0E7F for ch in text)
-
-
-def _widest_word_pt(text: str, font: str, size: float, bold: bool) -> float:
-    return max((text_width_pt(w, font, size, bold) for w, _ in thai_break.words(text)), default=0.0) * SAFETY
-
-
-def _thai_lines(text: str, font: str, size: float, bold: bool, avail_pt: float) -> list[str]:
-    """Lines broken between words only, each no wider than avail_pt (a longer word stays whole)."""
-    lines, cur = [], ""
-    for word, spaced in thai_break.words(text):
-        cand = (cur + (" " if spaced else "") + word) if cur else word
-        if cur and text_width_pt(cand, font, size, bold) * SAFETY > avail_pt:
-            lines.append(cur)
-            cur = word
+def _field(p, instr: str) -> None:
+    """A Word field (PAGE, NUMPAGES) as runs with no formatting of their own: the paragraph's style is theirs."""
+    for kind, text in (("begin", None), (None, instr), ("end", None)):
+        r = p.add_run()
+        if kind:
+            fc = OxmlElement("w:fldChar")
+            fc.set(qn("w:fldCharType"), kind)
+            r._element.append(fc)
         else:
-            cur = cand
-    return lines + ([cur] if cur else [])
+            it = OxmlElement("w:instrText")
+            it.set(qn("xml:space"), "preserve")
+            it.text = f" {text} "
+            r._element.append(it)
 
 
-def _cell_text(p, text: str, font: str, size: float, width_emu: int, bold=False, color=None, pad_pt=CELL_PAD_PT):
-    """Text in a table cell that Word never has to wrap (see above)."""
-    if not _is_thai(text):
-        return _run(p, text, font, size, bold=bold, color=color)
-    avail = width_emu / EMU_PER_PT - pad_pt
-    while size > MIN_CELL_PT and _widest_word_pt(text, font, size, bold) > avail:
-        size = round(size - 0.5, 1)
-    lines = _thai_lines(text, font, size, bold, avail)
-    r = None
-    for i, line in enumerate(lines):
-        if i:
-            r.add_break()
-        r = _run(p, line, font, size, bold=bold, color=color)
-    r._am_last_line_pt = text_width_pt(lines[-1], font, size, bold) * SAFETY if lines else 0.0
-    return r
-
-
-def _para(doc_or_cell, space_before=0, space_after=4, align=None, line=1.15):
-    p = doc_or_cell.add_paragraph()
-    pf = p.paragraph_format
-    pf.space_before = Pt(space_before)
-    pf.space_after = Pt(space_after)
-    pf.line_spacing = line
-    if align is not None:
-        p.alignment = align
-    return p
+def _page_line(p, text: str) -> None:
+    """'หน้า {page} / {total}' with live fields where the placeholders are."""
+    pos = 0
+    for token, instr in (("{page}", "PAGE"), ("{total}", "NUMPAGES")):
+        i = text.find(token, pos)
+        if i < 0:
+            continue
+        if text[pos:i]:
+            p.add_run(text[pos:i])
+        _field(p, instr)
+        pos = i + len(token)
+    if text[pos:]:
+        p.add_run(text[pos:])
 
 
 class ReportWriter:
@@ -177,269 +90,264 @@ class ReportWriter:
         self.m = model
         self.t = theme
         self.p = theme["palette"]
-        self.font = theme["fonts"]["thai"]
         self.charts = charts  # chart id → png path
-        self.doc = Document()
-        self.bindings: list[dict] = []
+        self.doc = dotx.document(theme)
+        self.layouts: list[dict] = []   # what the catalogue chose, section by section (recorded)
+
+    # ── helpers ───────────────────────────────────────────────────────
+    def _color(self, token: str) -> str:
+        return LOOK.color(self.p, token)
+
+    @property
+    def text_width(self) -> int:
+        sec = self.doc.sections[0]
+        return int(sec.page_width - sec.left_margin - sec.right_margin)
+
+    def _choose(self, section: str, content: dict, kinds: tuple | None = None, block: str = "") -> catalogue.Choice:
+        ch = catalogue.choose(FMT, content, section, kinds)
+        self.layouts.append({"section": section, "block": block or ch.layout, "layout": ch.layout, "role": ch.role, "reason": ch.reason})
+        return ch
+
+    def _para(self, style: str, text: str = "", where=None):
+        p = (where or self.doc).add_paragraph(style=style)
+        if text:
+            p.add_run(text)
+        return p
+
+    def _broken(self, p, text: str, role: str, avail_pt: float, bold: bool | None = None) -> str:
+        """Text in a frame of ``avail_pt``: Thai is broken between words here (a reader's Word would break it
+        anywhere); Latin is left to wrap. Returns the last line, for a caller that puts something after it."""
+        if not measure.is_thai(text):
+            p.add_run(text)
+            return text
+        size = LOOK.pt(FMT, role)
+        b = LOOK.bold(role) if bold is None else bold
+        lines = measure.break_lines(text, size, avail_pt, b)
+        r = None
+        for i, line in enumerate(lines):
+            if i:
+                r.add_break()
+            r = p.add_run(line)
+        return lines[-1] if lines else ""
 
     # ── page furniture ────────────────────────────────────────────────
     def setup(self):
-        doc = self.doc
-        dg.setup_thai_font(doc, self.font, 11)
-        # The document's complex-script language is Thai (python-docx's
-        # template says ar-SA): Word then breaks Thai lines between words
-        # instead of anywhere ("ค่าจ้า|ง") in narrow table cells.
-        defaults = doc.styles.element.find(qn("w:docDefaults"))
-        lang = defaults.find(f"{qn('w:rPrDefault')}/{qn('w:rPr')}/{qn('w:lang')}") if defaults is not None else None
-        if lang is not None:
-            lang.set(qn("w:bidi"), "th-TH")
-        st = doc.styles["Normal"]
-        st.font.size = Pt(BODY_PT)
-        st.font.color.rgb = _rgb(self.p["ink"])
-        rpr = st.element.get_or_add_rPr()
-        szcs = OxmlElement("w:szCs")
-        szcs.set(qn("w:val"), str(int(BODY_PT * 2)))
-        rpr.append(szcs)
-        st.paragraph_format.space_after = Pt(4)
-        st.paragraph_format.line_spacing = 1.2
-        for lvl, size in ((1, 17), (2, 12.5)):
-            hs = doc.styles[f"Heading {lvl}"]
-            hs.font.size = Pt(size)
-            hs.font.bold = True
-            hs.font.color.rgb = _rgb(self.p["primary"])
-            hs.paragraph_format.space_before = Pt(16 if lvl == 1 else 10)
-            hs.paragraph_format.space_after = Pt(6 if lvl == 1 else 3)
-            hs.paragraph_format.keep_with_next = True
-            hr = hs.element.get_or_add_rPr()
-            for tag in ("w:szCs",):
-                el = OxmlElement(tag)
-                el.set(qn("w:val"), str(int(size * 2)))
-                hr.append(el)
-        # AM8: no style of the file names a font outside the theme (python-docx's template carries a
-        # "Macro Text" style in Courier New): the gate reads every part of the package, styles included.
-        for rf in doc.styles.element.iter(qn("w:rFonts")):
-            for attr in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
-                if rf.get(qn(attr)) not in (None, self.font):
-                    rf.set(qn(attr), self.font)
-        for part in doc.part.package.iter_parts():
-            if str(part.partname).endswith("stylesWithEffects.xml") and hasattr(part, "_blob"):
-                xml = part._blob.decode("utf-8")
-                part._blob = re.sub(r'(w:(?:ascii|hAnsi|cs|eastAsia)=")(?!' + re.escape(self.font) + r'")[^"]*"',
-                                    r"\g<1>" + self.font.replace("\\", "") + '"', xml).encode("utf-8")
-        dg.setup_page(doc, {"page_size": "A4", "margins": {"top": 0.85, "bottom": 0.8, "left": 0.9, "right": 0.9}})
+        doc, m = self.doc, self.m
         sec = doc.sections[0]
-        sec.different_first_page_header_footer = True
-        sec.header_distance = Cm(0.9)
-        sec.footer_distance = Cm(0.8)
-        # Running header: company · report title (not on the cover).
         hp = sec.header.paragraphs[0]
-        hp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        _run(hp, (self.m["company"] + " · " if self.m["company"] else "") + self.m["title"] + " " + self.m["subtitle"],
-             self.font, 8, color=self.p["muted"])
-        # Footer: source note left, page x / y right — a borderless two-cell table,
-        # which every Word/LibreOffice version lays out the same way.
-        text_w = sec.page_width - sec.left_margin - sec.right_margin
-        ft = sec.footer.add_table(rows=1, cols=2, width=text_w)
-        _borders(ft, self.p["rule"], inside_h=False)
+        hp.style = doc.styles["AM Header"]
+        hp.add_run((m["company"] + " · " if m["company"] else "") + m["title"] + " " + m["subtitle"])
+        # Footer: source note left, page x / y right — a borderless two-cell table, which every Word and
+        # LibreOffice version lays out the same way.
+        ft = sec.footer.add_table(rows=1, cols=2, width=self.text_width)
+        ft.style = doc.styles["AM Plain"]
         left, right = ft.rows[0].cells
-        left.width, right.width = int(text_w * 0.8), int(text_w * 0.2)
+        left.width, right.width = int(self.text_width * 0.8), int(self.text_width * 0.2)
         lp = left.paragraphs[0]
-        _run(lp, self.m["source_note"], self.font, 7.5, color=self.p["muted"])
+        lp.style = doc.styles["AM Footer"]
+        lp.add_run(m["source_note"])
         rp = right.paragraphs[0]
-        rp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        dg._build_paged_footer(rp, S("docs.page", page="{page}", total="{total}"), self.font)   # (the builder puts field codes there)
-        for run in rp.runs:
-            run.font.size = Pt(8)
-            run.font.color.rgb = _rgb(self.p["muted"])
-        empty = sec.footer.paragraphs[0]
-        empty.paragraph_format.space_after = Pt(0)
+        rp.style = doc.styles["AM Footer Right"]
+        _page_line(rp, S("docs.page", page="{page}", total="{total}"))
+        sec.footer.paragraphs[0].style = doc.styles["AM Footer"]
 
-    # ── cover ─────────────────────────────────────────────────────────
+    # ── the cover (layout: cover) ─────────────────────────────────────
     def cover(self, logo_path: str | None):
-        doc, p = self.doc, self.p
-        band = doc.add_table(rows=1, cols=1)
-        band.alignment = WD_TABLE_ALIGNMENT.CENTER
-        _borders(band, p["primary"], inside_h=False)
-        cell = band.rows[0].cells[0]
-        _shade(cell, p["primary"])
-        cell.width = doc.sections[0].page_width - doc.sections[0].left_margin - doc.sections[0].right_margin
-        cp = cell.paragraphs[0]
-        cp.paragraph_format.space_before = Pt(26)
+        doc, m = self.doc, self.m
+        self._choose(S("docs.cover.name"), {"title": m["title"], "subtitle": m["subtitle"], "figures": [k["value"] for k in m["kpis"]],
+                                            "lines": m["cover_lines"] + [m["prepared"]]}, kinds=("cover",))
+        width_pt = self.text_width / EMU_PER_PT
+        if self.t.get("cover") == "band":
+            band = doc.add_table(rows=1, cols=1)
+            band.alignment = WD_TABLE_ALIGNMENT.CENTER
+            band.style = doc.styles["AM Band"]
+            sec = doc.sections[0]
+            band.rows[0].height = Emu(int((sec.page_height - sec.top_margin - sec.bottom_margin) * 0.42))
+            cell = band.rows[0].cells[0]
+            cell.width = self.text_width
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.BOTTOM
+            where, avail = cell, width_pt - 2 * BAND_PAD_PT
+            first = cell.paragraphs[0]
+        else:
+            where, avail = doc, width_pt
+            first = None
         if logo_path and os.path.exists(logo_path):
-            cp.add_run().add_picture(logo_path, height=Cm(1.4))
-            cp = cell.add_paragraph()
-        _run(cp, (self.m["company"] or "").upper() if self.m["company"].isascii() else self.m["company"],
-             self.font, 11, bold=True, color=p["gold"])
-        tp = cell.add_paragraph()
-        tp.paragraph_format.space_before = Pt(40)
-        tp.paragraph_format.space_after = Pt(2)
-        _run(tp, self.m["title"], self.font, 30, bold=True, color=p["on_primary"])
-        sp = cell.add_paragraph()
-        sp.paragraph_format.space_after = Pt(30)
-        _run(sp, self.m["subtitle"], self.font, 16, color=p["on_primary"])
-        for line in self.m["cover_lines"]:
-            lp = cell.add_paragraph()
-            lp.paragraph_format.space_after = Pt(2)
-            _run(lp, line, self.font, 10.5, color="DCE3EE")
-        endp = cell.add_paragraph()
-        endp.paragraph_format.space_after = Pt(28)
-        _run(endp, self.m["prepared"], self.font, 10.5, color="DCE3EE")
+            lp = first if first is not None else self._para("AM Cover Company", where=where)
+            lp.style = doc.styles["AM Cover Company"]
+            lp.add_run().add_picture(logo_path, height=Cm(1.4))
+            first = None
+        cp = first if first is not None else self._para("AM Cover Company", where=where)
+        cp.style = doc.styles["AM Cover Company"]
+        company = m["company"] or ""
+        self._broken(cp, company.upper() if company.isascii() else company, "body", avail, bold=True)
+        if self.t.get("cover") != "band":
+            self._para("AM Cover Rule", where=where)
+        # the title at the display size, or the next size down when it would take a third line
+        role = measure.fit_role(FMT, m["title"], "display", avail, 2) or "heading"
+        tp = self._para("AM Display" if role == "display" else "AM Cover Subtitle", where=where)
+        self._broken(tp, m["title"], role, avail)
+        sp = self._para("AM Cover Subtitle", where=where)
+        self._broken(sp, m["subtitle"], "heading", avail, bold=False)
+        for line in m["cover_lines"] + [m["prepared"]]:
+            lp = self._para("AM Cover Line", where=where)
+            self._broken(lp, line, "body", avail)
+        if self.t.get("cover") == "band":
+            self._para("AM Body")
+        self.tiles()
+        note = self._para("AM Small Muted")
+        self._broken(note, S("docs.cover.cite_note"), "small", width_pt)
+        self._para("AM Body").add_run().add_break(WD_BREAK.PAGE)
 
-        # Key figures on the cover, straight from the computed table.
-        _para(doc, space_before=18, space_after=6)
-        self.kpi_tiles()
-        note = _para(doc, space_before=14)
-        _run(note, S("docs.cover.cite_note"), self.font, 9, color=p["muted"])
-        doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
-
-    def kpi_tiles(self):
-        doc, p = self.doc, self.p
-        k = self.m["kpis"]
+    def tiles(self):
+        """The headline figures, once: a row of tiles on the cover."""
+        doc, k = self.doc, self.m["kpis"]
         t = doc.add_table(rows=1, cols=len(k))
         t.alignment = WD_TABLE_ALIGNMENT.CENTER
-        _borders(t, p["rule"], inside_h=False)
-        _cell_margins(t, 110, 110, 120, 120)
-        sec = doc.sections[0]
-        tile = int((sec.page_width - sec.left_margin - sec.right_margin) / len(k))
+        t.style = doc.styles["AM Tiles"]
         t.autofit = False
-        pad = 12.0  # 120 twips each side
+        tile = int(self.text_width / len(k))
+        avail = tile / EMU_PER_PT - 2 * TILE_PAD_PT
         for i, kp in enumerate(k):
             c = t.rows[0].cells[i]
             c.width = tile
-            _shade(c, p["surface"])
             lp = c.paragraphs[0]
-            lp.paragraph_format.space_after = Pt(2)
-            _cell_text(lp, kp["label"], self.font, 8.5, tile, color=p["muted"], pad_pt=pad)
-            vp = c.add_paragraph()
-            vp.paragraph_format.space_after = Pt(1)
-            _run(vp, kp["value"], self.font, 15, bold=True, color=p["primary"])
-            dp = c.add_paragraph()
-            dp.paragraph_format.space_after = Pt(0)
-            if kp["delta"]:
-                color = p["muted"] if kp["good"] is None else (p["positive"] if kp["good"] else p["negative"])
-                arrow = {"up": "▲ ", "down": "▼ ", "flat": ""}[kp["tone"]]
-                last = _cell_text(dp, arrow + kp["delta"], self.font, 8, tile, color=color, pad_pt=pad)
-            else:
-                last = _cell_text(dp, S("docs.kpi.no_compare"), self.font, 8, tile, color=p["muted"], pad_pt=pad)
+            lp.style = doc.styles["AM Tile Label"]
+            self._broken(lp, kp["label"], "small", avail)
+            vp = self._para("AM Tile Value", where=c)
+            vrole = measure.fit_role(FMT, kp["value"], "heading", avail, 1) or "small"
+            if vrole != "heading":
+                vp.style = doc.styles["AM Body Strong" if vrole == "body" else "AM Small"]
+            vp.add_run(kp["value"])
+            style = "AM Tile Up" if kp["good"] is True else ("AM Tile Down" if kp["good"] is False else "AM Tile Flat")
+            dp = self._para(style, where=c)
+            arrow = {"up": "▲ ", "down": "▼ ", "flat": ""}[kp["tone"]]
+            text = (arrow + kp["delta"]) if kp["delta"] else S("docs.kpi.no_compare")
+            last = self._broken(dp, text, "small", avail)
             cite = f"  [{kp['cite']}]"
-            used = getattr(last, "_am_last_line_pt", None)
-            if used is not None and used + text_width_pt(cite, self.font, 7) * SAFETY > tile / EMU_PER_PT - pad:
-                last.add_break()      # the cite goes on its own line rather than making Word wrap Thai
+            if measure.width_pt(last + cite, LOOK.pt(FMT, "small")) > avail:
+                dp.runs[-1].add_break()
                 cite = cite.strip()
-            _run(dp, cite, self.font, 7, color=p["muted"])
+            dp.add_run(cite, style=doc.styles["AM Char Cite"])
+        for row in t.rows:
+            for j, cell in enumerate(row.cells):
+                cell.width = tile
 
     # ── blocks ────────────────────────────────────────────────────────
-    def heading(self, text, level=1, size=None):
-        h = self.doc.add_heading(level=level)
-        _run(h, text, self.font, size or (17 if level == 1 else 12.5), bold=True, color=self.p["primary"])
-        if level == 1:
-            pPr = h._element.get_or_add_pPr()
-            bdr = OxmlElement("w:pBdr")
-            b = OxmlElement("w:bottom")
-            b.set(qn("w:val"), "single")
-            b.set(qn("w:sz"), "8")
-            b.set(qn("w:space"), "4")
-            b.set(qn("w:color"), self.p["accent"])
-            bdr.append(b)
-            pPr.append(bdr)
-        return h
+    def heading(self, text: str, level: int = 1):
+        return self._para("Heading 1" if level == 1 else "Heading 2", text)
 
-    def paragraph(self, runs, muted=False):
-        p = _para(self.doc, space_after=6)
-        for text, cite in runs:
-            _run(p, text, self.font, BODY_PT, color=self.p["muted"] if muted else None)
-            if cite:
-                _run(p, cite, self.font, 6.5, color=self.p["muted"], superscript=True)
+    def references(self, cites: list[str], appendix: bool = False):
+        ids = list(dict.fromkeys(c for c in cites if c))
+        if ids:
+            self._para("AM References", S("docs.refs", ids=", ".join(ids)))
 
-    def bullets(self, items, size=BODY_PT):
+    def paragraph(self, runs, muted=False, appendix=False):
+        p = self._para("AM Body Muted" if muted else ("AM Small" if appendix else "AM Body"))
+        p.add_run("".join(t for t, _ in runs))
+        self.references([c for _, c in runs])
+
+    def bullets(self, items, appendix=False):
+        cites: list[str] = []
         for runs in items:
-            p = self.doc.add_paragraph(style="List Bullet")
-            p.paragraph_format.space_after = Pt(3)
-            for text, cite in runs:
-                _run(p, text, self.font, size)
-                if cite:
-                    _run(p, cite, self.font, 6.5, color=self.p["muted"], superscript=True)
+            p = self._para("AM Bullet Small" if appendix else "AM Bullet")
+            p.add_run("".join(t for t, _ in runs))
+            cites += [c for _, c in runs if c]
+        self.references(cites)
 
-    def table(self, block):
-        doc, p = self.doc, self.p
-        cols = block["columns"]
-        rows = block["rows"]
+    def table(self, block, section: str):
+        doc = self.doc
+        cols, rows = block["columns"], block["rows"]
         if not rows:
-            para = _para(doc, space_after=8)
-            _run(para, block.get("empty_text") or S("docs.table.empty"), self.font, BODY_PT, color=p["muted"])
+            self._para("AM Body Muted", block.get("empty_text") or S("docs.table.empty"))
             return
-        size = SMALL_PT if block.get("small") else 9.5
+        self._choose(section, {"rows": rows, "columns": len(cols)}, kinds=("table",), block="table")
+        small = bool(block.get("small"))
         t = doc.add_table(rows=1 + len(rows), cols=len(cols))
         t.alignment = WD_TABLE_ALIGNMENT.CENTER
-        _borders(t, p["rule"], inside_h=True)
-        _cell_margins(t)
-        num_from = block.get("numeric_from")
-        cite_col = block.get("cite_col")
-        widths = self._widths(t, block, size)
+        t.style = doc.styles["AM Table"]
+        num_from, cite_col = block.get("numeric_from"), block.get("cite_col")
+        role = "small" if small else "body"
+        widths = self._widths(t, block, role)
+        if role == "body" and self._wraps(block, widths, role):
+            # the next size down the scale, before any label is broken over lines
+            role = "small"
+            small = True
+            widths = self._widths(t, block, role)
+            self.layouts[-1]["role"] = role
         hdr = t.rows[0]
         _repeat_header(hdr)
         for j, name in enumerate(cols):
-            c = hdr.cells[j]
-            _shade(c, p["primary"])
-            cp = c.paragraphs[0]
-            cp.paragraph_format.space_after = Pt(0)
-            if num_from is not None and j >= num_from and j != cite_col:
-                cp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-            _cell_text(cp, name, self.font, size, widths[j], bold=True, color=p["on_primary"])
+            cp = hdr.cells[j].paragraphs[0]
+            numeric = num_from is not None and j >= num_from and j != cite_col
+            cp.style = doc.styles[dotx.cell_style("Head Number" if numeric else "Head", small)]
+            self._broken(cp, str(name), role, widths[j] / EMU_PER_PT - CELL_PAD_PT, bold=True)
         strong = set(block.get("strong_rows") or [])
+        strong_fill = self._color(self.t["table"]["strong"])
         for i, row in enumerate(rows):
             tr = t.rows[i + 1]
             _no_split(tr)
             for j, val in enumerate(row):
                 c = tr.cells[j]
-                if self.t["table"].get("zebra") and i % 2 == 1:
-                    _shade(c, p["surface"])
                 if i in strong:
-                    _shade(c, p["accent_soft"])
+                    _shade(c, strong_fill)
                 cp = c.paragraphs[0]
-                cp.paragraph_format.space_after = Pt(0)
                 is_cite = j == cite_col
-                if (num_from is not None and j >= num_from and not is_cite):
-                    cp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                numeric = num_from is not None and j >= num_from and not is_cite
                 text = "" if val is None else str(val)
-                color = p["muted"] if is_cite else (p["negative"] if text.startswith("(") and not is_cite else None)
-                _cell_text(cp, text, self.font, 7 if is_cite else size, widths[j], bold=i in strong and not is_cite,
-                           color=color)
+                if is_cite:
+                    kind = "Cite"
+                elif numeric and text.startswith("("):
+                    kind = "Negative"
+                elif i in strong:
+                    kind = "Strong Number" if numeric else "Strong"
+                else:
+                    kind = "Number" if numeric else ""
+                cp.style = doc.styles[dotx.cell_style(kind, small)]
+                self._broken(cp, text, "small" if is_cite else role, widths[j] / EMU_PER_PT - CELL_PAD_PT, bold=i in strong and not is_cite)
         if block.get("caption"):
-            cap = _para(doc, space_before=3, space_after=10)
-            _run(cap, block["caption"], self.font, 8, color=p["muted"])
+            self._para("AM Caption", block["caption"])
         else:
-            _para(doc, space_after=6)
+            self._para("AM Body")
 
-    def _widths(self, t, block, size) -> list[int]:
-        """Numbers and the cite id take what their widest value (or header word) needs; label columns
+    def _wraps(self, block, widths: list[int], role: str) -> bool:
+        """Whether a label column is narrower than its longest text on one line."""
+        cols, num_from, cite_col = block["columns"], block.get("numeric_from"), block.get("cite_col")
+        size = LOOK.pt(FMT, role)
+        for j in range(len(cols)):
+            if j == cite_col or (num_from is not None and j >= num_from):
+                continue
+            longest = max([measure.width_pt("" if r[j] is None else str(r[j]), size) for r in block["rows"]] or [0.0]) + CELL_PAD_PT
+            if longest * EMU_PER_PT > widths[j] + 1:
+                return True
+        return False
+
+    def _widths(self, t, block, role: str) -> list[int]:
+        """Numbers and the reference id take what their widest value (or header word) needs; label columns
         get the rest — each its one-line width when the page has it, else a share in proportion to its
-        longest text — and room left over goes back to the numbers. No column is narrower than its
-        widest word (header included), so Word never breaks a Thai word (AM9: before, every number
-        column took 2.15 cm and "อัตรากำไรขั้นต้น" broke over three lines in a 1.9 cm label column)."""
-        sec = self.doc.sections[0]
-        total = int(sec.page_width - sec.left_margin - sec.right_margin)
-        cols = block["columns"]
-        num_from = block.get("numeric_from")
-        cite_col = block.get("cite_col")
+        longest text — and room left over goes back to the numbers. No column is narrower than its widest
+        word (header included), so Word never breaks a Thai word (AM9)."""
+        total = self.text_width
+        cols, num_from, cite_col = block["columns"], block.get("numeric_from"), block.get("cite_col")
+        size = LOOK.pt(FMT, role)
+        small = LOOK.pt(FMT, "small")
 
         def texts(j):
-            return [(str(cols[j]), size, True)] + [
-                ("" if r[j] is None else str(r[j]), 7 if j == cite_col else size, False) for r in block["rows"]]
+            return [(str(cols[j]), size, True)] + [("" if r[j] is None else str(r[j]), small if j == cite_col else size, False) for r in block["rows"]]
 
         def need(j) -> int:
-            pt = max(_widest_word_pt(w, self.font, s, b) for w, s, b in texts(j)) + CELL_PAD_PT
-            return int(pt * EMU_PER_PT)
+            pt = max(measure.widest_word_pt(w, s, b) for w, s, b in texts(j)) + CELL_PAD_PT
+            return int(pt * EMU_PER_PT) + 100   # (a hundred EMU over: never a point short by rounding)
 
         def one_line(j) -> int:
-            # a label's longest text on one line (the header may wrap between its words)
-            pt = max([text_width_pt(w, self.font, s, b) * SAFETY for w, s, b in texts(j)[1:]] or [0.0]) + CELL_PAD_PT
+            pt = max([measure.width_pt(w, s, b) for w, s, b in texts(j)[1:]] or [0.0]) + CELL_PAD_PT
             return max(need(j), int(pt * EMU_PER_PT))
-        widths = [None] * len(cols)
+
+        widths: list = [None] * len(cols)
         numbers = []
-        for j, name in enumerate(cols):
+        for j in range(len(cols)):
             if j == cite_col:
                 widths[j] = max(int(Cm(1.15)), need(j))
+                numbers.append(j)   # room left over reaches the reference column too: "c116, c118" on one line
             elif num_from is not None and j >= num_from:
                 widths[j] = max(int(Cm(1.25)), need(j))
                 numbers.append(j)
@@ -463,34 +371,28 @@ class ReportWriter:
             for j in receivers:
                 widths[j] += int(spare / len(receivers))
         t.autofit = False
-        # AM9: a fixed-layout table is laid out from its grid (w:gridCol) — Word and LibreOffice both;
-        # the cells' own widths alone left every column at an equal share of the page
         for j, col in enumerate(t.columns):
-            col.width = widths[j]
+            col.width = Emu(widths[j])
         for row in t.rows:
             for j, cell in enumerate(row.cells):
-                cell.width = widths[j]
+                cell.width = Emu(widths[j])
         return widths
 
-    def chart(self, chart_id):
+    def chart(self, chart_id: str, section: str):
         spec = next((c for c in self.m["charts"] if c["id"] == chart_id), None)
         path = self.charts.get(chart_id)
         if not spec or not path:
             return
-        tp = _para(self.doc, space_before=6, space_after=2)
-        tp.paragraph_format.keep_with_next = True
-        _run(tp, spec["title"], self.font, 11, bold=True, color=self.p["ink"])
-        _run(tp, "  " + spec.get("subtitle", ""), self.font, 8.5, color=self.p["muted"])
-        pp = _para(self.doc, space_after=2, align=WD_ALIGN_PARAGRAPH.CENTER)
-        pp.add_run().add_picture(path, width=Cm(16.2))
-        cap = _para(self.doc, space_after=10)
-        _run(cap, S("docs.chart.note"),
-             self.font, 8, color=self.p["muted"])
+        self._choose(section, {"title": spec["title"], "series": spec["series"], "categories": spec["categories"],
+                               "caption": S("docs.chart.note")}, kinds=("chart",), block="chart")
+        tp = self._para("AM Chart Title", spec["title"])
+        if spec.get("subtitle"):
+            tp.add_run("  " + spec["subtitle"], style=self.doc.styles["AM Char Muted"])
+        pp = self._para("AM Picture")
+        pp.add_run().add_picture(path, width=Emu(self.text_width))
+        self._para("AM Caption", S("docs.chart.note"))
 
-    # ── appendix (AM9) ────────────────────────────────────────────────
-    # Every source range stays (AM8 stopped hiding them behind "และอีก 58 ช่วง"); what changes is the
-    # typesetting: the appendix is its own section in two columns, each row an entry at a smaller size —
-    # the body text is unchanged. The sample report went from 21 pages to 14.
+    # ── appendix (AM9): its own section in two columns, each row an entry ──
     def appendix_section(self):
         new = self.doc.add_section(WD_SECTION.NEW_PAGE)
         new.different_first_page_header_footer = False
@@ -499,32 +401,34 @@ class ReportWriter:
             cols = OxmlElement("w:cols")
             new._sectPr.append(cols)
         cols.set(qn("w:num"), "2")
-        cols.set(qn("w:space"), str(int(APPENDIX_GAP_CM / 2.54 * 1440)))
+        cols.set(qn("w:space"), str(int(0.7 / 2.54 * 1440)))
 
-    def entries(self, block):
-        """An appendix table as entries: the first column bold, the next two on its line, every other
+    def entries(self, block, section: str):
+        """An appendix table as entries: the first column strong, the next two on its line, every other
         column on a line of its own under its header's name."""
-        p, cols = self.p, block["columns"]
+        cols = block["columns"]
         if not block["rows"]:
-            para = _para(self.doc, space_after=6)
-            _run(para, block.get("empty_text") or S("docs.table.empty"), self.font, APPENDIX_PT, color=p["muted"])
+            self._para("AM Small Muted", block.get("empty_text") or S("docs.table.empty"))
             return
+        self._choose(section, {"entry": max(("".join(str(v or "") for v in r) for r in block["rows"]), key=len), "title": section},
+                     kinds=("appendix",), block="entries")
+        strong, muted = self.doc.styles["AM Char Strong"], self.doc.styles["AM Char Muted"]
         for row in block["rows"]:
-            para = _para(self.doc, space_after=3, line=1.0)
+            para = self._para("AM Appendix Entry")
             para.paragraph_format.keep_together = True
             vals = ["" if v is None else str(v) for v in row]
-            _run(para, vals[0], self.font, APPENDIX_PT, bold=True, color=p["primary"])
+            para.add_run(vals[0], style=strong)
             head = " · ".join(v for v in vals[1:3] if v)
             if head:
-                _run(para, "  " + head, self.font, APPENDIX_PT)
+                para.add_run("  " + head)
             for name, v in zip(cols[3:], vals[3:]):
                 if v:
-                    _run(para, "", self.font, APPENDIX_PT - 0.5).add_break()
-                    _run(para, f"{name}: ", self.font, APPENDIX_PT - 0.5, color=p["muted"])
-                    _run(para, v, self.font, APPENDIX_PT - 0.5, color=p["muted"])
+                    para.add_run().add_break()
+                    para.add_run(f"{name}: ", style=muted)
+                    para.add_run(v, style=muted)
 
     # ── assemble ──────────────────────────────────────────────────────
-    def write(self, path: str, logo_path: str | None = None) -> dict:
+    def write(self, path: str, logo_path: str | None = None, organisation: str = "") -> dict:
         self.setup()
         self.cover(logo_path)
         appendix_started = False
@@ -532,31 +436,31 @@ class ReportWriter:
             if sec.get("appendix") and not appendix_started:
                 self.appendix_section()
                 appendix_started = True
-            if sec["key"] == "assumptions":
-                self.doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
-            self.heading(sec["title"], size=APPENDIX_HEADING_PT if appendix_started else None)
+            # the sections flow (a heading keeps with what follows it; a chart keeps with its title and
+            # a table's rows never split): a page ends early only where the next block would not fit whole
+            self._choose(sec["title"], {"title": sec["title"]}, kinds=("section",), block="section")
+            self.heading(sec["title"])
             for b in sec["blocks"]:
                 kind = b["type"]
                 if kind == "paragraph":
-                    self.paragraph(b["runs"], b.get("muted", False))
-                elif kind == "kpis":
-                    self.kpi_tiles()
-                    _para(self.doc, space_after=4)
+                    self._choose(sec["title"], {"paragraph": "".join(t for t, _ in b["runs"])}, kinds=("prose",), block="paragraph")
+                    self.paragraph(b["runs"], b.get("muted", False), appendix_started)
                 elif kind == "table":
-                    self.entries(b) if appendix_started else self.table(b)
+                    self.entries(b, sec["title"]) if appendix_started else self.table(b, sec["title"])
                 elif kind == "chart":
-                    self.chart(b["chart"])
+                    self.chart(b["chart"], sec["title"])
                 elif kind == "bullets":
-                    self.bullets(b["items"], size=APPENDIX_PT + 0.5 if appendix_started else BODY_PT)
+                    self._choose(sec["title"], {"items": ["".join(t for t, _ in runs) for runs in b["items"]]}, kinds=("prose",), block="bullets")
+                    self.bullets(b["items"], appendix_started)
                 elif kind == "subheading":
                     self.heading(b["text"], 2)
         props = self.doc.core_properties
         props.title = f"{self.m['title']} {self.m['subtitle']}"
-        props.author = self.m["company"] or "Agent Market"
+        props.author = self.m["company"] or organisation or ""
         props.subject = self.m["source_note"]
         self.doc.save(path)
-        embedded = embed_fonts(path, self.font)
-        return {"path": path, "embedded_fonts": embedded}
+        embedded = embed_fonts(path, LOOK.family)
+        return {"path": path, "embedded_fonts": embedded, "layouts": self.layouts}
 
 
 # ── font embedding (ECMA-376 Part 1 §17.8.1, obfuscated TrueType) ─────────
@@ -570,7 +474,7 @@ def _obfuscate(data: bytes, key_guid: str) -> bytes:
 
 
 def embed_fonts(docx_path: str, face: str) -> list[str]:
-    files = FONT_FILES.get(face) or {}
+    files = LOOK.font_files if face == LOOK.family else {}
     todo = [(kind, path) for kind, path in (("Regular", files.get("regular")), ("Bold", files.get("bold")))
             if path and os.path.exists(path)]
     if not todo:
@@ -600,8 +504,7 @@ def embed_fonts(docx_path: str, face: str) -> list[str]:
         + "".join(font_rels) + "</Relationships>").encode("utf-8")
     ct = entries["[Content_Types].xml"].decode("utf-8")
     if 'Extension="odttf"' not in ct:
-        ct = ct.replace("<Types ", "<Types ", 1).replace(
-            "</Types>", '<Default Extension="odttf" ContentType="application/vnd.openxmlformats-officedocument.obfuscatedFont"/></Types>')
+        ct = ct.replace("</Types>", '<Default Extension="odttf" ContentType="application/vnd.openxmlformats-officedocument.obfuscatedFont"/></Types>')
     entries["[Content_Types].xml"] = ct.encode("utf-8")
     st = entries["word/settings.xml"].decode("utf-8")
     if "embedTrueTypeFonts" not in st:

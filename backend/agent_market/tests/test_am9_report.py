@@ -65,8 +65,11 @@ class TheReport(unittest.TestCase):
         self.assertNotIn("และอีก", text)
 
     def test_the_body_text_size_is_unchanged(self):
-        sizes = {r.font.size.pt for p in self.doc.paragraphs if p.style.name == "Normal" for r in p.runs
-                 if r.font.size and len(r.text) > 40 and not r.font.superscript}
+        # AM21: a run sets no size of its own; the body's is its style's ("AM Body", based on Normal)
+        from agent_market.tests.test_deliverables import effective_font
+
+        sizes = {effective_font(r, p)[0] for p in self.doc.paragraphs if p.style.name in ("Normal", "AM Body") for r in p.runs
+                 if len(r.text) > 40}
         self.assertIn(10.5, sizes)
 
 

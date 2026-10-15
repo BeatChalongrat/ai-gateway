@@ -60,7 +60,11 @@ from ..engine import words
 from ..engine.words import SHARED as S
 from . import content as content_mod
 from .content import REQUIRED_SECTIONS, money0, pct_or_dash
-from .fit import frame_overflow
+from .fit import frame_overflow  # noqa: F401
+from .fit import wrap_lines as _wrap_lines
+from .look import dotx, markers
+from .look.catalogue import DoesNotFit
+from .look.tokens import LOOK
 from .reread import CENT
 from .reread import Tally as _Tally
 from .reread import check as _check
@@ -68,6 +72,12 @@ from .reread import dec as _dec
 from .reread import squash as _squash
 
 W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+
+
+def fit_lines(text: str, size: float, width_pt: float, bold: bool) -> int:
+    return _wrap_lines(text, LOOK.family, size, width_pt, bold)
+
 # A figure as a sentence prints it: 12,480,300 · (41,730) · 10.5% · 12.48 ล้าน · +0.95 จุด
 # … and as an English one does: 12.48 M · +0.95 pp
 # … and as an English one does: 12.48 M · +0.95 pp. The units are the documents' own words, in both languages
@@ -131,7 +141,9 @@ def _docx_fonts(path: str, allowed: set[str]) -> tuple[set[str], int]:
                     text = "".join(re.findall(r"<w:t\b[^>]*>(.*?)</w:t>", run, re.S))
                     if any("฀" <= ch <= "๿" for ch in text):
                         fonts = re.search(r"<w:rFonts\b([^>]*)/?>", run)
-                        if not fonts or 'w:cs="' not in fonts.group(1):
+                        # AM21: a run with no fonts of its own takes the template's (every style and the
+                        # document's defaults name a complex-script font); one that names fonts must name cs
+                        if fonts and 'w:cs="' not in fonts.group(1):
                             thai_no_cs += 1
     return bad, thai_no_cs
 
@@ -168,66 +180,83 @@ def _compare_table(tally: _Tally, table: str, got: list[list[str]] | None, want:
 
 
 def _narrative_check(doc, model: dict, computed: dict) -> dict:
-    """Every figure in the written sentences is a computed figure, and the citation right after it is that
-    figure's own. Read from the file's runs: a figure is a run's trailing number, its cite the next
-    superscript run."""
+    """Every figure in the written sentences is a computed figure, and the reference line under the
+    paragraph or the list lists that figure's own citation — every one, and no other (AM21: nothing is
+    cited inline; a block's references are listed under it). Read from the file: a block is the
+    paragraphs between two headings, closed by its reference line."""
     figures = computed.get("figures") or {}
-    by_cite: dict[str, set[str]] = {}
+    forms: dict[str, set] = {}
     for f in figures.values():
         for form in (f["text"], content_mod.figure_text(f, "abs")):
-            by_cite.setdefault(f.get("cite") or "", set()).add(_squash(form))
+            forms.setdefault(_squash(form), set()).add(f.get("cite") or "")
     ids = set(computed.get("quotable_ids") or [])
     titles = {s["key"]: s["title"] for s in model["sections"]}
     narrative_titles = {titles.get(k) for k in ("summary", "movements", "insights")} - {None}
     n, bad = 0, []
     section = None
-    for el in doc.element.body.iterchildren():
-        tag = el.tag.split("}")[-1]
-        if tag != "p":
-            continue
-        style = el.find(f"{W_NS}pPr/{W_NS}pStyle")
-        sval = style.get(W_NS + "val", "") if style is not None else ""
-        text_all = "".join(t.text or "" for t in el.iter(W_NS + "t")).strip()
-        if sval.startswith("Heading1"):
-            section = text_all
-            continue
-        if section not in narrative_titles or sval.startswith("Heading"):
-            continue
-        runs = []
-        for r in el.iter(W_NS + "r"):
-            t = "".join(x.text or "" for x in r.iter(W_NS + "t"))
-            sup = r.find(f"{W_NS}rPr/{W_NS}vertAlign")
-            runs.append((t, sup is not None and sup.get(W_NS + "val") == "superscript"))
-        plain = ""
-        for i, (t, sup) in enumerate(runs):
-            if sup:
-                continue
-            nxt = runs[i + 1] if i + 1 < len(runs) else ("", False)
-            cite = nxt[0].strip() if nxt[1] else ""
-            body = t
-            if cite:
-                m = _NUMBER_AT_END.search(t)
-                n += 1
-                if not m or _squash(_balanced(m.group(1))) not in by_cite.get(cite, set()):
-                    bad.append(S("gate.narrative.wrong_cite", text=t.strip()[-30:], cite=cite))
-                else:
-                    body = t[:m.start()]
-            plain += body + " "
-        for tok in NUMBER.findall(_blank_ids(plain, ids)):
+    block: list[str] = []
+
+    def close(refs: list[str] | None) -> None:
+        nonlocal n, block
+        text = " ".join(block)
+        block = []
+        if not text.strip():
+            return
+        possible: list[set] = []
+        for tok in NUMBER.findall(_blank_ids(text, ids)):
             tok = _balanced(tok)
             digits = tok.strip(_STRIP).replace(",", "")
             if "." not in digits and digits.isdigit() and (int(digits) <= 31 or 1990 <= int(digits) <= 2100
                                                           or 2400 <= int(digits) <= 2700):
                 continue
             n += 1
-            bad.append(S("gate.narrative.no_source", figure=tok.strip()))
-        if "{" in plain and content_mod.FIGURE.search(plain):
+            cites = forms.get(_squash(tok))
+            if not cites:
+                bad.append(S("gate.narrative.no_source", figure=tok.strip()))
+            else:
+                possible.append(cites)
+        if "{" in text and content_mod.FIGURE.search(text):
             n += 1
-            bad.append(S("gate.narrative.unknown", name=content_mod.FIGURE.search(plain).group(0)))
+            bad.append(S("gate.narrative.unknown", name=content_mod.FIGURE.search(text).group(0)))
+        if not possible:
+            return
+        n += 1
+        if refs is None:
+            bad.append(S("gate.narrative.refs_missing", text=text.strip()[:30]))
+            return
+        want = sorted({c for p in possible for c in p})
+        each_cited = all(any(c in refs for c in p) for p in possible)
+        none_extra = all(any(r in p for p in possible) for r in refs)
+        if not (each_cited and none_extra):
+            bad.append(S("gate.narrative.refs_differ", text=text.strip()[:30], got=", ".join(refs) or "—", want=", ".join(want)))
+
+    for el in doc.element.body.iterchildren():
+        tag = el.tag.split("}")[-1]
+        if tag == "tbl":
+            close(None)
+            continue
+        if tag != "p":
+            continue
+        style = el.find(f"{W_NS}pPr/{W_NS}pStyle")
+        sval = style.get(W_NS + "val", "") if style is not None else ""
+        text_all = "".join(t.text or "" for t in el.iter(W_NS + "t")).strip()
+        if sval.startswith("Heading1"):
+            close(None)
+            section = text_all
+            continue
+        if section not in narrative_titles:
+            continue
+        if sval.startswith("Heading"):
+            close(None)
+        elif sval == "AMReferences":
+            listed = text_all.split(":", 1)[1] if ":" in text_all else ""
+            close([c.strip() for c in listed.split(",") if c.strip()])
+        elif text_all:
+            block.append(text_all)
+    close(None)
     if bad:
         return _check("docx.narrative", False, "; ".join(bad[:4]), S("gate.narrative.label"), n)
-    return _check("docx.narrative", True, S("gate.narrative.ok", n=n),
-                  S("gate.narrative.label"), n)
+    return _check("docx.narrative", True, S("gate.narrative.ok", n=n), S("gate.narrative.label"), n)
 
 
 def _balanced(tok: str) -> str:
@@ -325,7 +354,33 @@ def check_docx(path: str, model: dict, theme: dict, req: dict) -> list[dict]:
     out.append(_narrative_check(doc, model, computed))
     if applied:
         out.append(_asked_docx(doc, headings, model, computed, applied))
+    out.append(styles_check(path, doc))
+    out.append(markers.check(path))
     return out
+
+
+def styles_check(path: str, doc) -> dict:
+    """AM21: the look is the template's — no run of the file sets a size, a colour or a font of its own,
+    and every table is in one of the template's table styles."""
+    bad_runs = dotx.run_formatting_in(path)
+    tstyles = sorted({(t.style.name if t.style is not None else "") for t in doc.tables} - set(dotx.TABLE_STYLES))
+    problems = []
+    if bad_runs:
+        problems.append(S("gate.docx.styles.runs", n=len(bad_runs), where="; ".join(bad_runs[:3])))
+    if tstyles:
+        problems.append(S("gate.docx.styles.table", styles=", ".join(s or "—" for s in tstyles)))
+    n, t = len(doc.paragraphs), len(doc.tables)
+    return _check("docx.styles", not problems, " · ".join(problems) if problems else S("gate.docx.styles.ok", n=n, t=t),
+                  S("gate.docx.styles.label"), n + t)
+
+
+def fit_refused(e: DoesNotFit) -> dict:
+    """The check a refused format carries: the content does not fit, the section named, no file written."""
+    return _check("look.fit", False, S("gate.fit.refused", section=e.section, why=e.why[:200]), S("gate.fit.label"))
+
+
+def fit_ok(layouts: list) -> dict:
+    return _check("look.fit", True, S("gate.fit.ok", n=len(layouts)), S("gate.fit.label"), len(layouts))
 
 
 def _asked_docx(doc, headings: list, model: dict, computed: dict, applied: list[str]) -> dict:
@@ -458,11 +513,52 @@ def _slide_text(slide) -> str:
     return "\n".join(parts)
 
 
+def _effective_size(run, para, shape) -> float:
+    """A run's size as a reader resolves it: its own, else the layout placeholder's level style, else the
+    master's body size."""
+    if run.font.size:
+        return run.font.size.pt
+    try:
+        base = shape._base_placeholder   # the layout's placeholder this one inherits from
+    except Exception:  # noqa: BLE001
+        base = None
+    if base is not None:
+        lst = base._element.find(".//{%s}lstStyle" % A_NS)
+        if lst is not None:
+            lvl = lst.find("{%s}lvl%dpPr" % (A_NS, (para.level or 0) + 1))
+            if lvl is not None:
+                d = lvl.find("{%s}defRPr" % A_NS)
+                if d is not None and d.get("sz"):
+                    return int(d.get("sz")) / 100
+    return LOOK.pt("pptx", "body")
+
+
+def _is_picture(shape) -> bool:
+    """A picture on a slide: a picture placeholder filled, or a picture shape."""
+    try:
+        return shape.image is not None
+    except (AttributeError, ValueError):
+        return False
+
+
+def _frame_need_pt(shape, para_sizes: list, bullets: bool) -> float:
+    width_pt = shape.width / 12700 - (25 if bullets else 0)
+    need = 0.0
+    for text, size, bold in para_sizes:
+        need += fit_lines(text, size, width_pt, bold) * size * LOOK.line("pptx")
+    return need
+
+
 def check_pptx(path: str, deck: dict, computed: dict, theme: dict, asked=()) -> list[dict]:
     """``deck`` (what the writer returned) is not read for any figure: the figures come out of the file.
     ``asked`` (AM11b): the directives applied — a deck asked to have no charts has none, and that many
-    fewer slides."""
+    fewer slides. AM21: every slide is on a layout of the catalogue and holds its content in placeholders;
+    the slide is 16:9; every size and colour set on a run is in the scale and the palette; the one
+    family is named everywhere and embedded; every chart picture is the computed one."""
     from pptx import Presentation
+
+    from .look import markers as _markers
+    from .look import potx as _potx
 
     out = []
     v = doc_validator.validate(path)
@@ -472,45 +568,89 @@ def check_pptx(path: str, deck: dict, computed: dict, theme: dict, asked=()) -> 
     n = info.get("slide_count", 0)
     no_charts = "no_charts" in asked
     least = 8 - (len(content_mod.charts(computed)) if no_charts else 0)
-    out.append(_check("pptx.slide_count", least <= n <= 12, (S("gate.pptx.slides.no_charts", n=n) if no_charts else S("gate.pptx.slides", n=n)),
+    out.append(_check("pptx.slide_count", least <= n <= 16, (S("gate.pptx.slides.no_charts", n=n) if no_charts else S("gate.pptx.slides", n=n)),
                       S("gate.pptx.slides.label", least=least)))
     prs = Presentation(path)
-    allowed = set(theme["fonts"].values())
-    overflows = []
-    bad_fonts = set()
+    w_in, h_in = prs.slide_width / 914400, prs.slide_height / 914400
+    page = LOOK.page("pptx")
+    size_ok = abs(w_in - page["width_in"]) < 0.01 and abs(h_in - page["height_in"]) < 0.01
+    out.append(_check("pptx.size", size_ok, S("gate.pptx.size.label") if size_ok else S("gate.pptx.size.other", w=f"{w_in:.3f}", h=f"{h_in:.2f}"),
+                      S("gate.pptx.size.label")))
+    # the layouts: in the catalogue, and nothing on a slide outside a placeholder
+    names = set(LOOK.catalogue("pptx"))
+    bad_layout = []
+    for i, slide in enumerate(prs.slides, start=1):
+        lname = slide.slide_layout.name
+        if lname not in names:
+            bad_layout.append(S("gate.pptx.layout.blank", i=i, name=lname))
+        for sh in slide.shapes:
+            if not sh.is_placeholder:
+                bad_layout.append(S("gate.pptx.layout.loose", i=i, name=sh.name))
+    out.append(_check("pptx.layout", not bad_layout, "; ".join(bad_layout[:4]) or S("gate.pptx.layout.ok", n=n), S("gate.pptx.layout.label"), n))
+    # overflow, with the sizes a reader resolves; the scale and the palette on every run that sets one
+    family = LOOK.family
+    scale = {round(x, 2) for x in LOOK.sizes("pptx")}
+    palette = set(theme["palette"].values())
+    overflows, bad_sizes, bad_colors, n_sizes, n_colors = [], set(), set(), 0, 0
     for i, slide in enumerate(prs.slides, start=1):
         for sh in slide.shapes:
             if sh.has_text_frame and sh.text_frame.text.strip():
-                r = frame_overflow(sh.text_frame, sh.width, sh.height, theme["fonts"]["thai"])
-                if r > 1.02:
-                    overflows.append(S("gate.pptx.overflow.at", i=i, text=sh.text_frame.text[:30], ratio=f"{r:.2f}"))
+                bullets = slide.slide_layout.name == "bullets" and sh.is_placeholder and sh.placeholder_format.idx == 11
+                paras = []
                 for p in sh.text_frame.paragraphs:
-                    for run in p.runs:
-                        if run.font.name and run.font.name not in allowed:
-                            bad_fonts.add(run.font.name)
-                        if not run.font.name:
-                            bad_fonts.add("(inherit)")
+                    sizes = [_effective_size(r, p, sh) for r in p.runs] or [LOOK.pt("pptx", "body")]
+                    bold = any(bool(r.font.bold) for r in p.runs)
+                    paras.append((p.text, max(sizes), bold))
+                    for r in p.runs:
+                        if r.font.size:
+                            n_sizes += 1
+                            if round(r.font.size.pt, 2) not in scale:
+                                bad_sizes.add(f"{r.font.size.pt:g}")
+                        try:
+                            if r.font.color and r.font.color.type is not None and r.font.color.rgb is not None:
+                                n_colors += 1
+                                if str(r.font.color.rgb) not in palette:
+                                    bad_colors.add(str(r.font.color.rgb))
+                        except (AttributeError, TypeError):
+                            pass
+                need = _frame_need_pt(sh, paras, bullets)
+                avail = sh.height / 12700
+                if avail > 0 and need / avail > 1.02:
+                    overflows.append(S("gate.pptx.overflow.at", i=i, text=sh.text_frame.text[:30], ratio=f"{need / avail:.2f}"))
             if getattr(sh, "has_table", False) and sh.has_table:
                 for row in sh.table.rows:
                     for cell in row.cells:
                         for p in cell.text_frame.paragraphs:
-                            for run in p.runs:
-                                if run.font.name not in allowed:
-                                    bad_fonts.add(run.font.name or "(inherit)")
-            if getattr(sh, "has_chart", False) and sh.has_chart:
-                if sh.chart.font.name not in allowed:
-                    bad_fonts.add(sh.chart.font.name or "(chart default)")
+                            for r in p.runs:
+                                if r.font.size:
+                                    n_sizes += 1
+                                    if round(r.font.size.pt, 2) not in scale:
+                                        bad_sizes.add(f"{r.font.size.pt:g}")
     out.append(_check("pptx.overflow", not overflows, "; ".join(overflows[:4]) or S("gate.pptx.overflow.none"),
                       S("gate.pptx.overflow.label")))
-    fonts_used = set(info.get("fonts_used") or []) - allowed
-    out.append(_check("pptx.fonts", not bad_fonts and not fonts_used,
-                      S("gate.pptx.fonts.other", fonts=sorted(bad_fonts | fonts_used)) if (bad_fonts or fonts_used) else
-                      S("gate.pptx.fonts.ok", font=theme["fonts"]["thai"]), S("gate.pptx.fonts.label")))
+    problems = []
+    if bad_sizes:
+        problems.append(S("gate.pptx.scale.size", sizes=", ".join(sorted(bad_sizes)), scale=", ".join(f"{x:g}" for x in LOOK.sizes("pptx"))))
+    if bad_colors:
+        problems.append(S("gate.pptx.scale.color", colors=", ".join(sorted(bad_colors))))
+    out.append(_check("pptx.scale", not problems, " · ".join(problems) if problems else S("gate.pptx.scale.ok", n=n_sizes, c=n_colors),
+                      S("gate.pptx.scale.label"), n_sizes + n_colors))
+    # the one family: named everywhere in the package, and embedded
+    faces = {f for part in _potx.typefaces_in(path).values() for f in part} - {family}
+    embedded = _potx.embedded_in(path)
+    fproblems = []
+    if faces:
+        fproblems.append(S("gate.pptx.fonts.other", fonts=sorted(faces)))
+    if not embedded:
+        fproblems.append(S("gate.pptx.fonts.embedded", font=family))
+    out.append(_check("pptx.fonts", not fproblems, " · ".join(fproblems) if fproblems else S("gate.pptx.fonts.ok", font=family), S("gate.pptx.fonts.label")))
 
     tally = _Tally()
-    # Charts: every chart in the file is one of the computed charts, every computed chart is there once.
+    # Charts: a native chart in the file must be one of the computed charts (the audit's wrong_chart.pptx);
+    # a chart picture must be, byte for byte, the picture drawn from the computed numbers at the chart
+    # layout's frame — and there are no other pictures.
     want = [] if no_charts else expected_charts(computed)
-    found: list[str] = []
+    found: list = []
     for i, slide in enumerate(prs.slides, start=1):
         for sh in slide.shapes:
             if not (getattr(sh, "has_chart", False) and sh.has_chart):
@@ -534,6 +674,29 @@ def check_pptx(path: str, deck: dict, computed: dict, theme: dict, asked=()) -> 
                 tally.bad.append(S("gate.pptx.chart.differs", i=i))
             else:
                 found.append(match["id"])
+    with zipfile.ZipFile(path) as z:
+        media = [z.read(nm) for nm in z.namelist() if nm.startswith("ppt/media/")]
+    if want:
+        from .charts import render_png
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for spec in want:
+                p = os.path.join(tmp, f"{spec['id']}.png")
+                render_png(spec, theme, p, width_in=_potx.CHART_BOX[0], height_in=_potx.CHART_BOX[1])
+                tally.n += 1
+                with open(p, "rb") as f:
+                    if f.read() in media:
+                        found.append(spec["id"])
+                    else:
+                        tally.bad.append(S("gate.pptx.chart.picture", title=spec["title"]))
+    pictures = [i for i, slide in enumerate(prs.slides, start=1) for sh in slide.shapes if _is_picture(sh)]
+    if no_charts and pictures:
+        for i in pictures:
+            tally.n += 1
+            tally.bad.append(S("gate.pptx.chart.unasked", i=i))
+    elif len(media) > len(want):
+        tally.n += 1
+        tally.bad.append(S("gate.pptx.chart.extra", n=len(media) - len(want)))
     for spec in want:
         if found.count(spec["id"]) != 1:
             tally.n += 1
@@ -556,12 +719,11 @@ def check_pptx(path: str, deck: dict, computed: dict, theme: dict, asked=()) -> 
               if getattr(sh, "has_table", False) and sh.has_table]
     pl = next((t for t in tables if t and [_squash(x) for x in t[0]] == [_squash(h) for h in heads]), None)
     _compare_table(tally, S("gate.table.deck_pl"), pl, {"columns": heads, "rows": rows})
-    # KPI values on the key-figures slide.
-    kslide = next((s for s in prs.slides if S("docs.deck.stats") in _slide_text(s)), None)
-    ktext = _squash(_slide_text(kslide)) if kslide is not None else ""
+    # The headline figures: each on a figure slide (the one big figure, the row of figures).
+    ktext = _squash(" ".join(_slide_text(s) for s in prs.slides if S("docs.deck.stats") in _slide_text(s)))
     for k in content_mod.kpis(computed):
         tally.n += 1
-        if _squash(k["value_short"].replace(" " + S("docs.unit.m"), "M")) not in ktext:
+        if _squash(k["value_short"]) not in ktext:
             tally.bad.append(S("gate.kpi.pptx", label=k["label"], value=k["value_short"]))
     # The summary slide: no figure that is not a computed one.
     allowed_forms = set()
@@ -580,6 +742,7 @@ def check_pptx(path: str, deck: dict, computed: dict, theme: dict, asked=()) -> 
             if _squash(tok) not in allowed_forms:
                 tally.bad.append(S("gate.pptx.summary.unknown", figure=tok.strip()))
     out.append(tally.result("pptx.figures", S("gate.pptx.figures.label"), S("gate.pptx.figures.what")))
+    out.append(_markers.check(path))
     return out
 
 

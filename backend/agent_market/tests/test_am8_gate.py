@@ -130,21 +130,28 @@ class TheSameBreakagesOnAFreshRender(unittest.TestCase):
         self.assertIn("Comic Sans MS", detail)
 
     def test_a_chart_redrawn_in_the_deck_fails(self):
-        from pptx import Presentation
-        from pptx.chart.data import CategoryChartData
+        # AM21: the deck's chart is a picture drawn from the computed numbers; a picture of other numbers
+        # (the last value of the first series at 99.99) in its place fails, whatever the writer's binding says
+        from agent_market.deliverables.charts import render_png
+        from agent_market.deliverables.look.potx import CHART_BOX
 
-        prs = Presentation(os.path.join(self.out, "d_v1.pptx"))
-        chart = next(sh.chart for s in prs.slides for sh in s.shapes if getattr(sh, "has_chart", False) and sh.has_chart)
-        data = CategoryChartData()
-        data.categories = [c.label for c in chart.plots[0].categories]
-        for i, ser in enumerate(chart.series):
-            values = list(ser.values)
-            if i == 0:
-                values[-1] = 99.99
-            data.add_series(ser.name, values)
-        chart.replace_data(data)
+        spec = copy.deepcopy(content.charts(self.computed)[0])
+        values = list(spec["series"][0]["values"])
+        values[-1] = "99990000"
+        spec["series"][0]["values"] = values
+        wrong = os.path.join(self.out, "wrong_deck.png")
+        render_png(spec, self.theme, wrong, width_in=CHART_BOX[0], height_in=CHART_BOX[1])
+        with open(wrong, "rb") as f:
+            wrong_bytes = f.read()
+        src = os.path.join(self.out, "d_v1.pptx")
         broken = os.path.join(self.out, "d_broken.pptx")
-        prs.save(broken)
+        with zipfile.ZipFile(src) as z, zipfile.ZipFile(broken, "w", zipfile.ZIP_DEFLATED) as out:
+            media = sorted(n for n in z.namelist() if n.startswith("ppt/media/"))
+            for item in z.infolist():
+                data = z.read(item.filename)
+                if item.filename == media[0]:
+                    data = wrong_bytes
+                out.writestr(item, data)
         deck = next(a for a in self.res["artifacts"] if a["format"] == "pptx")
         lying = copy.deepcopy(deck["chart_bindings"])
         failed, detail = _failed(quality.check_pptx(broken, {"chart_bindings": lying}, self.computed, self.theme),
@@ -217,12 +224,16 @@ class ACitationBelongsToItsFigure(unittest.TestCase):
                      "movements": [], "watch": [], "next_steps": []}
         render_all(self.computed, {**REQ, "formats": ["docx"], "narrative": narrative}, in_dir=out, out_dir=out)
         doc = Document(os.path.join(out, "r_v1.docx"))
-        p = next(p for p in doc.paragraphs if "สูงกว่างบประมาณ" in p.text)
-        runs = [(r.text, bool(r.font.superscript)) for r in p.runs]
-        i = next(i for i, (t, sup) in enumerate(runs) if not sup and t.rstrip().endswith("%"))
-        cite = runs[i + 1][0].strip()
+        # AM21: nothing is cited inline; the references of the paragraph are listed under it, and the
+        # figure's own citation is the one listed — not the cost-of-sales one that prints the same "10.5%"
+        paras = list(doc.paragraphs)
+        i = next(i for i, p in enumerate(paras) if "สูงกว่างบประมาณ" in p.text)
+        refs = next(p for p in paras[i + 1:] if p.style.name == "AM References")
+        listed = [c.strip() for c in refs.text.split(":", 1)[1].split(",")]
         lines = {l["key"]: l for l in self.computed["lines"]}
-        self.assertEqual(cite, lines["operating_expenses"]["cite_var_budget"])
+        self.assertEqual(listed, [lines["operating_expenses"]["cite_var_budget"]])
+        self.assertNotIn(lines["cost_of_sales"]["cite_var_prior"], listed)
+        cite = listed[0]
         sga = next(c for c in self.computed["citations"] if c["id"] == cite)
         # …and that citation is the SG&A budget comparison, which leads to the budget's own cells
         self.assertIn("ค่าใช้จ่ายในการขายและบริหาร", sga["label"])

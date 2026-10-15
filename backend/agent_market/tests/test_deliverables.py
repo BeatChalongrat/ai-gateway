@@ -22,6 +22,27 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SAMPLE = os.path.join(os.path.dirname(HERE), "packages", "financial_report", "sample-data")
 
 
+def effective_font(run, para) -> tuple[float, bool]:
+    """A run's size and weight as a reader's Word resolves them: the run's own, else its character style's,
+    else the paragraph style's (and the styles it is based on), else the document's default (AM21: a report
+    sets nothing on a run; its look is its styles')."""
+    size, bold = None, None
+    chain = [run.font]
+    if run.style is not None:
+        chain.append(run.style.font)
+    st = para.style
+    while st is not None:
+        chain.append(st.font)
+        st = st.base_style
+    for f in chain:
+        if size is None and f.size is not None:
+            size = f.size.pt
+        if bold is None and f.bold is not None:
+            bold = f.bold
+    return size or 10.5, bool(bold)
+
+
+
 def computed_for(names):
     files = [pkg.parse(os.path.join(SAMPLE, n), n, {}) for n in names]
     pre = pkg.preflight(files, message="ปิดงบกันยายน", today=dt.date(2026, 9, 25))
@@ -85,38 +106,54 @@ class Render(unittest.TestCase):
                         runs = [r for r in para.runs if r.text.strip()]
                         if not runs:
                             continue
-                        size = runs[0].font.size.pt if runs[0].font.size else 10.5
+                        size, bold = effective_font(runs[0], para)   # AM21: the size and weight are the style's
                         for line in para.text.split("\n"):
                             if not any(0x0E00 <= ord(ch) <= 0x0E7F for ch in line):
                                 continue
                             checked += 1
-                            w = text_width_pt(line, "Sarabun", size, bool(runs[0].bold)) * SAFETY
+                            w = text_width_pt(line, "Sarabun", size, bold) * SAFETY
                             if w > avail + 0.01:
                                 too_wide.append(f"{line} ({w:.1f} > {avail:.1f} pt)")
         self.assertGreater(checked, 20)
         self.assertEqual(too_wide, [])
 
-    def test_deck_bars_under_budget_keep_their_colour(self):
-        # AM1b walkthrough: PowerPoint inverts the fill of a negative bar
-        # unless the series says not to — the under-budget bars came out white.
+    def test_deck_charts_are_the_computed_pictures_drawn_at_the_chart_layouts_frame(self):
+        # AM21: a deck's chart is the same picture the report carries, drawn at the chart layout's frame
+        # (no native chart, whose look came from the application's defaults); the gate re-draws and compares.
         import zipfile
 
+        from agent_market.deliverables.charts import render_png
+        from agent_market.deliverables.look.potx import CHART_BOX
+
         with zipfile.ZipFile(os.path.join(self.out, "d_v1.pptx")) as z:
-            charts = [z.read(n).decode("utf-8") for n in z.namelist() if n.startswith("ppt/charts/chart")]
-        bars = [c for c in charts if "<c:barChart>" in c]
-        self.assertTrue(bars)
-        import re as _re
+            self.assertEqual([n for n in z.namelist() if n.startswith("ppt/charts/")], [])
+            media = [z.read(n) for n in z.namelist() if n.startswith("ppt/media/")]
+        specs = content.charts(self.computed)
+        self.assertEqual(len(media), len(specs))
+        theme = resolve(REQ["theme"])
+        for spec in specs:
+            p = os.path.join(self.out, f"again_{spec['id']}.png")
+            render_png(spec, theme, p, width_in=CHART_BOX[0], height_in=CHART_BOX[1])
+            with open(p, "rb") as f:
+                self.assertIn(f.read(), media, spec["id"])
 
-        for c in bars:
-            self.assertNotIn('<c:invertIfNegative val="1"/>', c)
-            self.assertIn('<c:invertIfNegative val="0"/>', c)
-            # a bar coloured on its own (<c:dPt>) inverts by itself unless told not to
-            for dpt in _re.findall(r"<c:dPt>.*?</c:dPt>", c, _re.S):
-                self.assertIn('<c:invertIfNegative val="0"/>', dpt)
+    def test_every_slide_is_on_a_layout_of_the_catalogue_with_nothing_outside_a_placeholder(self):
+        from pptx import Presentation
 
-    def test_deck_has_8_to_12_slides(self):
+        from agent_market.deliverables.look.tokens import LOOK
+
+        prs = Presentation(os.path.join(self.out, "d_v1.pptx"))
+        self.assertEqual((prs.slide_width, prs.slide_height), (12192000, 6858000))   # 13.333 × 7.5 in
+        names = set(LOOK.catalogue("pptx"))
+        for i, slide in enumerate(prs.slides, start=1):
+            self.assertIn(slide.slide_layout.name, names, i)
+            for sh in slide.shapes:
+                self.assertTrue(sh.is_placeholder, f"slide {i}: {sh.name} is outside a placeholder")
+        self.assertNotIn("Blank", [lay.name for lay in prs.slide_master.slide_layouts])
+
+    def test_deck_has_8_to_16_slides(self):
         deck = next(a for a in self.res["artifacts"] if a["format"] == "pptx")
-        self.assertTrue(8 <= deck["meta"]["slides"] <= 12)
+        self.assertTrue(8 <= deck["meta"]["slides"] <= 16, deck["meta"]["slides"])
 
     def test_report_embeds_the_thai_font(self):
         rep = next(a for a in self.res["artifacts"] if a["format"] == "docx")
@@ -183,21 +220,29 @@ class GateCatches(unittest.TestCase):
         self.assertFalse(next(c for c in checks if c["name"] == "pptx.overflow")["ok"])
 
     def test_chart_values_that_differ_from_the_table_fail(self):
-        # AM8: the values are read out of the chart in the file, never from the writer's binding.
-        from pptx import Presentation
-        from pptx.chart.data import CategoryChartData
+        # AM8: the values are read out of the file, never from the writer's binding. AM21: a chart is a
+        # picture; a picture of other numbers (drawn here with the first value changed) must fail.
+        import zipfile
+
+        from agent_market.deliverables.charts import render_png
+        from agent_market.deliverables.look.potx import CHART_BOX
 
         out = tempfile.mkdtemp()
         render_all(self.computed, {**REQ, "formats": ["pptx"]}, in_dir=out, out_dir=out)
         path = os.path.join(out, "d_v1.pptx")
-        prs = Presentation(path)
-        chart = next(sh.chart for s in prs.slides for sh in s.shapes if getattr(sh, "has_chart", False) and sh.has_chart)
-        data = CategoryChartData()
-        data.categories = [c.label for c in chart.plots[0].categories]
-        for i, ser in enumerate(chart.series):
-            data.add_series(ser.name, [1.0] + list(ser.values)[1:] if i == 0 else list(ser.values))
-        chart.replace_data(data)
-        prs.save(path)
+        spec = copy.deepcopy(content.charts(self.computed)[0])
+        spec["series"][0]["values"] = ["1"] + list(spec["series"][0]["values"])[1:]
+        wrong = os.path.join(out, "wrong.png")
+        render_png(spec, self.theme, wrong, width_in=CHART_BOX[0], height_in=CHART_BOX[1])
+        with open(wrong, "rb") as f:
+            wrong_bytes = f.read()
+        with zipfile.ZipFile(path) as z:
+            entries = {n: z.read(n) for n in z.namelist()}
+        first = sorted(n for n in entries if n.startswith("ppt/media/"))[0]
+        entries[first] = wrong_bytes
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+            for n, data in entries.items():
+                z.writestr(n, data)
         checks = quality.check_pptx(path, {"chart_bindings": []}, self.computed, self.theme)
         self.assertFalse(next(c for c in checks if c["name"] == "pptx.figures")["ok"])
 

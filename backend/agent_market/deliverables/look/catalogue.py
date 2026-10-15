@@ -1,0 +1,156 @@
+"""The layout catalogue and the one place where a layout is chosen (AM21).
+
+Each layout in look.json declares what it accepts — how many characters in a heading, how many items,
+how many rows before it must break, how many chart series. ``choose`` takes a block of content and its
+meaning, scores every layout that takes that kind of content by how well it holds it, and returns the
+best with a recorded reason; a tie breaks the same way every time (the catalogue's own order), so the
+same content always gets the same layout.
+
+Too much for the layout, in order: the next size down the scale (a layout marked ``shrink`` takes the
+same content at the small size); a break into parts across slides or pages where the layout counts
+items, rows or lines; and when nothing holds it, ``DoesNotFit`` — the run says the content does not fit
+and names the section. Nothing is truncated here or anywhere.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+
+from .tokens import LOOK
+
+# fields that count things (break into parts when over), and the field that measures one of them
+COUNTED = {"items": "item", "rows": "cell", "lines": "line", "figures": "figure", "categories": None, "series": None, "columns": None}
+# text fields the small size may hold more of
+TEXT = {"title", "subtitle", "label", "value", "sentence", "delta", "lead", "item", "text", "cell", "caption", "line", "paragraph",
+        "entry", "note", "sheet_name", "figure"}
+TARGET_FILL = 0.8
+
+
+class DoesNotFit(Exception):
+    """Content too long for every layout in the catalogue: the section is named, and no file is written."""
+
+    def __init__(self, section: str, why: str):
+        super().__init__(f"{section}: {why}")
+        self.section = section
+        self.why = why
+
+
+@dataclass
+class Choice:
+    layout: str
+    role: str                 # the text role the layout is set at: body, or small when it had to shrink
+    fill: float               # how full the layout is (1.0 = at its limit)
+    reason: str               # recorded: why this layout, in plain words
+    parts: list = field(default_factory=list)  # the content, broken into what each slide or page holds
+
+
+def measure(content: dict) -> dict[str, float]:
+    """What there is of each field: a string's length, a list's count, and the longest member of a list
+    under the name its layout measures it by (items → item, rows → cell, lines → line)."""
+    out: dict[str, float] = {}
+    for k, v in content.items():
+        if isinstance(v, str):
+            out[k] = len(v.strip())
+        elif isinstance(v, (list, tuple)):
+            out[k] = len(v)
+            one = COUNTED.get(k)
+            if one and v:
+                if k == "rows":
+                    out[one] = max((len(str(c or "")) for row in v for c in row), default=0)
+                    out.setdefault("columns", max((len(row) for row in v), default=0))
+                else:
+                    out[one] = max((len(str(x or "")) for x in v), default=0)
+        elif isinstance(v, (int, float)):
+            out[k] = float(v)
+    return out
+
+
+def _fits(takes: dict, got: dict, scale: float) -> tuple[bool, float, list[str]]:
+    """Whether a layout holds the content (text limits widened by ``scale`` at a smaller size), how full
+    it is, and which fields are over."""
+    fill = 0.0
+    over: list[str] = []
+    for key, limit in takes.items():
+        if key.endswith("_min"):
+            name = key[:-4]
+            if got.get(name, 0) < limit:
+                over.append(f"{name} {int(got.get(name, 0))} < {limit}")
+            continue
+        if key not in got:
+            continue
+        lim = limit * scale if key in TEXT else limit
+        f = got[key] / lim if lim else 0.0
+        fill = max(fill, f)
+        if f > 1.0:
+            over.append(f"{key} {int(got[key])} > {int(lim)}")
+    return not over, fill, over
+
+
+def _parts(content: dict, takes: dict) -> list[dict]:
+    """The content broken into what each slide or page holds, by the counted field the layout limits."""
+    for key in ("items", "rows", "lines", "figures"):
+        if key in takes and isinstance(content.get(key), (list, tuple)) and len(content[key]) > takes[key]:
+            n = takes[key]
+            seq = list(content[key])
+            return [{**content, key: seq[i:i + n]} for i in range(0, len(seq), n)]
+    return [content]
+
+
+def choose(fmt: str, content: dict, section: str, kinds: tuple | None = None) -> Choice:
+    """The layout for a block of content. ``content`` holds the block's fields by the names the catalogue
+    uses (title, items, rows, series…); ``kinds`` narrows the candidates to those layouts, else every
+    layout that takes every field the content has is a candidate."""
+    cat = LOOK.catalogue(fmt)
+    got = measure(content)
+    fields = {k for k in got if k not in ("columns",) or "columns" in content}
+    scored: list[tuple[float, int, str, str, float, list]] = []
+    reasons: list[str] = []
+    shrink = LOOK.pt(fmt, "body") / LOOK.pt(fmt, "small")
+    for order, (name, lay) in enumerate(cat.items()):
+        if kinds is not None and name not in kinds:
+            continue
+        takes = lay["takes"]
+        accepted = set(takes) | {k[:-4] for k in takes if k.endswith("_min")} | {"columns"}
+        if kinds is None and not fields <= accepted:
+            continue
+        # a counted field over its limit breaks into parts; the fill is of one part
+        parts = _parts(content, takes)
+        part = measure(parts[0])
+        for role, scale in (("body", 1.0), ("small", shrink)):
+            if role == "small" and not lay.get("shrink"):
+                break
+            ok, fill, over = _fits(takes, part, scale)
+            if ok:
+                why = f"{name} at {role}: {fill:.2f} full"
+                if len(parts) > 1:
+                    why += f", in {len(parts)} parts"
+                scored.append((abs(fill - TARGET_FILL), order, name, role, fill, parts))
+                reasons.append(why)
+                break
+            reasons.append(f"{name} at {role}: {', '.join(over)}")
+    if not scored:
+        raise DoesNotFit(section, "; ".join(reasons) or f"no layout of the {fmt} catalogue takes {sorted(fields)}")
+    scored.sort(key=lambda s: (s[0], s[1]))
+    _, _, name, role, fill, parts = scored[0]
+    reason = f"{name} at {role} ({fill:.2f} full" + (f", {len(parts)} parts" if len(parts) > 1 else "") + ")"
+    if len(scored) > 1:
+        reason += " over " + ", ".join(s[2] for s in scored[1:])
+    return Choice(layout=name, role=role, fill=round(fill, 3), reason=reason, parts=parts)
+
+
+def writing_limits(fmt: str = "pptx") -> dict:
+    """What a model is told before it writes (6.1): the catalogue's limits for the words it produces —
+    the summary's paragraph, a point of a list, how many points. Characters, and the model writes to fit."""
+    cat = LOOK.catalogue(fmt)
+    return {"summary_chars": cat["statement"]["takes"]["text"], "bullet_chars": cat["bullets"]["takes"]["item"],
+            "bullets_max": cat["bullets"]["takes"]["items"], "sentence_chars": cat["figure"]["takes"]["sentence"]}
+
+
+def listing(fmt: str) -> list[dict]:
+    """The catalogue as a list a report prints: the layout, what it is for, what it refuses."""
+    return [{"layout": name, "for": lay["for"], "takes": lay["takes"], "refuses": lay["refuses"]} for name, lay in LOOK.catalogue(fmt).items()]
+
+
+def slides_for(n_items: int, per: int) -> int:
+    return max(1, math.ceil(n_items / per))

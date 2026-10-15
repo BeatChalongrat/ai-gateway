@@ -80,7 +80,7 @@ class AskedOfTheReport(unittest.TestCase):
 
         prs = Presentation(os.path.join(out, "d_v1.pptx"))
         self.assertFalse([sh for s in prs.slides for sh in s.shapes if getattr(sh, "has_chart", False) and sh.has_chart])
-        self.assertEqual(len(prs.slides), 8)
+        self.assertEqual(len(prs.slides), 11)   # AM21: fourteen slides, less the three charts
 
     def test_no_figure_changes(self):
         """A directive is not arithmetic: the P&L, the key figures and the citations are the default's."""
@@ -105,7 +105,7 @@ class AskedOfTheReport(unittest.TestCase):
             self.assertIn(must, heads)
         self.assertTrue(_check(res, "docx", "docx.sections")["ok"])
         # the deck is already the short form: it keeps its charts
-        self.assertEqual(next(a for a in res["artifacts"] if a["format"] == "pptx")["meta"]["slides"], 11)
+        self.assertEqual(next(a for a in res["artifacts"] if a["format"] == "pptx")["meta"]["slides"], 14)
 
     def test_the_account_table_is_ordered_by_the_difference_as_read_from_the_file(self):
         res, out, _ = _render(self.full, ["sort_by_variance"])
