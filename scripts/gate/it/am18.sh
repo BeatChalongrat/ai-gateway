@@ -21,6 +21,7 @@ CHUNKS=(
   '^(TestTheBankPaperPrintsEachRowsDescriptionBesideItsAmountsInEnglish)$'
   '^(TestTheLanguageAndEveryTimeAreHeardKeptAndCleared)$'
   '^(TestARequestThatCouldMeanTwoThingsIsAskedBeforeWorkAndAnotherLanguageIsRefused)$'
+  '^(TestThePagesOfADeliveredFileAreMadeFromTheFileItselfAndKeptBesideIt)$'
 )
 for c in "${CHUNKS[@]}"; do
   echo "== chunk $c"

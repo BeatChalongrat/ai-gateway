@@ -194,6 +194,8 @@ case "$phase" in
   it)
     lock it; stack_stop; room; guard
     export AGENT_MARKET_IT=1
+    # AM21: the converter the integration tests start is the one this commit built (AM_CONVERTER_TAG), not a stale :dev
+    export AM_CONVERTER_IMAGE="${AM_CONVERTER_IMAGE:-ai-gateway-doc-converter:${AM_CONVERTER_TAG:-latest}}"
     out="$RESULTS/it_lane.txt"; : > "$out"; rc=0
     {
       date -u +"started %H:%M:%SZ at $(git rev-parse --short=7 HEAD)"
