@@ -121,7 +121,7 @@ func (r *Runner) renderJob(ctx context.Context, job am.Run, log *slog.Logger) er
 	if err != nil {
 		return rc.stepFailed("publish", err)
 	}
-	if err := rc.recordFormOutcome(ctx, ps.run.ID, rendered.form, arts); err != nil {
+	if err := rc.recordFormOutcome(ctx, ps.run.ID, rendered.form, arts, rendered.NotMade); err != nil {
 		return rc.stepFailed("publish", err)
 	}
 	// The run's current output set grows to include what was asked for.

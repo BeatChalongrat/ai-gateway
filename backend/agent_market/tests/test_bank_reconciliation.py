@@ -470,8 +470,8 @@ class SelfTest(unittest.TestCase):
 
     def test_the_manifest(self):
         m = S.manifest("bank_reconciliation")
-        self.assertEqual((m["id"], m["python_package"], m["narrative"]), ("sran.bank-reconciliation", "bank_reconciliation", "rules"))
-        self.assertEqual((m["version"], m["scope"], m["jurisdiction"]), ("1.9.0", "generic", "TH"))
+        self.assertEqual((m["id"], m["python_package"], m["narrative"]), ("sran.bank-reconciliation", "bank_reconciliation", "model"))   # AM22: a model writes its words
+        self.assertEqual((m["version"], m["scope"], m["jurisdiction"]), ("1.10.0", "generic", "TH"))
         self.assertIn(".pdf", next(i for i in m["inputs"] if i["role"] == "bank")["accept"])
         self.assertTrue(m["completion_gate"])
         self.assertTrue(m["record_who_answered"])
@@ -491,10 +491,12 @@ class SelfTest(unittest.TestCase):
 
 class NoModel(unittest.TestCase):
     def test_nothing_in_the_package_can_ask_a_model(self):
+        # AM22: one model capability — model.text, which the runner uses to write the commentary from the computed
+        # table (never a file, never a row of a statement); nothing in the package itself asks a model anything
         m = S.manifest("bank_reconciliation")
         caps = m["capabilities"]["required"] + m["capabilities"]["optional"]
-        self.assertEqual([c for c in caps if c.startswith("model.")], [])
-        self.assertEqual(m["guide"]["model_inputs"], {})
+        self.assertEqual([c for c in caps if c.startswith("model.")], ["model.text"])
+        self.assertEqual(list(m["guide"]["model_inputs"]), ["model.text"])
         self.assertFalse(hasattr(pkg, "parse_extras"))
         base = os.path.dirname(os.path.abspath(pkg.__file__))
         for root, _, names in os.walk(base):

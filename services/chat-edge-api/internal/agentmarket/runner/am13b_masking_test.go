@@ -158,7 +158,7 @@ func TestMaskingIsWrittenBesideAStepsOutputAndNowhereElse(t *testing.T) {
 // either would be masked — safe, but the round's card could then not say what was done. So: no file of
 // the runner calls the model client with a context of its own making.
 func TestEveryModelCallIsMadeInsideAStepOrThroughAskModel(t *testing.T) {
-	call := regexp.MustCompile(`\.Model\.(CompleteWith|Vision|Complete)\(([^,)]*)`)
+	call := regexp.MustCompile(`\.Model\.(CompleteWithInBy|CompleteWithIn|CompleteWith|Vision|Complete)\(([^,)]*)`) // (AM22: CompleteWithIn, the run's language)
 	files, _ := filepath.Glob("*.go")
 	seen := 0
 	for _, f := range files {

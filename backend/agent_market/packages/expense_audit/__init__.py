@@ -132,7 +132,10 @@ def _asked_check(path: str, view: dict, applied: list[str]) -> dict:
 def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     import hashlib
 
+    from ...deliverables import quality
     from ...deliverables.formats import wanted_formats
+    from ...deliverables.look import commentary
+    from ...deliverables.look.catalogue import DoesNotFit
     from ...deliverables.theme import resolve
     from .scripts.workbook import ExpenseWorkbook, check
 
@@ -141,12 +144,24 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
 
     theme = resolve(req.get("theme"))
     names = req.get("names") or {}
-    artifacts, all_ok = [], True
+    artifacts, refused, all_ok = [], [], True
     for fmt in [f for f in wanted_formats(req, ["xlsx"]) if f == "xlsx"]:
         name = os.path.basename(names.get(fmt) or "expense_audit.xlsx")
         path = os.path.join(out_dir, name)
-        meta = ExpenseWorkbook(view, theme, req.get("run")).write(path)
+        # AM22 §1.1: the commentary — a model's, or the rules' saying so — on its own sheet, read back by the gate;
+        # one too long for its layout is refused naming the section, and the file is not written
+        narrative = req.get("narrative") or dict(view.get("fallback_narrative") or {}, written_by="rules")
+        try:
+            meta = ExpenseWorkbook(view, theme, req.get("run"), narrative=narrative, model_info=req.get("model_info")).write(path)
+        except DoesNotFit as e:
+            if os.path.exists(path):
+                os.remove(path)
+            refused.append(commentary.refusal(fmt, name, e))
+            all_ok = False
+            continue
         checks = check(path, view, req.get("run"))
+        checks.append(commentary.check(path, narrative, view, req.get("model_info")))
+        checks.append(quality.fit_ok(meta.get("layouts") or []))
         if applied:
             checks.append(_asked_check(path, view, applied))
         ok = all(c["ok"] for c in checks)
@@ -156,5 +171,60 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
         artifacts.append({"name": name, "format": fmt, "kind": "table", "size": os.path.getsize(path), "sha256": sha,
                           "quality": {"passed": ok, "checks": checks}, "meta": meta, "chart_bindings": [],
                           "citations": len(computed["run_exceptions"])})
-    return {"passed": all_ok, "artifacts": artifacts, "theme": {"id": theme["id"], "version": theme.get("version", 1)},
-            "asked": {"applied": applied, "refused": []}}
+    return {"passed": all_ok, "artifacts": artifacts, "refused": refused,
+            "theme": {"id": theme["id"], "version": theme.get("version", 1)}, "asked": {"applied": applied, "refused": []}}
+
+
+# ── AM22 §2.1: the customer's own form ────────────────────────────────────────
+# Every value offered is one the round computed and cited (or a fact of the round: a name, a date); a form slot is
+# not a new place to make a number. A value that is not known is "" — its slot is named as a gap on the form's face.
+
+
+def _money(v) -> str:
+    from decimal import Decimal
+
+    from ...engine.thai import fmt_money
+
+    return fmt_money(Decimal(str(v))) if v not in (None, "") else ""
+
+
+def _day(v) -> str:
+    return _words.date(v) if v else ""
+
+
+def template_values(computed: dict, req: dict | None = None) -> dict:
+    """The values a customer's expense-claim form can take: the round's counts (n1–n5) and amounts by outcome (e1–e4),
+    the claimant when the round is one person's, and every claim as a line with the outcome the rules gave it."""
+    t = computed["totals"]
+    by = t["claimed_by_outcome"]
+    run = (req or {}).get("run") or {}
+    out = {"company": computed.get("company") or "", "period": computed["period_label"],
+           "prepared_on": _day(run.get("date") or computed["prepared_on"]), "claims": str(t["claims"]), "passed": str(t["pass"]),
+           "exceptions": str(t["exception"]), "judgement": str(t["question"]), "claimed_thb": _money(t["claimed"]),
+           "pass_thb": _money(by["pass"]), "exception_thb": _money(by["exception"]), "question_thb": _money(by["question"]),
+           "lines": [{"date": _day(c.get("date")) or (c.get("date_raw") or ""), "employee": c.get("employee_name") or c.get("employee_id") or "",
+                      "category": c.get("category_label") or c.get("category_raw") or "", "description": c.get("description") or "",
+                      "merchant": c.get("merchant") or "", "receipt": c.get("receipt") or c.get("receipt_ref") or "",
+                      "amount": _money(c.get("amount")), "outcome": c.get("outcome_label") or ""} for c in computed["claims"]]}
+    people = computed.get("by_employee") or []
+    if len(people) == 1:
+        # one claimant: their name and number fit the form's one blank (several do not)
+        out["employee_name"] = people[0].get("employee_name") or ""
+        out["employee_id"] = people[0].get("employee_id") or ""
+    return out
+
+
+def template_gaps(computed: dict) -> dict:
+    """What the form's face says it lacks — and what this round has no concept of: the agent does not see cash
+    advances, so an advance-cleared line is taken off the face rather than printed as a blank to fill."""
+    from ...deliverables import form_words
+
+    return form_words.gaps(not_applicable={"advance_cleared": W("form.na.advance")})
+
+
+def template_wanted(computed: dict) -> bool:
+    return bool(computed.get("claims"))
+
+
+def template_why_not(computed: dict) -> str:
+    return W("form.not_made")

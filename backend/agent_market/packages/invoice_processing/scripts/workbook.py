@@ -23,6 +23,7 @@ from decimal import Decimal
 from openpyxl import load_workbook
 
 from ....deliverables import workpaper
+from ....deliverables.look import commentary
 from ....deliverables.look.xlsx_styles import Book
 from ....deliverables.reread import sheets, table
 from ....engine import words
@@ -196,8 +197,13 @@ def item_status(line: dict) -> str:
 
 
 class InvoiceWorkbook:
-    def __init__(self, computed: dict, theme: dict, run: dict | None = None):
+    def __init__(self, computed: dict, theme: dict, run: dict | None = None, narrative: dict | None = None,
+                 model_info: dict | None = None):
         self.c, self.t, self.run = computed, theme, run or {}
+        # AM22: the commentary (a model's or the rules', with who wrote it) printed on its own sheet after the face
+        self.narrative = narrative or dict(computed.get("fallback_narrative") or {}, written_by="rules")
+        self.model_info = model_info or {}
+        self.commentary: dict = {}
         self.book = Book(theme, words.lang())
         self.wb = self.book.wb
 
@@ -324,8 +330,10 @@ class InvoiceWorkbook:
         self.checks()
         # AM8: printable — the register's row number, date and document number repeat on every page (AM10: and
         # open its companion sheet)
+        # AM22 §1.1: the commentary sheet, right after the face, with the line that says who wrote it
+        self.commentary = commentary.sheet(self.book, self.narrative, self.c, self.model_info)
         self.book.finish(path, id_cols={W(S_REGISTER): ID_COLS[S_REGISTER], W(S_REGISTER_EV): ID_COLS[S_REGISTER], W("doc.sheet.provenance"): 2}, author=str(self.c.get("company") or self.run.get("organisation") or ""))
-        return {"sheets": list(self.wb.sheetnames), "register_rows": self.c["totals"]["included"]}
+        return {"sheets": list(self.wb.sheetnames), "register_rows": self.c["totals"]["included"], "layouts": [self.commentary["layout"]]}
 
 
 def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:

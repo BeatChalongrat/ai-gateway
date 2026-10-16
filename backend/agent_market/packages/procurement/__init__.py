@@ -100,7 +100,27 @@ def compute(files, roles, period, *, answers=None, defaults=None, today: _dt.dat
     today = today or _dt.date.today()
     request = _request.build(need, items, picks, vat_rate=rate)
     tot = (request or {}).get("totals") or {}
+    # AM22 §1.1: the round's commentary — the rules' words, and what a model is shown to write its own. The
+    # figures of a comparison have no citation ids of their own (a price is cited by its source page on the
+    # sources sheet), so the commentary names them as printed (the runner's quotable path), not by key.
+    from ...deliverables.look.catalogue import writing_limits
+    offers = sum(len(it["candidates"]) for it in items)
+    chosen = len((request or {}).get("lines") or [])
+    gaps = len((request or {}).get("gaps") or [])
+    quotable = {"items": str(len(items)), "offers": str(offers), "chosen": str(chosen), "gaps": str(gaps)}
+    for k in ("subtotal", "net", "vat", "total"):
+        if tot.get(k):
+            quotable[k] = str(tot[k])
+    fallback = {"summary": t(lang, "narr.summary", items=len(items), offers=offers, chosen=chosen),
+                "movements": [t(lang, "narr.total", total=tot["total"], currency=tot.get("currency") or "")] if tot.get("total") else [],
+                "watch": [t(lang, "narr.gaps", gaps=gaps)] if gaps else [],
+                "next_steps": [t(lang, "narr.next.review")]}
+    facts = [{"heading": t(lang, "fact.h.result"), "lines": [
+        t(lang, "fact.counts", items=len(items), offers=offers, chosen=chosen, gaps=gaps),
+        *([t(lang, "narr.total", total=tot["total"], currency=tot.get("currency") or "")] if tot.get("total") else [])]}]
     return {"kind": "procurement", "schema": 1, "lang": lang, "period": period, "today": today.isoformat(), "vat_rate": rate,
+            "quotable": quotable, "quotable_ids": [], "fallback_narrative": fallback, "narrative_facts": facts,
+            "writing_limits": writing_limits("xlsx"),
             "need": need, "items": items, "picks": picks, "request": request,
             # the round in a few counts and amounts: what a self-test's expectations are read from
             "totals": {"offers": sum(len(it["candidates"]) for it in items), "dropped": sum(len(it["dropped"]) for it in items),
@@ -274,14 +294,18 @@ def _asked_check(path: str, view: dict) -> dict:
 def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     import hashlib
 
+    from ...deliverables import quality
     from ...deliverables.formats import wanted_formats
+    from ...engine import words as _words
+    from ...deliverables.look import commentary
+    from ...deliverables.look.catalogue import DoesNotFit
     from ...deliverables.theme import resolve
     from .scripts.draft import RequestDraft
     from .scripts.draft import check as check_draft
     from .scripts.workbook import ComparisonWorkbook
     from .scripts.workbook import check as check_workbook
 
-    view, applied, refused = _as_asked(computed, req)
+    view, applied, asked_refused = _as_asked(computed, req)
     theme = resolve(req.get("theme"))
     names = req.get("names") or {}
     run = req.get("run") or {}
@@ -298,21 +322,35 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
         artifacts.append({"name": os.path.basename(path), "format": fmt, "kind": kind, "size": os.path.getsize(path), "sha256": sha,
                           "quality": {"passed": ok, "checks": checks}, "meta": meta, "chart_bindings": [], "citations": 0})
 
+    refused: list = []
     if "xlsx" in wanted:
         path = os.path.join(out_dir, os.path.basename(names.get("xlsx") or "comparison.xlsx"))
-        meta = ComparisonWorkbook(view, theme, run).write(path)
-        checks = check_workbook(path, view, run)
-        if applied:
-            checks.append(_asked_check(path, view))
-        done(path, "xlsx", "table", checks, meta)
+        # AM22 §1.1: the commentary on its own sheet, read back by the gate; one too long for its layout is
+        # refused naming the section, and the file is not written
+        narrative = req.get("narrative") or dict(view.get("fallback_narrative") or {}, written_by="rules")
+        try:
+            meta = ComparisonWorkbook(view, theme, run, narrative=narrative, model_info=req.get("model_info")).write(path)
+        except DoesNotFit as e:
+            if os.path.exists(path):
+                os.remove(path)
+            refused.append(commentary.refusal("xlsx", os.path.basename(path), e))
+            all_ok = False
+        else:
+            checks = check_workbook(path, view, run)
+            if applied:
+                checks.append(_asked_check(path, view))
+            with _words.speaking(view.get("lang")):
+                checks.append(commentary.check(path, narrative, view, req.get("model_info")))
+            checks.append(quality.fit_ok(meta.get("layouts") or []))
+            done(path, "xlsx", "table", checks, meta)
     # the request as a plain document — unless the organisation's own form is being filled this round, or
     # nothing was chosen (then there is no request to draft, and the comparison says so)
     if "docx" in wanted and request.get("lines") and not req.get("template"):
         path = os.path.join(out_dir, os.path.basename(names.get("docx") or "purchase_request.docx"))
         meta = RequestDraft(computed, theme, run).write(path, in_dir if os.path.isdir(in_dir) else None)
         done(path, "docx", "request", check_draft(path, computed), meta)
-    return {"passed": all_ok, "artifacts": artifacts, "theme": {"id": theme["id"], "version": theme.get("version", 1)},
-            "asked": {"applied": applied, "refused": refused}}
+    return {"passed": all_ok, "artifacts": artifacts, "refused": refused,
+            "theme": {"id": theme["id"], "version": theme.get("version", 1)}, "asked": {"applied": applied, "refused": asked_refused}}
 
 
 def template_values(computed: dict, req: dict | None = None) -> dict:

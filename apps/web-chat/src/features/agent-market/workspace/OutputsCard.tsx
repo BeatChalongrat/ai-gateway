@@ -391,6 +391,15 @@ export function SeenBy({ outputs }: { outputs: OutputsPayload }) {
   } else {
     lines.push(t("outputs.seenNone"));
   }
+  // AM22: an agent that reads scans and has a model write its commentary says who wrote the words too —
+  // the model, or the agent's rules when no model could answer (the runner sets written_by_rules only then)
+  if (m.uses === "vision" && typeof m.written_by_rules === "boolean") {
+    lines.push(
+      m.written_by_rules || !m.model
+        ? t("outputs.commentaryByRules")
+        : t("outputs.commentaryBy", { model: m.model, where: where(m.self_hosted) }),
+    );
+  }
   if (m.not_chosen && m.chosen_model) {
     const used = m.uses === "text" ? m.model : m.uses === "web" ? m.web?.[0]?.model : m.vision_model;
     lines.push(

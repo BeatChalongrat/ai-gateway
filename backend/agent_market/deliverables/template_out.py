@@ -83,6 +83,11 @@ def slots(inspection: dict) -> list[dict]:
         i = info.get(t["cell"])
         if i:
             slot.update({"required": bool(i.get("required")), "side": i.get("side"), "label_at": i.get("label_at")})
+            # AM22: a blank that is a merged range says so; one inside a range is refused by name
+            if i.get("merged"):
+                slot["merged"] = i["merged"]
+            if i.get("fillable") is False:
+                slot.update(fillable=False, reason=i.get("reason"))
         out.append(slot)
     # AM12: the rows of a table of items in a form with no marker — one place that takes a list, its
     # columns the headings over the rows; and a blank drawn as a line after its label
@@ -158,22 +163,48 @@ def propose(sl: list[dict], spec: dict) -> dict[str, str]:
     return out
 
 
+# AM22 §2.4: what a slot is, besides its key — a new version whose key is the same and whose label, kind, place
+# or columns are not is the same address holding something else ("moved"), never "kept"
+IDENTITY = ("kind", "label", "label_at", "side", "where", "columns", "column_labels", "merged", "fillable")
+
+
+def _same_slot(a: dict, b: dict) -> bool:
+    return all(_norm(str(a.get(k) or "")) == _norm(str(b.get(k) or "")) if k in ("label",) else a.get(k) == b.get(k)
+               for k in IDENTITY)
+
+
 def diff(saved: dict | None, sl: list[dict]) -> dict:
-    """A new version against the saved template: the slots kept (their mapping kept), added, removed."""
+    """A new version against the saved template: the slots kept (their mapping kept), added, removed — and
+    moved (AM22): the same key whose label, kind or place changed. Anvil's field detection ran only on the first
+    upload, and a PDF swapped under an existing template kept its old fields; a key compared by name alone
+    would say "kept" here and carry the old mapping into the wrong cell."""
     if not saved:
-        return {"first": True, "kept": [], "added": [s["key"] for s in sl], "removed": []}
-    old = {s["key"] for s in saved.get("slots") or []}
-    new = {s["key"] for s in sl}
-    return {"first": False, "kept": sorted(old & new), "added": sorted(new - old), "removed": sorted(old - new)}
+        return {"first": True, "kept": [], "added": [s["key"] for s in sl], "removed": [], "moved": []}
+    old = {s["key"]: s for s in saved.get("slots") or []}
+    new = {s["key"]: s for s in sl}
+    both = sorted(set(old) & set(new))
+    moved = [k for k in both if not _same_slot(old[k], new[k])]
+    return {"first": False, "kept": [k for k in both if k not in moved], "added": sorted(set(new) - set(old)),
+            "removed": sorted(set(old) - set(new)), "moved": moved}
+
+
+def slot_of(key: str, keys) -> str:
+    """The slot a mapping key belongs to: the key itself, or — for a column of a table of items, "<slot>.<column>" —
+    the slot before its last dot. (AM22: a Word blank's own key has a dot in it, "table0.r1c1"; split at its first
+    dot it was "table0", and a saved mapping of a Word form's blanks was never carried to its next version.)"""
+    if key in keys:
+        return key
+    return key.rsplit(".", 1)[0] if "." in key else key
 
 
 def carry_over(saved: dict | None, sl: list[dict], proposal: dict) -> dict:
-    """The mapping to show for a new version: the saved choice for every kept slot, the proposal for the rest."""
+    """The mapping to show for a new version: the saved choice for every kept slot, the proposal for the rest.
+    A moved slot (AM22) is not kept: the person confirms it again."""
     mapping = dict(proposal)
     if saved:
-        keep = {s["key"] for s in sl}
+        keep = set(diff(saved, sl)["kept"])
         for k, v in (saved.get("mapping") or {}).items():
-            if k.split(".", 1)[0] in keep:
+            if slot_of(k, keep) in keep:
                 mapping[k] = v
     return mapping
 
@@ -196,17 +227,31 @@ def template_values(sl: list[dict], mapping: dict, values: dict) -> dict[str, An
     return out
 
 
-def fill(path: str, out_path: str, saved: dict, values: dict) -> dict:
+def fill(path: str, out_path: str, saved: dict, values: dict, not_applicable: dict | None = None) -> dict:
     """Fill the saved template with a run's values; then open the filled file again and judge it (``verify``).
     Returns the filler's report plus the checks and ``unfilled`` — every slot that does not hold its value,
-    by name, for the person."""
+    by name, for the person.
+
+    AM22 §2.2: ``not_applicable`` is the package's word on the fields this round has no concept of ({field:
+    why}). A slot mapped to one is not a gap: it is taken off the form's face (template_fill.drop_not_applicable)
+    and recorded in ``report["not_applicable"]`` — a reader cannot act on it, and it would make a complete form
+    look incomplete. Only the package decides which fields those are; the filler never guesses from emptiness
+    (a blank from no data, from a name that does not match and from a permission look the same)."""
     sl = saved.get("slots") or slots(tf.inspect(path))
     mapping = saved.get("mapping") or {}
+    na = not_applicable or {}
+    off = [{"key": s["key"], "label": s.get("label") or s["key"], "label_at": s.get("label_at"), "field": mapping[s["key"]].split(".", 1)[0],
+            "why": na[mapping[s["key"]].split(".", 1)[0]]}
+           for s in sl if s.get("fillable") and mapping.get(s["key"]) and mapping[s["key"]].split(".", 1)[0] in na]
+    off_keys = {o["key"] for o in off}
+    mapping = {k: v for k, v in mapping.items() if slot_of(k, off_keys) not in off_keys}
     tvals = template_values(sl, mapping, values)
     targets = {s["key"]: s["key"] for s in sl if s["kind"] == "target" and s["key"] in tvals}
     report = tf.fill(path, out_path, tvals, targets)
     report["regions"] = ([g for g in (tf.inspect(path, reads=("rows",)).get("regions") or []) if g["key"] in tvals]
                          if any(tf.fr.ROWS_RE.match(str(k)) for k in tvals) else [])
+    report["not_applicable"], removed = tf.drop_not_applicable(out_path, report["kind"], off)
+    report["moved"] = list(report.get("moved") or []) + removed
     if report["kind"] == "xlsx":
         _recalc_on_open(out_path)
     checks, unfilled = verify(path, out_path, sl, mapping, tvals, report)
@@ -297,12 +342,23 @@ def verify(src: str, out: str, sl: list[dict], mapping: dict, tvals: dict, repor
             miss(k, "wrong_label")
     # AM11: the gap list is the file's, not the mapping's. A blank the form expects filled, that the
     # delivered file still holds empty, is named — whether nobody mapped it or a person left it "not used".
+    # AM22: not a place the package said this round has no concept of (taken off the face, recorded).
+    off = {o["key"]: o for o in report.get("not_applicable") or []}
     expected = [s for s in sl if s.get("kind") == "target" and s.get("required") and s["fillable"]
-                and not mapping.get(s["key"])]
+                and not mapping.get(s["key"]) and s["key"] not in off]
     for s in expected:
         if tf.still_blank(out, kind, there(s)):
             miss(s["key"], "not_mapped")
-    asked = len(mapped) + len(expected)
+    # AM22 §2.4: a blank the filler cannot write (inside a merged range) is named with its reason, never skipped
+    refused_blanks = [s for s in sl if s.get("kind") == "target" and s.get("required") and not s["fillable"]]
+    for s in refused_blanks:
+        miss(s["key"], s.get("reason") or "cannot")
+    # AM22: a blank that is a merged range is still one range in the filled file
+    for s in mapped:
+        if s.get("merged") and kind == "xlsx" and not tf.still_merged(out, s["key"], s["merged"]):
+            miss(s["key"], "merged_cell")
+    asked = len(mapped) + len(expected) + len(refused_blanks)
+    off_face = [o for o in off.values() if not tf.not_applicable_off(out, kind, {**o, "key": there(o)["key"]})]
     left = tf.markers_left(out)
     for k in left:
         miss(k, "marker_left")
@@ -344,6 +400,11 @@ def verify(src: str, out: str, sl: list[dict], mapping: dict, tvals: dict, repor
         ck("template.parts_kept", not report.get("parts_dropped"), ", ".join(report.get("parts_dropped") or []) or S("form.parts.ok"),
            S("form.parts.label")),
     ]
+    if off:
+        # AM22 §2.2: what the round has no concept of is off the form's face, read from the file
+        checks.append(ck("template.not_applicable", not off_face,
+                         S("form.na.left", fields=", ".join(o["label"] for o in off_face))[:300] if off_face
+                         else S("form.na.ok", n=len(off)), S("form.na.label"), len(off)))
     for where in cut:
         unfilled.setdefault(f"cut:{where}", {"slot": f"cut:{where}", "label": where, "why": _why("cut_off")})
     for c in charts:

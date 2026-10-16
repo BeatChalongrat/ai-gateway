@@ -337,7 +337,7 @@ func TestANarrativeWithANullListIsAnEmptyList(t *testing.T) {
 	cv := computedView{}
 	for _, s := range []string{
 		`{"summary":"ภาพรวมของงวดนี้","movements":["ค่าที่ปรึกษาเพิ่มขึ้น"],"watch":null,"next_steps":null}`,
-		`{"summary":"ภาพรวมของงวดนี้","movements":"ไม่มี","watch":[null, "ตรวจค่าที่ปรึกษา", 7, {"a":1}],"next_steps":[]}`,
+		`{"summary":"ภาพรวมของงวดนี้","movements":[],"watch":["ตรวจค่าที่ปรึกษา"],"next_steps":[]}`,
 		`{"summary":"ภาพรวมของงวดนี้"}`,
 	} {
 		v, err := checkNarrative(am.Thai, s, cv)
@@ -358,6 +358,17 @@ func TestANarrativeWithANullListIsAnEmptyList(t *testing.T) {
 	}
 	if _, err := checkNarrative(am.Thai, `{"summary":"  "}`, cv); err == nil {
 		t.Fatal("a narrative without a summary is refused")
+	}
+	// AM22 §1.2: what is not a sentence among the sentences — a number, an object, a list sent as one
+	// sentence — is refused and asked for again, not dropped on the way to the renderer (it was, until this card)
+	for _, s := range []string{
+		`{"summary":"ภาพรวมของงวดนี้","movements":"ไม่มี"}`,
+		`{"summary":"ภาพรวมของงวดนี้","watch":[null, "ตรวจค่าที่ปรึกษา", 7, {"a":1}]}`,
+		`{"summary":"ภาพรวมของงวดนี้","next_steps":["ทบทวน", "  "]}`,
+	} {
+		if _, err := checkNarrative(am.Thai, s, cv); err == nil {
+			t.Fatalf("%s: a list that holds what is not a sentence is refused, not cleaned", s)
+		}
 	}
 }
 

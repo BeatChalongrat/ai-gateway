@@ -13,7 +13,8 @@ func TestTheModelIsToldTheLayoutsLimitsBeforeItWrites(t *testing.T) {
 	cv := computedView{PeriodLabel: "กันยายน 2569", Figures: map[string]figureView{"revenue": {Text: "12,480,300", Cite: "c61", Label: "รายได้"}},
 		WritingLimits: map[string]int{"summary_chars": 480, "bullet_chars": 110, "bullets_max": 4, "sentence_chars": 160}}
 	p := narrativePrompt(am.Thai, cv)
-	for _, want := range []string{"สรุปไม่เกิน 480", "แต่ละข้อในรายการไม่เกิน 110 ตัวอักษร", "ไม่เกิน 4 ข้อ"} {
+	// (AM22 §1.3 reworded the line: the points a page holds, and how to write to the budget — am22_test.go)
+	for _, want := range []string{"สรุปไม่เกิน 480", "แต่ละข้อในรายการไม่เกิน 110", "4 ข้อต่อหน้า"} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("the prompt does not tell the model %q:\n%s", want, p)
 		}

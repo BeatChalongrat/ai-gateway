@@ -40,12 +40,17 @@ def _base_computed():
 
 
 def _phrase(lang: str, n: int) -> str:
-    """A sentence of about n characters, in the language, made of words a layout can break between."""
+    """A sentence of about n characters a reader sees (AM22: columns — a Thai mark takes none), in the language,
+    made of words a layout can break between."""
+    from ..columns import columns
+
     word = "รายได้เพิ่มขึ้นจากงวดก่อนตามแผน " if lang == "th" else "Revenue rose against the plan this period "
     out = ""
-    while len(out) < n:
+    while columns(out) < n:
         out += word
-    return out[:n].rstrip()
+    while columns(out) > n:
+        out = out[:-1]
+    return out.rstrip()
 
 
 def narrative_for(case: str, lang: str, base: dict, limits: dict) -> dict:
@@ -85,7 +90,6 @@ def render(out: str) -> dict:
     from ..engine import words
 
     base = _base_computed()
-    limits = writing_limits()
     refusals: dict[str, list] = {}
     made: list[str] = []
     for case in CASES:
@@ -100,6 +104,8 @@ def render(out: str) -> dict:
                     computed = dict(base)
                     computed["exceptions"] = exceptions_for(case, base)
                     company = "บริษัท ตัวอย่าง จำกัด" if lang == "th" else "Example Co., Ltd."
+                    # AM22: the long case is at the limits each language is told (its own columns), the absurd far past them
+                    limits = writing_limits("pptx", lang)
                     req = {"formats": ["docx", "pptx"], "names": {"docx": "report.docx", "pptx": "deck.pptx"},
                            "theme": {"id": theme, "company": company},
                            "narrative": narrative_for(case, lang, computed["fallback_narrative"], limits), "assumptions": [],

@@ -1,7 +1,7 @@
 {
   "schema_version": "agent.market.v1",
   "id": "sran.expense-audit",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "name": "ตรวจการเบิกค่าใช้จ่ายตามนโยบายบริษัท",
   "name_en": "Expense Audit",
   "short_name": "ตรวจค่าใช้จ่าย",
@@ -34,7 +34,7 @@
   ],
   "capabilities": {
     "required": ["document.extract.e2", "compute.python.decimal", "deliverable.table.xlsx", "spreadsheet.read.xlsx"],
-    "optional": ["model.vision"]
+    "optional": ["model.vision", "model.text"]
   },
   "install": {
     "defaults": {
@@ -61,7 +61,8 @@
     },
     "questions": ["company", "policy", "theme", "formats"]
   },
-  "narrative": "rules",
+  "narrative": "model",
+  "narrative_when_away": "rules",
   "document_index": {"retention_days": 730},
   "guide": {
     "for": "สำหรับผู้ตรวจการเบิกค่าใช้จ่ายพนักงานประจำเดือน ที่อยากให้ตรวจทุกรายการตามนโยบายของบริษัทก่อนส่งให้ผู้อนุมัติ",
@@ -101,7 +102,8 @@
     },
     "questions": "จะถามเรื่องที่ต้องใช้วิจารณญาณ เช่น รายการที่เบิกในวันหยุดเป็นงานของบริษัทหรือไม่ หรือรายละเอียดที่ยังไม่บอกว่าเบิกเพื่ออะไร และจะถามยอดในใบเสร็จที่อ่านไม่ชัด",
     "model_inputs": {
-      "model.vision": "เฉพาะภาพใบเสร็จที่เป็นสแกนหรือรูปถ่าย ส่งให้โมเดลที่เลือกไว้สำหรับ agent นี้อ่านซ้ำเพื่อเทียบยอดรวม โดยปกติคือโมเดลที่รันในองค์กร ภาพจะออกนอกองค์กรก็ต่อเมื่อผู้ดูแลอนุญาตให้เอกสารของ agent นี้ออกนอกองค์กรและมีการเลือกโมเดลนอกองค์กร ซึ่งการ์ดของรอบนั้นจะบอกไว้ ค่าที่โมเดลอ่านเป็นเพียงคำแนะนำในการ์ดคำถาม ใบเสร็จ PDF ดิจิทัลและไฟล์รายการเบิกอ่านด้วยกฎเท่านั้น ไม่มีโมเดลเห็น"
+      "model.vision": "เฉพาะภาพใบเสร็จที่เป็นสแกนหรือรูปถ่าย ส่งให้โมเดลที่เลือกไว้สำหรับ agent นี้อ่านซ้ำเพื่อเทียบยอดรวม โดยปกติคือโมเดลที่รันในองค์กร ภาพจะออกนอกองค์กรก็ต่อเมื่อผู้ดูแลอนุญาตให้เอกสารของ agent นี้ออกนอกองค์กรและมีการเลือกโมเดลนอกองค์กร ซึ่งการ์ดของรอบนั้นจะบอกไว้ ค่าที่โมเดลอ่านเป็นเพียงคำแนะนำในการ์ดคำถาม ใบเสร็จ PDF ดิจิทัลและไฟล์รายการเบิกอ่านด้วยกฎเท่านั้น ไม่มีโมเดลเห็น",
+      "model.text": "ตารางตัวเลขที่คำนวณแล้วของรอบนั้น — ยอดรวม จำนวน ผลการตรวจ และข้อสังเกตจากกฎ — เพื่อเขียนคำอธิบายรอบนี้ (ชีต “คำอธิบายรอบนี้” ในไฟล์ Excel) และเพื่อตอบคำถามที่คุณพิมพ์ถามเกี่ยวกับตัวเลขของรอบนั้น ไม่มีการส่งไฟล์ที่อัปโหลดหรือรายการรายบรรทัด โมเดลไม่พิมพ์ตัวเลขเอง: เขียนชื่อของตัวเลขแล้วระบบใส่ตัวเลขพร้อมรหัสอ้างอิงของมันเอง ถ้าไม่มีโมเดลที่ให้คำตอบที่ใช้ได้ กฎของแพ็กเกจเขียนคำอธิบายแทน และชีตนั้นบอกไว้"
     },
     "never": [
       "ไม่อนุมัติหรือปฏิเสธการเบิกแทนคน",
@@ -130,6 +132,28 @@
   },
   "limits": {"max_file_mb": 20, "max_files": 60},
   "self_test": "self-test.json",
+  "templates": {
+    "reads": ["rows", "lines", "pdf"],
+    "fields": {
+      "company": {"label": "ชื่อบริษัท"},
+      "period": {"label": "งวด"},
+      "prepared_on": {"label": "วันที่จัดทำ"},
+      "employee_name": {"label": "ชื่อผู้เบิก"},
+      "employee_id": {"label": "รหัสพนักงาน"},
+      "claims": {"label": "จำนวนรายการเบิก", "once": true},
+      "passed": {"label": "จำนวนรายการที่ผ่าน", "once": true},
+      "exceptions": {"label": "จำนวนรายการที่เป็นข้อยกเว้น", "once": true},
+      "judgement": {"label": "จำนวนรายการที่ต้องใช้วิจารณญาณ", "once": true},
+      "claimed_thb": {"label": "ยอดเบิกรวม (บาท)", "once": true},
+      "pass_thb": {"label": "ยอดที่ผ่าน (บาท)", "once": true},
+      "exception_thb": {"label": "ยอดที่เป็นข้อยกเว้น (บาท)", "once": true},
+      "question_thb": {"label": "ยอดที่ต้องใช้วิจารณญาณ (บาท)", "once": true},
+      "advance_cleared": {"label": "เงินทดรองจ่ายที่หักล้าง (บาท)"}
+    },
+    "lists": {
+      "lines": {"label": "รายการเบิก", "columns": {"date": "วันที่", "employee": "ผู้เบิก", "category": "หมวด", "description": "รายละเอียด", "merchant": "ร้านค้า", "receipt": "ใบเสร็จ", "amount": "จำนวนเงิน", "outcome": "ผลตรวจ"}}
+    }
+  },
   "strings": {
     "weekday.0": "วันจันทร์",
     "weekday.1": "วันอังคาร",
@@ -579,7 +603,30 @@
     "doc.calendar.not_checked": "ไม่ได้ตรวจวันหยุดนักขัตฤกษ์: {v} ตรวจเฉพาะวันเสาร์–อาทิตย์",
     "doc.note.models": "โมเดลที่เห็นใบเสร็จ: {model} ({place}) อ่านซ้ำ {n} ฉบับที่เป็นสแกนหรือรูปถ่าย เพื่อเทียบกับ OCR เท่านั้น",
     "doc.model.inside": "รันในองค์กร",
-    "doc.model.outside": "ผู้ให้บริการภายนอก"
+    "doc.model.outside": "ผู้ให้บริการภายนอก",
+    "cite.claims_n.label": "จำนวนรายการเบิกทั้งหมด",
+    "cite.claims_n": "นับทุกรายการในไฟล์เบิกที่อ่านได้",
+    "cite.pass_n.label": "จำนวนรายการที่ผ่าน",
+    "cite.pass_n": "นับรายการที่ผ่านทุกกฎ",
+    "cite.exception_n.label": "จำนวนรายการที่เป็นข้อยกเว้น",
+    "cite.exception_n": "นับรายการที่ติดกฎและรอคนตัดสิน",
+    "cite.question_n.label": "จำนวนรายการที่ต้องใช้วิจารณญาณ",
+    "cite.question_n": "นับรายการที่กฎตัดสินไม่ได้",
+    "cite.review_n.label": "จำนวนข้อยกเว้นของรอบที่รอคนตัดสิน",
+    "cite.review_n": "นับข้อยกเว้นของรอบที่ต้องมีคนตัดสิน",
+    "fact.h.result": "ผลการตรวจรายการเบิก",
+    "fact.h.reasons": "เหตุที่พบในรอบนี้",
+    "fact.h.policy": "นโยบายที่ใช้ในรอบนี้",
+    "fact.exp.counts": "รายการเบิก {claims} รายการ: ผ่าน {pass_} เป็นข้อยกเว้น {exception} ต้องใช้วิจารณญาณ {question}",
+    "fact.exp.amounts": "ยอดเบิกรวม {claimed} บาท: ผ่าน {pass_} ข้อยกเว้น {exception} วิจารณญาณ {question}",
+    "fact.exp.review": "ข้อยกเว้นของรอบที่รอคนตัดสิน {review} ข้อ",
+    "fact.exp.reason": "พบเหตุ: {reason}",
+    "fact.exp.policy.set": "วงเงินมาจากตารางนโยบายที่บริษัทตั้งไว้",
+    "fact.exp.calendar.on": "ตรวจวันหยุดนักขัตฤกษ์ด้วยปฏิทินของบริษัทแล้ว",
+    "fact.exp.calendar.off": "ยังไม่ได้ตรวจวันหยุดนักขัตฤกษ์ ตรวจเฉพาะวันเสาร์–อาทิตย์",
+    "fact.exp.policy.shipped": "วงเงินมาจากตารางนโยบายตัวอย่างที่มากับ agent ยังไม่ใช่ของบริษัท",
+    "form.na.advance": "agent นี้ไม่ได้ตรวจเงินทดรองจ่าย จึงไม่มีเรื่องนี้ในรอบนี้",
+    "form.not_made": "รอบนี้ไม่มีรายการเบิกที่อ่านได้ จึงไม่มีอะไรให้กรอกลงแบบฟอร์ม"
   },
   "en": {
     "เรียงรายการเบิกจากยอดสูงสุด": "Claims ordered from the largest amount",
@@ -1053,7 +1100,40 @@
     "โมเดลที่เห็นใบเสร็จ: {model} ({place}) อ่านซ้ำ {n} ฉบับที่เป็นสแกนหรือรูปถ่าย เพื่อเทียบกับ OCR เท่านั้น": "Model that saw receipts: {model} ({place}) re-read {n} scanned or photographed receipts, only to compare with OCR",
     "รันในองค์กร": "runs inside the organisation",
     "ผู้ให้บริการภายนอก": "an outside provider"
-
+,
+    "จำนวนรายการเบิกทั้งหมด": "Number of claims",
+    "นับทุกรายการในไฟล์เบิกที่อ่านได้": "Counts every readable claim in the claims file",
+    "จำนวนรายการที่ผ่าน": "Number of claims that passed",
+    "นับรายการที่ผ่านทุกกฎ": "Counts the claims that passed every rule",
+    "จำนวนรายการที่เป็นข้อยกเว้น": "Number of claims that are exceptions",
+    "นับรายการที่ติดกฎและรอคนตัดสิน": "Counts the claims caught by a rule and awaiting a person",
+    "จำนวนรายการที่ต้องใช้วิจารณญาณ": "Number of claims needing judgement",
+    "นับรายการที่กฎตัดสินไม่ได้": "Counts the claims no rule could decide",
+    "จำนวนข้อยกเว้นของรอบที่รอคนตัดสิน": "Number of run exceptions awaiting a person",
+    "นับข้อยกเว้นของรอบที่ต้องมีคนตัดสิน": "Counts the run exceptions a person must decide",
+    "ผลการตรวจรายการเบิก": "Result of the audit",
+    "เหตุที่พบในรอบนี้": "Reasons found this run",
+    "นโยบายที่ใช้ในรอบนี้": "Policy applied this run",
+    "รายการเบิก {claims} รายการ: ผ่าน {pass_} เป็นข้อยกเว้น {exception} ต้องใช้วิจารณญาณ {question}": "{claims} claims: {pass_} passed, {exception} exceptions, {question} needing judgement",
+    "ยอดเบิกรวม {claimed} บาท: ผ่าน {pass_} ข้อยกเว้น {exception} วิจารณญาณ {question}": "Total claimed {claimed} baht: passed {pass_}, exceptions {exception}, judgement {question}",
+    "ข้อยกเว้นของรอบที่รอคนตัดสิน {review} ข้อ": "{review} run exceptions await a person",
+    "พบเหตุ: {reason}": "Reason found: {reason}",
+    "วงเงินมาจากตารางนโยบายตัวอย่างที่มากับ agent ยังไม่ใช่ของบริษัท": "The limits come from the sample policy table shipped with the agent, not yet the company's own",
+    "วงเงินมาจากตารางนโยบายที่บริษัทตั้งไว้": "The limits come from the policy table the company set",
+    "ตรวจวันหยุดนักขัตฤกษ์ด้วยปฏิทินของบริษัทแล้ว": "Public holidays were checked against the company's calendar",
+    "ยังไม่ได้ตรวจวันหยุดนักขัตฤกษ์ ตรวจเฉพาะวันเสาร์–อาทิตย์": "Public holidays were not checked; only Saturdays and Sundays were",
+    "ตารางตัวเลขที่คำนวณแล้วของรอบนั้น — ยอดรวม จำนวน ผลการตรวจ และข้อสังเกตจากกฎ — เพื่อเขียนคำอธิบายรอบนี้ (ชีต “คำอธิบายรอบนี้” ในไฟล์ Excel) และเพื่อตอบคำถามที่คุณพิมพ์ถามเกี่ยวกับตัวเลขของรอบนั้น ไม่มีการส่งไฟล์ที่อัปโหลดหรือรายการรายบรรทัด โมเดลไม่พิมพ์ตัวเลขเอง: เขียนชื่อของตัวเลขแล้วระบบใส่ตัวเลขพร้อมรหัสอ้างอิงของมันเอง ถ้าไม่มีโมเดลที่ให้คำตอบที่ใช้ได้ กฎของแพ็กเกจเขียนคำอธิบายแทน และชีตนั้นบอกไว้": "The run's computed table — totals, counts, the outcome of the checks and the rules' observations — to write this run's commentary (the “คำอธิบายรอบนี้” sheet of the Excel file) and to answer a question you type about the run's figures. No uploaded file and no line item is sent. The model types no figure itself: it writes the figure's name and the system puts in the figure with its own reference code. When no model gives a usable answer, the package's rules write the commentary and the sheet says so",
+    "ชื่อบริษัท": "Company name",
+    "งวด": "Period",
+    "วันที่จัดทำ": "Prepared on",
+    "ชื่อผู้เบิก": "Claimant",
+    "จำนวนรายการเบิก": "Number of claims",
+    "เงินทดรองจ่ายที่หักล้าง (บาท)": "Cash advance cleared (baht)",
+    "ผู้เบิก": "Claimant",
+    "ร้านค้า": "Merchant",
+    "ผลตรวจ": "Outcome",
+    "agent นี้ไม่ได้ตรวจเงินทดรองจ่าย จึงไม่มีเรื่องนี้ในรอบนี้": "This agent does not check cash advances, so this run has nothing about them",
+    "รอบนี้ไม่มีรายการเบิกที่อ่านได้ จึงไม่มีอะไรให้กรอกลงแบบฟอร์ม": "This run has no readable claim, so there is nothing to put in the form"
   },
   "en_by_key": {
     "doc.sheet.exceptions": "Exceptions",

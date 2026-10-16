@@ -466,7 +466,7 @@ class SelfTest(unittest.TestCase):
 
     def test_the_manifest(self):
         m = samplekit.manifest("po_matching")
-        self.assertEqual((m["id"], m["python_package"], m["narrative"]), ("sran.invoice-po-matching", "po_matching", "rules"))
+        self.assertEqual((m["id"], m["python_package"], m["narrative"]), ("sran.invoice-po-matching", "po_matching", "model"))   # AM22: a model writes its words
         self.assertEqual((m["scope"], m["jurisdiction"]), ("generic", "TH"))
         self.assertTrue(m["record_who_answered"])
         self.assertNotIn("completion_gate", m)           # finding a blocked invoice is the work, not a round that failed
@@ -481,8 +481,9 @@ class SelfTest(unittest.TestCase):
 class NoModel(unittest.TestCase):
     def test_no_model_decides_a_link_a_number_or_a_status(self):
         m = samplekit.manifest("po_matching")
-        self.assertEqual(m["capabilities"]["optional"], ["model.vision"])
-        self.assertNotIn("model.text", m["capabilities"]["required"] + m["capabilities"]["optional"])
+        # AM22: model.text writes the commentary from the computed table; no model decides a link, a number or a status
+        self.assertEqual(m["capabilities"]["optional"], ["model.vision", "model.text"])
+        self.assertNotIn("model.text", m["capabilities"]["required"])
         base = os.path.dirname(os.path.abspath(pkg.__file__))
         for root, _, names in os.walk(base):
             for n in names:

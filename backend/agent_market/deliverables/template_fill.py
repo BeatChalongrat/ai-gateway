@@ -39,6 +39,7 @@ from typing import Any
 
 import openpyxl
 from openpyxl.utils import get_column_letter
+from openpyxl.utils.cell import coordinate_from_string
 from docx import Document
 from docx.oxml.ns import qn
 from lxml import etree
@@ -231,11 +232,19 @@ def _xlsx_targets(wb, skip: set | None = None) -> tuple[list[dict[str, str]], di
     out: list[dict[str, str]] = []
     info: dict[str, dict] = {}
 
-    def add(ws, row, col, label, side, required, label_cell) -> bool:
+    def add(ws, row, col, label, side, required, label_cell, refused: str | None = None) -> bool:
         ref = f"{ws.title}!{get_column_letter(col)}{row}"
         if ref not in info:
             out.append({"cell": ref, "label": label})
             info[ref] = {"required": bool(required), "side": side, "label_at": f"{ws.title}!{label_cell.coordinate}"}
+            merged = _merge_of(ws, row, col)
+            if merged is not None:
+                # AM22 §2.4: a blank that is a merged range is the range — its top-left takes the value, and the
+                # filled file is read again to see the range is still one; a blank inside a range but not its
+                # top-left is refused by name, never written to the top-left and hoped for
+                info[ref]["merged"] = merged
+            if refused:
+                info[ref].update(fillable=False, reason=refused)
         return len(out) >= MAX_TARGETS
 
     skip = skip or set()
@@ -259,12 +268,22 @@ def _xlsx_targets(wb, skip: set | None = None) -> tuple[list[dict[str, str]], di
             return any((cell.row + d, cell.column) in at and free(cell.row + d, cell.column + 1) for d in (-1, 1))
 
         later = []
-        # 1. a blank beside its label that the form marks as one: a colon, a drawn cell, a list of fields
+        # 1. a blank beside its label that the form marks as one: a colon, a drawn cell, a list of fields.
+        # AM22: "beside" is right of the label's own merged range, when the label is one (a label drawn across
+        # several columns to a blank at the end of the row was never read before: its first neighbour is its own merge)
         for cell, label, colon in labels:
-            if not free(cell.row, cell.column + 1):
+            nxt = _after_label(ws, cell)
+            beside = ex.peek_cell(ws, cell.row, nxt)
+            if isinstance(beside, ex.MergedCell) and (ws.title, cell.row) not in skip and (
+                    colon or _drawn_as_blank(_top_left(ws, cell.row, nxt))):
+                # AM22: the label's blank is inside a merged range and is not its top-left — named, refused
+                if add(ws, cell.row, nxt, label, "right", True, cell, refused="merged_cell"):
+                    return out, info
+                continue
+            if not free(cell.row, nxt):
                 later.append((cell, label, False))
-            elif colon or _drawn_as_blank(ex.peek_cell(ws, cell.row, cell.column + 1)) or in_a_list(cell):
-                if add(ws, cell.row, cell.column + 1, label, "right", True, cell):
+            elif colon or _drawn_as_blank(ex.peek_cell(ws, cell.row, nxt)) or in_a_list(cell):
+                if add(ws, cell.row, nxt, label, "right", True, cell):
                     return out, info
             else:
                 later.append((cell, label, True))
@@ -274,9 +293,143 @@ def _xlsx_targets(wb, skip: set | None = None) -> tuple[list[dict[str, str]], di
                 if add(ws, cell.row + 1, cell.column, label, "below", True, cell):
                     return out, info
             elif beside:
-                if add(ws, cell.row, cell.column + 1, label, "right", False, cell):
+                if add(ws, cell.row, _after_label(ws, cell), label, "right", False, cell):
                     return out, info
     return out, info
+
+
+def _after_label(ws, cell) -> int:
+    """The column right of a label: past its own merged range when the label is the top-left of one."""
+    for rng in ws.merged_cells.ranges:
+        if rng.min_row == cell.row and rng.min_col == cell.column:
+            return rng.max_col + 1
+    return cell.column + 1
+
+
+def _merge_of(ws, row: int, col: int) -> str | None:
+    """The merged range a cell is part of ("B5:D5"), or None."""
+    for rng in ws.merged_cells.ranges:
+        if rng.min_row <= row <= rng.max_row and rng.min_col <= col <= rng.max_col:
+            return rng.coord
+    return None
+
+
+def _top_left(ws, row: int, col: int):
+    """The top-left cell of the merged range a cell is part of (the cell itself when none)."""
+    for rng in ws.merged_cells.ranges:
+        if rng.min_row <= row <= rng.max_row and rng.min_col <= col <= rng.max_col:
+            return ws.cell(row=rng.min_row, column=rng.min_col)
+    return ex.peek_cell(ws, row, col)
+
+
+def still_merged(path: str, ref: str, merged: str) -> bool:
+    """AM22: the filled file, opened again — is the blank's merged range still one range?"""
+    sheet = ref.rpartition("!")[0].strip("'").replace("''", "'")
+    wb = openpyxl.load_workbook(path)
+    return sheet in wb.sheetnames and any(r.coord == merged for r in wb[sheet].merged_cells.ranges)
+
+
+# ─── AM22 §2.2: what this round has no concept of ─────────────
+def _docx_row_paragraphs(doc, table: int, row: int) -> tuple[int, int]:
+    """(the paragraph index after the row, how many paragraphs the row holds), counted as fr.moved_key counts."""
+    tr = doc.tables[table].rows[row]._tr
+    at, n = 0, 0
+    for i, p in enumerate(fr._paragraphs(doc), start=1):
+        if any(a is tr for a in p.iterancestors()):
+            n += 1
+            at = i
+    return at + 1, n
+
+
+def drop_not_applicable(path: str, kind: str, slots: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Take the places a round has no concept of off the filled form's face (AM22 §2.2) — the package said
+    which (template_gaps "not_applicable"): an Excel row is hidden (its formulas stay where they are), a Word
+    table row that holds nothing but the place and its label is removed, the rows of a table of items under
+    their heading are removed; a PDF field cannot be taken off its page and is left empty. Every one is
+    returned with what was done ({"slot", "label", "field", "why", "done"}), for the run's record — none is
+    printed as a gap. Returns (that list, the moves of what stood under a removed Word row)."""
+    done: list[dict] = []
+    moves: list[dict] = []
+    if not slots:
+        return done, moves
+    if kind == "xlsx":
+        wb = _load_xlsx(path)
+        regions = {g["key"]: g for g in fr.xlsx_regions(wb)} if any(fr.ROWS_RE.match(s["key"]) for s in slots) else {}
+        for s in slots:
+            rows: list[tuple[str, int]] = []
+            if fr.ROWS_RE.match(s["key"]) and s["key"] in regions:
+                g = regions[s["key"]]
+                rows = [(g["sheet"], r) for r in range(g["header"], g["first"] + g["rows"])]
+            elif "!" in s["key"]:
+                for ref in (s["key"], s.get("label_at") or ""):
+                    if "!" in ref:
+                        sheet, _, coord = ref.rpartition("!")
+                        rows.append((sheet.strip("'").replace("''", "'"), coordinate_from_string(coord)[1]))
+            for sheet, r in set(rows):
+                if sheet in wb.sheetnames:
+                    wb[sheet].row_dimensions[r].hidden = True
+            done.append({**s, "done": "hidden" if rows else "left_blank"})
+        wb.save(path)
+    elif kind == "docx":
+        doc = Document(path)
+        regions = {g["key"]: g for g in fr.docx_regions(doc)} if any(fr.ROWS_RE.match(s["key"]) for s in slots) else {}
+        drop: list[tuple[int, int, dict]] = []
+        for s in slots:
+            m = TARGET_RE.match(s["key"])
+            if fr.ROWS_RE.match(s["key"]) and s["key"] in regions:
+                g = regions[s["key"]]
+                table = doc.tables[g["table"]]
+                if g["first"] + g["rows"] - g["header"] >= len(table.rows):
+                    done.append({**s, "done": "left_blank"})   # the table is nothing but the list: it stays, empty
+                    continue
+                drop += [(g["table"], r, s) for r in range(g["header"], g["first"] + g["rows"])]
+            elif m:
+                ti, r, c = (int(x) for x in m.groups())
+                cells = fr._distinct(doc.tables[ti].rows[r].cells)
+                lm = TARGET_RE.match(s.get("label_at") or "")
+                own = {c} | ({int(lm.group(3))} if lm and int(lm.group(2)) == r else set())
+                if all(ci in own or not cell.text.strip() for ci, cell in cells):
+                    drop.append((ti, r, s))
+                else:
+                    done.append({**s, "done": "left_blank"})   # the row holds another place: only this one stays empty
+            else:
+                done.append({**s, "done": "left_blank"})
+        seen = set()
+        for ti, r, s in sorted(drop, key=lambda x: (x[0], x[1]), reverse=True):
+            if (ti, r) in seen:
+                continue
+            seen.add((ti, r))
+            after, n = _docx_row_paragraphs(doc, ti, r)
+            tr = doc.tables[ti].rows[r]._tr
+            tr.getparent().remove(tr)
+            moves.append({"table": ti, "from_row": r + 1, "rows": -1, "from_paragraph": after, "paragraphs": -n})
+        for s in {id(s): s for _, _, s in drop}.values():
+            done.append({**s, "done": "removed"})
+        doc.save(path)
+    else:
+        done += [{**s, "done": "left_blank"} for s in slots]
+    # the moves are applied from the bottom up, so a key is moved by each removal above it, the lowest first
+    return done, sorted(moves, key=lambda mv: (mv["table"], -mv["from_row"]))
+
+
+def not_applicable_off(path: str, kind: str, item: dict) -> bool:
+    """The filled file, opened again: is a place the round has no concept of off the form's face?"""
+    if item["done"] == "left_blank":
+        return still_blank(path, kind, item) if kind != "xlsx" and not fr.ROWS_RE.match(item["key"]) else True
+    if kind == "xlsx":
+        wb = openpyxl.load_workbook(path)
+        ref = item["key"] if "!" in item["key"] else ""
+        if not ref:
+            return True
+        sheet, _, coord = ref.rpartition("!")
+        sheet = sheet.strip("'").replace("''", "'")
+        r = coordinate_from_string(coord)[1]
+        return sheet in wb.sheetnames and bool(wb[sheet].row_dimensions[r].hidden)
+    if kind == "docx":
+        doc = Document(path)
+        text = "\n".join(c.text for t in doc.tables for row in t.rows for c in row.cells)
+        return _squash(item.get("label")) not in _squash(text)
+    return True
 
 
 def _xlsx_tables(wb, names: list[dict]) -> list[dict[str, Any]]:

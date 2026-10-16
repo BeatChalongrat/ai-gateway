@@ -75,7 +75,8 @@ export function TemplateMapper({
   const mapped = slots.filter((s) => s.fillable && mapping[s.key]).length;
   const fillable = slots.filter((s) => s.fillable).length;
   const counts = diffCounts(inspect.diff);
-  const added = new Set(counts ? inspect.diff.added ?? [] : []);
+  // AM22: a slot at the same address whose label moved is marked like a new one — its old choice is not carried
+  const added = new Set(counts ? [...(inspect.diff.added ?? []), ...(inspect.diff.moved ?? [])] : []);
   const savedSlots = new Map((saved?.slots ?? []).map((s) => [s.key, s] as const));
   const removed = counts
     ? (inspect.diff.removed ?? []).map((k) => {
@@ -108,6 +109,7 @@ export function TemplateMapper({
       {counts ? (
         <p className="mt-2 rounded-lg border border-border-subtle bg-bg-base px-3 py-2 text-xs text-text-secondary" data-testid="am-template-diff">
           {t("tpl.map.diff", { kept: String(counts.kept), added: String(counts.added), removed: String(counts.removed) })}
+          {counts.moved ? ` · ${t("tpl.map.moved", { n: String(counts.moved) })}` : ""}
         </p>
       ) : null}
 

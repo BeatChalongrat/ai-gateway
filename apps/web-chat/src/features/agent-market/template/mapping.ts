@@ -126,9 +126,9 @@ export function mappedCount(slots: TemplateSlot[], mapping: Record<string, strin
 }
 
 /** A new version against the saved one, or null for a first template. */
-export function diffCounts(diff: TemplateDiff | null | undefined): { kept: number; added: number; removed: number } | null {
+export function diffCounts(diff: TemplateDiff | null | undefined): { kept: number; added: number; removed: number; moved: number } | null {
   if (!diff || diff.first) return null;
-  return { kept: diff.kept?.length ?? 0, added: diff.added?.length ?? 0, removed: diff.removed?.length ?? 0 };
+  return { kept: diff.kept?.length ?? 0, added: diff.added?.length ?? 0, removed: diff.removed?.length ?? 0, moved: diff.moved?.length ?? 0 };
 }
 
 /** The slot as the person sees it in the file: {{marker}}, a control's alias, a name or a labelled cell with its reference. */

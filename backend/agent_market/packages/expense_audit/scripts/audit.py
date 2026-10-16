@@ -296,13 +296,31 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
     reasons = sorted({e["reason"] for e in run_ex if e["severity"] == "review"})
     fallback = {"summary": W("say.summary", n=len(claims), claimed=fmt_money(claimed), pass_=count["pass"],
                              exception=count["exception"], question=count["question"]),
-                "movements": [], "watch": reasons,
+                "movements": [], "watch": _capped(reasons),
                 "next_steps": ([W("say.next.review", review_n=review_n)] if review_n else [])
                 + ([W("say.next.sample_table")] if p.source == "package_sample" else [])}
     quotable = {"claims": str(len(claims)), "pass": str(count["pass"]), "exception": str(count["exception"]),
-                "question": str(count["question"]), "claimed_thb": fmt_money(claimed), "review": str(review_n)}
+                "question": str(count["question"]), "claimed_thb": fmt_money(claimed), "review": str(review_n),
+                "pass_thb": fmt_money(amount["pass"]), "exception_thb": fmt_money(amount["exception"]), "question_thb": fmt_money(amount["question"])}
     cal = rv.calendar
+    # AM22 §1.1: the figures a sentence of the commentary may name, each with its own citation; the facts a
+    # model is shown, with the figures by key; the layouts' limits for the words, in the run's language
+    from ....deliverables.look.catalogue import writing_limits
+    from ....engine import figures as F
+    figures = F.table([
+        ("claimed_thb", quotable["claimed_thb"], "e1", W("cite.claimed.label")), ("pass_thb", quotable["pass_thb"], "e2", W("cite.pass.label")),
+        ("exception_thb", quotable["exception_thb"], "e3", W("cite.exception.label")), ("question_thb", quotable["question_thb"], "e4", W("cite.question.label")),
+        ("claims", quotable["claims"], "n1", W("cite.claims_n.label")), ("pass", quotable["pass"], "n2", W("cite.pass_n.label")),
+        ("exception", quotable["exception"], "n3", W("cite.exception_n.label")), ("question", quotable["question"], "n4", W("cite.question_n.label")),
+        ("review", quotable["review"], "n5", W("cite.review_n.label"))])
+    facts = F.facts(
+        (W("fact.h.result"), [W("fact.exp.counts", claims="{claims}", pass_="{pass}", exception="{exception}", question="{question}"),
+                              W("fact.exp.amounts", claimed="{claimed_thb}", pass_="{pass_thb}", exception="{exception_thb}", question="{question_thb}"),
+                              W("fact.exp.review", review="{review}")]),
+        (W("fact.h.reasons"), [W("fact.exp.reason", reason=r) for r in reasons]),
+        (W("fact.h.policy"), [W("fact.exp.policy.shipped") if p.source == "package_sample" else W("fact.exp.policy.set"), _calendar_fact(cal)]))
     return {
+        "figures": figures, "narrative_facts": facts, "writing_limits": writing_limits("xlsx"),
         "schema": SCHEMA, "period": period, "period_label": label,
         "prepared_on": (today or _dt.date.today()).isoformat(), "company": (defaults or {}).get("company") or "",
         "claims": claims, "run_exceptions": run_ex, "receipts": receipts,
@@ -327,6 +345,11 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
     }
 
 
+def _calendar_fact(cal) -> str:
+    """What the model is told of the holiday calendar: whether public holidays were checked at all."""
+    return W("fact.exp.calendar.on") if getattr(cal, "active", False) else W("fact.exp.calendar.off")
+
+
 def _citations(claims: list[dict], totals: dict) -> list[dict]:
     """How each amount of the summary sheet was made (AM4) — the provenance an answer to "why is this
     figure what it is" is built from: which claims it adds up, each with its own amount and outcome."""
@@ -345,7 +368,14 @@ def _citations(claims: list[dict], totals: dict) -> list[dict]:
                 "left_out": [], "aliases": names, "script": "packages/expense_audit/scripts/audit.py"}
 
     with_amount = [x for x in claims if x.get("amount")]
+    # AM22: the counts a commentary names, so that a sentence can point to them too
+    by_outcome = {o: [x for x in claims if x["outcome"] == o] for o in ("pass", "exception", "question")}
     return [
+        c("n1", "claims_n", str(totals["claims"]), claims, []),
+        c("n2", "pass_n", str(totals["pass"]), by_outcome["pass"], []),
+        c("n3", "exception_n", str(totals["exception"]), by_outcome["exception"], []),
+        c("n4", "question_n", str(totals["question"]), by_outcome["question"], []),
+        c("n5", "review_n", str(totals["review"]), [], []),
         c("e1", "claimed", totals["claimed"], with_amount, ["cite.claimed.a1", "cite.claimed.a2", "cite.claimed.a3"]),
         c("e2", "pass", by["pass"], [x for x in with_amount if x["outcome"] == "pass"], ["cite.pass.a1", "outcome.pass"]),
         c("e3", "exception", by["exception"], [x for x in with_amount if x["outcome"] == "exception"],
@@ -363,3 +393,10 @@ def summarize(computed: dict) -> dict:
             "models": [{"model": m["model"], "self_hosted": m["self_hosted"], "documents": len(m["documents"])}
                        for m in computed["models"]],
             "excluded_list": []}
+
+
+def _capped(lines: list) -> list:
+    """AM22: the rules' list under one heading, at most the commentary sheet's ceiling; more is said, never cut."""
+    from ....engine import figures as F
+
+    return F.capped_rules(lines)

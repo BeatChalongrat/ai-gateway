@@ -421,12 +421,39 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
     fallback = {"summary": summary,
                 "movements": [W("say.matched", matched=c["matched"], by_rule=totals["by_rule"], by_person=totals["by_person"]),
                               W("say.items", items=len(items), journal=len(journal))],
-                "watch": [r for r in gate["reasons"]][:4],
+                # AM22: every reason, up to the sheet's ceiling and a line that says how many more (all are on the face)
+                "watch": _capped(gate["reasons"]),
                 "next_steps": ([gate["next"]] if gate.get("next") else []) +
                               ([W("say.check_journal")] if journal else [])}
     quotable = {"adjusted_bank": st["bank"]["adjusted"] or "", "adjusted_book": st["book"]["adjusted"] or "",
-                "difference": st["difference"] or "", "matched": str(c["matched"]), "items": str(len(items))}
+                "difference": st["difference"] or "", "matched": str(c["matched"]), "items": str(len(items)),
+                "bank_balance": st["bank"]["balance"] or "", "book_balance": st["book"]["balance"] or ""}
+    # AM22 §1.1: the figures a sentence of the commentary may name, each with its own citation (never matched
+    # by printed text, AM8); the facts a model is shown, with the figures by key; the layouts' limits for the
+    # words, in the run's language
+    from ....deliverables.look.catalogue import writing_limits
+    from ....engine import figures as F
+
+    def money(v):
+        return TH.fmt_money(Decimal(v)) if v not in (None, "") else ""
+    figures = F.table([
+        ("bank_balance", money(st["bank"]["balance"]), "b1", W("cite.balance.label", side=SIDE_TH["bank"])),
+        ("book_balance", money(st["book"]["balance"]), "b2", W("cite.balance.label", side=SIDE_TH["book"])),
+        ("adjusted_bank", money(st["bank"]["adjusted"]), "a1", W("cite.adjusted.bank.label")),
+        ("adjusted_book", money(st["book"]["adjusted"]), "a2", W("cite.adjusted.book.label")),
+        ("difference", money(st["difference"]), "d1", W("cite.difference.label")),
+        ("matched", str(c["matched"]), "n1", W("cite.matched.label")), ("items", str(len(items)), "n2", W("cite.items.label")),
+        ("older", str(sum(b["count"] for b in buckets[1:])), "n3", W("cite.older.label")), ("stale", str(len(stale)), "n4", W("cite.stale.label"))])
+    facts = F.facts(
+        (W("fact.h.result"), [W("fact.bank.tied") if gate["passed"] else W("fact.bank.not_tied", what=gate["what"]),
+                              W("fact.bank.balances", bank_balance="{bank_balance}", book_balance="{book_balance}"),
+                              W("fact.bank.adjusted", adjusted_bank="{adjusted_bank}", adjusted_book="{adjusted_book}", difference="{difference}")]),
+        (W("fact.h.matching"), [W("fact.bank.matched", matched="{matched}", by_rule=totals["by_rule"], by_person=totals["by_person"]),
+                                W("fact.bank.items", items="{items}", missing=c["missing"], extra=c["extra"], suspect=c["suspect"], journal=len(journal))]),
+        # (the buckets' bounds are not shown: "31–60" is not a figure of the table, and a model that repeats it is refused)
+        (W("fact.h.ageing"), [W("fact.bank.older", older="{older}")] + ([W("fact.bank.stale", n="{stale}")] if stale else [])))
     return {
+        "figures": figures, "narrative_facts": facts, "writing_limits": writing_limits("xlsx"),
         "schema": SCHEMA, "period": period, "period_label": label, "as_of": rv.end.isoformat(), "period_start": rv.start.isoformat(),
         "period_source": rv.period_source, "prepared_on": (today or rv.today).isoformat(),
         "company": str(rv.defaults.get("company") or ""), "account": {**rv.account, "gl_code": rv.gl_code or ""},
@@ -485,6 +512,28 @@ def _citations(rv: Review, st: dict, items: list[dict]) -> list[dict]:
                      names))
     label, names = words.names(lambda: (W("cite.difference.label"), [W("cite.difference.alias"), W("cite.difference.alias2")]))
     out.append(c("d1", label, st["difference"], W("cite.difference"), [], names))
+    # AM22: the counts a commentary names, so that a sentence can point to them too
+    label, names = words.names(lambda: (W("cite.matched.label"), [W("cite.matched.alias")]))
+    out.append(c("n1", label, str(len(rv.match["groups"]["matched"])), W("cite.matched"), [], names))
+    label, names = words.names(lambda: (W("cite.items.label"), [W("cite.items.alias")]))
+    out.append(c("n2", label, str(len(items)), W("cite.items"), [], names))
+    older = [i for i in items if i["type"] in OUTSTANDING and i.get("bucket") not in (None, "0-30")]
+    label, names = words.names(lambda: (W("cite.older.label"), []))
+    out.append(c("n3", label, str(len(older)), W("cite.older"), [part(x["sources"][0].get("file"), x["sources"][0].get("sheet"),
+                 x["sources"][0].get("row"), x["effect"], x["type_label"]) for x in older if x.get("sources")], names))
+    stale = [i for i in items if i["type"] == "outstanding_cheque" and (i.get("age_days") or 0) > C.STALE_DAYS]
+    label, names = words.names(lambda: (W("cite.stale.label"), []))
+    out.append(c("n4", label, str(len(stale)), W("cite.stale"), [part(x["sources"][0].get("file"), x["sources"][0].get("sheet"),
+                 x["sources"][0].get("row"), x["effect"], x["type_label"]) for x in stale if x.get("sources")], names))
+    # AM22 §2.1: each kind of reconciling item's total — what a customer's own form takes on its lines (0.00 when
+    # the round has none of the kind: the sum of nothing, said with nothing under it)
+    for kind in C.TYPES:
+        mine = [i for i in items if i["type"] == kind and i.get("effect") is not None]
+        total = abs(sum((Decimal(i["effect"]) for i in mine), ZERO))
+        label, names = words.names(lambda kind=kind: (W("cite.type.label", kind=C.TYPE_TH[kind]), []))
+        out.append(c(f"t_{kind}", label, f2(total), W("cite.type"),
+                     [part(x["sources"][0].get("file"), x["sources"][0].get("sheet"), x["sources"][0].get("row"), x["effect"], x["type_label"])
+                      for x in mine if x.get("sources")], names))
     return out
 
 
@@ -500,3 +549,10 @@ def summarize(computed: dict) -> dict:
             "models": [], "excluded_list": [],
             "not_included": [{k: e[k] for k in ("doc_key", "name", "reason", "detail", "how", "can_restore")}
                              for e in computed.get("not_included") or []]}
+
+
+def _capped(lines: list) -> list:
+    """AM22: the rules' list under one heading, at most the commentary sheet's ceiling; more is said, never cut."""
+    from ....engine import figures as F
+
+    return F.capped_rules(lines)

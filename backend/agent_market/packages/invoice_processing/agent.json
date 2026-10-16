@@ -1,7 +1,7 @@
 {
   "schema_version": "agent.market.v1",
   "id": "sran.invoice-processing",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "name": "อ่านใบกำกับภาษี / ใบเสร็จ ทำทะเบียนซื้อ",
   "name_en": "Invoice Processing",
   "short_name": "ทะเบียนเอกสารซื้อ",
@@ -32,13 +32,14 @@
   ],
   "capabilities": {
     "required": ["document.extract.e2", "compute.python.decimal", "deliverable.table.xlsx"],
-    "optional": ["model.vision"]
+    "optional": ["model.vision", "model.text"]
   },
   "install": {
     "defaults": {"formats": ["xlsx"], "language": "th", "currency": "THB", "theme": {"id": "navy"}},
     "questions": ["company_tax", "theme", "formats"]
   },
-  "narrative": "rules",
+  "narrative": "model",
+  "narrative_when_away": "rules",
   "document_index": {"retention_days": 730},
   "guide": {
     "for": "สำหรับฝ่ายบัญชีเจ้าหนี้หรือจัดซื้อ ที่ต้องบันทึกใบกำกับภาษีและใบเสร็จซื้อเข้าทะเบียน และอยากให้ตรวจเลขผู้เสียภาษี VAT และเอกสารซ้ำให้ก่อน",
@@ -69,7 +70,8 @@
     },
     "questions": "จะถามเมื่ออ่านค่าไหนไม่ชัด (เช่น ยอดรวมในสแกนที่ไม่คม) เมื่อกฎตรวจไม่ผ่าน (VAT ไม่เท่ากับ 7% เลขผู้เสียภาษีผิด เอกสารไม่ได้ออกในนามบริษัทคุณ) หรือเมื่อเจอเอกสารที่เคยส่งมาแล้ว กดเลือกคำตอบ หรือพิมพ์ค่าที่ถูกต้องตามที่เห็นในเอกสาร",
     "model_inputs": {
-      "model.vision": "เฉพาะภาพหน้าเอกสารที่เป็นสแกนหรือรูปถ่าย ส่งให้โมเดลที่เลือกไว้สำหรับ agent นี้อ่านซ้ำเพื่อเทียบกับการอ่านตัวอักษร (OCR) โดยปกติคือโมเดลที่รันในองค์กร ภาพจะออกนอกองค์กรก็ต่อเมื่อผู้ดูแลอนุญาตให้เอกสารของ agent นี้ออกนอกองค์กรและมีการเลือกโมเดลนอกองค์กร ซึ่งการ์ดของรอบนั้นจะบอกไว้ ค่าที่โมเดลอ่านเป็นเพียงคำแนะนำในการ์ดคำถาม ไม่ถูกบันทึกเองจนกว่าคนจะยืนยัน PDF ดิจิทัลและไฟล์ e-Tax อ่านด้วยกฎเท่านั้น ไม่มีโมเดลเห็น"
+      "model.vision": "เฉพาะภาพหน้าเอกสารที่เป็นสแกนหรือรูปถ่าย ส่งให้โมเดลที่เลือกไว้สำหรับ agent นี้อ่านซ้ำเพื่อเทียบกับการอ่านตัวอักษร (OCR) โดยปกติคือโมเดลที่รันในองค์กร ภาพจะออกนอกองค์กรก็ต่อเมื่อผู้ดูแลอนุญาตให้เอกสารของ agent นี้ออกนอกองค์กรและมีการเลือกโมเดลนอกองค์กร ซึ่งการ์ดของรอบนั้นจะบอกไว้ ค่าที่โมเดลอ่านเป็นเพียงคำแนะนำในการ์ดคำถาม ไม่ถูกบันทึกเองจนกว่าคนจะยืนยัน PDF ดิจิทัลและไฟล์ e-Tax อ่านด้วยกฎเท่านั้น ไม่มีโมเดลเห็น",
+      "model.text": "ตารางตัวเลขที่คำนวณแล้วของรอบนั้น — ยอดรวม จำนวน ผลการตรวจ และข้อสังเกตจากกฎ — เพื่อเขียนคำอธิบายรอบนี้ (ชีต “คำอธิบายรอบนี้” ในไฟล์ Excel) และเพื่อตอบคำถามที่คุณพิมพ์ถามเกี่ยวกับตัวเลขของรอบนั้น ไม่มีการส่งไฟล์ที่อัปโหลดหรือรายการรายบรรทัด โมเดลไม่พิมพ์ตัวเลขเอง: เขียนชื่อของตัวเลขแล้วระบบใส่ตัวเลขพร้อมรหัสอ้างอิงของมันเอง ถ้าไม่มีโมเดลที่ให้คำตอบที่ใช้ได้ กฎของแพ็กเกจเขียนคำอธิบายแทน และชีตนั้นบอกไว้"
     },
     "never": [
       "ไม่บันทึกอะไรเข้าระบบบัญชี",
@@ -416,7 +418,16 @@
     "doc.status.left_out": "ระบบอ่าน · ต้องตรวจ: ในแถวมีคำว่า “{words}” ที่ไม่ได้อ่านเข้าชื่อรายการ",
     "doc.note.models": "โมเดลที่เห็นเอกสาร: {model} ({place}) อ่านซ้ำ {n} ฉบับที่เป็นสแกนหรือรูปถ่าย เพื่อเทียบกับ OCR เท่านั้น",
     "doc.model.inside": "รันในองค์กร",
-    "doc.model.outside": "ผู้ให้บริการภายนอก"
+    "doc.model.outside": "ผู้ให้บริการภายนอก",
+    "cite.count_all.label": "จำนวนเอกสารที่ได้รับทั้งหมด",
+    "cite.count_all": "นับทุกไฟล์ที่ส่งมาในรอบนี้ ทั้งที่บันทึกและที่ตัดออก",
+    "cite.count_excluded.label": "จำนวนเอกสารที่ตัดออก",
+    "cite.count_excluded": "นับเอกสารที่ไม่ได้บันทึกเข้าทะเบียน เหตุผลอยู่ในชีตข้อยกเว้น",
+    "fact.h.result": "ผลของรอบนี้",
+    "fact.h.reasons": "เหตุที่พบในรอบนี้",
+    "fact.inv.counts": "ได้รับเอกสาร {documents} ฉบับ บันทึก {included} ฉบับ ตัดออก {excluded} ฉบับ",
+    "fact.inv.totals": "ยอดรวมที่บันทึก {total} บาท ภาษีมูลค่าเพิ่ม {vat} บาท",
+    "fact.inv.currency": "สกุลเงิน {code}: {n} ฉบับ"
   },
   "en": {
     "เรียงตามผู้ขาย · จัดกลุ่มตามร้าน · เอาเอกสารของผู้ขายรายเดียวกันไว้ติดกัน": "order by seller · group by shop · keep one seller's documents together",
@@ -754,7 +765,17 @@
     "โมเดลที่เห็นเอกสาร: {model} ({place}) อ่านซ้ำ {n} ฉบับที่เป็นสแกนหรือรูปถ่าย เพื่อเทียบกับ OCR เท่านั้น": "Model that saw documents: {model} ({place}) re-read {n} scanned or photographed documents, only to compare with OCR",
     "รันในองค์กร": "runs inside the organisation",
     "ผู้ให้บริการภายนอก": "an outside provider"
-
+,
+    "จำนวนเอกสารที่ได้รับทั้งหมด": "Number of documents received",
+    "นับทุกไฟล์ที่ส่งมาในรอบนี้ ทั้งที่บันทึกและที่ตัดออก": "Counts every file sent this run, recorded or left out",
+    "จำนวนเอกสารที่ตัดออก": "Number of documents left out",
+    "นับเอกสารที่ไม่ได้บันทึกเข้าทะเบียน เหตุผลอยู่ในชีตข้อยกเว้น": "Counts the documents not recorded in the register; the reasons are on the exceptions sheet",
+    "ผลของรอบนี้": "Result of this run",
+    "เหตุที่พบในรอบนี้": "Reasons found this run",
+    "ได้รับเอกสาร {documents} ฉบับ บันทึก {included} ฉบับ ตัดออก {excluded} ฉบับ": "{documents} documents received, {included} recorded, {excluded} left out",
+    "ยอดรวมที่บันทึก {total} บาท ภาษีมูลค่าเพิ่ม {vat} บาท": "Total recorded {total} baht, VAT {vat} baht",
+    "สกุลเงิน {code}: {n} ฉบับ": "Currency {code}: {n} documents",
+    "ตารางตัวเลขที่คำนวณแล้วของรอบนั้น — ยอดรวม จำนวน ผลการตรวจ และข้อสังเกตจากกฎ — เพื่อเขียนคำอธิบายรอบนี้ (ชีต “คำอธิบายรอบนี้” ในไฟล์ Excel) และเพื่อตอบคำถามที่คุณพิมพ์ถามเกี่ยวกับตัวเลขของรอบนั้น ไม่มีการส่งไฟล์ที่อัปโหลดหรือรายการรายบรรทัด โมเดลไม่พิมพ์ตัวเลขเอง: เขียนชื่อของตัวเลขแล้วระบบใส่ตัวเลขพร้อมรหัสอ้างอิงของมันเอง ถ้าไม่มีโมเดลที่ให้คำตอบที่ใช้ได้ กฎของแพ็กเกจเขียนคำอธิบายแทน และชีตนั้นบอกไว้": "The run's computed table — totals, counts, the outcome of the checks and the rules' observations — to write this run's commentary (the “คำอธิบายรอบนี้” sheet of the Excel file) and to answer a question you type about the run's figures. No uploaded file and no line item is sent. The model types no figure itself: it writes the figure's name and the system puts in the figure with its own reference code. When no model gives a usable answer, the package's rules write the commentary and the sheet says so"
   },
   "en_by_key": {
     "doc.col.wht": "Withholding tax",

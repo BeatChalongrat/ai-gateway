@@ -104,7 +104,9 @@ describe("buildMapping / saveBody", () => {
 
 describe("a new version", () => {
   it("kept / added / removed counts; none for a first template", () => {
-    expect(diffCounts({ first: false, kept: ["a", "b", "c"], added: ["d"], removed: ["e", "f"] })).toEqual({ kept: 3, added: 1, removed: 2 });
+    expect(diffCounts({ first: false, kept: ["a", "b", "c"], added: ["d"], removed: ["e", "f"] })).toEqual({ kept: 3, added: 1, removed: 2, moved: 0 });
+    // AM22: the same address with another label is counted as moved, and is not "unchanged"
+    expect(diffCounts({ first: false, kept: ["a"], added: [], removed: [], moved: ["b", "c"] })).toEqual({ kept: 1, added: 0, removed: 0, moved: 2 });
     expect(diffCounts({ first: true, kept: [], added: ["a"], removed: [] })).toBeNull();
     expect(diffCounts(null)).toBeNull();
   });

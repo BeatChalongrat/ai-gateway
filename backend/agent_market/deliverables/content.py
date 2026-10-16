@@ -475,9 +475,13 @@ def build(computed: dict, req: dict) -> dict:
     for c in chart_specs:
         chart_blocks += [{"type": "chart", "chart": c["id"]}, chart_table(c)]
     sections = [
-        {"key": "summary", "title": S("docs.section.summary"), "blocks": [
+        {"key": "summary", "title": S("docs.section.summary"), "blocks": [b for b in (
             {"type": "paragraph", "runs": cite_runs(narrative["summary"], computed), "narrative": True},
-        ]},
+            # AM22 §1.1: a commentary the rules wrote says so on the page, under the words themselves; one a
+            # model wrote never carries the line (the appendix names the model)
+            {"type": "paragraph", "runs": [(S("doc.commentary.rules_wrote"), None)], "muted": True}
+            if narrative.get("written_by") == "rules" else None,
+        ) if b]},
         {"key": "pl", "title": S("docs.section.pl"), "blocks": [pl_table(computed)]},
         {"key": "charts", "title": SECTION_TITLES["charts"], "blocks": chart_blocks},
         {"key": "movements", "title": SECTION_TITLES["movements"], "blocks": [b for b in (

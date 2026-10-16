@@ -82,8 +82,13 @@ type Manifest struct {
 	// extraction agent has nothing for a model to write). DocumentIndex: the
 	// runner keeps the install's duplicate index (migration 002) and hands it
 	// to the package as history. PhotoNotice: shown where photos are accepted.
-	Narrative     string `json:"narrative"`
-	DocumentIndex *struct {
+	Narrative string `json:"narrative"`
+	// AM22 §1.1: what a commentary the model writes falls back to when no model it may use can be reached.
+	// "rules": the package's rules write the words, the document says so on its face, and the run delivers —
+	// an agent whose deliverable is its figures does not hold its working paper back for a commentary.
+	// Empty (the financial report, whose commentary is the report): the run waits for its model (AM15).
+	NarrativeWhenAway string `json:"narrative_when_away"`
+	DocumentIndex     *struct {
 		RetentionDays int `json:"retention_days"`
 	} `json:"document_index"`
 	PhotoNotice string `json:"photo_notice"`

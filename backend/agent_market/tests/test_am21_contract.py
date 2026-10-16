@@ -135,14 +135,16 @@ class TheCatalogueChooses(unittest.TestCase):
         many = catalogue.choose("pptx", {"title": "t", "items": [f"ข้อ {i}" for i in range(9)]}, "s", kinds=("bullets",))
         self.assertEqual(len(many.parts), 3)
         self.assertEqual([len(p["items"]) for p in many.parts], [4, 4, 1])
-        long = catalogue.choose("pptx", {"title": "t", "items": ["ก" * 140]}, "s", kinds=("bullets",))
+        # AM22 §1.4: a point is measured as a reader sees it, a Thai character weighed by its width in the family
+        # — so the long point is a Thai sentence, not a run of bare consonants (the widest Thai there is)
+        long = catalogue.choose("pptx", {"title": "t", "items": [("รายได้เพิ่มขึ้นจากงวดก่อนตามแผน " * 4).strip()]}, "s", kinds=("bullets",))
         self.assertEqual(long.role, "small")
 
     def test_content_too_long_for_every_layout_is_refused_naming_the_section(self):
         with self.assertRaises(catalogue.DoesNotFit) as cm:
             catalogue.choose("pptx", {"title": "t", "items": ["ก" * 2000]}, "ข้อสังเกต", kinds=("bullets",))
         self.assertEqual(cm.exception.section, "ข้อสังเกต")
-        self.assertIn("item 2000", cm.exception.why)
+        self.assertRegex(cm.exception.why, r"item \d+ > 165")   # (AM22: measured in Latin columns, a Thai one weighed by its width)
         with self.assertRaises(catalogue.DoesNotFit):
             catalogue.choose("docx", {"paragraph": "ก" * 5000}, "สรุปผู้บริหาร", kinds=("prose",))
 
@@ -154,9 +156,15 @@ class TheCatalogueChooses(unittest.TestCase):
                 self.assertTrue(lay["for"] and lay["refuses"] and lay["takes"], f"{fmt}.{name}")
 
     def test_the_limits_a_model_is_told_are_the_catalogues(self):
-        lim = catalogue.writing_limits()
+        # AM22 §1.4: the catalogue's numbers are Latin columns; an English run is told them as they are, a Thai run
+        # divided by how much wider a Thai column is in the family (test_am22_words has the rest)
+        lim = catalogue.writing_limits(lang="en")
         self.assertEqual(lim["bullets_max"], LOOK.layout("pptx", "bullets")["takes"]["items"])
         self.assertEqual(lim["summary_chars"], LOOK.layout("pptx", "statement")["takes"]["text"])
+        self.assertEqual(lim["items_max"], LOOK.layout("docx", "prose")["takes"]["items"])
+        th = catalogue.writing_limits(lang="th")
+        self.assertLess(th["summary_chars"], lim["summary_chars"])
+        self.assertEqual(set(th), set(lim))
 
 
 class NoMarkerOnADocument(unittest.TestCase):

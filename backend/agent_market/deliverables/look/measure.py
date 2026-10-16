@@ -8,13 +8,64 @@ wider than its frame and no Thai word is split by a reader's Word.
 
 from __future__ import annotations
 
+import functools
+import statistics
+import unicodedata
+
 from .. import thai_break
+from ...columns import columns
 from ..fit import SAFETY, text_width_pt, wrap_lines
 from .tokens import LOOK
 
 
 def is_thai(text: str) -> bool:
     return any(0x0E00 <= ord(ch) <= 0x0E7F for ch in text)
+
+
+# ── how wide a column of each script is (AM22 §1.4) ──────────────────────
+#
+# The catalogue's limits are counts of characters, and a count sees neither width nor height (W3C). The
+# count itself is ``columns`` — the characters a reader sees, Thai marks taking none — but a Thai column
+# in Sarabun is wider than a Latin one, so the same count is not the same width. The ratio is measured
+# here, from the embedded font on the engine's own sentences in both languages (engine/words.json), not
+# typed: a font change moves it, and the contract test pins it to what the font says.
+
+def _corpus(lang: str) -> list[str]:
+    from ...engine import words
+
+    w = words.SHARED
+    texts = list(w.english.values()) if lang == "en" else list(w.strings.values())
+    return [t for t in texts if "{" not in t and columns(t) >= 12]
+
+
+@functools.lru_cache(maxsize=4)
+def column_width(lang: str) -> float:
+    """The width of one column of a language's text in the family at 100 pt: the median over the
+    engine's own sentences in that language."""
+    size = 100.0
+    widths = [text_width_pt(t, LOOK.family, size) / columns(t) for t in _corpus("en" if lang == "en" else "th")]
+    return statistics.median(widths)
+
+
+@functools.lru_cache(maxsize=4)
+def width_ratio(lang: str) -> float:
+    """How many Latin columns one column of ``lang`` is as wide as (1.0 for English)."""
+    if lang == "en":
+        return 1.0
+    return column_width(lang) / column_width("en")
+
+
+def latin_columns(text: str) -> float:
+    """A text's width as a count of Latin-width columns: each character a reader sees counts one, a Thai
+    one as many as it is wider — the one measure the catalogue compares its limits with. A Thai limit
+    told to a model is the catalogue's limit divided by the same ratio (catalogue.writing_limits)."""
+    ratio = width_ratio("th")
+    out = 0.0
+    for ch in text or "":
+        if unicodedata.category(ch) in ("Mn", "Me"):
+            continue
+        out += ratio if 0x0E00 <= ord(ch) <= 0x0E7F else 1.0
+    return out
 
 
 def width_pt(text: str, size_pt: float, bold: bool = False) -> float:

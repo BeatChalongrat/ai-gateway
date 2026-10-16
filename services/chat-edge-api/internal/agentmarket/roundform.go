@@ -47,6 +47,9 @@ const (
 	FormFilled       = "filled"        // delivered, every slot holds its value
 	FormUnfilled     = "unfilled"      // delivered beside the agent's files, not passed
 	FormFailed       = "failed"        // the form cannot be used (a blocking slot, a file that cannot be read)
+	// FormNothingThisRound (AM22, a Why of FormFailed): the package had nothing of the round to put in the form —
+	// no file was made, and the package's sentence says why (RoundForm.WhyText)
+	FormNothingThisRound = "nothing_this_round"
 	// AM11: refused before any work — the agent has a value for less than half of the blanks the form
 	// expects filled (they are named), or the file has nothing that takes a value. A person may still
 	// map it themselves; a mapping that covers enough makes it ready.
@@ -68,8 +71,11 @@ type RoundForm struct {
 	ArtifactID *uuid.UUID        `json:"artifact_id,omitempty"`
 	ItemID     *uuid.UUID        `json:"item_id,omitempty"`
 	Why        string            `json:"why,omitempty"`
-	UpdatedAt  time.Time         `json:"updated_at"`
-	Fills      int               `json:"fills,omitempty"` // how many times it was filled (the artifact's version)
+	// WhyText (AM22): the package's own sentence for a form it did not fill because the round had nothing for it
+	// (Why = FormNothingThisRound) — said as the package's words, in the run's language
+	WhyText   string    `json:"why_text,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Fills     int       `json:"fills,omitempty"` // how many times it was filled (the artifact's version)
 }
 
 // FormPayload is the thread item that follows the round's form.
@@ -155,6 +161,10 @@ func FormText(f RoundForm) PersonText {
 			"ถ้าช่องใดรับค่าของ agent ได้ กด “จับคู่ช่อง” เพื่อเลือกเอง ยังไม่มีไฟล์ใดถูกสร้างหรือเปลี่ยน",
 			Name(f.Name), Count(asked), Count(asked-len(lacking)))
 	case FormFailed:
+		if f.Why == FormNothingThisRound {
+			// AM22 §2.4: no file, and a line that says why — the form itself is fine
+			return Text("ไม่ได้กรอก %s ในรอบนี้ — %s แบบฟอร์มนี้ยังใช้กับรอบอื่นได้", Name(f.Name), Words(FromPackage(f.WhyText, NoText)))
+		}
 		if why := formWhy(f.Why); !why.Empty() {
 			return Text("ใช้แบบฟอร์ม %s ไม่ได้ — %s แบบฟอร์มที่ตั้งไว้ของ agent ไม่ถูกเปลี่ยน", Name(f.Name), Words(why))
 		}
@@ -259,6 +269,9 @@ func FormItemPayload(run uuid.UUID, f RoundForm) FormPayload {
 		}
 	case FormFailed:
 		p.Reason = f.Why
+		if f.Why == FormNothingThisRound {
+			p.Why = FromPackage(f.WhyText, NoText)
+		}
 	}
 	if f.ArtifactID != nil {
 		p.ArtifactID = f.ArtifactID.String()

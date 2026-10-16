@@ -158,11 +158,19 @@ func TestAReconciliationThatTiesSucceeds(t *testing.T) {
 	if g == nil || g.Status != "succeeded" || g.Kind != "check" {
 		t.Fatalf("the gate is a step of the run: %+v", g)
 	}
-	// no step of the round showed a model anything of the round (the runner itself lists the gateway's
+	// no step of the round showed a model a file of the round (the runner itself lists the gateway's
 	// models when it registers; that is not this round). AM13: since the agent takes an order for its
 	// items, one step does ask a model something — "instructions" — and what that step is given is the
-	// words the person typed and nothing else: no file, no figure, no name of a file.
+	// words the person typed and nothing else: no file, no figure, no name of a file. AM22: and the
+	// commentary is written by a model from the computed table (the narrative step) — an in-house one
+	// here, as for every agent whose documents may not leave.
 	for _, s := range e.steps(run.ID) {
+		if s.Name == "narrative" {
+			if s.ModelID != "fake-self-hosted" {
+				t.Fatalf("the commentary is written by the in-house model: %q", s.ModelID)
+			}
+			continue
+		}
 		if s.Name == "instructions" {
 			var in map[string]json.RawMessage
 			_ = json.Unmarshal(s.Input, &in)
@@ -177,8 +185,8 @@ func TestAReconciliationThatTiesSucceeds(t *testing.T) {
 			t.Fatalf("step %s used a model", s.Name)
 		}
 	}
-	if got.ModelUsed != nil {
-		t.Fatalf("the run names a model as having seen its data: %v", *got.ModelUsed)
+	if got.ModelUsed == nil || *got.ModelUsed != "fake-self-hosted" {
+		t.Fatalf("the run names the model that wrote its commentary (AM22): %v", got.ModelUsed)
 	}
 	readable(t, "the thread", e.visibleThread())
 

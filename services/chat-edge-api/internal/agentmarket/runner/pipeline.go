@@ -56,6 +56,8 @@ type runCtx struct {
 	// instr (AM11b): the directives this round's documents are made with — read out of what the person
 	// typed (asked.go), ids of the package's own list.
 	instr []string
+	// formNotMade (AM22): the package's sentence for the customer's form it did not fill this round (nothing for it)
+	formNotMade string
 }
 
 // blobRef is a large step output kept in object storage.
@@ -245,7 +247,8 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 	if err != nil {
 		return rc.stepFailed("publish", err)
 	}
-	if err := rc.recordFormOutcome(ctx, rc.run.ID, rendered.form, arts); err != nil {
+	rc.formNotMade = rendered.NotMade
+	if err := rc.recordFormOutcome(ctx, rc.run.ID, rendered.form, arts, rendered.NotMade); err != nil {
 		return rc.stepFailed("publish", err)
 	}
 	// AM5: the package's own verdict on the round (a reconciliation that does

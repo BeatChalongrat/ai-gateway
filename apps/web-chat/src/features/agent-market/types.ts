@@ -130,6 +130,8 @@ export interface TemplateDiff {
   kept: string[];
   added: string[];
   removed: string[];
+  /** AM22: the same address whose label or place changed — confirmed again, never carried over */
+  moved?: string[];
 }
 
 /** The inspect job's step output (the step named "template:<file>"). */

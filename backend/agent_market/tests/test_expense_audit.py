@@ -354,11 +354,11 @@ class Hooks(unittest.TestCase):
         with open(os.path.join(os.path.dirname(EA.__file__), "agent.json"), encoding="utf-8") as f:
             m = json.load(f)
         self.assertEqual((m["id"], m["version"], m["python_package"], m["narrative"]),
-                         ("sran.expense-audit", "1.11.0", "expense_audit", "rules"))
+                         ("sran.expense-audit", "1.12.0", "expense_audit", "model"))   # AM22: a model writes its words
         self.assertEqual(m["install"]["questions"], ["company", "policy", "theme", "formats"])
         self.assertEqual(sorted(m["capabilities"]["required"]),
                          sorted(["document.extract.e2", "compute.python.decimal", "deliverable.table.xlsx", "spreadsheet.read.xlsx"]))
-        self.assertEqual(m["capabilities"]["optional"], ["model.vision"])
+        self.assertEqual(m["capabilities"]["optional"], ["model.vision", "model.text"])   # AM22: model.text writes the commentary
         for d in ("email_send", "accounting_write", "payment", "schedule"):
             self.assertIn(d, m["permissions"]["denied"])
 

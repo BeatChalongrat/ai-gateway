@@ -8,7 +8,6 @@ import am "github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/agentmark
 
 func init() {
 	am.AddEnglish(map[string]string{
-		"\nความยาวที่เอกสารรับได้ (นับตัวอักษร): สรุปไม่เกิน %d · แต่ละข้อในรายการไม่เกิน %d ตัวอักษร และไม่เกิน %d ข้อต่อหัวข้อ · เขียนให้พอดี ส่วนที่ยาวกว่านี้จะถูกปฏิเสธ\n": "\nWhat the documents take (in characters): the summary up to %d · each point of a list up to %d characters, and up to %d points per heading · write to fit; anything longer is refused\n",
 		" %d แถว": ", %d rows",
 		" (แปลง PDF ไม่ผ่าน ใช้ .docx ที่มีชื่อผู้ตรวจทานแทน)": " (conversion to PDF did not pass, so use the .docx with the reviewer's name instead)",
 		" คาด ":          ", expected ",

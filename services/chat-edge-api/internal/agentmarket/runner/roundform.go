@@ -263,7 +263,7 @@ func (rc *runCtx) roundFormInput(ctx context.Context, artifactRun uuid.UUID) (*a
 }
 
 // recordFormOutcome writes what the fill came to on the round and its item.
-func (rc *runCtx) recordFormOutcome(ctx context.Context, artifactRun uuid.UUID, form *am.RoundForm, arts []am.Artifact) error {
+func (rc *runCtx) recordFormOutcome(ctx context.Context, artifactRun uuid.UUID, form *am.RoundForm, arts []am.Artifact, notMade string) error {
 	if form == nil {
 		return nil
 	}
@@ -289,6 +289,10 @@ func (rc *runCtx) recordFormOutcome(ctx context.Context, artifactRun uuid.UUID, 
 	}
 	if form.ArtifactID == nil {
 		form.Status = am.FormFailed
+		if notMade != "" {
+			// AM22: the round had nothing for the form — the card says so, in the package's sentence
+			form.Why, form.WhyText = am.FormNothingThisRound, notMade
+		}
 	}
 	if err := rc.r.Store.SyncFormItem(ctx, rc.r.Store.Pool, parent, form); err != nil {
 		return err

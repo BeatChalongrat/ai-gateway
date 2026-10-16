@@ -366,6 +366,17 @@
             "note": 2000
           },
           "refuses": "a note over 2,000 characters"
+        },
+        "commentary": {
+          "for": "a sheet of the commentary a model (or the rules) wrote about the round: the summary, the points, what to watch, the next steps, each with its references",
+          "takes": {
+            "title": 120,
+            "text": 600,
+            "items": 12,
+            "item": 200
+          },
+          "shrink": true,
+          "refuses": "a summary over 600 characters or a point over 200 even at the small size, or more than twelve points under one heading"
         }
       }
     }

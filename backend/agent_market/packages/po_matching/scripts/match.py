@@ -919,10 +919,13 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
     head = (W("narr.summary", n=len(invoices), passed=by[PASS]["count"], blocked=by[BLOCKED]["count"], person=by[PERSON]["count"]))
     d3, d2 = summary["by_depth"][0]["lines"], summary["by_depth"][1]["lines"]
     depth_line = W("narr.depth.no_gr", d3=d3, d2=d2) if d2 and not d3 else W("narr.depth", d3=d3, d2=d2)
-    watch = [W("narr.reason", label=r["label"], invoices=r["invoices"]) for r in summary["by_reason"]][:6]
+    # AM22: every reason, up to the commentary sheet's ceiling and a line that says how many more (all of them
+    # are on the summary and the exceptions sheets) — no longer the first six and nothing said of the rest
+    watch = [W("narr.reason", label=r["label"], invoices=r["invoices"]) for r in summary["by_reason"]]
     over = [p for p in po_rows if p["over_billed"]]
     if over:
         watch.insert(0, W("narr.over", n=len(over)))
+    watch = _capped(watch)
     fallback = {"summary": head, "movements": [depth_line,
                                                W("narr.grir", received_not_billed=money(grir["received_not_billed"]), billed_not_received=money(grir["billed_not_received"]))],
                 "watch": watch, "next_steps": [W("narr.next.exceptions"),
@@ -930,7 +933,29 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
     quotable = {"invoices": str(len(invoices)), "passed": str(by[PASS]["count"]), "blocked": str(by[BLOCKED]["count"]),
                 "person": str(by[PERSON]["count"]), "value_passed": by[PASS]["value"] or "", "value_blocked": by[BLOCKED]["value"] or "",
                 "received_not_billed": grir["received_not_billed"], "billed_not_received": grir["billed_not_received"]}
+    # AM22 §1.1: the figures a sentence of the commentary may name, each with its own citation (the counts and
+    # values by status: s1 … v3 in _citations; the invoices and the GR/IR amounts: n1, g1, g2); the facts a
+    # model is shown, with the figures by key; the layouts' limits for the words, in the run's language
+    from ....deliverables.look.catalogue import writing_limits
+    from ....engine import figures as F
+    at = {s["status"]: n for n, s in enumerate(summary["by_status"], start=1)}
+    figures = F.table([
+        ("invoices", quotable["invoices"], "n1", W("cite.invoices.label")),
+        ("passed", quotable["passed"], f"s{at[PASS]}", W("cite.count", label=STATUS_TH[PASS])),
+        ("blocked", quotable["blocked"], f"s{at[BLOCKED]}", W("cite.count", label=STATUS_TH[BLOCKED])),
+        ("person", quotable["person"], f"s{at[PERSON]}", W("cite.count", label=STATUS_TH[PERSON])),
+        ("value_passed", money(by[PASS]["value"]) if by[PASS]["value"] else "", f"v{at[PASS]}", W("cite.value", label=STATUS_TH[PASS], currency=summary["currency"])),
+        ("value_blocked", money(by[BLOCKED]["value"]) if by[BLOCKED]["value"] else "", f"v{at[BLOCKED]}", W("cite.value", label=STATUS_TH[BLOCKED], currency=summary["currency"])),
+        ("received_not_billed", money(grir["received_not_billed"]), "g1", W("cite.grir.received.label")),
+        ("billed_not_received", money(grir["billed_not_received"]), "g2", W("cite.grir.billed.label"))])
+    facts = F.facts(
+        (W("fact.h.result"), [W("fact.po.counts", invoices="{invoices}", passed="{passed}", blocked="{blocked}", person="{person}"),
+                              W("fact.po.values", value_passed="{value_passed}", value_blocked="{value_blocked}"), depth_line,
+                              W("fact.po.grir", received_not_billed="{received_not_billed}", billed_not_received="{billed_not_received}")]),
+        (W("fact.h.reasons"), [W("narr.reason", label=r["label"], invoices=r["invoices"]) for r in summary["by_reason"]]
+         + ([W("narr.over", n=len(over))] if over else [])))
     return {
+        "figures": figures, "narrative_facts": facts, "writing_limits": writing_limits("xlsx"),
         "schema": SCHEMA, "period": period, "period_label": label, "period_source": rv.period_source,
         "prepared_on": (today or rv.today).isoformat(), "company": rv.settings.company,
         "company_tax_id": rv.settings.company_tax_id, "currency": rv.settings.currency,
@@ -961,8 +986,8 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
         "quotable": quotable, "quotable_ids": [], "fallback_narrative": fallback,
         # the runner's generic view of computed.json
         "exceptions": run_ex, "excluded": [], "ratios": [], "top_movements": [],
-        "citations": _citations(invoices, lines, summary),
-        "provenance": _citations(invoices, lines, summary),
+        "citations": _citations(invoices, lines, summary, grir),
+        "provenance": _citations(invoices, lines, summary, grir),
         "source": {"po": _named(rv, "po"), "gr": _named(rv, "gr"), "invoice": _named(rv, "invoice")},
         "script": SCRIPT,
     }
@@ -1037,8 +1062,9 @@ def _links(rv: Review, answered_by: dict | None) -> list:
     return out
 
 
-def _citations(invoices: list, lines: list, summary: dict) -> list:
-    """How each figure of the summary was made: the invoices a count or a value adds up."""
+def _citations(invoices: list, lines: list, summary: dict, grir: dict | None = None) -> list:
+    """How each figure of the summary was made: the invoices a count or a value adds up. AM22: with ``grir``, the
+    count of every invoice and the two GR/IR amounts too, so a commentary can point to them."""
     def c(cid, name, value, formula, sources):
         # name() says the figure's name in the language being spoken: a question may also ask about a figure by
         # the words the working paper prints (engine/words.py names)
@@ -1055,6 +1081,11 @@ def _citations(invoices: list, lines: list, summary: dict) -> list:
                      s["value"], W("cite.value.formula"),
                      [{"file": i["name"], "sheet": i.get("sheet") or "", "row": i.get("row"), "value": i["value_thb"], "note": i["number"]}
                       for i in mine if i["value_thb"] is not None]))
+    if grir is not None:
+        out.append(c("n1", lambda: W("cite.invoices.label"), str(len(invoices)), W("cite.invoices.formula"),
+                     [{"file": i["name"], "sheet": i.get("sheet") or "", "row": i.get("row"), "value": i["number"], "note": i["status_label"]} for i in invoices]))
+        out.append(c("g1", lambda: W("cite.grir.received.label"), grir["received_not_billed"], W("cite.grir.received.formula"), []))
+        out.append(c("g2", lambda: W("cite.grir.billed.label"), grir["billed_not_received"], W("cite.grir.billed.formula"), []))
     return out
 
 
@@ -1074,3 +1105,10 @@ def summarize(computed: dict) -> dict:
             "models": [], "excluded_list": [],
             "not_included": [{k: e[k] for k in ("doc_key", "name", "reason", "detail", "how", "can_restore")}
                              for e in computed.get("not_included") or []]}
+
+
+def _capped(lines: list) -> list:
+    """AM22: the rules' list under one heading, at most the commentary sheet's ceiling; more is said, never cut."""
+    from ....engine import figures as F
+
+    return F.capped_rules(lines)

@@ -17,6 +17,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+from .measure import latin_columns, width_ratio
 from .tokens import LOOK
 
 # fields that count things (break into parts when over), and the field that measures one of them
@@ -46,21 +47,23 @@ class Choice:
 
 
 def measure(content: dict) -> dict[str, float]:
-    """What there is of each field: a string's length, a list's count, and the longest member of a list
-    under the name its layout measures it by (items → item, rows → cell, lines → line)."""
+    """What there is of each field: a string's width in Latin columns (AM22 §1.4: the characters a reader
+    sees, a Thai one weighed by how much wider it is — never bare len() on a display string), a list's
+    count, and the widest member of a list under the name its layout measures it by (items → item,
+    rows → cell, lines → line)."""
     out: dict[str, float] = {}
     for k, v in content.items():
         if isinstance(v, str):
-            out[k] = len(v.strip())
+            out[k] = latin_columns(v.strip())
         elif isinstance(v, (list, tuple)):
             out[k] = len(v)
             one = COUNTED.get(k)
             if one and v:
                 if k == "rows":
-                    out[one] = max((len(str(c or "")) for row in v for c in row), default=0)
+                    out[one] = max((latin_columns(str(c or "")) for row in v for c in row), default=0)
                     out.setdefault("columns", max((len(row) for row in v), default=0))
                 else:
-                    out[one] = max((len(str(x or "")) for x in v), default=0)
+                    out[one] = max((latin_columns(str(x or "")) for x in v), default=0)
         elif isinstance(v, (int, float)):
             out[k] = float(v)
     return out
@@ -139,12 +142,53 @@ def choose(fmt: str, content: dict, section: str, kinds: tuple | None = None) ->
     return Choice(layout=name, role=role, fill=round(fill, 3), reason=reason, parts=parts)
 
 
-def writing_limits(fmt: str = "pptx") -> dict:
-    """What a model is told before it writes (6.1): the catalogue's limits for the words it produces —
-    the summary's paragraph, a point of a list, how many points. Characters, and the model writes to fit."""
-    cat = LOOK.catalogue(fmt)
-    return {"summary_chars": cat["statement"]["takes"]["text"], "bullet_chars": cat["bullets"]["takes"]["item"],
-            "bullets_max": cat["bullets"]["takes"]["items"], "sentence_chars": cat["figure"]["takes"]["sentence"]}
+# the layouts a commentary is printed in, per format: the summary's paragraph, a point of a list, the
+# most points a slide or a page holds before the layout breaks them (per_page), and the most a heading may
+# hold at all (ceiling: the report's prose block refuses a list over twenty items; the commentary sheet holds
+# twelve under one heading; a deck has no ceiling of its own — its list breaks across slides)
+_WRITING = {"pptx": {"summary": ("statement", "text"), "item": ("bullets", "item"), "per_page": ("bullets", "items"),
+                     "sentence": ("figure", "sentence")},
+            "docx": {"summary": ("prose", "paragraph"), "item": ("prose", "item"), "per_page": ("prose", "items"),
+                     "ceiling": ("prose", "items")},
+            "xlsx": {"summary": ("commentary", "text"), "item": ("commentary", "item"), "per_page": ("commentary", "items"),
+                     "ceiling": ("commentary", "items")}}
+# a commentary printed in a deck is printed in its report too (financial_report): the tighter of the two holds
+_PRINTED_WITH = {"pptx": ("pptx", "docx"), "docx": ("docx",), "xlsx": ("xlsx",)}
+
+
+def writing_limits(fmt: str = "pptx", lang: str | None = None) -> dict:
+    """What a model is told before it writes (AM21 §6.1, AM22 §1.2–1.4): the catalogue's limits for the
+    words it produces, in the characters a reader sees in the run's language — the summary's paragraph
+    (``summary_chars``), a point of a list (``bullet_chars``), how many points a slide or a page holds
+    before the list breaks (``bullets_max``) and the most a heading may hold at all (``items_max``). The
+    validator (runner: checkNarrative) measures the answer against these same numbers; an item past them
+    is refused and asked for again, never trimmed.
+
+    The catalogue's numbers are Latin columns. Told in Thai they are divided by how much wider a Thai
+    column is in the family (measure.width_ratio), so a Thai run and an English run are allowed the
+    same width of text — which is what a frame holds."""
+    from ...engine import words
+
+    lang = words.lang_of(lang if lang is not None else words.lang())
+    ratio = width_ratio(lang)
+
+    def limit(which: str) -> int:
+        vals = []
+        for f in _PRINTED_WITH[fmt]:
+            spec = _WRITING[f].get(which)
+            if spec:
+                vals.append(LOOK.catalogue(f)[spec[0]]["takes"][spec[1]])
+        return min(vals)
+
+    per_page = _WRITING[fmt]["per_page"]
+    out = {"summary_chars": int(limit("summary") / ratio), "bullet_chars": int(limit("item") / ratio),
+           "bullets_max": LOOK.catalogue(fmt)[per_page[0]]["takes"][per_page[1]],
+           "items_max": limit("ceiling")}
+    # (numbers only: the runner reads this map as numbers — computedView.WritingLimits map[string]int — and a word in
+    # it fails the reading of the whole table. AM22's model measurement found that before any run did.)
+    if "sentence" in _WRITING[fmt]:
+        out["sentence_chars"] = int(limit("sentence") / ratio)
+    return out
 
 
 def listing(fmt: str) -> list[dict]:

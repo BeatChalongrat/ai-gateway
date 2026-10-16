@@ -39,8 +39,18 @@ type computedView struct {
 	Citations   []json.RawMessage     `json:"citations"`
 	Materiality string                `json:"materiality"`
 	Script      string                `json:"script"`
-	// AM21 §6.1: the layout catalogue's limits (characters, counts), told to the model before it writes
+	// AM21 §6.1: the layout catalogue's limits (characters, counts), told to the model before it writes.
+	// AM22 §1.2: the same numbers the validator measures the answer against (checkNarrative), in the
+	// run's language (engine: catalogue.writing_limits).
 	WritingLimits map[string]int `json:"writing_limits"`
+	// AM22 §1.1: what a package that is not the financial report shows the model of its round — facts under
+	// headings, figures named by key — in place of the P&L-shaped blocks
+	NarrativeFacts []narrativeFact `json:"narrative_facts"`
+}
+
+type narrativeFact struct {
+	Heading string   `json:"heading"`
+	Lines   []string `json:"lines"`
 }
 
 type figureView struct {
@@ -93,18 +103,32 @@ func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey st
 			// reads the answer as a text of that language
 			l := rc.docLang(ctx)
 			user := narrativePrompt(l, cv)
-			var parsed map[string]any
-			c, tried, err := rc.r.Model.CompleteWith(ctx, models, rc.pkg.Instructions, user, func(s string) error {
+			var parsed, long map[string]any
+			var longBy string
+			c, tried, err := rc.r.Model.CompleteWithInBy(ctx, l, models, rc.pkg.Instructions, user, func(model, s string) error {
 				v, err := checkNarrative(l, s, cv)
+				var tl *tooLongErr
+				if errors.As(err, &tl) {
+					long, longBy = v, model // (AM22: kept, in case no attempt fits — see overLength)
+				}
 				if err != nil {
 					return err
 				}
 				parsed = v
 				return nil
 			})
-			if errors.Is(err, ErrModelUnreachable) && ctx.Err() == nil {
+			if err != nil && !errors.Is(err, ErrModelUnreachable) && ctx.Err() == nil {
+				if v, model, ok := overLength(long, longBy); ok {
+					// AM22 §1.2: the model's words, too long after both attempts — the renderer's ladder decides
+					parsed, err = v, nil
+					c.Model = model
+				}
+			}
+			if errors.Is(err, ErrModelUnreachable) && ctx.Err() == nil && rc.pkg.Manifest.NarrativeWhenAway != "rules" {
 				// AM15: no model that may see the table could be reached. The rules stand in for a model
 				// whose answer could not be used — not for one that is away: the run waits for it.
+				// AM22: unless the package says its rules write the words then (narrative_when_away), saying so
+				// on the document's face — its deliverable is its figures, which no model touched.
 				return nil, c.CostUSD * rc.r.CreditsPerUSD, "", "", err
 			}
 			if err != nil {
@@ -138,28 +162,55 @@ func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey st
 
 // checkNarrative reads a model's answer as the report's words, or says why
 // it cannot be used (the model is asked again, then the next model).
+//
+// AM22 §1.2: it measures what the prompt promised. The summary, each point and the number of points
+// under a heading are measured against the catalogue's limits the package put in computed.json
+// (writing_limits, in the run's language), in the characters a reader sees (columns). A point past
+// the limit is a reason to ask again — never a silent cut: nothing between the model's answer and
+// the renderer drops, trims or truncates anything. An engine that sends no limits is checked as before.
 func checkNarrative(l am.Lang, s string, cv computedView) (map[string]any, error) {
 	var v map[string]any
 	if err := json.Unmarshal([]byte(extractJSON(s)), &v); err != nil {
-		return nil, fmt.Errorf("ไม่ใช่ JSON")
+		return nil, errors.New(inLang(l, "ไม่ใช่ JSON", "not JSON"))
 	}
 	sum, _ := v["summary"].(string)
 	if strings.TrimSpace(sum) == "" {
-		return nil, fmt.Errorf("ไม่มี summary")
+		return nil, errors.New(inLang(l, "ไม่มี summary", "no summary"))
+	}
+	lim := cv.WritingLimits
+	// AM22 §1.2: a length past the limits is the first reason given, and is asked again; but every other check
+	// still runs — an answer whose only fault is its length is returned with errTooLong, so that after the last
+	// attempt it can go on to the renderer's ladder instead of being replaced by the rules' words
+	var long []string
+	if n := lim["summary_chars"]; n > 0 && columns(sum) > n {
+		long = append(long, tooLong(l, "summary", 0, columns(sum), n))
 	}
 	var all []string
 	all = append(all, sum)
-	// AM5: each list is a list of sentences, whatever the model sent — a list
-	// left null (or a sentence, or a number among the sentences) reached the
-	// report's renderer as it was, and the round failed on it.
+	// AM5: a list left null or missing is an empty list — it reached the report's renderer as it was
+	// once, and the round failed on it. AM22: what is in a list that is not a sentence (a number, an
+	// object, a list sent as one sentence) is refused and asked for again, not dropped on the way.
 	for _, k := range []string{"movements", "watch", "next_steps"} {
-		arr, _ := v[k].([]any)
 		lines := []any{}
-		for _, x := range arr {
-			if s, ok := x.(string); ok && strings.TrimSpace(s) != "" && len(lines) < 6 {
+		if v[k] != nil {
+			arr, ok := v[k].([]any)
+			if !ok {
+				return nil, errors.New(notAList(l, k))
+			}
+			for i, x := range arr {
+				s, ok := x.(string)
+				if !ok || strings.TrimSpace(s) == "" {
+					return nil, errors.New(notASentence(l, k, i+1))
+				}
+				if n := lim["bullet_chars"]; n > 0 && columns(s) > n {
+					long = append(long, tooLong(l, k, i+1, columns(s), n))
+				}
 				lines = append(lines, s)
 				all = append(all, s)
 			}
+		}
+		if n := lim["items_max"]; n > 0 && len(lines) > n {
+			long = append(long, tooMany(l, k, len(lines), n))
 		}
 		v[k] = lines
 	}
@@ -167,12 +218,30 @@ func checkNarrative(l am.Lang, s string, cv computedView) (map[string]any, error
 		if err := guardFigures(l, strings.Join(all, "\n"), cv); err != nil {
 			return nil, err
 		}
-		return v, nil
-	}
-	if err := GuardNumbersIn(l, strings.Join(all, "\n"), cv.Quotable, cv.QuotableIDs); err != nil {
+	} else if err := GuardNumbersIn(l, strings.Join(all, "\n"), cv.Quotable, cv.QuotableIDs); err != nil {
 		return nil, err
 	}
+	if len(long) > 0 {
+		return v, &tooLongErr{reason: strings.Join(long, "; ")}
+	}
 	return v, nil
+}
+
+// tooLongErr (AM22 §1.2) is an answer whose only fault is its length: the reason is sent back for the one retry;
+// after the last attempt the answer itself goes on to the renderer's ladder (overLength).
+type tooLongErr struct{ reason string }
+
+func (e *tooLongErr) Error() string { return e.reason }
+
+// overLength is what a narrative step does when no attempt gave an answer within the limits: the last answer whose
+// only fault was its length is used — the renderer steps it down the scale, breaks it into parts, or refuses it
+// naming the section and writes no file — written by the model that wrote it (the last one tried). Nothing else
+// stands in: an answer refused for anything else (a typed figure, not JSON) leaves the rules' words.
+func overLength(last map[string]any, model string) (map[string]any, string, bool) {
+	if last == nil || model == "" {
+		return nil, "", false
+	}
+	return last, model, true
 }
 
 // figureRe is a figure named by its key in a sentence: {revenue}, {revenue_var_prior_pct:abs}.
@@ -191,7 +260,8 @@ func guardFigures(l am.Lang, text string, cv computedView) error {
 		}
 	}
 	if len(unknown) > 0 {
-		return fmt.Errorf("อ้างตัวเลขที่ไม่มีในตาราง: %s ใช้ได้เฉพาะชื่อในรายการตัวเลขที่อ้างได้", strings.Join(unknown, ", "))
+		return fmt.Errorf(inLang(l, "อ้างตัวเลขที่ไม่มีในตาราง: %s ใช้ได้เฉพาะชื่อในรายการตัวเลขที่อ้างได้",
+			"names a figure that is not in the table: %s; use only the names in the list of figures you may cite"), strings.Join(unknown, ", "))
 	}
 	rest := figureRe.ReplaceAllString(text, " ")
 	// AM11b: a brace left over is a figure's name that is not whole. "…ค่าใช้จ่ายในการขายและบริหารที่:abs}" is
@@ -200,10 +270,12 @@ func guardFigures(l am.Lang, text string, cv computedView) error {
 	// commentaries on live). The report printed the sentence as it was; it is now no answer, for every
 	// installed version — the model is told, and a second cut ends in the rules' own commentary.
 	if strings.ContainsAny(rest, "{}") {
-		return fmt.Errorf("มีชื่อตัวเลขที่เขียนไม่ครบ (วงเล็บปีกกาไม่ครบคู่) — เขียนชื่อของตัวเลขให้ครบในรูป {ชื่อ} หรือ {ชื่อ:abs} และเขียนประโยคด้วยคำของคุณเอง อย่าคัดลอกประโยคตัวอย่างจากคำสั่ง")
+		return errors.New(inLang(l, "มีชื่อตัวเลขที่เขียนไม่ครบ (วงเล็บปีกกาไม่ครบคู่) — เขียนชื่อของตัวเลขให้ครบในรูป {ชื่อ} หรือ {ชื่อ:abs} และเขียนประโยคด้วยคำของคุณเอง อย่าคัดลอกประโยคตัวอย่างจากคำสั่ง",
+			"a figure's name is not whole (a brace without its pair) — write the whole name as {name} or {name:abs}, and write the sentence in your own words; do not copy an example sentence from the instructions"))
 	}
 	if err := GuardNumbersIn(l, rest, nil, cv.QuotableIDs); err != nil {
-		return fmt.Errorf("%s — อย่าพิมพ์ตัวเลขเอง ให้เขียนชื่อของตัวเลขในวงเล็บปีกกา เช่น {revenue}", err.Error())
+		return fmt.Errorf(inLang(l, "%s — อย่าพิมพ์ตัวเลขเอง ให้เขียนชื่อของตัวเลขในวงเล็บปีกกา เช่น {revenue}",
+			"%s — do not type a figure; write its name in braces, such as {revenue}"), err.Error())
 	}
 	return nil
 }
@@ -241,21 +313,34 @@ func narrativePrompt(l am.Lang, cv computedView) string {
 	if cv.PriorLabel != nil {
 		fmt.Fprintf(&b, "เทียบกับ: %s\n", *cv.PriorLabel)
 	}
-	fmt.Fprintf(&b, "มีงบประมาณ: %v\n\n", cv.HasBudget)
-	b.WriteString("ตารางงบกำไรขาดทุน (คำนวณแล้ว):\n")
-	for _, l := range cv.Lines {
-		b.Write(l)
+	if len(cv.NarrativeFacts) > 0 {
+		// AM22 §1.1: a package that is not the financial report says what its round found as facts under
+		// its own headings, the figures named by key — in the run's language, as its answer will be
 		b.WriteByte('\n')
-	}
-	b.WriteString("\nอัตราส่วน:\n")
-	for _, r := range cv.Ratios {
-		b.Write(r)
-		b.WriteByte('\n')
-	}
-	b.WriteString("\nรายการเคลื่อนไหวสำคัญ:\n")
-	for _, m := range cv.TopMovements {
-		b.Write(m)
-		b.WriteByte('\n')
+		for _, f := range cv.NarrativeFacts {
+			fmt.Fprintf(&b, "%s:\n", f.Heading)
+			for _, line := range f.Lines {
+				fmt.Fprintf(&b, "- %s\n", line)
+			}
+			b.WriteByte('\n')
+		}
+	} else {
+		fmt.Fprintf(&b, "มีงบประมาณ: %v\n\n", cv.HasBudget)
+		b.WriteString("ตารางงบกำไรขาดทุน (คำนวณแล้ว):\n")
+		for _, l := range cv.Lines {
+			b.Write(l)
+			b.WriteByte('\n')
+		}
+		b.WriteString("\nอัตราส่วน:\n")
+		for _, r := range cv.Ratios {
+			b.Write(r)
+			b.WriteByte('\n')
+		}
+		b.WriteString("\nรายการเคลื่อนไหวสำคัญ:\n")
+		for _, m := range cv.TopMovements {
+			b.Write(m)
+			b.WriteByte('\n')
+		}
 	}
 	b.WriteString("\nรายการที่กฎตั้งข้อสังเกต (exceptions):\n")
 	for _, e := range cv.Exceptions {
@@ -274,7 +359,7 @@ func narrativePrompt(l am.Lang, cv computedView) string {
 			f := cv.Figures[k]
 			fmt.Fprintf(&b, "- {%s} = %s · %s\n", k, f.Text, f.Label)
 		}
-		b.WriteString(writingLimitsLine(cv))
+		b.WriteString(writingLimitsLine(l, cv))
 		b.WriteString("\nเขียนคำอธิบายตามรูปแบบ JSON ใน instructions " + languageName(l) + " ทุกตัวเลขเขียนเป็น {ชื่อ} จากรายการด้านบน " +
 			"(ถ้าบอกทิศทางเป็นคำแล้ว เช่น " + directionWord(l) + " ใช้ {ชื่อ:abs} เพื่อพิมพ์โดยไม่มีเครื่องหมาย)" + answerIn(l))
 		return b.String()
@@ -288,21 +373,43 @@ func narrativePrompt(l am.Lang, cv computedView) string {
 	for _, k := range keys {
 		fmt.Fprintf(&b, "- %s: %s\n", k, cv.Quotable[k])
 	}
+	b.WriteString(writingLimitsLine(l, cv))
 	b.WriteString("\nเขียนคำอธิบายตามรูปแบบ JSON ใน instructions " + languageName(l) + " ใช้ตัวเลขจากรายการด้านบนเท่านั้น" + answerIn(l))
 	return b.String()
 }
 
-// writingLimitsLine (AM21 §6.1) tells the model, before it writes, how much the layouts take: the
-// summary's paragraph, a point of a list, how many points. A model that writes to fit is not refused
-// afterwards; one that is not told writes freely and ends up truncated or refused. An engine from
-// before this card sends no limits, and the prompt is as it was.
-func writingLimitsLine(cv computedView) string {
+// writingLimitsLine (AM21 §6.1, AM22 §1.3) tells the model, before it writes, how much the layouts take —
+// the summary's paragraph, a point of a list, how many points a page holds and how many a heading may
+// hold at all — in the characters a reader sees in the run's language (the engine's writing_limits),
+// and how to write to it: draft the whole thought first, then compress it to the limits without
+// dropping a point (CAPEL: writing to a budget costs quality; drafting then compressing in the same
+// answer recovers it). It is a craft instruction, not a threat: the validator's refusal and the retry
+// are the machinery, and the model is not told of them here. Addressed to a model, in the run's
+// language. An engine from before AM21 sends no limits, and the prompt is as it was.
+func writingLimitsLine(l am.Lang, cv computedView) string {
 	lim := cv.WritingLimits
 	if lim["summary_chars"] == 0 || lim["bullet_chars"] == 0 || lim["bullets_max"] == 0 {
 		return ""
 	}
-	return fmt.Sprintf("\nความยาวที่เอกสารรับได้ (นับตัวอักษร): สรุปไม่เกิน %d · แต่ละข้อในรายการไม่เกิน %d ตัวอักษร และไม่เกิน %d ข้อต่อหัวข้อ · เขียนให้พอดี ส่วนที่ยาวกว่านี้จะถูกปฏิเสธ\n",
-		lim["summary_chars"], lim["bullet_chars"], lim["bullets_max"])
+	if l == am.English {
+		s := fmt.Sprintf("\nWhat the document takes (characters a reader sees; a Thai tone mark or a vowel above or below the line counts none): "+
+			"the summary up to %d · each point of a list up to %d", lim["summary_chars"], lim["bullet_chars"])
+		if lim["items_max"] > 0 {
+			s += fmt.Sprintf(" · at most %d points under one heading (%d to a page; more go on to the next)", lim["items_max"], lim["bullets_max"])
+		} else {
+			s += fmt.Sprintf(" · %d points to a page; more go on to the next", lim["bullets_max"])
+		}
+		return s + " · How to write: draft everything that needs saying first, then edit it down to these lengths without dropping " +
+			"a point, the way a copy editor trims a manuscript; send only the edited version\n"
+	}
+	s := fmt.Sprintf("\nความยาวที่เอกสารรับได้ (นับตัวอักษรที่อ่านเห็น ไม่นับวรรณยุกต์และสระบน-ล่าง): สรุปไม่เกิน %d · แต่ละข้อในรายการไม่เกิน %d",
+		lim["summary_chars"], lim["bullet_chars"])
+	if lim["items_max"] > 0 {
+		s += fmt.Sprintf(" · หนึ่งหัวข้อมีได้ไม่เกิน %d ข้อ (%d ข้อต่อหน้า เกินนั้นขึ้นหน้าใหม่)", lim["items_max"], lim["bullets_max"])
+	} else {
+		s += fmt.Sprintf(" · %d ข้อต่อหน้า เกินนั้นขึ้นหน้าใหม่", lim["bullets_max"])
+	}
+	return s + " · วิธีเขียน: ร่างสิ่งที่ต้องบอกให้ครบก่อน แล้วเกลาถ้อยคำให้อยู่ในความยาวนี้โดยไม่ตัดประเด็นใดทิ้ง เหมือนบรรณาธิการเกลาต้นฉบับ ส่งเฉพาะฉบับที่เกลาแล้ว\n"
 }
 
 // ── render (+ quality gate) ──────────────────────────────────────────────
@@ -351,6 +458,8 @@ type renderOut struct {
 	Asked renderAsked `json:"asked"`
 	// form (AM10): the round's own form this render filled, if any
 	form *am.RoundForm
+	// NotMade (AM22): the package's sentence for a form it did not fill — the round had nothing for it
+	NotMade string `json:"not_made,omitempty"`
 }
 
 func (rc *runCtx) theme(ctx context.Context) (map[string]any, int, *string) {
@@ -513,11 +622,18 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 				// AM21: a format whose content fits no layout of the catalogue — refused, no file written,
 				// the check naming the section
 				Refused []refusedFormat `json:"refused"`
+				// AM22: a form the round had nothing for — no file, and the package's sentence for why
+				TemplateNotMade *struct {
+					Why string `json:"why"`
+				} `json:"template_not_made"`
 			}
 			if err := json.Unmarshal(mustJSON(res.Result), &r); err != nil {
 				return nil, 0, "", "", err
 			}
 			ro := renderOut{Theme: r.Theme, Passed: r.Passed, Asked: r.Asked}
+			if r.TemplateNotMade != nil {
+				ro.NotMade = r.TemplateNotMade.Why
+			}
 			var failed []string
 			docxPath := ""
 			for _, a := range r.Artifacts {
@@ -826,24 +942,40 @@ func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts [
 		text = am.Text("%s · แบบฟอร์มของคุณยังกรอกไม่ครบ %s ช่อง ดูชื่อช่องในการ์ดไฟล์ ยังไม่ควรส่งต่อ",
 			am.Words(text), am.Count(n))
 	}
+	if rc.formNotMade != "" {
+		// AM22 §2.4: the form was not filled because the round had nothing for it — said, in the package's words
+		text = am.Text("%s · ไม่ได้กรอกแบบฟอร์มของคุณในรอบนี้: %s", am.Words(text), am.Words(am.FromPackage(rc.formNotMade, am.NoText)))
+	}
+	return st.PostText(ctx, run, closingText(rc.pkg.Manifest, summary, narrative, rerender, text))
+}
+
+// closingText is what the round's last message says about models (AM2, AM4, AM12; AM22 §1.1): an agent on
+// the web, its web closing; an agent that reads documents says which model saw them, whoever wrote its
+// words; an agent whose commentary a model writes says which model — or that the rules did, because no
+// model gave a usable answer. Since AM22 an agent may both read scans and have a model write: it says both.
+func closingText(m am.Manifest, summary map[string]any, narrative narrativeOut, rerender bool, text am.PersonText) am.PersonText {
 	switch {
-	case rc.pkg.Manifest.UsesWeb():
+	case m.UsesWeb():
 		// AM12: what a model did in a round on the web, and what it did not — in the words that fit what
 		// the round came to (webwords.go)
-		text = webClosing(text, summary)
-	case rc.pkg.Manifest.Narrative == "rules":
-		text = am.Text("%s %s", am.Words(text), am.Words(documentsNote(summary)))
+		return webClosing(text, summary)
 	case rerender:
-		text = am.Text("สร้างไฟล์เพิ่มจากตัวเลขชุดเดิมแล้วครับ ไม่ได้คำนวณใหม่ ตัวเลขและที่มาตรงกับรายงานเดิมทุกตัว")
-	case narrative.Model == "":
-		text = am.Text("%s คำอธิบายในรอบนี้เขียนจากกฎ เพราะไม่มีโมเดลที่ตอบได้ ตัวเลขทุกตัวยังมาจากสคริปต์เหมือนเดิม", am.Words(text))
-	case narrative.SelfHosted:
-		text = am.Text("%s ตัวเลขทุกตัวมาจากสคริปต์ คำอธิบายเขียนด้วย %s ที่รันในองค์กร", am.Words(text), am.ModelName(narrative.Model))
-	default:
-		text = am.Text("%s ตัวเลขทุกตัวมาจากสคริปต์ คำอธิบายเขียนด้วย %s (ผู้ให้บริการภายนอก เห็นเฉพาะตารางที่คำนวณแล้ว)",
-			am.Words(text), am.ModelName(narrative.Model))
+		return am.Text("สร้างไฟล์เพิ่มจากตัวเลขชุดเดิมแล้วครับ ไม่ได้คำนวณใหม่ ตัวเลขและที่มาตรงกับรายงานเดิมทุกตัว")
 	}
-	return st.PostText(ctx, run, text)
+	if m.Narrative == "rules" || am.ModelUse(m) == "vision" {
+		text = am.Text("%s %s", am.Words(text), am.Words(documentsNote(summary)))
+	}
+	if m.Narrative == "rules" {
+		return text
+	}
+	switch {
+	case narrative.Model == "":
+		return am.Text("%s คำอธิบายในรอบนี้เขียนจากกฎ เพราะไม่มีโมเดลที่ตอบได้ ตัวเลขทุกตัวยังมาจากสคริปต์เหมือนเดิม", am.Words(text))
+	case narrative.SelfHosted:
+		return am.Text("%s ตัวเลขทุกตัวมาจากสคริปต์ คำอธิบายเขียนด้วย %s ที่รันในองค์กร", am.Words(text), am.ModelName(narrative.Model))
+	}
+	return am.Text("%s ตัวเลขทุกตัวมาจากสคริปต์ คำอธิบายเขียนด้วย %s (ผู้ให้บริการภายนอก เห็นเฉพาะตารางที่คำนวณแล้ว)",
+		am.Words(text), am.ModelName(narrative.Model))
 }
 
 // modelLine is what the outputs card always says about models (AM4): which
@@ -872,6 +1004,11 @@ func (rc *runCtx) modelLine(ctx context.Context, run am.Run, narrative narrative
 		line.VisionModel = used
 		line.VisionSelfHosted = flag(used != "" && rc.r.Model.IsSelfHosted(used))
 		line.NotChosen = flag(notChosen)
+		if rc.pkg.Manifest.Narrative != "rules" {
+			// AM22 §1.1: an agent that reads scans and has a model write its commentary — the card says
+			// which model wrote (Model), or that the rules did
+			line.WrittenByRules = flag(narrative.Model == "")
+		}
 	case "text":
 		chosen := rc.chosenModel()
 		line.ChosenModel = chosen

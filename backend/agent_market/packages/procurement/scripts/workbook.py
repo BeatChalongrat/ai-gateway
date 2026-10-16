@@ -23,6 +23,8 @@ from decimal import Decimal
 from openpyxl import load_workbook
 
 from ....deliverables import workpaper
+from ....deliverables.look import commentary
+from ....engine import words as _words
 from ....deliverables.look.xlsx_styles import Book
 from ....deliverables.reread import check as _check
 from ....deliverables.reread import dec
@@ -52,8 +54,13 @@ def _quote(ev) -> str:
 
 
 class ComparisonWorkbook:
-    def __init__(self, computed: dict, theme: dict, run: dict | None = None):
+    def __init__(self, computed: dict, theme: dict, run: dict | None = None, narrative: dict | None = None,
+                 model_info: dict | None = None):
         self.c, self.t, self.run = computed, theme, run or {}
+        # AM22: the commentary (a model's or the rules', with who wrote it) printed on its own sheet after the face
+        self.narrative = narrative or dict(computed.get("fallback_narrative") or {}, written_by="rules")
+        self.model_info = model_info or {}
+        self.commentary: dict = {}
         self.lang = computed.get("lang") or "th"
         self.book = Book(theme, self.lang)
         self.wb = self.book.wb
@@ -180,11 +187,15 @@ class ComparisonWorkbook:
         self.unused()
         self.ask()
         self.sources()
+        # AM22 §1.1: the commentary sheet, right after the face, with the line that says who wrote it — in the
+        # language of the comparison (this package carries its language in its table; the shared words follow it)
+        with _words.speaking(self.lang):
+            self.commentary = commentary.sheet(self.book, self.narrative, self.c, self.model_info)
         name = path.replace("\\", "/").rsplit("/", 1)[-1]
         main = self.w("sheet.candidates")
         ids = {s.title: ID_COLS for s in self.wb.worksheets if s.title.split(workpaper.COMPANION)[0] == main}
         plan = self.book.finish(path, id_cols=ids, author=str(self.run.get("organisation") or ""))
-        return {"sheets": [s.title for s in self.wb.worksheets], "print": plan}
+        return {"sheets": [s.title for s in self.wb.worksheets], "print": plan, "layouts": [self.commentary["layout"]]}
 
 
 def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:

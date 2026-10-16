@@ -132,7 +132,10 @@ def _asked_check(path: str, view: dict, applied: list[str]) -> dict:
 def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     import hashlib
 
+    from ...deliverables import quality
     from ...deliverables.formats import wanted_formats
+    from ...deliverables.look import commentary
+    from ...deliverables.look.catalogue import DoesNotFit
     from ...deliverables.theme import resolve
     from .scripts.workbook import BankWorkbook, check
 
@@ -140,12 +143,24 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     view, applied = _as_asked(computed, req)
     theme = resolve(req.get("theme"))
     names = req.get("names") or {}
-    artifacts, all_ok = [], True
+    artifacts, refused, all_ok = [], [], True
     for fmt in [f for f in wanted_formats(req, ["xlsx"]) if f == "xlsx"]:
         name = os.path.basename(names.get(fmt) or "bank_reconciliation.xlsx")
         path = os.path.join(out_dir, name)
-        meta = BankWorkbook(view, theme, req.get("run")).write(path)
+        # AM22 §1.1: the commentary — a model's, or the rules' saying so — on its own sheet, read back by the gate;
+        # one too long for its layout is refused naming the section, and the file is not written
+        narrative = req.get("narrative") or dict(view.get("fallback_narrative") or {}, written_by="rules")
+        try:
+            meta = BankWorkbook(view, theme, req.get("run"), narrative=narrative, model_info=req.get("model_info")).write(path)
+        except DoesNotFit as e:
+            if os.path.exists(path):
+                os.remove(path)
+            refused.append(commentary.refusal(fmt, name, e))
+            all_ok = False
+            continue
         checks = check(path, view, req.get("run"))
+        checks.append(commentary.check(path, narrative, view, req.get("model_info")))
+        checks.append(quality.fit_ok(meta.get("layouts") or []))
         if applied:
             checks.append(_asked_check(path, view, applied))
         ok = all(c["ok"] for c in checks)
@@ -155,5 +170,71 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
         artifacts.append({"name": name, "format": fmt, "kind": "table", "size": os.path.getsize(path), "sha256": sha,
                           "quality": {"passed": ok, "checks": checks}, "meta": meta, "chart_bindings": [],
                           "citations": len(computed["citations"])})
-    return {"passed": all_ok, "artifacts": artifacts, "theme": {"id": theme["id"], "version": theme.get("version", 1)},
-            "asked": {"applied": applied, "refused": []}}
+    return {"passed": all_ok, "artifacts": artifacts, "refused": refused,
+            "theme": {"id": theme["id"], "version": theme.get("version", 1)}, "asked": {"applied": applied, "refused": []}}
+
+
+# ── AM22 §2.1: the customer's own form ────────────────────────────────────────
+# Every value offered is one the round computed and cited (or a fact of the round: a name, a date); a form slot is
+# not a new place to make a number. A value that is not known is "" — its slot is named as a gap on the form's face.
+
+
+def _money(v) -> str:
+    from decimal import Decimal
+
+    from ...engine.thai import fmt_money
+
+    return fmt_money(Decimal(str(v))) if v not in (None, "") else ""
+
+
+def _day(v) -> str:
+    return _words.date(v) if v else ""
+
+
+def template_values(computed: dict, req: dict | None = None) -> dict:
+    """The values a customer's reconciliation form can take (the manifest's templates block): the balances (b1 b2),
+    each kind of reconciling item's total (t_<kind>), the adjusted balances (a1 a2) and their difference (d1), the
+    account and the round, and every reconciling item as a line."""
+    from decimal import Decimal
+
+    from .checks import classify as C
+    from .scripts.reconcile import SIDE_TH
+
+    c, st = computed, computed["statement"]
+    acc = c.get("account") or {}
+    run = (req or {}).get("run") or {}
+    out = {"company": c.get("company") or "", "account_name": acc.get("name") or "", "bank": acc.get("bank") or "",
+           "account_number": acc.get("number") or "", "gl_code": acc.get("gl_code") or "", "period": c["period_label"],
+           "as_of": _day(c["as_of"]), "prepared_on": _day(run.get("date") or c["prepared_on"]),
+           "prepared_by": str(run.get("preparer") or "") if run.get("kind") != "self_test" else "",
+           "bank_balance": _money(st["bank"]["balance"]), "book_balance": _money(st["book"]["balance"]),
+           "adjusted_bank": _money(st["bank"]["adjusted"]), "adjusted_book": _money(st["book"]["adjusted"]),
+           "difference": _money(st["difference"])}
+    for kind in C.TYPES:
+        total = abs(sum((Decimal(i["effect"]) for i in c["items"] if i["type"] == kind and i.get("effect") is not None), Decimal(0)))
+        out[kind] = _money(f"{total:.2f}")
+    out["items"] = [{"date": _day(i.get("date")), "ref": i.get("ref") or "", "description": i.get("description") or "",
+                     "kind": i.get("type_label") or "",
+                     # (an item nobody classified has no side yet: its side is a blank, not a guess)
+                     "side": SIDE_TH[i["side"]] if i.get("side") in ("bank", "book") else "",
+                     "amount": _money(abs(Decimal(i["amount"]))) if i.get("amount") not in (None, "") else ""}
+                    for i in c["items"]]
+    return out
+
+
+def template_gaps(computed: dict) -> dict:
+    """What the form's face says it lacks — and what this round has no concept of: the agent reconciles an account
+    in baht, so an exchange-rate line of a foreign-currency form is not this round's, and is taken off the face."""
+    from ...deliverables import form_words
+
+    return form_words.gaps(not_applicable={"fx_rate": W("form.na.fx")})
+
+
+def template_wanted(computed: dict) -> bool:
+    """A form is filled only when the round has a balance on at least one side: otherwise it would be all blanks."""
+    st = computed["statement"]
+    return st["bank"]["balance"] is not None or st["book"]["balance"] is not None
+
+
+def template_why_not(computed: dict) -> str:
+    return W("form.not_made")

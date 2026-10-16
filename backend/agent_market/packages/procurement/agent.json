@@ -1,7 +1,7 @@
 {
   "schema_version": "agent.market.v1",
   "id": "sran.procurement",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "name": "จัดซื้อ: เทียบราคาและร่างใบขอซื้อ",
   "name_en": "Procurement: Price Comparison and Purchase Request Draft",
   "short_name": "จัดซื้อ",
@@ -106,7 +106,8 @@
       }
     ]
   },
-  "narrative": "rules",
+  "narrative": "model",
+  "narrative_when_away": "rules",
   "templates": {
     "reads": [
       "rows",
@@ -196,7 +197,7 @@
     },
     "questions": "ถามเมื่อไม่ทราบจำนวน เมื่อสิ่งที่ขอตีความได้หลายแบบ และเมื่อไม่ทราบสถานที่ส่ง หลังค้นหาเสร็จจะถามหนึ่งครั้งว่าจะร่างใบขอซื้อจากตัวเลือกไหน หรือไม่เลือกรายใด วันที่ต้องการใช้ที่ไม่ได้ระบุจะไม่ถาม แต่อยู่ในรายการช่องที่ยังกรอกไม่ได้",
     "model_inputs": {
-      "model.text": "ข้อความคำขอของคุณ และข้อความที่มองเห็นได้ของหน้าเว็บสาธารณะที่บันทึกไว้ ส่งให้โมเดลอ่านเมื่อผู้ดูแลเปิดให้ agent นี้ใช้งานนอกองค์กรแล้วเท่านั้น โมเดลไม่มีเครื่องมือใดๆ และตอบเป็นข้อมูลตามรูปแบบที่กำหนด ทุกค่าที่โมเดลอ่านได้ถูกตรวจซ้ำกับหน้าที่บันทึกไว้ด้วยโปรแกรม โมเดลไม่ได้คำนวณ และไม่ได้ตัดสินว่าผู้ขายรายใดอยู่ในรายชื่อขององค์กร"
+      "model.text": "ข้อความคำขอของคุณ และข้อความที่มองเห็นได้ของหน้าเว็บสาธารณะที่บันทึกไว้ ส่งให้โมเดลอ่านเมื่อผู้ดูแลเปิดให้ agent นี้ใช้งานนอกองค์กรแล้วเท่านั้น โมเดลไม่มีเครื่องมือใดๆ และตอบเป็นข้อมูลตามรูปแบบที่กำหนด ทุกค่าที่โมเดลอ่านได้ถูกตรวจซ้ำกับหน้าที่บันทึกไว้ด้วยโปรแกรม โมเดลไม่ได้คำนวณ และไม่ได้ตัดสินว่าผู้ขายรายใดอยู่ในรายชื่อขององค์กร · โมเดลยังเขียนคำอธิบายรอบนี้ (ชีต “คำอธิบายรอบนี้” ของตารางเทียบ) จากตัวเลขที่โปรแกรมคำนวณแล้ว ถ้าไม่มีโมเดลที่ใช้ได้ กฎของแพ็กเกจเขียนแทน และชีตนั้นบอกไว้"
     },
     "never": [
       "ไม่สั่งซื้อ ไม่ชำระเงิน และไม่ขอใบเสนอราคาแทนคุณ",
@@ -574,7 +575,13 @@
     "pr.sign.title": "ลงชื่อ",
     "pr.sign.requester": "ผู้ขอซื้อ / วันที่",
     "pr.sign.approver": "ผู้อนุมัติ / วันที่",
-    "pr.footer": "ร่างโดย agent ผู้ช่วยจัดซื้อ agent ไม่ได้ส่ง ไม่ได้อนุมัติ และไม่ได้สั่งซื้อ"
+    "pr.footer": "ร่างโดย agent ผู้ช่วยจัดซื้อ agent ไม่ได้ส่ง ไม่ได้อนุมัติ และไม่ได้สั่งซื้อ",
+    "narr.summary": "เทียบราคา {items} รายการ พบตัวเลือก {offers} รายการ เลือกแล้ว {chosen} รายการ",
+    "narr.total": "ยอดรวมของรายการที่เลือก {total} {currency}",
+    "narr.gaps": "ใบขอซื้อยังมีช่องที่หน้าเว็บบอกไม่ได้ {gaps} ช่อง",
+    "narr.next.review": "ตรวจตัวเลือกและราคาที่หน้าเว็บแสดงก่อนส่งใบขอซื้อ",
+    "fact.h.result": "ผลการเทียบราคา",
+    "fact.counts": "ขอซื้อ {items} รายการ พบตัวเลือก {offers} รายการ เลือกแล้ว {chosen} รายการ ช่องที่ยังขาด {gaps} ช่อง"
   },
   "en": {
     "เรียงจากถูกสุด · เรียงตามราคา · เอาราคาต่ำสุดขึ้นก่อน": "order from the cheapest · order by price · the lowest price first",
@@ -618,7 +625,7 @@
     "ข้อกำหนดที่เทียบ": "Requirement compared",
     "ข้อกำหนดที่ไม่ตรง": "Requirements that differ",
     "ข้อกำหนดที่ไม่ตรงกับที่ขอ": "Requirements that differ from the request",
-    "ข้อความคำขอของคุณ และข้อความที่มองเห็นได้ของหน้าเว็บสาธารณะที่บันทึกไว้ ส่งให้โมเดลอ่านเมื่อผู้ดูแลเปิดให้ agent นี้ใช้งานนอกองค์กรแล้วเท่านั้น โมเดลไม่มีเครื่องมือใดๆ และตอบเป็นข้อมูลตามรูปแบบที่กำหนด ทุกค่าที่โมเดลอ่านได้ถูกตรวจซ้ำกับหน้าที่บันทึกไว้ด้วยโปรแกรม โมเดลไม่ได้คำนวณ และไม่ได้ตัดสินว่าผู้ขายรายใดอยู่ในรายชื่อขององค์กร": "The text of your request, and the visible text of the saved public web pages. They go to a model only once an admin has allowed this agent to work outside the organisation. The model has no tools and answers as data in a set form. Every value the model reads is checked again against the saved page by code. The model does not calculate and does not decide which seller is on the organisation's list.",
+    "ข้อความคำขอของคุณ และข้อความที่มองเห็นได้ของหน้าเว็บสาธารณะที่บันทึกไว้ ส่งให้โมเดลอ่านเมื่อผู้ดูแลเปิดให้ agent นี้ใช้งานนอกองค์กรแล้วเท่านั้น โมเดลไม่มีเครื่องมือใดๆ และตอบเป็นข้อมูลตามรูปแบบที่กำหนด ทุกค่าที่โมเดลอ่านได้ถูกตรวจซ้ำกับหน้าที่บันทึกไว้ด้วยโปรแกรม โมเดลไม่ได้คำนวณ และไม่ได้ตัดสินว่าผู้ขายรายใดอยู่ในรายชื่อขององค์กร · โมเดลยังเขียนคำอธิบายรอบนี้ (ชีต “คำอธิบายรอบนี้” ของตารางเทียบ) จากตัวเลขที่โปรแกรมคำนวณแล้ว ถ้าไม่มีโมเดลที่ใช้ได้ กฎของแพ็กเกจเขียนแทน และชีตนั้นบอกไว้": "The text of your request, and the visible text of the saved public web pages. They go to a model only once an admin has allowed this agent to work outside the organisation. The model has no tools and answers as data in a set form. Every value the model reads is checked again against the saved page by code. The model does not calculate and does not decide which seller is on the organisation's list.; the model also writes this run's commentary (the “คำอธิบายรอบนี้” sheet of the comparison) from the figures the program computed; when no model is available the package's rules write it, and the sheet says so",
     "ข้อความนี้ไม่ใช่เลขประจำตัวผู้เสียภาษี {digits} หลัก จึงไม่ใช้": "This text is not a {digits}-digit tax ID, so it is not used.",
     "ข้อความรอบราคา": "Text around the price",
     "ข้อความเรื่องการรับประกัน": "Warranty statement",
@@ -938,6 +945,12 @@
     "“{item}”: ไม่เทียบในรอบนี้ ตามที่เลือกไว้": "“{item}”: not compared in this run, as chosen",
     "“{item}”: ไม่ได้ระบุจำนวน จึงเทียบราคาต่อหนึ่งหน่วย": "“{item}”: no quantity was given, so prices are compared for one unit",
     "“{item}”: ไม่ได้ระบุแบบที่ต้องการ จึงค้นหาทุกแบบ": "“{item}”: no type was specified, so every type was searched for",
-    "“{item}”: ไม่ได้เลือกรายใด จึงไม่อยู่ในร่างนี้": "“{item}”: no candidate was chosen, so it is not in this draft"
+    "“{item}”: ไม่ได้เลือกรายใด จึงไม่อยู่ในร่างนี้": "“{item}”: no candidate was chosen, so it is not in this draft",
+    "เทียบราคา {items} รายการ พบตัวเลือก {offers} รายการ เลือกแล้ว {chosen} รายการ": "Compared prices for {items} items: {offers} options found, {chosen} chosen",
+    "ยอดรวมของรายการที่เลือก {total} {currency}": "Total of the chosen lines {total} {currency}",
+    "ใบขอซื้อยังมีช่องที่หน้าเว็บบอกไม่ได้ {gaps} ช่อง": "The purchase request still has {gaps} fields no web page can tell",
+    "ตรวจตัวเลือกและราคาที่หน้าเว็บแสดงก่อนส่งใบขอซื้อ": "Check the chosen options and the prices the pages show before sending the purchase request",
+    "ผลการเทียบราคา": "Result of the comparison",
+    "ขอซื้อ {items} รายการ พบตัวเลือก {offers} รายการ เลือกแล้ว {chosen} รายการ ช่องที่ยังขาด {gaps} ช่อง": "{items} items asked for, {offers} options found, {chosen} chosen, {gaps} fields still missing"
   }
 }

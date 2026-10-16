@@ -234,7 +234,8 @@ func TestTheNumberGuardReadsAnEnglishCommentary(t *testing.T) {
 	if err := GuardNumbersIn(am.English, "Revenue was THB 12.48 M, the margin down 0.95 pp to 22.0%.", th, nil); err != nil {
 		t.Fatalf("an English commentary on Thai-printed figures: %v", err)
 	}
-	if err := GuardNumbersIn(am.English, "Revenue was THB 12.84 M.", th, nil); err == nil || !strings.Contains(err.Error(), "ตัวเลขที่ไม่มีในตารางที่คำนวณ") {
+	// (AM22 §1.6: the reason sent back to the model is in the language of its answer)
+	if err := GuardNumbersIn(am.English, "Revenue was THB 12.84 M.", th, nil); err == nil || !strings.Contains(err.Error(), "numbers that are not in the computed table") {
 		t.Fatalf("an invented figure, and the reason sent back to the model: %v", err)
 	}
 	// a model's answer may give no cause, in either language

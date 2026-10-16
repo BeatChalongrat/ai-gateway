@@ -182,7 +182,18 @@ func keepValid(slots []am.TemplateSlot, base, picked map[string]string, spec am.
 		}
 		return keys[i] < keys[j]
 	})
+	// AM22 §2.4: a value one slot takes, proposed for two slots — neither pair is kept: the screen asks the person,
+	// who tells the two labels apart (kept pair by pair, the first in key order would win: the code picking)
+	twice := map[string]int{}
 	for _, k := range keys {
+		if _, once := spec.Once(picked[k]); once {
+			twice[picked[k]]++
+		}
+	}
+	for _, k := range keys {
+		if twice[picked[k]] > 1 {
+			continue
+		}
 		out[k] = picked[k]
 		if am.CheckTemplateMapping(am.Thai, slots, out, spec) != "" {
 			delete(out, k)

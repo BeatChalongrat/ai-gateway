@@ -194,8 +194,25 @@ func (m *ModelClient) SelfHostedModels() []string {
 }
 
 // CompleteWith is Complete over the given models, in order (AM3: an agent
-// whose documents must stay in the organisation passes only self-hosted ones).
+// whose documents must stay in the organisation passes only self-hosted ones). The one retry's reason
+// is said in Thai, as a prompt is (modellang.go).
 func (m *ModelClient) CompleteWith(ctx context.Context, models []string, system, user string, validate func(string) error) (Completion, []string, error) {
+	return m.CompleteWithIn(ctx, am.Thai, models, system, user, validate)
+}
+
+// CompleteWithIn is CompleteWith for an answer written in l (AM22 §1.6): the reason an unusable answer
+// is sent back with is in that language too, since the answer it corrects is.
+func (m *ModelClient) CompleteWithIn(ctx context.Context, l am.Lang, models []string, system, user string, validate func(string) error) (Completion, []string, error) {
+	var check func(string, string) error
+	if validate != nil {
+		check = func(_, s string) error { return validate(s) }
+	}
+	return m.CompleteWithInBy(ctx, l, models, system, user, check)
+}
+
+// CompleteWithInBy is CompleteWithIn whose check is told which model gave the answer it reads (AM22: an answer
+// kept for the renderer's ladder is said to be that model's, never the next one tried).
+func (m *ModelClient) CompleteWithInBy(ctx context.Context, l am.Lang, models []string, system, user string, validate func(model, content string) error) (Completion, []string, error) {
 	var tried []string
 	if !m.Available() || len(models) == 0 {
 		return Completion{}, tried, ErrNoModel
@@ -224,10 +241,11 @@ func (m *ModelClient) CompleteWith(ctx context.Context, models []string, system,
 			}
 			reached = true
 			if validate != nil {
-				if verr := validate(c.Content); verr != nil {
+				if verr := validate(model, c.Content); verr != nil {
 					tried = append(tried, note+": "+trim(verr.Error(), 160))
-					// One retry on the same model with the reason, then move on.
-					user = user + "\n\nคำตอบก่อนหน้าใช้ไม่ได้เพราะ: " + verr.Error() + " แก้แล้วตอบใหม่เป็น JSON ตามรูปแบบเดิม"
+					// One retry on the same model with the reason, then move on (bounded, as Guardrails
+					// documents its reasks: fail fast, never loop).
+					user = user + retryLine(l, verr.Error())
 					continue
 				}
 			}
@@ -566,7 +584,7 @@ func GuardNumbersIn(l am.Lang, text string, quotable map[string]string, ids []st
 		bad = append(bad, m)
 	}
 	if len(bad) > 0 {
-		return fmt.Errorf("ตัวเลขที่ไม่มีในตารางที่คำนวณ: %s", strings.Join(bad, ", "))
+		return fmt.Errorf(inLang(l, "ตัวเลขที่ไม่มีในตารางที่คำนวณ: %s", "numbers that are not in the computed table: %s"), strings.Join(bad, ", "))
 	}
 	return nil
 }

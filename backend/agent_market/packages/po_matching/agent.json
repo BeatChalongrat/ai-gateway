@@ -1,7 +1,7 @@
 {
   "schema_version": "agent.market.v1",
   "id": "sran.invoice-po-matching",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "name": "ตรวจใบกำกับภาษีกับใบสั่งซื้อ",
   "name_en": "Invoice to Purchase Order Matching",
   "short_name": "ใบกำกับภาษีกับ PO",
@@ -34,7 +34,7 @@
   ],
   "capabilities": {
     "required": ["document.match.e3", "document.extract.e2", "spreadsheet.read.xlsx", "compute.python.decimal", "deliverable.table.xlsx"],
-    "optional": ["model.vision"]
+    "optional": ["model.vision", "model.text"]
   },
   "install": {
     "defaults": {
@@ -73,7 +73,8 @@
        "help": "คั่นด้วยจุลภาค ถ้าไม่ตั้ง ใช้คำตั้งต้น เช่น ค่าขนส่ง ค่าประกันภัย ค่าธรรมเนียม"}
     ]
   },
-  "narrative": "rules",
+  "narrative": "model",
+  "narrative_when_away": "rules",
   "document_index": {"retention_days": 1825},
   "record_who_answered": true,
   "guide": {
@@ -124,7 +125,8 @@
     },
     "questions": "จะถามเมื่อใบแจ้งหนี้ไม่ได้ระบุบรรทัดของใบสั่งซื้อและมีบรรทัดที่น่าจะเป็นคู่ เมื่อใบแจ้งหนี้อาจซ้ำกับฉบับที่ส่งมาก่อน เมื่อบอกไม่ได้ว่าเป็นผู้ขายรายเดียวกัน เมื่อหน่วยนับไม่ตรงกันและไม่มีอัตราแปลง เมื่ออ่านค่าในเอกสารไม่ชัด และถามครั้งเดียวว่าบริษัทออกใบรับของหรือไม่ บริษัทที่ไม่ออกใบรับของจะไม่ถูกถามเรื่องใบรับของที่ไม่มี",
     "model_inputs": {
-      "model.vision": "เฉพาะภาพหน้าใบแจ้งหนี้ที่เป็นสแกนหรือรูปถ่าย ส่งให้โมเดลที่เลือกไว้สำหรับ agent นี้อ่านซ้ำเพื่อเทียบกับการอ่านตัวอักษร โดยปกติคือโมเดลที่รันในองค์กร ภาพจะออกนอกองค์กรก็ต่อเมื่อผู้ดูแลอนุญาตให้เอกสารของ agent นี้ออกนอกองค์กรและมีการเลือกโมเดลนอกองค์กร ซึ่งการ์ดของรอบนั้นจะบอกไว้ ค่าที่โมเดลอ่านเป็นเพียงคำแนะนำในการ์ดคำถาม ไม่ถูกใช้จนกว่าคนจะยืนยัน ตาราง PDF ดิจิทัล และไฟล์ e-Tax อ่านด้วยกฎเท่านั้น ไม่มีโมเดลเห็น โมเดลไม่ได้จับคู่ ไม่ได้คำนวณ และไม่ได้ตัดสินว่าใบใดผ่าน"
+      "model.vision": "เฉพาะภาพหน้าใบแจ้งหนี้ที่เป็นสแกนหรือรูปถ่าย ส่งให้โมเดลที่เลือกไว้สำหรับ agent นี้อ่านซ้ำเพื่อเทียบกับการอ่านตัวอักษร โดยปกติคือโมเดลที่รันในองค์กร ภาพจะออกนอกองค์กรก็ต่อเมื่อผู้ดูแลอนุญาตให้เอกสารของ agent นี้ออกนอกองค์กรและมีการเลือกโมเดลนอกองค์กร ซึ่งการ์ดของรอบนั้นจะบอกไว้ ค่าที่โมเดลอ่านเป็นเพียงคำแนะนำในการ์ดคำถาม ไม่ถูกใช้จนกว่าคนจะยืนยัน ตาราง PDF ดิจิทัล และไฟล์ e-Tax อ่านด้วยกฎเท่านั้น ไม่มีโมเดลเห็น โมเดลไม่ได้จับคู่ ไม่ได้คำนวณ และไม่ได้ตัดสินว่าใบใดผ่าน",
+      "model.text": "ตารางตัวเลขที่คำนวณแล้วของรอบนั้น — ยอดรวม จำนวน ผลการตรวจ และข้อสังเกตจากกฎ — เพื่อเขียนคำอธิบายรอบนี้ (ชีต “คำอธิบายรอบนี้” ในไฟล์ Excel) และเพื่อตอบคำถามที่คุณพิมพ์ถามเกี่ยวกับตัวเลขของรอบนั้น ไม่มีการส่งไฟล์ที่อัปโหลดหรือรายการรายบรรทัด โมเดลไม่พิมพ์ตัวเลขเอง: เขียนชื่อของตัวเลขแล้วระบบใส่ตัวเลขพร้อมรหัสอ้างอิงของมันเอง ถ้าไม่มีโมเดลที่ให้คำตอบที่ใช้ได้ กฎของแพ็กเกจเขียนคำอธิบายแทน และชีตนั้นบอกไว้"
     },
     "never": [
       "ไม่อนุมัติจ่าย และไม่โอนเงิน",
@@ -153,6 +155,29 @@
   },
   "limits": {"max_file_mb": 20, "max_files": 40},
   "self_test": "self-test.json",
+  "templates": {
+    "reads": ["rows", "lines", "pdf"],
+    "fields": {
+      "company": {"label": "ชื่อบริษัท"},
+      "company_tax_id": {"label": "เลขประจำตัวผู้เสียภาษีของบริษัท"},
+      "period": {"label": "งวด"},
+      "prepared_on": {"label": "วันที่จัดทำ"},
+      "supplier_name": {"label": "ชื่อผู้ขาย"},
+      "supplier_tax_id": {"label": "เลขประจำตัวผู้เสียภาษีของผู้ขาย"},
+      "invoices": {"label": "จำนวนใบแจ้งหนี้ที่ตรวจ", "once": true},
+      "passed": {"label": "จำนวนที่ผ่าน", "once": true},
+      "blocked": {"label": "จำนวนที่ติดเงื่อนไข", "once": true},
+      "person": {"label": "จำนวนที่ต้องให้คนตัดสิน", "once": true},
+      "value_passed": {"label": "มูลค่าที่ผ่าน (บาท)", "once": true},
+      "value_blocked": {"label": "มูลค่าที่ติดเงื่อนไข (บาท)", "once": true},
+      "received_not_billed": {"label": "รับของแล้วยังไม่มีใบแจ้งหนี้ (บาท)", "once": true},
+      "billed_not_received": {"label": "มีใบแจ้งหนี้แล้วยังไม่รับของ (บาท)", "once": true}
+    },
+    "lists": {
+      "lines": {"label": "ใบแจ้งหนี้ที่ตรวจ", "columns": {"number": "เลขที่ใบแจ้งหนี้", "date": "วันที่", "supplier": "ผู้ขาย", "supplier_tax_id": "เลขผู้เสียภาษีผู้ขาย", "total": "ยอดรวม", "status": "ผลตรวจ", "depth": "การเทียบ"}},
+      "credit_notes": {"label": "ใบลดหนี้", "columns": {"number": "เลขที่", "date": "วันที่", "supplier": "ผู้ขาย", "total": "ยอดรวม"}}
+    }
+  },
   "strings": {
     "kind.po": "ใบสั่งซื้อ (PO)",
     "card.kind.po.d": "รายการที่ตกลงซื้อ: สินค้า จำนวน และราคาต่อหน่วย",
@@ -773,7 +798,20 @@
     "doc.col.pass_in_order": "วิธีจับคู่ (ตามลำดับ)",
     "doc.sub.left_out": "ไฟล์ของรอบนี้ที่ไม่ได้นำมาตรวจ เหตุผล และวิธีนำกลับมารวม",
     "doc.col.how_back": "นำกลับมารวมได้อย่างไร",
-    "doc.file.read": "เอกสาร {tier} · อ่านด้วย {method}"
+    "doc.file.read": "เอกสาร {tier} · อ่านด้วย {method}",
+    "cite.invoices.label": "จำนวนใบแจ้งหนี้ที่ตรวจ",
+    "cite.invoices.formula": "นับใบแจ้งหนี้ทุกฉบับที่นำมาตรวจกับใบสั่งซื้อ",
+    "cite.grir.received.label": "รับของแล้วยังไม่มีใบแจ้งหนี้ (บาท)",
+    "cite.grir.received.formula": "รวมมูลค่าของที่รับแล้วแต่ยังไม่มีใบแจ้งหนี้มาเทียบ",
+    "cite.grir.billed.label": "มีใบแจ้งหนี้แล้วยังไม่รับของ (บาท)",
+    "cite.grir.billed.formula": "รวมมูลค่าที่แจ้งหนี้แล้วแต่ยังไม่มีใบรับของ",
+    "fact.h.result": "ผลการตรวจใบแจ้งหนี้",
+    "fact.h.reasons": "เหตุที่พบในรอบนี้",
+    "fact.po.counts": "ใบแจ้งหนี้ {invoices} ฉบับ: ผ่าน {passed} ติดเงื่อนไข {blocked} ต้องให้คนตัดสิน {person}",
+    "fact.po.values": "มูลค่าที่ผ่าน {value_passed} มูลค่าที่ติดเงื่อนไข {value_blocked}",
+    "fact.po.grir": "รับของแล้วยังไม่มีใบแจ้งหนี้ {received_not_billed} มีใบแจ้งหนี้แล้วยังไม่รับของ {billed_not_received}",
+    "form.na.credit_notes": "รอบนี้ไม่มีใบลดหนี้",
+    "form.not_made": "รอบนี้ไม่มีใบแจ้งหนี้ที่ตรวจได้ จึงไม่มีอะไรให้กรอกลงแบบฟอร์ม"
   },
   "en": {
     "เรียงจากรายการที่ต่างมากที่สุด · เรียงตามส่วนต่างราคา · เอาบรรทัดที่ราคาต่างจาก PO มากขึ้นก่อน": "order from the line that differs most · order by price difference · the lines whose price is furthest from the PO first",
@@ -1420,7 +1458,33 @@
     "เอกสาร {tier} · อ่านด้วย {method}": "Document {tier} · read by {method}",
     "อนุมัติแล้ว": "approved",
     "จ่ายแล้ว": "paid"
-
+,
+    "จำนวนใบแจ้งหนี้ที่ตรวจ": "Number of invoices tested",
+    "นับใบแจ้งหนี้ทุกฉบับที่นำมาตรวจกับใบสั่งซื้อ": "Counts every invoice tested against a purchase order",
+    "รับของแล้วยังไม่มีใบแจ้งหนี้ (บาท)": "Received, not yet billed (baht)",
+    "รวมมูลค่าของที่รับแล้วแต่ยังไม่มีใบแจ้งหนี้มาเทียบ": "Sums the value of goods received that no invoice has yet covered",
+    "มีใบแจ้งหนี้แล้วยังไม่รับของ (บาท)": "Billed, not yet received (baht)",
+    "รวมมูลค่าที่แจ้งหนี้แล้วแต่ยังไม่มีใบรับของ": "Sums the value invoiced that no goods receipt has yet covered",
+    "ผลการตรวจใบแจ้งหนี้": "Result of the invoice test",
+    "เหตุที่พบในรอบนี้": "Reasons found this run",
+    "ใบแจ้งหนี้ {invoices} ฉบับ: ผ่าน {passed} ติดเงื่อนไข {blocked} ต้องให้คนตัดสิน {person}": "{invoices} invoices: {passed} passed, {blocked} blocked, {person} for a person to decide",
+    "มูลค่าที่ผ่าน {value_passed} มูลค่าที่ติดเงื่อนไข {value_blocked}": "Value passed {value_passed}, value blocked {value_blocked}",
+    "รับของแล้วยังไม่มีใบแจ้งหนี้ {received_not_billed} มีใบแจ้งหนี้แล้วยังไม่รับของ {billed_not_received}": "Received not yet billed {received_not_billed}; billed not yet received {billed_not_received}",
+    "ตารางตัวเลขที่คำนวณแล้วของรอบนั้น — ยอดรวม จำนวน ผลการตรวจ และข้อสังเกตจากกฎ — เพื่อเขียนคำอธิบายรอบนี้ (ชีต “คำอธิบายรอบนี้” ในไฟล์ Excel) และเพื่อตอบคำถามที่คุณพิมพ์ถามเกี่ยวกับตัวเลขของรอบนั้น ไม่มีการส่งไฟล์ที่อัปโหลดหรือรายการรายบรรทัด โมเดลไม่พิมพ์ตัวเลขเอง: เขียนชื่อของตัวเลขแล้วระบบใส่ตัวเลขพร้อมรหัสอ้างอิงของมันเอง ถ้าไม่มีโมเดลที่ให้คำตอบที่ใช้ได้ กฎของแพ็กเกจเขียนคำอธิบายแทน และชีตนั้นบอกไว้": "The run's computed table — totals, counts, the outcome of the checks and the rules' observations — to write this run's commentary (the “คำอธิบายรอบนี้” sheet of the Excel file) and to answer a question you type about the run's figures. No uploaded file and no line item is sent. The model types no figure itself: it writes the figure's name and the system puts in the figure with its own reference code. When no model gives a usable answer, the package's rules write the commentary and the sheet says so",
+    "ชื่อบริษัท": "Company name",
+    "เลขประจำตัวผู้เสียภาษีของบริษัท": "Company tax ID",
+    "วันที่จัดทำ": "Prepared on",
+    "จำนวนที่ผ่าน": "Number passed",
+    "จำนวนที่ติดเงื่อนไข": "Number blocked",
+    "จำนวนที่ต้องให้คนตัดสิน": "Number for a person to decide",
+    "มูลค่าที่ผ่าน (บาท)": "Value passed (baht)",
+    "มูลค่าที่ติดเงื่อนไข (บาท)": "Value blocked (baht)",
+    "ใบแจ้งหนี้ที่ตรวจ": "Invoices tested",
+    "เลขที่ใบแจ้งหนี้": "Invoice number",
+    "เลขผู้เสียภาษีผู้ขาย": "Supplier tax ID",
+    "การเทียบ": "Matched against",
+    "รอบนี้ไม่มีใบลดหนี้": "This run has no credit note",
+    "รอบนี้ไม่มีใบแจ้งหนี้ที่ตรวจได้ จึงไม่มีอะไรให้กรอกลงแบบฟอร์ม": "This run has no invoice that could be tested, so there is nothing to put in the form"
   },
   "en_by_key": {
     "card.practice.header": "GR issued?",

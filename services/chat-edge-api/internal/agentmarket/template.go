@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -131,6 +132,45 @@ type TemplateSpec struct {
 		Label   string            `json:"label"`
 		Columns map[string]string `json:"columns"`
 	} `json:"lists"`
+}
+
+// Once (AM22 §2.4) is a field the manifest says one slot takes ("once": a balance, a total) and its label.
+func (spec TemplateSpec) Once(field string) (string, bool) {
+	var f struct {
+		Label string `json:"label"`
+		Once  bool   `json:"once"`
+	}
+	if raw, ok := spec.Fields[field]; ok && json.Unmarshal(raw, &f) == nil && f.Once {
+		return f.Label, true
+	}
+	return "", false
+}
+
+// OnceTwice is the first field one slot takes that a mapping gives to two slots: the two slots' labels and the
+// field's, or nil. Two labels that could take one value ("ยอดตามธนาคาร", "ยอดตามบัญชี") are the person's to tell
+// apart — never the code's, which would pick one by its order.
+func OnceTwice(slots []TemplateSlot, mapping map[string]string, spec TemplateSpec) []string {
+	by := map[string]TemplateSlot{}
+	for _, s := range slots {
+		by[s.Key] = s
+	}
+	keys := make([]string, 0, len(mapping))
+	for k := range mapping {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	first := map[string]string{}
+	for _, k := range keys {
+		label, once := spec.Once(mapping[k])
+		if !once {
+			continue
+		}
+		if prev, ok := first[mapping[k]]; ok {
+			return []string{by[prev].Label, by[k].Label, label}
+		}
+		first[mapping[k]] = k
+	}
+	return nil
 }
 
 // SavedTemplate reads an install's saved template (ok=false when there is none).
@@ -387,6 +427,15 @@ func CheckTemplateMapping(l Lang, slots []TemplateSlot, mapping map[string]strin
 		if _, ok := found.Columns[lcol]; !ok {
 			return T(l, "ไม่มีคอลัมน์ “") + lcol + T(l, "” ในรายการ “") + found.Label + "”"
 		}
+	}
+	// AM22 §2.4: a value one slot takes, given to two — refused, naming both; the person keeps one
+	if two := OnceTwice(slots, mapping, spec); two != nil {
+		field := two[2]
+		if l == English {
+			field = englishOfPackage(field) // the package's own name for its value, as its manifest says it in English
+		}
+		return T(l, "ช่อง “") + two[0] + T(l, "” และช่อง “") + two[1] + T(l, "” รับค่าเดียวกัน (“") + field +
+			T(l, "”) ซึ่งใส่ได้ช่องเดียว เลือกช่องที่ถูกต้องเพียงช่องเดียว")
 	}
 	return ""
 }

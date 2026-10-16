@@ -22,6 +22,7 @@ from decimal import Decimal
 from openpyxl import load_workbook
 
 from ....deliverables import workpaper
+from ....deliverables.look import commentary
 from ....deliverables.look.xlsx_styles import Book
 from ....deliverables.reread import Tally, sheets, table
 from ....engine import words
@@ -118,8 +119,13 @@ def parts(wb, sheet: str) -> list:
 
 
 class ExpenseWorkbook:
-    def __init__(self, computed: dict, theme: dict, run: dict | None = None):
+    def __init__(self, computed: dict, theme: dict, run: dict | None = None, narrative: dict | None = None,
+                 model_info: dict | None = None):
         self.c, self.t, self.run = computed, theme, run or {}
+        # AM22: the commentary (a model's or the rules', with who wrote it) printed on its own sheet after the face
+        self.narrative = narrative or dict(computed.get("fallback_narrative") or {}, written_by="rules")
+        self.model_info = model_info or {}
+        self.commentary: dict = {}
         self.book = Book(theme, words.lang())
         self.wb = self.book.wb
 
@@ -287,9 +293,11 @@ class ExpenseWorkbook:
         # AM8: printable — the claim's number and its person repeat on every page (AM10: and open every companion
         # sheet of a wide table)
         id_cols = {W(s): ID_COLS[main] for main, names in PARTS.items() for s in names}
+        # AM22 §1.1: the commentary sheet, right after the face, with the line that says who wrote it
+        self.commentary = commentary.sheet(self.book, self.narrative, self.c, self.model_info)
         self.book.finish(path, id_cols={**id_cols, W(S_FACTS): 2}, author=str(self.c.get("company") or self.run.get("organisation") or ""))
         return {"sheets": list(self.wb.sheetnames), "claims": self.c["totals"]["claims"],
-                "run_exceptions": self.c["totals"]["run_exceptions"]}
+                "run_exceptions": self.c["totals"]["run_exceptions"], "layouts": [self.commentary["layout"]]}
 
 
 def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:

@@ -243,11 +243,25 @@ def compute(docs: list[R.Doc], roles: dict, period: str, *, answers: dict | None
                 "excluded": str(counts["excluded"]), "total_thb": fmt_money(totals["total"]),
                 "vat_thb": fmt_money(totals["vat_amount"])}
     citations = _citations(documents, tot, exceptions)
+    # AM22 §1.1: the figures a sentence of the commentary may name, each with its own citation; the facts a
+    # model is shown, with the figures by key; the layouts' limits for the words, in the run's language
+    from ....deliverables.look.catalogue import writing_limits
+    from ....engine import figures as F
+    figures = F.table([
+        ("total_thb", quotable["total_thb"], "i3", W("cite.total.label")), ("vat_thb", quotable["vat_thb"], "i2", W("cite.vat_amount.label")),
+        ("included", quotable["included"], "i7", W("cite.count.label")), ("documents", quotable["documents"], "i8", W("cite.count_all.label")),
+        ("excluded", quotable["excluded"], "i9", W("cite.count_excluded.label"))])
+    facts = F.facts(
+        (W("fact.h.result"), [W("fact.inv.counts", documents="{documents}", included="{included}", excluded="{excluded}"),
+                              W("fact.inv.totals", total="{total_thb}", vat="{vat_thb}")]
+         + [W("fact.inv.currency", code=k, n=v["documents"]) for k, v in sorted(by_currency.items())]),
+        (W("fact.h.reasons"), sorted({e["reason"] for e in exceptions})))
     fallback = {"summary": (W("say.summary", documents=counts["documents"], included=counts["included"],
                               total=fmt_money(totals["total"]), vat_amount=fmt_money(totals["vat_amount"]))
                             + (" " + W("say.summary.excluded", excluded=counts["excluded"]) if counts["excluded"] else "")),
-                "movements": [], "watch": sorted({e["reason"] for e in exceptions}), "next_steps": []}
+                "movements": [], "watch": _capped(sorted({e["reason"] for e in exceptions})), "next_steps": []}
     return {"schema": SCHEMA, "period": period, "period_label": label,
+            "figures": figures, "narrative_facts": facts, "writing_limits": writing_limits("xlsx"),
             "prepared_on": (today or _dt.date.today()).isoformat(), "company": (defaults or {}).get("company") or "",
             "company_tax_id": (R.org_from(defaults or {}) or {}).get("tax_id"),
             "documents": documents, "line_items": lines, "provenance": prov, "exceptions": exceptions, "checks": checks,
@@ -295,6 +309,8 @@ def _citations(documents: list[dict], tot: dict, exceptions: list[dict]) -> list
                 "script": "packages/invoice_processing/scripts/register.py"}
 
     label, names = named("count", ["cite.count.a1", "cite.count.a2", "cite.count.a3", "cite.count.a4", "cite.count.a5"])
+    label_all, names_all = named("count_all", [])
+    label_ex, names_ex = named("count_excluded", [])
     return [
         c("i1", "subtotal", ["cite.subtotal.a1", "cite.subtotal.a2", "cite.subtotal.a3"], printed("subtotal")),
         c("i2", "vat_amount", ["cite.vat_amount.a1", "vat", "cite.vat_amount.a2"], printed("vat_amount")),
@@ -305,6 +321,12 @@ def _citations(documents: list[dict], tot: dict, exceptions: list[dict]) -> list
         {"id": "i7", "label": label, "value": str(len(included)), "unit": "count", "formula": W("cite.count"),
          "sources": [{"file": d["name"], "value": None, "note": W("cite.count.a1")} for d in included], "left_out": left_out,
          "aliases": names, "script": "packages/invoice_processing/scripts/register.py"},
+        # AM22: the counts a commentary names — every document received, and those left out
+        {"id": "i8", "label": label_all, "value": str(len(documents)), "unit": "count", "formula": W("cite.count_all"),
+         "sources": [{"file": d["name"], "value": None, "note": ""} for d in documents], "left_out": [],
+         "aliases": names_all, "script": "packages/invoice_processing/scripts/register.py"},
+        {"id": "i9", "label": label_ex, "value": str(len(left_out)), "unit": "count", "formula": W("cite.count_excluded"),
+         "sources": [], "left_out": left_out, "aliases": names_ex, "script": "packages/invoice_processing/scripts/register.py"},
     ]
 
 
@@ -341,3 +363,10 @@ def summarize(computed: dict) -> dict:
             # AM5: what the round's files card lists under "เอกสารที่ยังไม่ได้รวม" (what restoring takes stays in computed.json)
             "not_included": [{k: e[k] for k in ("doc_key", "name", "reason", "detail", "how", "can_restore")}
                              for e in computed.get("not_included") or []]}
+
+
+def _capped(lines: list) -> list:
+    """AM22: the rules' list under one heading, at most the commentary sheet's ceiling; more is said, never cut."""
+    from ....engine import figures as F
+
+    return F.capped_rules(lines)

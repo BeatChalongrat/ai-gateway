@@ -16,6 +16,7 @@ import re
 from decimal import Decimal
 
 from agent_market.engine.thai import BE_OFFSET, MONTHS_EN, MONTHS_TH, MONTHS_TH_ABBR
+from agent_market.engine.words import SHARED
 
 THAI = re.compile(r"[฀-๿]")
 THAI_RUN = re.compile(r"[฀-๿]+(?:[  ]*[฀-๿]+)*")
@@ -120,8 +121,10 @@ def same_but_words(th: dict, en: dict, w, sheet_names: dict | None = None, limit
     if len(th_sheets) != len(en_sheets):
         say(f"{len(th_sheets)} sheets in Thai, {len(en_sheets)} in English: {th_sheets} / {en_sheets}")
     for t, e in zip(th_sheets, en_sheets):
-        if sheet_names is not None and sheet_names.get(t) != e:
-            say(f"sheet “{t}” is “{e}” in English; the manifest says “{sheet_names.get(t)}”")
+        # AM22: the commentary sheet is named by the shared words (engine/words.json), not the package's manifest
+        expected = sheet_names.get(t, SHARED.english.get(t)) if sheet_names is not None else e
+        if expected != e:
+            say(f"sheet “{t}” is “{e}” in English; the manifest says “{expected}”")
         rows_t, rows_e = th[t], en[e]
         if len(rows_t) != len(rows_e):
             say(f"sheet “{t}”: {len(rows_t)} rows in Thai, {len(rows_e)} in English")

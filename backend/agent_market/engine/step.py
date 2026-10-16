@@ -116,7 +116,9 @@ def _fill_template(pkg, computed: dict, t: dict, req: dict | None = None) -> dic
         req = req or {}
         values["company"] = (str((req.get("theme") or {}).get("company") or "").strip()
                              or str((req.get("run") or {}).get("organisation") or "").strip())
-    rep = template_out.fill(_in(t["input"]), path, t.get("saved") or {}, values)
+    # AM22 §2.2: the fields this round has no concept of, in the package's own words (taken off the form's face)
+    early = pkg.template_gaps(computed) if hasattr(pkg, "template_gaps") else {}
+    rep = template_out.fill(_in(t["input"]), path, t.get("saved") or {}, values, (early or {}).get("not_applicable"))
     if hasattr(pkg, "template_gaps"):
         # AM12: a draft says on its own face what it lacks — the form's blanks that are still empty (read
         # from the filled file, not from the mapping) and what the package knows cannot be known — and the
@@ -146,7 +148,10 @@ def _fill_template(pkg, computed: dict, t: dict, req: dict | None = None) -> dic
             "chart_bindings": [],
             "meta": {"ext": rep["kind"], "needs_recalc": bool(rep.get("needs_recalc")), "filled": len(rep.get("filled") or []),
                      "not_filled": rep.get("not_filled_explained") or [], "refused": rep.get("refused") or {},
-                     "unfilled": rep.get("unfilled") or []}}
+                     "unfilled": rep.get("unfilled") or [],
+                     # AM22: the places this round had no concept of, taken off the face — recorded, not printed
+                     "not_applicable": [{k: o.get(k) for k in ("key", "label", "field", "why", "done")}
+                                        for o in rep.get("not_applicable") or []]}}
 
 
 def run(req: dict) -> dict:
@@ -208,6 +213,11 @@ def run(req: dict) -> dict:
             art = _fill_template(pkg, computed, req["template"], req)
             out["artifacts"] = list(out.get("artifacts") or []) + [art]
             out["passed"] = bool(out.get("passed", True)) and art["quality"]["passed"]
+        elif req.get("template") and hasattr(pkg, "template_values"):
+            # AM22 §2.4: nothing of this round goes in a form — no file, and a line that says why (a form full of
+            # blanks is worse than no form)
+            why = pkg.template_why_not(computed) if hasattr(pkg, "template_why_not") else ""
+            out["template_not_made"] = {"why": why}
     elif op == "inspect_template":
         from ..deliverables import template_fill, template_out
 

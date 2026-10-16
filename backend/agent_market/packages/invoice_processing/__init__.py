@@ -181,7 +181,10 @@ def _asked_check(path: str, view: dict, applied: list[str]) -> dict:
 def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     import hashlib
 
+    from ...deliverables import quality
     from ...deliverables.formats import wanted_formats
+    from ...deliverables.look import commentary
+    from ...deliverables.look.catalogue import DoesNotFit
     from ...deliverables.theme import resolve
     from .scripts.workbook import InvoiceWorkbook, check
 
@@ -189,12 +192,24 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     view, applied = _as_asked(computed, req)
     theme = resolve(req.get("theme"))
     names = req.get("names") or {}
-    artifacts, all_ok = [], True
+    artifacts, refused, all_ok = [], [], True
     for fmt in [f for f in wanted_formats(req, ["xlsx"]) if f == "xlsx"]:
         name = os.path.basename(names.get(fmt) or "register.xlsx")
         path = os.path.join(out_dir, name)
-        meta = InvoiceWorkbook(view, theme, req.get("run")).write(path)
+        # AM22 §1.1: the commentary — a model's, or the rules' saying so — on its own sheet, read back by the gate;
+        # one too long for its layout is refused naming the section, and the file is not written
+        narrative = req.get("narrative") or dict(view.get("fallback_narrative") or {}, written_by="rules")
+        try:
+            meta = InvoiceWorkbook(view, theme, req.get("run"), narrative=narrative, model_info=req.get("model_info")).write(path)
+        except DoesNotFit as e:
+            if os.path.exists(path):
+                os.remove(path)
+            refused.append(commentary.refusal(fmt, name, e))
+            all_ok = False
+            continue
         checks = check(path, view, req.get("run"))
+        checks.append(commentary.check(path, narrative, view, req.get("model_info")))
+        checks.append(quality.fit_ok(meta.get("layouts") or []))
         if applied:
             checks.append(_asked_check(path, view, applied))
         ok = all(c["ok"] for c in checks)
@@ -204,5 +219,5 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
         artifacts.append({"name": name, "format": fmt, "kind": "table", "size": os.path.getsize(path), "sha256": sha,
                           "quality": {"passed": ok, "checks": checks}, "meta": meta, "chart_bindings": [],
                           "citations": len(computed["provenance"])})
-    return {"passed": all_ok, "artifacts": artifacts, "theme": {"id": theme["id"], "version": theme.get("version", 1)},
-            "asked": {"applied": applied, "refused": []}}
+    return {"passed": all_ok, "artifacts": artifacts, "refused": refused,
+            "theme": {"id": theme["id"], "version": theme.get("version", 1)}, "asked": {"applied": applied, "refused": []}}

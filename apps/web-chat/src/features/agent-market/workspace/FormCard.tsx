@@ -49,6 +49,8 @@ function sentence(p: FormPayload, t: (key: AmKey, vars?: Record<string, string>)
       ? t("form.refused.noFields")
       : t("form.refused.tooFew", { fields: String(p.fields ?? 0), mapped: String(p.mapped ?? 0) });
   }
+  // AM22: the round had nothing for the form — no file, and not a form that cannot be used (the why is the package's)
+  if (p.status === "failed" && p.reason === "nothing_this_round") return t("form.notThisRound");
   if (p.status === "failed" && p.reason && FAILED_WHY[p.reason]) return t("form.failedWhy", { why: t(FAILED_WHY[p.reason]) });
   const n = p.status === "unfilled" ? (p.unfilled?.length ?? 0) || 1 : (p.open ?? 0);
   return t(STATUS[p.status] ?? "form.inspecting", { n: String(n) });

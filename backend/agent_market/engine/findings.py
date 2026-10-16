@@ -104,10 +104,10 @@ class FindingError(ValueError):
 
 
 def display_len(s: str) -> int:
-    """Characters a reader sees: Thai combining marks take no column."""
-    import unicodedata
+    """Characters a reader sees: Thai combining marks take no column (AM22: the one count, agent_market.columns)."""
+    from ..columns import columns
 
-    return sum(1 for ch in s if unicodedata.category(ch) not in ("Mn", "Me"))
+    return columns(s)
 
 
 def validate(f: Finding) -> None:

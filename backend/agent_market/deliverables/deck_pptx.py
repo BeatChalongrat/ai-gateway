@@ -374,6 +374,9 @@ class DeckWriter:
                    S("docs.deck.computed", script=c["script"]),
                    S("docs.deck.model") + " " + (model.get("model") or S("docs.deck.no_model")) + (" " + S("docs.deck.inside") if model.get("self_hosted") else ""),
                    S("docs.deck.readonly"), S("docs.deck.scope")]
+        if nar.get("written_by") == "rules":
+            # AM22 §1.1: a commentary the rules wrote says so on the deck's face too, beside the model line
+            closing.insert(4, S("docs.about.rules_wrote"))
         closing += [a["text"] for a in m["assumptions"]]
         closing += [(S("docs.deck.cites") + " " if i == 0 else "    ") + line for i, line in enumerate(_chunks(", ".join(refs), 110))]
         self.closing(closing)
