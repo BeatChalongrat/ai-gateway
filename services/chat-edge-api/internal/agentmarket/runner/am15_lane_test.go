@@ -21,7 +21,7 @@ import (
 // and every name in those chunks is a test that exists.
 
 // The lanes `scripts/gate.sh it` runs, in its order: two it names itself and the one it runs last
-// (GATE_IT's default — AM18's since that card), with the lanes that one runs first (AM16's, then
+// (GATE_IT's default — AM22's since that card), with the lanes that one runs first (AM18's, AM16's, then
 // AM15's, which runs AM13's).
 var gateLanes = []string{
 	"scripts/gate/it/am10.sh",
@@ -30,6 +30,7 @@ var gateLanes = []string{
 	"scripts/gate/it/am15.sh",
 	"scripts/gate/it/am16.sh",
 	"scripts/gate/it/am18.sh",
+	"scripts/gate/it/am22.sh",
 }
 
 // startsIT is the call that starts the integration environment (written in two parts, so that this
@@ -47,10 +48,13 @@ func TestEveryIntegrationTestIsInALaneOfTheGate(t *testing.T) {
 	}
 	// the gate runs these lanes: its own words
 	gate := read("scripts/gate.sh")
-	for _, want := range []string{"scripts/gate/it/am10.sh", "scripts/gate/it/am12.sh web", "GATE_IT:-scripts/gate/it/am18.sh"} {
+	for _, want := range []string{"scripts/gate/it/am10.sh", "scripts/gate/it/am12.sh web", "GATE_IT:-scripts/gate/it/am22.sh"} {
 		if !strings.Contains(gate, want) {
 			t.Fatalf("scripts/gate.sh it no longer runs %q — this test reads the lanes it runs; bring the two together", want)
 		}
+	}
+	if !strings.Contains(read("scripts/gate/it/am22.sh"), "scripts/gate/it/am18.sh\" |") {
+		t.Fatal("scripts/gate/it/am22.sh no longer runs AM18's lane first")
 	}
 	if !strings.Contains(read("scripts/gate/it/am18.sh"), "scripts/gate/it/am16.sh\" |") {
 		t.Fatal("scripts/gate/it/am18.sh no longer runs AM16's lane first")

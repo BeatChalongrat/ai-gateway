@@ -1369,3 +1369,61 @@ month because a company name typed during a walkthrough was the only place a nam
   languages under two themes, rendered, rasterised by the converter and compared with the approved
   pictures in `tests/fixtures/look_gallery`; a difference beyond the threshold fails with both pictures
   side by side; the absurd case must be refused.
+
+## The words every agent writes, and the customer's own form (AM22)
+
+**Every agent's commentary.** The bank reconciliation, the expense audit, the PO matching, the invoice register and
+procurement now have a model write their words (`"narrative": "model"`), as the financial report always did. Each
+package computes a `figures` table (`engine/figures.py`: key → printed text, its own citation, what it is) and the
+facts a model is shown under headings (`narrative_facts`), so a sentence names a figure by its key and the figure is
+printed with its own citation (AM8) — procurement, whose prices are cited by their pages rather than by an id, stays
+on the quotable path. The words are printed on a sheet of their own after the face of the working paper
+(`deliverables/look/commentary.py`, the catalogue's xlsx `commentary` layout), read back by the gate
+(`xlsx.commentary`). The rules' words stay as the no-model path: when no model the organisation allows can be
+reached, a package that says `"narrative_when_away": "rules"` (the five) delivers with its rules' words and the
+working paper says so on its face, under the commentary; the financial report waits for its model (AM15). A run a
+model wrote never carries that line (`tests/test_am22_words.py`, `runner/am22_it_test.go`).
+
+**The validator measures what the prompt promised** (`runner/deliver.go` `checkNarrative`). The summary, each point
+and the number of points under a heading are measured against `writing_limits` — the catalogue's own numbers for the
+format, in the run's language — in the characters a reader sees (`columns`: a Thai tone mark or a vowel above or below
+the line takes no column; `agent_market/columns.py` is the same count). An answer past a limit is refused with the
+reason, in the run's language, and asked again once on the same model (`model.go`, bounded); nothing on the way to the
+renderer drops, trims or cuts a point any more (the seventh point was dropped until this card). The prompt asks the
+model to draft what needs saying and then edit it to the limits without dropping a point, in the run's language.
+
+**One width for both languages** (`deliverables/look/measure.py`). The catalogue's limits are Latin columns; the
+chooser weighs a Thai character by how much wider a Thai column is in the embedded Sarabun (measured from the font on
+the engine's own sentences, about 1.24), and a Thai run is told its budget divided by the same ratio, so the two
+languages are allowed the same width of text. Height is measured as lines × size × 1.22 for both scripts; Sarabun's own
+line box is 1.30 em and Thai with stacked marks reaches it — left for its own card.
+
+**A customer's form: not applicable is not missing** (`template_out.fill`, `template_fill.drop_not_applicable`). A
+package names the fields its round has no concept of (`template_gaps` → `not_applicable`: an exchange rate on a baht
+account, a cash advance the expense audit does not see, a credit-note section with no credit note); a slot mapped to
+one is taken off the form's face — an Excel row hidden (its formulas stay put), a Word row that holds only that place
+removed — recorded in the run's JSON and checked off the face (`template.not_applicable`). A slot that should have a
+value and has none is printed on the face under its heading, as before. The filler never decides which is which.
+
+**The three new forms** (bank, expense, PO: `template_values` / `template_gaps` / `template_wanted` /
+`template_why_not`). Every value offered is a computed figure with its citation (the bank cites each kind of
+reconciling item, `t_<kind>`). A field one slot takes is marked `"once"`; a mapping that gives it to two slots is
+refused at the save naming both, and a model's proposal of it for two slots keeps neither (`OnceTwice`, `keepValid`) —
+two labels that could take one balance are the person's to tell apart. A blank inside a merged range that is not its
+top-left is refused by name; a blank that is a merged range is filled at its top-left and read again as still one
+range; a label drawn across several columns finds its blank past its own merge. A new version whose addresses are the
+same and whose labels moved is `moved`, not `kept`, and its old mapping is not carried. A round with nothing for the
+form makes no file and says why, on the form's card and in the round's message. The test forms are made up
+(`tests/am22forms.py`, committed under each package's `evals/fixtures/forms`).
+
+**A customer's form: what is kept on purpose.** Three things were looked for at the vendors and not found; they exist
+because of bugs found here, and `tests/test_am22_kept.py` with `runner/am22_test.go`
+(`TestTheFilledFormIsRecalculatedAndReadBack`) fail if any is taken out:
+
+1. **The finished file is opened again and the values read back** (`template_out.verify`): a value the filler wrote and
+   the file does not hold is a gap, whatever the filler reported.
+2. **A formula cell and a locked cell are refused; `needs_recalc` is set and the converter recalculates the form**
+   (`runner/template.go` `recalcTemplate`): the form's own arithmetic is never written over, and its results are the
+   form's, not ours.
+3. **A new version is inspected again and diffed** (`template_out.diff`): kept, added, removed and moved — never a
+   mapping carried by a key whose cell now means something else.

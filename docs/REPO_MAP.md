@@ -51,7 +51,7 @@ words where it is cited, never by a path a clone cannot follow.
   `smoke`, `drill`, `backup`). `gate/` holds its pieces: `tracks.py` (nothing tracked that `.gitignore`
   excludes), `marked.py` + `backend_marked_failing.txt` (the backend tests marked `integration`, held
   by name), `go_test.sh` (the Go lane against the test database), `it/` (the integration lane in
-  chunks: `am10.sh` … `am18.sh`, and `chunk.sh` to run one chunk alone).
+  chunks: `am10.sh` … `am22.sh`, and `chunk.sh` to run one chunk alone).
 - `smoke.sh` + `smoke/` — the permanent smoke suite, every entry point; `smoke-daily.ps1` registers it.
 - `ops/` — the host's own tools: `power.sh` (nothing heavy on battery), `envsafe.sh` (settings without
   printing them), `live_memory.py`, `swap.sh` (one live service to its new image, measured),

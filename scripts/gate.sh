@@ -201,7 +201,7 @@ case "$phase" in
       date -u +"started %H:%M:%SZ at $(git rev-parse --short=7 HEAD)"
       timeout 4200 bash scripts/gate/it/am10.sh | sed -u 's/^lane_exit=/am10_lane_exit=/'
       timeout 2400 bash scripts/gate/it/am12.sh web | sed -u 's/^lane_exit=/am12_web_lane_exit=/'
-      [ -n "${GATE_IT:-scripts/gate/it/am18.sh}" ] && timeout 1800 bash ${GATE_IT:-scripts/gate/it/am18.sh} | sed -u 's/^lane_exit=/card_lane_exit=/'
+      [ -n "${GATE_IT:-scripts/gate/it/am22.sh}" ] && timeout 2400 bash ${GATE_IT:-scripts/gate/it/am22.sh} | sed -u 's/^lane_exit=/card_lane_exit=/'
       date -u +"ended %H:%M:%SZ"
     } >> "$out" 2>&1
     grep -a -q -E '^(--- FAIL|FAIL|panic)' "$out" && rc=1
