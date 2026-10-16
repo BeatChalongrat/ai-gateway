@@ -606,8 +606,15 @@ func TestTheProcurementSelfTestRunsOnItsBundledPagesAndReachesNothing(t *testing
 	if done.Status != am.RunSucceeded {
 		t.Fatalf("the self-test passes: %s %s", done.Status, done.StatusReason)
 	}
-	if n := len(web.searched) + len(web.fetched) + len(web.bodies); n != 0 {
-		t.Fatalf("a self-test searches nothing, opens nothing and asks no model: %d calls", n)
+	// AM22: a self-test searches nothing and opens nothing; the one model it asks is the one that writes its
+	// commentary, from the bundled sample's computed table (the stand-in's answer is not one: the rules write it)
+	if n := len(web.searched) + len(web.fetched); n != 0 {
+		t.Fatalf("a self-test searches nothing and opens nothing: %d calls", n)
+	}
+	for i, b := range web.bodies {
+		if web.prompts[i] != "other" || !strings.Contains(string(b), "งวด: ") {
+			t.Fatalf("a self-test asks a model only for its commentary: call %d was %q", i, web.prompts[i])
+		}
 	}
 	if cards, _ := e.store.RunCards(ctx, run.ID); len(cards) != 0 {
 		t.Fatalf("the sample asks nothing: %d cards", len(cards))

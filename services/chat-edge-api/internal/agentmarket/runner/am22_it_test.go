@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"html"
 	"io"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +37,9 @@ func (e *itEnv) am22BankRun() am.Run {
 	return run
 }
 
-// am22SheetTexts is every shared string of the delivered workbook (what a person reads in it).
+var xmlTag = regexp.MustCompile(`<[^>]*>`)
+
+// am22SheetTexts is the text of the delivered workbook's sheets (what a person reads in it).
 func (e *itEnv) am22SheetTexts(r *Runner, run am.Run) string {
 	e.t.Helper()
 	ctx := context.Background()
@@ -60,7 +64,10 @@ func (e *itEnv) am22SheetTexts(r *Runner, run am.Run) string {
 				rc, _ := f.Open()
 				x, _ := io.ReadAll(rc)
 				rc.Close()
-				b.Write(x)
+				// the text a person reads: the markup taken out and the characters it writes as references
+				// (&#3591; is the Thai letter) written back, so a cell's runs read as one sentence
+				b.WriteString(html.UnescapeString(xmlTag.ReplaceAllString(string(x), "")))
+				b.WriteByte('\n')
 			}
 		}
 		return b.String()
@@ -87,7 +94,7 @@ func TestAReconciliationWhoseModelIsAwayIsDeliveredWithTheRulesWordsSayingSo(t *
 	}
 	texts := e.am22SheetTexts(r, run)
 	if !strings.Contains(texts, am22RulesLine) || !strings.Contains(texts, "คำอธิบายรอบนี้") {
-		t.Fatal("the commentary sheet says on its face that the rules wrote it")
+		t.Fatalf("the commentary sheet says on its face that the rules wrote it; the workbook holds:\n%s", trim(texts, 1200))
 	}
 	if !has(e.threadOf(run.ID), "เขียนจากกฎ") {
 		t.Fatalf("the round's message says the rules wrote the words:\n%s", strings.Join(e.threadOf(run.ID), "\n"))
@@ -96,8 +103,13 @@ func TestAReconciliationWhoseModelIsAwayIsDeliveredWithTheRulesWordsSayingSo(t *
 		if s.Name == "narrative" {
 			var n narrativeOut
 			_ = json.Unmarshal(s.Output, &n)
-			if s.Status != "succeeded" || n.Model != "" || !strings.Contains(string(n.Narrative), `"written_by":"rules"`) {
-				t.Fatalf("the narrative step is the rules': %s model=%q %s", s.Status, n.Model, trim(string(n.Narrative), 160))
+			var words struct {
+				WrittenBy string `json:"written_by"`
+				Why       string `json:"why"`
+			}
+			_ = json.Unmarshal(n.Narrative, &words) // (the database gives the JSON back in its own spacing)
+			if s.Status != "succeeded" || n.Model != "" || words.WrittenBy != "rules" || words.Why != "unavailable" {
+				t.Fatalf("the narrative step is the rules', because no model could be reached: %s model=%q %s", s.Status, n.Model, trim(string(n.Narrative), 160))
 			}
 			if s.Credits != 0 {
 				t.Fatalf("a model step that did not happen is charged nothing: %v", s.Credits)
@@ -131,7 +143,7 @@ func TestAReconciliationAModelWroteNamesTheModelAndNeverCarriesTheRulesLine(t *t
 		t.Fatal("a commentary a model wrote carries the line that the rules wrote it")
 	}
 	if !strings.Contains(texts, "fake-self-hosted") || !strings.Contains(texts, "ค่าที่ปรึกษาเพิ่มขึ้นมาก") {
-		t.Fatal("the sheet carries the model's words and names the model")
+		t.Fatalf("the sheet carries the model's words and names the model; the workbook holds:\n%s", trim(texts, 1200))
 	}
 	if got.ModelUsed == nil || *got.ModelUsed != "fake-self-hosted" {
 		t.Fatalf("the run names the model that wrote its words: %v", got.ModelUsed)
