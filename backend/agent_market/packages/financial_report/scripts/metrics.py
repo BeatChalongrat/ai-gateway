@@ -691,6 +691,12 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
 
     from ....deliverables.look.catalogue import writing_limits
 
+    # AM22: a figure the model may name is one the report can cite. A line that is zero with no row behind it (income
+    # tax in a month that has none) has a citation with no source, and the gate refuses that citation: a model that
+    # wrote "income tax was {income_tax_m}" failed its run (the measurement: 8 of 16 runs).
+    sourced = {c["id"] for c in cites.items if c["sources"] or c.get("derived_from")}
+    figures = {k: v for k, v in figures.items() if not v.get("cite") or v["cite"] in sourced}
+
     computed = {
         "format": FORMAT,
         "script": SCRIPT_VERSION,

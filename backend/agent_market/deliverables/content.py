@@ -479,7 +479,8 @@ def build(computed: dict, req: dict) -> dict:
             {"type": "paragraph", "runs": cite_runs(narrative["summary"], computed), "narrative": True},
             # AM22 §1.1: a commentary the rules wrote says so on the page, under the words themselves; one a
             # model wrote never carries the line (the appendix names the model)
-            {"type": "paragraph", "runs": [(S("doc.commentary.rules_wrote"), None)], "muted": True}
+            {"type": "paragraph", "runs": [(S("doc.commentary.rules_unusable") if narrative.get("why") == "unusable"
+                                            else S("doc.commentary.rules_wrote"), None)], "muted": True}
             if narrative.get("written_by") == "rules" else None,
         ) if b]},
         {"key": "pl", "title": S("docs.section.pl"), "blocks": [pl_table(computed)]},

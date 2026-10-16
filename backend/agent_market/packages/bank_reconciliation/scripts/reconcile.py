@@ -451,7 +451,9 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
         (W("fact.h.matching"), [W("fact.bank.matched", matched="{matched}", by_rule=totals["by_rule"], by_person=totals["by_person"]),
                                 W("fact.bank.items", items="{items}", missing=c["missing"], extra=c["extra"], suspect=c["suspect"], journal=len(journal))]),
         # (the buckets' bounds are not shown: "31–60" is not a figure of the table, and a model that repeats it is refused)
-        (W("fact.h.ageing"), [W("fact.bank.older", older="{older}")] + ([W("fact.bank.stale", n="{stale}")] if stale else [])))
+        (W("fact.h.ageing"), [W("fact.bank.older", older="{older}")] + ([W("fact.bank.stale", n="{stale}")] if stale else [])),
+        # the run's exceptions by their reasons — words, no amounts (the records themselves are not shown to the model)
+        (W("fact.h.exceptions"), sorted({e["reason"] for e in run_ex})))
     return {
         "figures": figures, "narrative_facts": facts, "writing_limits": writing_limits("xlsx"),
         "schema": SCHEMA, "period": period, "period_label": label, "as_of": rv.end.isoformat(), "period_start": rv.start.isoformat(),

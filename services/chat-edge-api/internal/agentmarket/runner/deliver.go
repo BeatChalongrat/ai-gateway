@@ -82,6 +82,9 @@ type narrativeOut struct {
 	Tried      []string        `json:"tried"`
 	Tokens     int             `json:"tokens"`
 	CostUSD    float64         `json:"cost_usd"`
+	// Why (AM22) the rules wrote, when they did: "unusable" — a model answered and no answer could be used;
+	// "unavailable" — no model it may use could be asked or reached. The file and the message say which.
+	Why string `json:"why,omitempty"`
 }
 
 func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey string) (narrativeOut, string, error) {
@@ -139,9 +142,14 @@ func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey st
 					fb = map[string]any{}
 				}
 				fb["written_by"] = "rules"
+				why := "unavailable"
+				if len(tried) > 0 && !errors.Is(err, ErrModelUnreachable) {
+					why = "unusable" // a model answered; none of its answers could be used
+				}
+				fb["why"] = why
 				nb, _ := json.Marshal(fb)
 				// Refused answers were still paid for: the budget counts them.
-				return narrativeOut{Narrative: nb, Tried: tried, Tokens: c.Tokens, CostUSD: c.CostUSD},
+				return narrativeOut{Narrative: nb, Tried: tried, Tokens: c.Tokens, CostUSD: c.CostUSD, Why: why},
 					c.CostUSD * rc.r.CreditsPerUSD, "metrics.py:fallback_narrative", "", nil
 			}
 			parsed["written_by"] = "model"
@@ -342,10 +350,14 @@ func narrativePrompt(l am.Lang, cv computedView) string {
 			b.WriteByte('\n')
 		}
 	}
-	b.WriteString("\nรายการที่กฎตั้งข้อสังเกต (exceptions):\n")
-	for _, e := range cv.Exceptions {
-		b.Write(e)
-		b.WriteByte('\n')
+	if len(cv.NarrativeFacts) == 0 {
+		// (AM22: a package that states its facts states its exceptions' reasons there, without the raw records — whose
+		// amounts are not cited figures: a model copied them, and the number guard refused its answer)
+		b.WriteString("\nรายการที่กฎตั้งข้อสังเกต (exceptions):\n")
+		for _, e := range cv.Exceptions {
+			b.Write(e)
+			b.WriteByte('\n')
+		}
 	}
 	if len(cv.Figures) > 0 {
 		// AM8: the model names a figure by its key; the report prints it with its own citation
@@ -969,6 +981,9 @@ func closingText(m am.Manifest, summary map[string]any, narrative narrativeOut, 
 		return text
 	}
 	switch {
+	case narrative.Model == "" && narrative.Why == "unusable":
+		// AM22: a model answered and no answer could be used — not "no model could answer"
+		return am.Text("%s คำอธิบายในรอบนี้เขียนจากกฎ เพราะคำตอบของโมเดลใช้ไม่ได้ ตัวเลขทุกตัวยังมาจากสคริปต์เหมือนเดิม", am.Words(text))
 	case narrative.Model == "":
 		return am.Text("%s คำอธิบายในรอบนี้เขียนจากกฎ เพราะไม่มีโมเดลที่ตอบได้ ตัวเลขทุกตัวยังมาจากสคริปต์เหมือนเดิม", am.Words(text))
 	case narrative.SelfHosted:

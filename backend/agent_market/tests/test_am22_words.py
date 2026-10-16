@@ -164,6 +164,14 @@ class TheCommentarySheet(unittest.TestCase):
         self.assertIn(words.SHARED(RULES_LINE), texts_of_xlsx(path2))
         self.assertTrue(res2["passed"])
 
+    def test_when_a_model_answered_and_was_refused_the_file_says_that_and_not_that_none_was_available(self):
+        fb = dict(self.computed["fallback_narrative"], written_by="rules", why="unusable")
+        res, path = self.render(fb)
+        self.assertTrue(res["passed"], [(c["name"], c["detail"]) for c in self.checks(res).values() if not c["ok"]])
+        texts = texts_of_xlsx(path)
+        self.assertIn(words.SHARED("doc.commentary.rules_unusable"), texts)
+        self.assertNotIn(words.SHARED(RULES_LINE), texts)
+
     def test_a_run_a_model_wrote_never_carries_the_line_anywhere(self):
         nar = {"summary": "กระทบยอดงวดนี้ลงตัว ยอดหลังปรับปรุงฝั่งธนาคาร {adjusted_bank} เท่ากับฝั่งบัญชี {adjusted_book}",
                "movements": ["จับคู่ได้ {matched} คู่", "รายการกระทบยอด {items} รายการ"], "watch": [], "next_steps": ["ควรตรวจสอบร่างรายการปรับปรุงก่อนบันทึก"],
@@ -172,6 +180,7 @@ class TheCommentarySheet(unittest.TestCase):
         self.assertTrue(res["passed"], [(c["name"], c["detail"]) for c in self.checks(res).values() if not c["ok"]])
         texts = texts_of_xlsx(path)
         self.assertNotIn(words.SHARED(RULES_LINE), texts)
+        self.assertNotIn(words.SHARED("doc.commentary.rules_unusable"), texts)
         self.assertTrue(any("qwen3.8-27b-fp8" in t for t in texts), "the sheet names the model that wrote")
         # the figures are printed with their citations beside them, and no key is left as written
         self.assertTrue(any(self.computed["figures"]["adjusted_bank"]["text"] in t for t in texts))
@@ -296,6 +305,34 @@ class TheReport(unittest.TestCase):
             self.assertTrue(any(line in t for t in pptx), line)
         heads = [t for t in pptx if re.search(r"\(\s*\d+\s*/\s*3\s*\)|\d+/3", t) or ("3" in t and "ส่วน" in t)]
         self.assertGreaterEqual(len(heads), 3, "the heading is repeated on each slide of the broken list, marked as a part (AM22 §1.5)")
+
+    def test_every_figure_offered_to_the_model_has_a_citation_the_gate_accepts(self):
+        # a line that is zero with no row behind it (income tax in a month without one) has a citation with no
+        # source; offered to the model, "income tax was {income_tax_m}" failed the run's gate (8 of 16 measured runs)
+        from agent_market.packages.financial_report.scripts import metrics
+        ids = {c["id"]: c for c in self.computed["citations"]}
+        for key, f in self.computed["figures"].items():
+            if f.get("cite"):
+                c = ids[f["cite"]]
+                self.assertTrue(c["sources"] or c.get("derived_from"), f"{key} → {f['cite']} has no source")
+        lines = {l["key"]: l for l in self.computed["lines"]}
+        unsourced = [k for k, l in lines.items() if l.get("cite") and not (ids[l["cite"]]["sources"] or ids[l["cite"]].get("derived_from"))]
+        self.assertTrue(unsourced, "the fixture has a line with nothing behind it (else this test proves nothing)")
+        for k in unsourced:
+            self.assertNotIn(k, self.computed["figures"])
+            self.assertNotIn(k + "_m", self.computed["figures"])
+        self.assertTrue(metrics)
+
+    def test_a_comma_after_a_figure_is_the_sentences_and_the_gate_finds_the_figure(self):
+        from agent_market.deliverables import quality
+        self.assertEqual(quality.NUMBER.findall("Revenue was 12,480,300, and 3,821, then (41,730)."),
+                         ["12,480,300", "3,821", "(41,730)"])
+        key = next(k for k, f in self.computed["figures"].items() if f.get("cite") and re.fullmatch(r"[\d,]+", f["text"]))
+        fb = self.computed["fallback_narrative"]
+        nar = dict(fb, summary=fb["summary"] + " {" + key + "}, " + fb["summary"][:10], written_by="model", model="m")
+        res, _texts, _ = self.render(nar)
+        self.assertTrue(res["passed"], [(a["name"], c["name"], c["detail"][:160]) for a in res["artifacts"]
+                                        for c in a["quality"]["checks"] if not c["ok"]])
 
     def test_what_the_character_count_cannot_see_the_renderer_still_refuses(self):
         # 400 W's are within the summary's 480-character budget and far wider than the statement's frame

@@ -519,10 +519,12 @@ func trim(s string, n int) string { return am.TrimText(s, n) }
 // ── the number guard ─────────────────────────────────────────────────────
 
 var (
-	numRe = regexp.MustCompile(`[-+]?\(?\d[\d,]*(?:\.\d+)?\)?(?:\s?%|\s?ล้าน)?`)
+	// A comma is part of a figure only between its digits (AM22): "on 13, 14 and 15 September" is three days, not
+	// the figure "13," — the guard refused that sentence as a number the table does not have.
+	numRe = regexp.MustCompile(`[-+]?\(?\d(?:,?\d)*(?:\.\d+)?\)?(?:\s?%|\s?ล้าน)?`)
 	// AM11: an English sentence writes a figure's unit in English — "12.48 M", "12.48 million"
 	// (GLOSSARY.md §4). The unit is part of the figure there too, so "12.48 M" is not "12.48".
-	numReEnglish  = regexp.MustCompile(`[-+]?\(?\d[\d,]*(?:\.\d+)?\)?(?:\s?%|\s?ล้าน|\s?(?:[Mm]illion|mn|M)\b)?`)
+	numReEnglish  = regexp.MustCompile(`[-+]?\(?\d(?:,?\d)*(?:\.\d+)?\)?(?:\s?%|\s?ล้าน|\s?(?:[Mm]illion|mn|M)\b)?`)
 	millionSuffix = regexp.MustCompile(`(?:[Mm]illion|mn|M)$`)
 )
 

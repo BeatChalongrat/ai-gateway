@@ -1381,8 +1381,17 @@ on the quotable path. The words are printed on a sheet of their own after the fa
 (`deliverables/look/commentary.py`, the catalogue's xlsx `commentary` layout), read back by the gate
 (`xlsx.commentary`). The rules' words stay as the no-model path: when no model the organisation allows can be
 reached, a package that says `"narrative_when_away": "rules"` (the five) delivers with its rules' words and the
-working paper says so on its face, under the commentary; the financial report waits for its model (AM15). A run a
-model wrote never carries that line (`tests/test_am22_words.py`, `runner/am22_it_test.go`).
+working paper says so on its face, under the commentary; the financial report waits for its model (AM15). The line
+says which of two things happened: no model could be reached, or a model answered and none of its answers could be
+used (the runner's narrative `why`) — the report and the deck say the same. A run a model wrote never carries either
+line (`tests/test_am22_words.py`, `runner/am22_it_test.go`).
+
+**A figure a model may name is one the gate can cite.** The financial report offered the model a line that is zero with
+no row behind it (income tax in a month that has none), whose citation has no source; a sentence naming it failed the
+run's gate. Such a figure is no longer offered (`metrics.py`). A comma after a figure is the sentence's, in both
+languages and on both sides: the runner's guard and the gate read "12,480,300, and" as the figure 12,480,300 (they
+read "12,480,300," and refused it). Both were found by rendering every measured model answer through the gate, which
+is how the words of a new package are to be accepted.
 
 **The validator measures what the prompt promised** (`runner/deliver.go` `checkNarrative`). The summary, each point
 and the number of points under a heading are measured against `writing_limits` — the catalogue's own numbers for the

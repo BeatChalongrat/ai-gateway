@@ -185,6 +185,11 @@ func TestAPackagesFactsArePrintedUnderTheirHeadingsAndTheReportsPromptIsAsItWas(
 	if strings.Contains(p, "ตารางงบกำไรขาดทุน") || strings.Contains(p, "มีงบประมาณ") {
 		t.Fatal("a reconciliation's prompt does not show an income statement")
 	}
+	// nor the raw records of its exceptions, whose amounts are not cited figures (its facts state their reasons)
+	cv.Exceptions = []json.RawMessage{json.RawMessage(`{"reason":"เช็คค้างนาน","detail":"ยอด 6,420.00 บาท"}`)}
+	if q := narrativePrompt(am.Thai, cv); strings.Contains(q, "6,420.00") || strings.Contains(q, "(exceptions)") {
+		t.Fatalf("the raw exceptions were shown to the model:\n%s", q)
+	}
 	report := computedView{PeriodLabel: "กันยายน 2569", HasBudget: true, Figures: cv.Figures}
 	if q := narrativePrompt(am.Thai, report); !strings.Contains(q, "มีงบประมาณ: true") || !strings.Contains(q, "ตารางงบกำไรขาดทุน (คำนวณแล้ว):") {
 		t.Fatalf("the report's prompt is as it was:\n%s", q)
@@ -395,5 +400,33 @@ func TestTheNarrativeStepWithAModelThatObeysOneThatWritesTooLongAndOneThatTypesA
 	_, _, err = am22Narrative(t, am22Stub(t, am22Answer(long, "รายได้ 12,480,300 บาท")), cv)
 	if err == nil {
 		t.Fatal("an answer too long that also types a figure is not one the renderer may have")
+	}
+}
+
+// AM22 — the round's message says why the rules wrote: a model that answered and was refused is not "no model".
+func TestTheClosingLineSaysWhetherTheModelWasAwayOrItsAnswersCouldNotBeUsed(t *testing.T) {
+	var fin am.Manifest
+	_ = json.Unmarshal([]byte(`{"narrative":"model","capabilities":{"required":["model.text"]}}`), &fin)
+	done := am.Text("เสร็จแล้วครับ")
+	if got := closingText(fin, map[string]any{}, narrativeOut{Why: "unusable"}, false, done).String(); !strings.Contains(got, "คำตอบของโมเดลใช้ไม่ได้") {
+		t.Fatalf("refused answers: %q", got)
+	}
+	if got := closingText(fin, map[string]any{}, narrativeOut{Why: "unavailable"}, false, done).String(); !strings.Contains(got, "ไม่มีโมเดลที่ตอบได้") {
+		t.Fatalf("no model: %q", got)
+	}
+}
+
+// AM22 — a comma after a figure is the sentence's, in both languages: the guard reads "13, 14 and 15" as three small
+// counts and "12,480,300, and" as the table's figure (it refused both, reading "13," and "12,480,300,").
+func TestACommaAfterAFigureIsTheSentencesNotTheFigures(t *testing.T) {
+	quotable := map[string]string{"revenue": "12,480,300"}
+	if err := GuardNumbersIn(am.English, "Revenue was 12,480,300, and refunds came on 13, 14 and 15 September.", quotable, nil); err != nil {
+		t.Fatalf("English: %v", err)
+	}
+	if err := GuardNumbersIn(am.Thai, "รายได้ 12,480,300, คืนเงินวันที่ 13, 14 และ 15", quotable, nil); err != nil {
+		t.Fatalf("Thai: %v", err)
+	}
+	if err := GuardNumbersIn(am.English, "Revenue was 12,480,301, and more.", quotable, nil); err == nil {
+		t.Fatal("a figure the table does not have still has to be refused")
 	}
 }

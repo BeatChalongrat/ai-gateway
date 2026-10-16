@@ -56,10 +56,16 @@ def rows(narrative: dict, computed: dict) -> list[tuple[str, str, list[str]]]:
     return out
 
 
+def rules_line(narrative: dict) -> str:
+    """The line a commentary the rules wrote carries, saying why: no model was available, or the model's answers could
+    not be used (the runner says which: narrative "why")."""
+    return S("doc.commentary.rules_unusable") if narrative.get("why") == "unusable" else S("doc.commentary.rules_wrote")
+
+
 def who_wrote(narrative: dict, model_info: dict | None) -> str:
     """The one line under the commentary that says who wrote it."""
     if narrative.get("written_by") == "rules":
-        return S("doc.commentary.rules_wrote")
+        return rules_line(narrative)
     model = str(narrative.get("model") or (model_info or {}).get("model") or "")
     place = ""
     if (model_info or {}).get("self_hosted") is True:
@@ -132,9 +138,9 @@ def check(path: str, narrative: dict, computed: dict, model_info: dict | None = 
     braces = [t for t in texts if "{" in t or "}" in t]
     if braces:
         return ck(False, S("check.commentary.brace", text=braces[0][:80]), len(want))
-    rules_line = "".join(S("doc.commentary.rules_wrote").split())
-    has_line = rules_line in squashed
-    if narrative.get("written_by") == "rules" and not has_line:
+    lines = {"".join(S(k).split()) for k in ("doc.commentary.rules_wrote", "doc.commentary.rules_unusable")}
+    has_line = bool(lines & squashed)
+    if narrative.get("written_by") == "rules" and "".join(rules_line(narrative).split()) not in squashed:
         return ck(False, S("check.commentary.rules_line_missing"), len(want))
     if narrative.get("written_by") != "rules" and has_line:
         return ck(False, S("check.commentary.rules_line_extra"), len(want))

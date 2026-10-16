@@ -84,8 +84,11 @@ def fit_lines(text: str, size: float, width_pt: float, bold: bool) -> int:
 # (AM18), never written here.
 UNITS = [v for k in ("docs.unit.m", "docs.unit.pp") for v in S.both(k).values()]
 _UNIT = "|".join(r"\s?" + re.escape(u) + (r"\b" if u.isascii() else "") for u in UNITS)
-NUMBER = re.compile(r"[-+]?\(?\d[\d,]*(?:\.\d+)?\)?(?:\s?%|" + _UNIT + ")?")
-_NUMBER_AT_END = re.compile(r"([-+]?\(?\d[\d,]*(?:\.\d+)?\)?(?:\s?%|" + _UNIT + r")?)\s*$")
+# A comma belongs to a figure only between its digits: "revenue was 12,480,300, and costs…" is the figure 12,480,300
+# followed by the sentence's comma (AM22: an English sentence put the comma on the figure, and the gate found no such
+# figure — a run whose model wrote that sentence failed).
+NUMBER = re.compile(r"[-+]?\(?\d(?:,?\d)*(?:\.\d+)?\)?(?:\s?%|" + _UNIT + ")?")
+_NUMBER_AT_END = re.compile(r"([-+]?\(?\d(?:,?\d)*(?:\.\d+)?\)?(?:\s?%|" + _UNIT + r")?)\s*$")
 _STRIP = "+-()% " + "".join(sorted(set("".join(UNITS))))
 
 
