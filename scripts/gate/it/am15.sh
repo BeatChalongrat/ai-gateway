@@ -18,7 +18,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 export AGENT_MARKET_IT=1
 rc=0
 if [ "${1:-all}" != "new" ]; then
-  bash "$ROOT/scripts/gate/it/am13.sh" asked | sed 's/^lane_exit=/am13_lane_exit=/' | tee /dev/stderr | grep -q '^am13_lane_exit=0$' || rc=1
+  bash "$ROOT/scripts/gate/it/am13.sh" asked | sed 's/^lane_exit=/am13_lane_exit=/' | tee -a /dev/stderr | grep -q '^am13_lane_exit=0$' || rc=1
 fi
 CHUNKS=(
   '^(TestARunWaitsForAModelThatCannotBeReachedAndGoesOnWhenItIsBack)$'

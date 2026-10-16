@@ -492,6 +492,13 @@ author ran before: `scripts/tests/test_*.py` (`host_tests`), `scripts/smoke/*.te
 sandbox test that no chunk names runs nowhere, and a renamed one leaves a chunk that matches nothing
 and passes. `runner/am15_lane_test.go`, in the unit lane, fails for either.
 
+**The lane's file keeps every chunk's verdict (AM22).** Each card's lane prints the lane it wraps to
+stderr as well, and the gate collects stdout and stderr into one file. From AM19 to AM22 that was
+`tee /dev/stderr`, which opens the file afresh and truncates it: on 17 Oct 2026 the file was emptied the
+moment the card's piece started, taking two failures of the AM10 chunks with it, and the nested lanes
+wrote over each other's lines. Every lane tees with `-a` now; `scripts/tests/test_am22_lane_output_kept.py`
+fails on a lane that does not.
+
 **The smoke can fail, and the gate proves it each time**: `gate.sh smoke` takes the model away on
 the test stack (`scripts/smoke/dead_primary.js red`) and demands a RED suite in which every turn
 names the model it asked, then puts it back and demands GREEN (`green`).

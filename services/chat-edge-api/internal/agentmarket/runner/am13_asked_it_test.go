@@ -49,7 +49,8 @@ func TestTheBankReconciliationTakesOneOrderAndALaterOneTakesItsPlace(t *testing.
 	if got.Status != am.RunSucceeded {
 		t.Fatalf("the round: %s %s", got.Status, got.StatusReason)
 	}
-	if got.ModelUsed != nil {
+	// AM22: the one model named on the round is the one that wrote its commentary from the computed table
+	if got.ModelUsed != nil && *got.ModelUsed != narrativeModel(e.steps(run.ID)) {
 		t.Fatalf("the model that read the person's words is named as one that saw the statement: %v", *got.ModelUsed)
 	}
 	var asked am.Asked

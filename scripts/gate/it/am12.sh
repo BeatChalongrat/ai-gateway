@@ -12,7 +12,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 export AGENT_MARKET_IT=1
 rc=0
 if [ "${1:-all}" != "web" ]; then
-  bash "$ROOT/scripts/gate/it/am10.sh" | sed 's/^lane_exit=/am10_lane_exit=/' | tee /dev/stderr | grep -q '^am10_lane_exit=0$' || rc=1
+  bash "$ROOT/scripts/gate/it/am10.sh" | sed 's/^lane_exit=/am10_lane_exit=/' | tee -a /dev/stderr | grep -q '^am10_lane_exit=0$' || rc=1
 fi
 CHUNKS=(
   '^(TestFormsWithNoMarkerAreReadMappedFilledAndOpenedAgain)$'

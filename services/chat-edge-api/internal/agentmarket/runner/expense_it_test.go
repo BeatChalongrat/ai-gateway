@@ -156,8 +156,23 @@ func TestExpenseAuditLeavesEveryFailedRuleToAPerson(t *testing.T) {
 	if got.Status != am.RunSucceeded {
 		t.Fatalf("after the answers: %s %s", got.Status, got.StatusReason)
 	}
-	if got.ModelUsed != nil {
-		t.Fatalf("no model saw a digital receipt: %v", *got.ModelUsed)
+	// AM22: the audit's words are a model's; what never reaches a model is a digital receipt — no vision step, and
+	// the one model of the run is the one that wrote the commentary
+	steps := e.steps(run.ID)
+	if n := countSteps(steps, "vision:"); n != 0 {
+		t.Fatalf("no model saw a digital receipt: %d vision steps", n)
+	}
+	wrote := ""
+	for _, s := range steps {
+		if s.Name == "narrative" {
+			wrote = s.ModelID
+		}
+	}
+	if wrote == "" {
+		t.Fatal("the audit's commentary is written by a model (AM22)")
+	}
+	if got.ModelUsed != nil && *got.ModelUsed != wrote {
+		t.Fatalf("no model but the commentary's saw the round: %v", *got.ModelUsed)
 	}
 	arts, _ := e.store.RunArtifacts(ctx, run.ID)
 	if len(arts) != 1 || arts[0].Format != "xlsx" {

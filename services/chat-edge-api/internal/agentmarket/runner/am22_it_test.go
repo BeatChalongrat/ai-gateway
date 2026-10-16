@@ -147,3 +147,13 @@ func TestAReconciliationAModelWroteNamesTheModelAndNeverCarriesTheRulesLine(t *t
 		}
 	}
 }
+
+// narrativeModel is the model that wrote a round's commentary (AM22), "" when its rules did.
+func narrativeModel(steps []am.Step) string {
+	for _, s := range steps {
+		if s.Name == "narrative" {
+			return s.ModelID
+		}
+	}
+	return ""
+}

@@ -107,17 +107,22 @@ func TestInvoiceRunRecordsThenCatchesTheDuplicate(t *testing.T) {
 	if countSteps(steps, "vision:") != 0 {
 		t.Fatal("a digital PDF is never sent to a vision model")
 	}
+	// AM22: the register's words are a model's (they were the rules' until this card); the document never reaches one
+	wrote := ""
 	for _, s := range steps {
-		if s.Name == "narrative" && (s.Kind != "compute" || s.ModelID != "") {
-			t.Fatalf("the invoice agent's summary is written by rules: %+v", s)
+		if s.Name == "narrative" {
+			wrote = s.ModelID
 		}
+	}
+	if wrote == "" {
+		t.Fatal("the register's commentary is written by a model (AM22)")
 	}
 	arts, _ := e.store.RunArtifacts(ctx, run.ID)
 	if len(arts) != 1 || arts[0].Format != "xlsx" {
 		t.Fatalf("one register workbook: %+v", arts)
 	}
-	if got.ModelUsed != nil {
-		t.Fatalf("no model saw a digital document: %v", *got.ModelUsed)
+	if got.ModelUsed != nil && *got.ModelUsed != wrote {
+		t.Fatalf("no model but the commentary's saw the round: %v", *got.ModelUsed)
 	}
 	if n := e.indexRows(); n != 1 {
 		t.Fatalf("the recorded document joins the duplicate index: %d rows", n)
