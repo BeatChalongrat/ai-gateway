@@ -1143,7 +1143,8 @@ export interface AgentDashboard {
     human_wait_p50_s: number | null;
     human_wait_p90_s: number | null;
   };
-  waiting: { runs: number; oldest_run_s: number | null; open_exceptions: number; oldest_exception_s: number | null };
+  // AM24: runs counts the waits for a person; for_model and for_budget the others (absent from an older server)
+  waiting: { runs: number; oldest_run_s: number | null; open_exceptions: number; oldest_exception_s: number | null; for_model?: number; for_budget?: number };
   questions: DashCount[] | null;
   exceptions: { open: number; resolved: number; noted: number; by_reason: DashCount[] | null; choices: DashCount[] | null };
   failures: DashCount[] | null;

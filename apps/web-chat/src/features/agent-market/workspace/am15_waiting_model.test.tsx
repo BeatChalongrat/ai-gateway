@@ -45,12 +45,22 @@ describe("a run that waits for its model", () => {
   it("has its own words, and only for that reason", () => {
     expect(MODEL_UNREACHABLE).toBe("model_unreachable"); // the runner's own code (agentmarket/modeldown.go)
     expect(outcomeKey("awaiting_input", "model_unreachable")).toBe("progress.title.waiting_model");
-    for (const reason of ["waiting_preflight", "waiting_postcompute", "reask", "budget_install", "", undefined, null]) {
+    for (const reason of ["waiting_preflight", "waiting_postcompute", "reask", "", undefined, null]) {
       expect(outcomeKey("awaiting_input", reason)).toBe("progress.title.awaiting_input");
+    }
+    // AM24: nor is a run that waits for budget (an admin raises it; nobody answers it)
+    for (const reason of ["budget_install", "budget_org"]) {
+      expect(outcomeKey("awaiting_input", reason)).toBe("progress.title.waiting_budget");
     }
     // a run that ended for that reason is a failed run, said as one
     expect(outcomeKey("failed", "model_unreachable")).toBe("progress.title.failed");
     expect(outcomeTone("awaiting_input")).toBe("warning");
+  });
+
+  it("a run that waits for budget is titled รอเพิ่มงบ on its card, not รอคำตอบของคุณ (AM24)", () => {
+    render(<ProgressCard progress={waiting("budget_install")} />);
+    expect(title()).toBe("รอเพิ่มงบ");
+    expect(screen.queryByText("รอคำตอบของคุณ")).toBeNull();
   });
 
   it("is titled รอโมเดล on its card, not รอคำตอบของคุณ", () => {

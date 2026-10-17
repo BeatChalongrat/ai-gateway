@@ -157,6 +157,17 @@ describe("DashboardPage", () => {
     expect(screen.getByTestId("am-dash-selftest").textContent).toContain("เสร็จแล้ว");
   });
 
+  it("the runs that wait for their model or for budget are said beside the count of answers awaited, never in it (AM24)", async () => {
+    dash = { ...busy, waiting: { ...busy.waiting, runs: 0, oldest_run_s: null, for_model: 2, for_budget: 1 } };
+    render(<DashboardPage installId="i-1" />);
+    const tiles = await screen.findAllByTestId("am-dash-tile");
+    expect(tiles[2]!.textContent).toBe("รอคำตอบอยู่02 งานรอโมเดล · 1 งานรอเพิ่มงบ");
+    cleanup();
+    dash = { ...busy, waiting: { ...busy.waiting, for_model: 1 } };
+    render(<DashboardPage installId="i-1" />);
+    expect((await screen.findAllByTestId("am-dash-tile"))[2]!.textContent).toBe("รอคำตอบอยู่1นานสุด 2 ชั่วโมง 1 นาที · 1 งานรอโมเดล");
+  });
+
   it("the range picker asks for 7, 30 or 90 days", async () => {
     render(<DashboardPage installId="i-1" />);
     await screen.findAllByTestId("am-dash-tile");

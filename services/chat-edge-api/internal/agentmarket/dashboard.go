@@ -79,9 +79,16 @@ type DashTimes struct {
 	HumanP90 *float64 `json:"human_wait_p90_s"`
 }
 
+// waitsForAPerson is a waiting run that waits for a person: not for its model, not for budget (AM24).
+const waitsForAPerson = `coalesce(status_reason, '') <> 'model_unreachable' AND coalesce(status_reason, '') NOT LIKE 'budget\_%'`
+
 type DashWaiting struct {
-	Runs             int64    `json:"runs"`            // awaiting an answer now
-	OldestRunS       *float64 `json:"oldest_run_s"`    // how long the oldest has waited
+	Runs       int64    `json:"runs"`         // awaiting a person's answer now
+	OldestRunS *float64 `json:"oldest_run_s"` // how long the oldest has waited
+	// AM24: the runs that wait for something else — their model (model_unreachable) or budget (budget_*) — which
+	// "waiting for an answer" counted until AM24: a person reading it thought people were being asked things
+	ForModel         int64    `json:"for_model"`
+	ForBudget        int64    `json:"for_budget"`
 	OpenExceptions   int64    `json:"open_exceptions"` // left for a person, not yet decided
 	OldestExceptionS *float64 `json:"oldest_exception_s"`
 }
@@ -179,9 +186,11 @@ func (s *Store) Dashboard(ctx context.Context, in Install, since time.Time) (Das
 		return d, err
 	}
 	// waiting now (not limited to the window: an old wait is exactly what to see)
-	if err := s.Pool.QueryRow(ctx, `SELECT count(*), extract(epoch FROM now() - min(awaiting_since))::float8
+	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE `+waitsForAPerson+`),
+		extract(epoch FROM now() - min(awaiting_since) FILTER (WHERE `+waitsForAPerson+`))::float8,
+		count(*) FILTER (WHERE status_reason = 'model_unreachable'), count(*) FILTER (WHERE status_reason LIKE 'budget\_%')
 		FROM agent_market.agent_runs WHERE install_id = $1 AND status = 'awaiting_input'`, id).
-		Scan(&d.Waiting.Runs, &d.Waiting.OldestRunS); err != nil {
+		Scan(&d.Waiting.Runs, &d.Waiting.OldestRunS, &d.Waiting.ForModel, &d.Waiting.ForBudget); err != nil {
 		return d, err
 	}
 	if err := s.Pool.QueryRow(ctx, `SELECT count(*), extract(epoch FROM now() - min(e.created_at))::float8

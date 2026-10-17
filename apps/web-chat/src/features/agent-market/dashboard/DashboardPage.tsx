@@ -209,7 +209,13 @@ function Dashboard({ installId }: { installId: string }) {
             <Tile
               label={t("dash.kpi.waiting")}
               value={formatInt(data.waiting.runs)}
-              sub={data.waiting.runs ? t("dash.oldest", { age: formatSeconds(data.waiting.oldest_run_s, t) }) : t("dash.nothingWaiting")}
+              sub={[
+                data.waiting.runs ? t("dash.oldest", { age: formatSeconds(data.waiting.oldest_run_s, t) })
+                  : data.waiting.for_model || data.waiting.for_budget ? "" : t("dash.nothingWaiting"),
+                // AM24: the runs that wait for their model or for budget are not waiting for an answer — said beside it
+                data.waiting.for_model ? t("dash.waitingModel", { n: formatInt(data.waiting.for_model) }) : "",
+                data.waiting.for_budget ? t("dash.waitingBudget", { n: formatInt(data.waiting.for_budget) }) : "",
+              ].filter(Boolean).join(" · ")}
               tone={data.waiting.runs ? "warning" : null}
             />
             <Tile

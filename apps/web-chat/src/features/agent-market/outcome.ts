@@ -37,12 +37,16 @@ const KEYS: Record<string, AmKey> = {
 
 /** AM15: the reason of a run that waits for a model it may use to be reachable again. */
 export const MODEL_UNREACHABLE = "model_unreachable";
+/** AM24: the head of the reason of a run parked until its budget is raised (runner/selfserve.go parkForBudget). */
+export const BUDGET = "budget_";
 
 /** The words for an outcome; `reason` is the run's reason code (never shown itself). */
 export function outcomeKey(outcome: string, reason?: string | null): AmKey | null {
   if (outcome === COMPLETED_OPEN) return reason === NOT_TIED ? "outcome.open.notTied" : "outcome.open.gate";
   // a run that waits for its model asks nothing of the person: it is not "waiting for your answer"
   if (outcome === "awaiting_input" && reason === MODEL_UNREACHABLE) return "progress.title.waiting_model";
+  // AM24: nor one that waits for budget (budget_install, budget_org, …): an admin raises it, nobody answers it
+  if (outcome === "awaiting_input" && reason?.startsWith(BUDGET)) return "progress.title.waiting_budget";
   return KEYS[outcome] ?? null;
 }
 
