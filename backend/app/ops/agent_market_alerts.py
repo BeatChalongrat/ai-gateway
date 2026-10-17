@@ -13,6 +13,11 @@ firing ones from Prometheus every tick and hands them to a pager of their own:
 * Prometheus already waits each alert's ``for:``, so a firing alert pages at
   once; a check that fails (Prometheus down) is logged, never raised into the
   core tick.
+* AM24 — and the daily smoke's own ``agent_market.*`` checks. The core pager
+  leaves them out (AM1b: Agent Market never pages the core channel), and
+  until AM24 nothing else read them: a failed agent check paged nobody. They
+  are read from the same record the core reads (``smoke_last.json``) and page
+  here, on the agent topic.
 
 ``python -m app.ops.agent_market_alerts test`` sends one ``[TEST]`` alert to
 the agent topic and prints where it went.
@@ -54,6 +59,24 @@ def classify_agent_alerts(payload: dict | None) -> list[Finding]:
     return out
 
 
+def classify_agent_smoke(record: dict | None) -> list[Finding]:
+    """AM24 — the daily smoke's failed ``agent_market.*`` checks → one finding on the agent pager. A record that is
+    missing, stale or unreadable is the core's finding (the whole suite did not run), never repeated here."""
+    if not isinstance(record, dict) or not isinstance(record.get("checks"), list):
+        return []
+    failed = [str(c.get("name")) for c in record["checks"]
+              if isinstance(c, dict) and c.get("status") == "FAIL" and str(c.get("name") or "").startswith("agent_market.")]
+    if not failed:
+        return []
+    detail = {str(c.get("name")): str(c.get("detail") or "")[:160] for c in record["checks"]
+              if isinstance(c, dict) and str(c.get("name")) in failed}
+    message = (f"The smoke run of {record.get('at') or 'unknown time'} on {record.get('target') or 'live'}: "
+               + "; ".join(f"{n} — {detail[n]}" if detail[n] else n for n in failed)
+               + ". Chat is not affected. Run scripts/smoke.sh by hand once it is fixed: the incident closes on a green run.")
+    return [Finding(key=f"{CHANNEL}:smoke", title=f"Agent Market smoke check failed: {', '.join(failed[:3])}",
+                    message=message, severity=cat.HIGH, group=f"{CHANNEL}:smoke")]
+
+
 def firing_alerts(prom_url: str) -> dict:
     r = httpx.get(prom_url.rstrip("/") + "/api/v1/alerts", timeout=5.0)
     r.raise_for_status()
@@ -72,10 +95,11 @@ def agent_state(*, ttl_s: float) -> AlertState:
     return AlertState(ttl_s=ttl_s, store=store, send=deliver_agent_market, sender="ops-watch/agent-market")
 
 
-def agent_tick(state: AlertState, prom_url: str) -> list[Decision]:
-    """One tick: firing Agent Market alerts → the agent pager. Never raises."""
+def agent_tick(state: AlertState, prom_url: str, smoke: dict | None = None) -> list[Decision]:
+    """One tick: firing Agent Market alerts, and the smoke's failed agent checks (AM24), → the agent pager. Never
+    raises."""
     try:
-        findings = classify_agent_alerts(firing_alerts(prom_url))
+        findings = classify_agent_alerts(firing_alerts(prom_url)) + classify_agent_smoke(smoke)
     except Exception as exc:  # noqa: BLE001 — a blind tick is logged, the core tick goes on
         _log("agent_market_alerts_unreadable", error=f"{type(exc).__name__}: {str(exc)[:120]}",
              note="Prometheus did not answer: Agent Market alerts are not checked this tick")

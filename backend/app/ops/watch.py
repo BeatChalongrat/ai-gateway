@@ -966,7 +966,8 @@ def main() -> int:
                 state.save(state_file)
         finally:
             if agent is not None:
-                ama.agent_tick(agent, prom_url)
+                # AM24: with the smoke's own record, whose agent checks the core pager leaves to this one
+                ama.agent_tick(agent, prom_url, smoke_record(cfg["smoke_file"]) if cfg.get("smoke_file") else None)
                 if state_file:
                     agent.save(state_file + ".agent-market")
 
