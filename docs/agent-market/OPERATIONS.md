@@ -514,7 +514,9 @@ AM19 to AM23 nobody saw every lane green at one commit. Every lane now writes, w
 when, its count and its result to the gate's ledger (`scripts/gate/results/ledger.jsonl`); a lane run with
 uncommitted changes under it is recorded as such and never counts. `bash scripts/gate.sh verdict` (and the last line
 of every `lanes` run) is green only when every lane, every chunk, the build, the test stack and the smoke have a
-green result at HEAD; otherwise it names each one that has not, with the commit its last result carries.
+green result at HEAD; otherwise it names each one that has not, with the commit its last result carries. And as
+the full run has said since AM15, it is not ALL GREEN while a backend test still fails by name on
+`scripts/gate/backend_marked_failing.txt`.
 `scripts/tests/test_am24_ledger.py` holds each rule with a fixture shown red, and a run with a lane left out.
 
 **A swap that swapped nothing is not a pass, and a slow one says so (AM24).** On 16 Oct 2026 the admin's swap was run

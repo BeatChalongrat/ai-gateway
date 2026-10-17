@@ -37,9 +37,11 @@ class Ledger(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.removed = self.tmp / "removed.txt"
         self.removed.write_text("# none\n", encoding="utf-8")
+        self.standing = self.tmp / "standing.txt"
+        self.standing.write_text("# none\n", encoding="utf-8")
         self.env = {**os.environ, "GATE_LEDGER": (self.tmp / "ledger.jsonl").as_posix(),
-                    "GATE_REMOVED": self.removed.as_posix(), "GATE_COMMIT": "abc1234", "GATE_DIRTY": "0",
-                    "PYTHONIOENCODING": "utf-8"}
+                    "GATE_REMOVED": self.removed.as_posix(), "GATE_STANDING": self.standing.as_posix(),
+                    "GATE_COMMIT": "abc1234", "GATE_DIRTY": "0", "PYTHONIOENCODING": "utf-8"}
 
     def run_it(self, *args: str, **env: str) -> subprocess.CompletedProcess:
         return subprocess.run([sys.executable, str(LEDGER), *args], env={**self.env, **env}, capture_output=True,
@@ -139,10 +141,19 @@ class Ledger(unittest.TestCase):
         self.record("go_vet", "")
         r = self.run_it("verdict", "tracks go_vet")
         self.assertEqual(r.returncode, 0, r.stdout)
-        self.assertIn("gate: GREEN at abc1234 — every one of the 2 lanes", r.stdout)
+        self.assertIn("gate: ALL GREEN at abc1234 — every one of the 2 lanes", r.stdout)
         dirty = self.run_it("verdict", "tracks go_vet", GATE_DIRTY="1")
         self.assertEqual(dirty.returncode, 1, dirty.stdout)
         self.assertIn("uncommitted", dirty.stdout)
+
+    def test_every_lane_passed_with_backend_tests_still_failing_by_name_is_not_all_green(self):
+        # (the gate's full run has said so since AM15: the list of tests that still fail must be empty)
+        self.standing.write_text("# the list\nintegration/test_x.py::test_a\nintegration/test_y.py::test_b\n", encoding="utf-8")
+        self.record("tracks", "tracks: ok\n")
+        r = self.run_it("verdict", "tracks")
+        self.assertIn("with 2 backend test(s) still failing by name", r.stdout)
+        self.assertIn("not ALL GREEN", r.stdout)
+        self.assertNotIn("gate: ALL GREEN", r.stdout)
 
     def test_a_result_recorded_with_uncommitted_changes_never_counts_for_the_commit(self):
         self.record("tracks", "tracks: ok\n", GATE_DIRTY="1")

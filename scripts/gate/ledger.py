@@ -38,6 +38,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 LEDGER = Path(os.environ.get("GATE_LEDGER") or ROOT / "scripts" / "gate" / "results" / "ledger.jsonl")
 REMOVED = Path(os.environ.get("GATE_REMOVED") or ROOT / "scripts" / "gate" / "removed_checks.txt")
+# the backend tests that still fail by name (AM15, scripts/gate/marked.py): while one is on it, no verdict says green
+STANDING = Path(os.environ.get("GATE_STANDING") or ROOT / "scripts" / "gate" / "backend_marked_failing.txt")
 
 # Lanes that check the whole tree at once and print nothing when it is right: one check, when it exited 0.
 WHOLE = {"go_vet", "gofmt", "web_tsc", "web_lints", "removal_drill", "gitleaks", "build_images", "build_runner",
@@ -337,8 +339,23 @@ def verdict(lanes: list[str]) -> int:
     if bad:
         print(f"gate: NOT GREEN at {at['commit']} — {len(bad)} of {len(lanes)} lanes: " + " · ".join(bad))
         return 1
-    print(f"gate: GREEN at {at['commit']} — every one of the {len(lanes)} lanes has a green result at {at['commit']}")
+    standing = standing_names()
+    if standing:
+        # (as the gate's full run says it since AM15: every lane passed, and the list of tests that still fail is
+        # not empty — that is not green)
+        print(f"gate: every one of the {len(lanes)} lanes passed at {at['commit']}, with {standing} backend test(s) still "
+              f"failing by name ({_shown(STANDING)}) — not ALL GREEN until that list is empty")
+        return 0
+    print(f"gate: ALL GREEN at {at['commit']} — every one of the {len(lanes)} lanes has a green result at {at['commit']}")
     return 0
+
+
+def standing_names() -> int:
+    try:
+        lines = STANDING.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return 0
+    return sum(1 for l in lines if l.strip() and not l.lstrip().startswith("#"))
 
 
 def main(argv: list[str]) -> int:
