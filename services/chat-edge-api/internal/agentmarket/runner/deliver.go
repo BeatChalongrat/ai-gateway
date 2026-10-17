@@ -184,7 +184,7 @@ func askNarrative(ctx context.Context, m *ModelClient, l am.Lang, models []strin
 	marks marksFunc) (narrativeAnswer, Completion, []string, error) {
 	var out narrativeAnswer
 	var long, mended map[string]any
-	var longBy, mendedBy string
+	var longBy, mendedBy, longUnchecked string
 	var longFixes, mendedFixes []markFix
 	c, tried, err := m.CompleteWithInBy(ctx, l, models, system, user, func(model, s string) error {
 		v, err := checkNarrative(l, s, cv)
@@ -194,9 +194,6 @@ func askNarrative(ctx context.Context, m *ModelClient, l am.Lang, models []strin
 			return err
 		}
 		mv := judgeMarks(ctx, l, v, marks)
-		if mv.unchecked != "" {
-			out.unchecked = mv.unchecked
-		}
 		switch {
 		case mv.reason != "" && mv.mended == nil:
 			// a slip with no one reading: this answer is never used
@@ -211,10 +208,12 @@ func askNarrative(ctx context.Context, m *ModelClient, l am.Lang, models []strin
 			mended, mendedBy, mendedFixes = mv.mended, model, mv.fixes
 			return errors.New(mv.reason)
 		case isLong:
-			long, longBy, longFixes = v, model, nil // (AM22: kept, in case no attempt fits — see overLength)
+			// (AM22: kept, in case no attempt fits — see overLength; AM24: with whether its Thai could be read)
+			long, longBy, longFixes, longUnchecked = v, model, nil, mv.unchecked
 			return err
 		}
-		out.parsed = v
+		// the record says whether the answer USED was checked — not whether some attempt could not be
+		out.parsed, out.unchecked = v, mv.unchecked
 		return nil
 	})
 	if err != nil && !errors.Is(err, ErrModelUnreachable) && ctx.Err() == nil {
@@ -224,7 +223,7 @@ func askNarrative(ctx context.Context, m *ModelClient, l am.Lang, models []strin
 			c.Model = mendedBy
 		} else if v, model, ok := overLength(long, longBy); ok {
 			// AM22 §1.2: the model's words, too long after both attempts — the renderer's ladder decides
-			out.parsed, out.fixes, err = v, longFixes, nil
+			out.parsed, out.fixes, out.unchecked, err = v, longFixes, longUnchecked, nil
 			c.Model = model
 		}
 	}

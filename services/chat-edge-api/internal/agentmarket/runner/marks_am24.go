@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -52,6 +53,9 @@ type marksVerdict struct {
 
 // engineMarks asks the runner's current engine (a platform op, as stamp_review is).
 func (rc *runCtx) engineMarks(ctx context.Context, texts []string) ([]markResult, error) {
+	if rc.r.Exec == nil {
+		return nil, errors.New("no engine to ask (the runner has no sandbox)")
+	}
 	res, err := rc.r.Exec.Run(ctx, map[string]any{"op": "thai_marks", "texts": texts}, nil)
 	if err != nil {
 		return nil, err

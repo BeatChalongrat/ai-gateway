@@ -132,6 +132,37 @@ func TestATooLongAnswerIsMendedOnItsWayAndAnUncheckedOneSaysSo(t *testing.T) {
 	}
 }
 
+// The record says whether the answer USED was checked: an attempt the engine could not read, then one it read and
+// found clean, is a checked answer — and a runner with no engine says why it could not check, never panics.
+func TestTheRecordSaysWhetherTheAnswerUsedWasChecked(t *testing.T) {
+	var calls int32
+	flaky := func(ctx context.Context, texts []string) ([]markResult, error) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			return nil, errors.New("sandbox: busy")
+		}
+		return make([]markResult, len(texts)), nil
+	}
+	// the first answer is too long and could not be checked; the second fits, is checked, and is the one used
+	long := make([]string, 9)
+	for i := range long {
+		long[i] = "ข้อ " + strings.Repeat("ก", i+1)
+	}
+	long[3] = strings.Repeat("ยาวเกินไป", 8)
+	ans, _, _, err := am24Ask(t, flaky, am.Thai, am22Answer(long, "สรุป {revenue}"), `{"summary":"ยอดเท่ากัน {revenue}"}`)
+	if err != nil || ans.unchecked != "" {
+		t.Fatalf("the answer used was checked; the record must not say otherwise: %v %q", err, ans.unchecked)
+	}
+	calls = 0
+	ans, _, _, err = am24Ask(t, flaky, am.Thai, `{"summary":"ยอดเท่ากัน {revenue}"}`)
+	if err != nil || ans.unchecked == "" {
+		t.Fatalf("the answer used could not be checked; the record says so: %v %q", err, ans.unchecked)
+	}
+	rc := &runCtx{r: &Runner{}}
+	if _, err := rc.engineMarks(context.Background(), []string{"ร่่าง"}); err == nil || !strings.Contains(err.Error(), "no engine") {
+		t.Fatalf("a runner with no sandbox says it could not check: %v", err)
+	}
+}
+
 // An answer with no Thai is never sent to the engine; an English run's reason is English.
 func TestAnAnswerWithNoThaiIsNotCheckedAndAnEnglishRunsReasonIsEnglish(t *testing.T) {
 	var calls int32
