@@ -50,6 +50,23 @@ type API struct {
 	smtp *SMTPMailer
 	// personMail sends from a person's own mailbox (AM9, personmail.go); nil: not offered.
 	personMail PersonMailer
+	// AM24: closed when the server shuts down (EndStreams): a thread's stream then tells its page to reconnect
+	// (to the next copy, through the front door) instead of holding the old copy for the whole of its 10 s wait
+	endInit, endClose sync.Once
+	endCh             chan struct{}
+}
+
+func (a *API) ending() chan struct{} {
+	a.endInit.Do(func() { a.endCh = make(chan struct{}) })
+	return a.endCh
+}
+
+// EndStreams ends every open thread stream with a reconnect (AM24): http.Server.RegisterOnShutdown calls it once
+// the server has stopped listening. Until AM24 an agent's page left open kept the old chat-edge's Shutdown waiting
+// its full 10 s — the swap of 17 Oct 2026 was 11.7 s without an answer, the old copy's stop 11.4 s of it.
+func (a *API) EndStreams() {
+	ch := a.ending()
+	a.endClose.Do(func() { close(ch) })
 }
 
 // personMailFrom is the mail connector the configuration names (AM9): the
@@ -965,6 +982,11 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case <-deadline.C:
+			_, _ = fmt.Fprintf(w, "event: reconnect\ndata: {\"after\":%d}\n\n", after)
+			fl.Flush()
+			return
+		case <-a.ending():
+			// AM24: the server is shutting down — reconnect, with the cursor, to the copy that answers next
 			_, _ = fmt.Fprintf(w, "event: reconnect\ndata: {\"after\":%d}\n\n", after)
 			fl.Flush()
 			return

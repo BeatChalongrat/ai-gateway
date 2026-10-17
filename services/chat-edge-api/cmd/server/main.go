@@ -818,12 +818,14 @@ func main() {
 
 	// Agent Market (AM1) — absent unless AGENT_MARKET_ENABLED: no route, no
 	// pool, no query. Its own small pool; a setup failure leaves chat as is.
+	var amEndStreams func() // AM24: the server ends Agent Market's open streams when it shuts down
 	if amCfg := agentmarket.ConfigFromEnv(); amCfg.Enabled {
 		amCtx, amCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		if amAPI, err := agentmarket.NewAPI(amCtx, amCfg, cfg.DatabaseURL, storageBackend, slog.Default()); err != nil {
 			slog.Error("agent market not started", "err", err)
 		} else {
 			handlers.AgentMarket = amAPI
+			amEndStreams = amAPI.EndStreams
 			service.RegisterAccountDataProvider(amAPI.AccountProvider()) // AM2: export and account deletion reach agent_market
 			// AM7: every admin change is written to the admin audit log (the
 			// backend's internal endpoint, as a trusted service) before it lands.
@@ -862,6 +864,9 @@ func main() {
 		Addr:              ":" + cfg.Port,
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
+	}
+	if amEndStreams != nil {
+		srv.RegisterOnShutdown(amEndStreams)
 	}
 
 	// S9 — start the retention enforcer goroutine. Lifetime is
