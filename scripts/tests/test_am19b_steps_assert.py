@@ -35,6 +35,24 @@ BASH = shutil.which("bash")
 DOCKER = r'''#!/bin/sh
 # a stand-in for Docker: records what it was asked; answers from the files the test wrote
 echo "$@" >> "$FAKE_CALLS"
+# AM24 — what the swap asks Compose (the services its files hold, the container a service runs, the swap itself)
+# and Docker's events
+case "$1" in
+  compose)
+    case " $* " in
+      *" config --services "*)
+        if [ -n "${FAKE_CONFIG_RC:-}" ]; then echo "no configuration file provided: not found" >&2; exit "$FAKE_CONFIG_RC"; fi
+        printf '%s\n' ${FAKE_SERVICES:-chat-edge-api web-chat admin-ui agent-runner}; exit 0 ;;
+      *" ps -q "*)
+        n=$(cat "$FAKE_CALLS.ps" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$FAKE_CALLS.ps"
+        if [ "$n" -eq 1 ]; then echo "${FAKE_BEFORE-0ld0ld0ld0ld0ld}"; else echo "${FAKE_AFTER-new0new0new0new}"; fi
+        exit 0 ;;
+      *" up "*)
+        if [ -n "${FAKE_UP_RC:-}" ]; then echo "no such service: ${FAKE_UP_SAYS:-x}" >&2; exit "$FAKE_UP_RC"; fi
+        exit 0 ;;
+    esac ;;
+  events) [ -f "${FAKE_EVENTS:-/nonexistent}" ] && cat "$FAKE_EVENTS"; exit 0 ;;
+esac
 case "$1 $2" in
   "image inspect")
     shift 2
@@ -49,7 +67,14 @@ case "$1 $2" in
   *) exit 0 ;;
 esac
 '''
-CURL = "#!/bin/sh\nprintf '%s' \"${FAKE_CODE:-200}\"\n"
+CURL = r'''#!/bin/sh
+# (AM24: FAKE_DOWN=n — the door does not answer from its 7th ask, for n asks: a swap with a gap)
+if [ -n "${FAKE_DOWN:-}" ]; then
+  n=$(cat "$FAKE_CALLS.curl" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$FAKE_CALLS.curl"
+  if [ "$n" -gt 6 ] && [ "$n" -le $((6 + FAKE_DOWN)) ]; then printf 000; exit 0; fi
+fi
+printf '%s' "${FAKE_CODE:-200}"
+'''
 SLEEP = "#!/bin/sh\nexit 0\n"
 POWERSHELL = "#!/bin/sh\necho 'Online 1 100'\n"
 
