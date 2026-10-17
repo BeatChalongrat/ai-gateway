@@ -157,6 +157,11 @@ export const en = {
   "am.models.leaveBody": "Sending accounting documents outside the organisation is the organisation's decision, not an agent's. While it is off, a scan that cannot be read becomes a question asking for a clearer scan, and a report's commentary is written by rules when the organisation's own model does not answer.",
   "am.models.leaveOff": "Not allowed (default) — documents and figures are seen only by models running inside the organisation.",
   "am.models.leaveOn": "Allowed — people in the organisation may choose an outside model for an agent.",
+  // AM23 §3.2: the one neutral line on a document whose commentary a model drafted — the organisation's choice
+  "am.models.assistantTitle": "Say on documents that the AI assistant drafted the commentary?",
+  "am.models.assistantBody": "A document whose commentary a model drafted carries one line in its closing block, beside the sources and the references: “The commentary was drafted by the organisation's AI assistant; every figure is from the source cited beside it.” It names no model and no vendor, and it is never on the cover. When the system's rules composed the words because no model's could be used, the document says so whatever is chosen here.",
+  "am.models.assistantOn": "Say it (default) — every such document carries the line.",
+  "am.models.assistantOff": "Do not say it — the line is left out of every document.",
   "am.models.audit": "Every change on this page is recorded in {link} (who, when, old value → new value).",
   "am.models.auditLink": "the audit log",
   "am.egress.title": "Each agent, under the organisation's switch",
@@ -560,6 +565,11 @@ export const th: Record<keyof typeof en, string> = {
   "am.models.leaveBody": "การส่งเอกสารบัญชีออกนอกองค์กรเป็นการตัดสินใจขององค์กร ไม่ใช่ของ agent — ถ้าปิดไว้ สแกนที่อ่านไม่ออกจะกลายเป็นคำถามขอสแกนที่ชัดกว่า และคำบรรยายรายงานจะเขียนด้วยกฎเมื่อโมเดลในองค์กรไม่ตอบ",
   "am.models.leaveOff": "ไม่อนุญาต (ค่าเริ่มต้น) — เอกสารและตัวเลขเห็นได้เฉพาะโมเดลที่รันในองค์กร",
   "am.models.leaveOn": "อนุญาต — คนในองค์กรเลือกโมเดลนอกองค์กรให้ agent ได้",
+  // AM23 §3.2
+  "am.models.assistantTitle": "บอกบนเอกสารว่าผู้ช่วย AI ร่างคำอธิบายหรือไม่",
+  "am.models.assistantBody": "เอกสารที่คำอธิบายร่างโดยโมเดลจะมีหนึ่งบรรทัดในส่วนท้าย ข้างแหล่งที่มาและรหัสอ้างอิง: “คำอธิบายในเอกสารนี้ร่างโดยผู้ช่วย AI ขององค์กร ตัวเลขทุกตัวมาจากแหล่งที่อ้างไว้ข้างตัวเลขนั้น” ไม่ระบุชื่อโมเดลหรือผู้ให้บริการ และไม่อยู่บนหน้าปก เมื่อคำอธิบายเรียบเรียงจากกฎของระบบเพราะใช้คำตอบของโมเดลไม่ได้ เอกสารจะบอกไว้เสมอ ไม่ว่าเลือกไว้อย่างไรที่นี่",
+  "am.models.assistantOn": "บอก (ค่าเริ่มต้น) — เอกสารแบบนี้ทุกฉบับมีบรรทัดนี้",
+  "am.models.assistantOff": "ไม่บอก — ไม่ใส่บรรทัดนี้ในเอกสารใดเลย",
   "am.models.audit": "ทุกการเปลี่ยนแปลงบนหน้านี้ถูกบันทึกลง {link} (ใคร เมื่อไร ค่าเดิม → ค่าใหม่)",
   "am.models.auditLink": "ประวัติการทำงานของผู้ดูแล",
   "am.egress.title": "แยกตาม agent ภายใต้สวิตช์ขององค์กร",

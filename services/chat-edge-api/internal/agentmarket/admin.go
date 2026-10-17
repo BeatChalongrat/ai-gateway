@@ -133,6 +133,8 @@ func (a *API) adminPutOrg(w http.ResponseWriter, r *http.Request) {
 		DocumentsMayLeave *bool `json:"documents_may_leave"`
 		RetentionYears    *int  `json:"retention_years"`
 		StorageWarnMB     *int  `json:"storage_warn_mb"`
+		// AM23 §3.2: the neutral line on a document whose words a model drafted
+		AssistantLine *bool `json:"assistant_line"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil {
 		badRequest(w, "BAD_JSON")
@@ -231,6 +233,14 @@ func (a *API) adminPutOrg(w http.ResponseWriter, r *http.Request) {
 			acc.OrgID, o.Name, o.Access, o.Domains, o.UserMonthlyCredits, o.ContactName, o.ContactEmail, normEmail(c.Email),
 			o.DocumentsMayLeave, o.RetentionYears, o.StorageWarnMB); err != nil {
 			return nil, err
+		}
+		if body.AssistantLine != nil && *body.AssistantLine != o.AssistantLine {
+			// (its own statement: the column is migration 013's)
+			if _, err := tx.Exec(ctx, `UPDATE agent_market.org_settings SET assistant_line = $2 WHERE org_id = $1`,
+				acc.OrgID, *body.AssistantLine); err != nil {
+				return nil, err
+			}
+			o.AssistantLine = *body.AssistantLine
 		}
 		return orgChanges(r, before, o), nil
 	})

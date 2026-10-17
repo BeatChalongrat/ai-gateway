@@ -56,26 +56,97 @@ def rows(narrative: dict, computed: dict) -> list[tuple[str, str, list[str]]]:
     return out
 
 
-def rules_line(narrative: dict) -> str:
-    """The line a commentary the rules wrote carries, saying why: no model was available, or the model's answers could
-    not be used (the runner says which: narrative "why")."""
-    return S("doc.commentary.rules_unusable") if narrative.get("why") == "unusable" else S("doc.commentary.rules_wrote")
+def rules_line(narrative: dict | None = None) -> str:
+    """The sentence a commentary the rules composed carries under its words (AM23 §3.2): it names no model, and it is
+    in the file whatever the organisation's switch says, because it changes what a reader should trust. Why no
+    model's words were used (none could be reached, or none of its answers could be) is the run's record."""
+    return S("doc.commentary.rules_composed")
 
 
-def who_wrote(narrative: dict, model_info: dict | None) -> str:
-    """The one line under the commentary that says who wrote it."""
-    if narrative.get("written_by") == "rules":
-        return rules_line(narrative)
-    model = str(narrative.get("model") or (model_info or {}).get("model") or "")
-    place = ""
-    if (model_info or {}).get("self_hosted") is True:
-        place = " " + S("docs.model.inside")
-    elif (model_info or {}).get("self_hosted") is False:
-        place = " " + S("docs.model.outside")
-    return S("doc.commentary.model_wrote", model=model or S("docs.about.no_model"), place=place)
+def assistant_on(req: dict | None) -> bool:
+    """The organisation's switch for the neutral line (AM23 §3.2): on unless the runner says it is off."""
+    return (req or {}).get("assistant_line") is not False
 
 
-def sheet(book, narrative: dict, computed: dict, model_info: dict | None = None) -> dict:
+def closing_line(narrative: dict, req: dict | None) -> str | None:
+    """The one neutral line a file's closing block carries about how its commentary was written (AM23 §3.2): when a
+    model drafted it and the organisation has the line on. It names no model, no vendor and not the platform; it is
+    never on the cover. None otherwise — the rules' own sentence stands under their words."""
+    if narrative.get("written_by") == "rules" or not assistant_on(req):
+        return None
+    return S("doc.assistant.line")
+
+
+def model_names(narrative: dict | None, computed: dict | None, req: dict | None) -> list[str]:
+    """Every model this run used, by name: the one that wrote the words and any that read a scan (AM23 §3.1: none of
+    them is printed in a file — the run's own record keeps them)."""
+    names = {str((narrative or {}).get("model") or ""), str(((req or {}).get("model_info") or {}).get("model") or "")}
+    for m in (computed or {}).get("models") or []:
+        if isinstance(m, dict):
+            names.add(str(m.get("model") or ""))
+    return sorted(n for n in names if len(n.strip()) >= 3)
+
+
+def no_model_name(texts: list[str], names: list[str], where: str = "") -> dict:
+    """The finished file's text, read again: no model's name in it (AM23 §3.1)."""
+    low = [t.lower() for t in texts]
+    for n in names:
+        hit = next((t for t, l in zip(texts, low) if n.lower() in l), None)
+        if hit is not None:
+            return {"name": "file.no_model", "ok": False, "label": S("check.no_model.label"),
+                    "detail": S("check.no_model.found", model=n, where=where or hit[:60])}
+    return {"name": "file.no_model", "ok": True, "label": S("check.no_model.label"), "detail": S("check.no_model.ok")}
+
+
+def workbook_texts(path: str) -> list[str]:
+    from openpyxl import load_workbook
+
+    wb = load_workbook(path)
+    return [ws.title for ws in wb.worksheets] + [str(c.value) for ws in wb.worksheets for row in ws.iter_rows()
+                                                 for c in row if isinstance(c.value, str)]
+
+
+def file_texts(path: str) -> list[str]:
+    """Every text a finished file holds, by its kind: a workbook's sheet names and cells, a document's paragraphs,
+    tables, headers and footers, a deck's shapes, tables and notes (AM23: what the gates read back)."""
+    ext = path.rsplit(".", 1)[-1].lower()
+    if ext in ("xlsx", "xlsm"):
+        return workbook_texts(path)
+    out: list[str] = []
+    if ext == "docx":
+        from docx import Document
+
+        doc = Document(path)
+
+        def walk(tables):
+            for t in tables:
+                for row in t.rows:
+                    for cell in row.cells:
+                        out.extend(p.text for p in cell.paragraphs)
+                        walk(cell.tables)
+
+        out.extend(p.text for p in doc.paragraphs)
+        walk(doc.tables)
+        for sec in doc.sections:
+            for part in (sec.header, sec.footer):
+                out.extend(p.text for p in part.paragraphs)
+                walk(part.tables)
+    elif ext == "pptx":
+        from pptx import Presentation
+
+        prs = Presentation(path)
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    out.extend(p.text for p in shape.text_frame.paragraphs)
+                if getattr(shape, "has_table", False) and shape.has_table:
+                    out.extend(c.text for row in shape.table.rows for c in row.cells)
+            if slide.has_notes_slide:
+                out.append(slide.notes_slide.notes_text_frame.text)
+    return [t for t in out if t]
+
+
+def sheet(book, narrative: dict, computed: dict, req: dict | None = None) -> dict:
     """Write the commentary sheet into ``book`` (a look.xlsx_styles.Book), placed right after the face.
     Raises catalogue.DoesNotFit when the commentary is too long for the layout."""
     name = S("doc.sheet.commentary")
@@ -108,16 +179,21 @@ def sheet(book, narrative: dict, computed: dict, model_info: dict | None = None)
     book.section(ws, r, S("doc.commentary.refs"))
     book.muted(ws, r, CITE_COL, S("doc.commentary.refs_note"))
     r += 1
-    book.note(ws, r, who_wrote(narrative, model_info), cols=TEXT_COLS)
+    # AM23 §3.2: under the words the rules composed, their sentence (always); beside the references, the neutral line
+    # when a model drafted the words and the organisation has it on; and never a model's name
+    last = rules_line(narrative) if narrative.get("written_by") == "rules" else closing_line(narrative, req)
+    if last:
+        book.note(ws, r, last, cols=TEXT_COLS)
     wb = book.wb
     wb.move_sheet(ws, offset=-(len(wb.worksheets) - 2))
     return {"layout": {"section": name, "block": "commentary", "layout": choice.layout, "role": choice.role, "reason": choice.reason},
             "sentences": len(lines)}
 
 
-def check(path: str, narrative: dict, computed: dict, model_info: dict | None = None) -> dict:
-    """The finished file, opened again: every sentence of the commentary is there as printed, the line
-    that says the rules wrote it is there exactly when they did, and no figure's name is left unreplaced."""
+def check(path: str, narrative: dict, computed: dict, req: dict | None = None) -> dict:
+    """The finished file, opened again: every sentence of the commentary is there as printed, the sentence that says
+    the rules composed it is there exactly when they did, the neutral line exactly when a model drafted it and the
+    organisation has it on (AM23 §3.2), and no figure's name is left unreplaced."""
     from openpyxl import load_workbook
 
     name = S("doc.sheet.commentary")
@@ -138,12 +214,17 @@ def check(path: str, narrative: dict, computed: dict, model_info: dict | None = 
     braces = [t for t in texts if "{" in t or "}" in t]
     if braces:
         return ck(False, S("check.commentary.brace", text=braces[0][:80]), len(want))
-    lines = {"".join(S(k).split()) for k in ("doc.commentary.rules_wrote", "doc.commentary.rules_unusable")}
-    has_line = bool(lines & squashed)
-    if narrative.get("written_by") == "rules" and "".join(rules_line(narrative).split()) not in squashed:
+    has_line = "".join(rules_line().split()) in squashed
+    if narrative.get("written_by") == "rules" and not has_line:
         return ck(False, S("check.commentary.rules_line_missing"), len(want))
     if narrative.get("written_by") != "rules" and has_line:
         return ck(False, S("check.commentary.rules_line_extra"), len(want))
+    has_assistant = "".join(S("doc.assistant.line").split()) in squashed
+    wants_assistant = closing_line(narrative, req) is not None
+    if wants_assistant and not has_assistant:
+        return ck(False, S("check.commentary.assistant_missing"), len(want))
+    if has_assistant and not wants_assistant:
+        return ck(False, S("check.commentary.assistant_extra"), len(want))
     return ck(True, S("check.commentary.ok", n=len(want), sheet=name), len(want))
 
 

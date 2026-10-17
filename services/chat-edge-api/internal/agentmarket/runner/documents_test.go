@@ -49,13 +49,18 @@ func TestExtrasLeaveAM1StepKeysUnchanged(t *testing.T) {
 	}
 }
 
-func TestOutputsSayWhichModelSawTheDocuments(t *testing.T) {
+// AM23 §3.1: the note says what read the scans — the organisation's AI assistant — and where it ran, never by the
+// model's name (the run's own record keeps that).
+func TestOutputsSayWhatSawTheDocumentsAndWhereNeverWhichModel(t *testing.T) {
 	plain := documentsNote(map[string]any{}).String()
-	if !strings.Contains(plain, "โมเดลไม่ได้เป็นผู้กำหนดตัวเลข") || strings.Contains(plain, "โมเดลที่เห็นเอกสาร") {
+	if !strings.Contains(plain, "โมเดลไม่ได้เป็นผู้กำหนดตัวเลข") || strings.Contains(plain, "อ่านซ้ำ") {
 		t.Fatalf("no model: %s", plain)
 	}
-	note := documentsNote(map[string]any{"models": []any{map[string]any{"model": "qwen3.8-27b-fp8", "self_hosted": true, "documents": float64(3)}}}).String()
-	if !strings.Contains(note, "qwen3.8-27b-fp8 (รันในองค์กร)") || !strings.Contains(note, "3 ฉบับ") {
-		t.Fatalf("model named: %s", note)
+	note := documentsNote(map[string]any{"models": []any{map[string]any{"model": "qwen3.8-27b-fp8", "self_hosted": true, "documents": float64(3)}}})
+	if s := note.String(); !strings.Contains(s, "ผู้ช่วย AI ขององค์กร (รันในองค์กร)") || !strings.Contains(s, "3 ฉบับ") || strings.Contains(s, "qwen") {
+		t.Fatalf("what read them, where, and no model's name: %s", s)
+	}
+	if strings.Contains(note.In(am.English), "qwen") {
+		t.Fatalf("nor in English: %s", note.In(am.English))
 	}
 }

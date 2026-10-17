@@ -180,15 +180,16 @@ describe("the files card", () => {
     model: { uses: "vision", choice: "gpt-vision", chosen_model: "gpt-vision", not_chosen: true, vision_model: "qwen3.8-27b-fp8" },
   };
 
-  it("always says which model saw the documents — and when another was used instead of the chosen one", () => {
+  it("always says what saw the documents and where it ran — and when another was used instead of the chosen one, naming no model (AM23)", () => {
     render(
       <WorkspaceContext.Provider value={{ installId: "i-1", merge: () => {} }}>
         <OutputsCard outputs={outputs} />
       </WorkspaceContext.Provider>,
     );
     const seen = screen.getByTestId("am-outputs-seen-by").textContent ?? "";
-    expect(seen).toContain("qwen3.8-27b-fp8 (ในองค์กร)");
-    expect(seen).toContain("คุณเลือก gpt-vision ไว้ แต่รอบนี้ใช้ qwen3.8-27b-fp8 แทน");
+    expect(seen).toContain("อ่านโดยผู้ช่วย AI ขององค์กร (ในองค์กร)");
+    expect(seen).toContain("รอบนี้ไม่ได้ใช้โมเดลที่คุณเลือกไว้");
+    expect(seen).not.toMatch(/qwen|gpt-vision/);
     // a member: checks and credits folded
     expect(screen.queryByTestId("am-outputs-details-body")).toBeNull();
   });

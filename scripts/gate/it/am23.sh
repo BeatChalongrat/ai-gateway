@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # AM23 — the integration lane of the card, and from now on the gate's own last lane: AM22's (which runs AM18's,
 # AM16's, AM15's and AM13's first), then the file a person asks for, from any agent: a round asked only for a
-# kind of file its agent does not make stops before any work and says why.
+# kind of file its agent does not make stops before any work and says why; the one neutral line on a working paper
+# follows the organisation's switch, and no file or message names a model.
 #
 #   bash scripts/gate/it/am23.sh          AM22's lane, then these (what scripts/gate.sh it runs last)
 #   bash scripts/gate/it/am23.sh new      these only
@@ -19,6 +20,7 @@ if [ "${1:-all}" != "new" ]; then
 fi
 CHUNKS=(
   '^(TestARoundAskedOnlyForAFileItsAgentDoesNotMakeStopsBeforeAnyWorkAndSaysWhy)$'
+  '^(TestTheNeutralLineOnAWorkingPaperFollowsTheOrganisationsSwitch)$'
 )
 for c in "${CHUNKS[@]}"; do
   echo "== chunk $c"

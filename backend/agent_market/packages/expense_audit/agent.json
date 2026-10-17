@@ -1,7 +1,7 @@
 {
   "schema_version": "agent.market.v1",
   "id": "sran.expense-audit",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "name": "ตรวจการเบิกค่าใช้จ่ายตามนโยบายบริษัท",
   "name_en": "Expense Audit",
   "short_name": "ตรวจค่าใช้จ่าย",
@@ -601,7 +601,7 @@
     "doc.calendar.off": "ปฏิทินวันหยุด: ไม่ได้ใช้ — {v} จึงยังไม่ได้ตรวจวันหยุดนักขัตฤกษ์ รอบนี้ตรวจเฉพาะวันเสาร์–อาทิตย์",
     "doc.calendar.unset": "ยังไม่ได้ตั้งปฏิทินวันหยุดของบริษัท",
     "doc.calendar.not_checked": "ไม่ได้ตรวจวันหยุดนักขัตฤกษ์: {v} ตรวจเฉพาะวันเสาร์–อาทิตย์",
-    "doc.note.models": "โมเดลที่เห็นใบเสร็จ: {model} ({place}) อ่านซ้ำ {n} ฉบับที่เป็นสแกนหรือรูปถ่าย เพื่อเทียบกับ OCR เท่านั้น",
+    "doc.note.models": "ผู้ช่วย AI ขององค์กร ({place}) อ่านซ้ำ {n} ฉบับที่เป็นสแกนหรือรูปถ่าย เพื่อเทียบกับ OCR เท่านั้น",
     "doc.model.inside": "รันในองค์กร",
     "doc.model.outside": "ผู้ให้บริการภายนอก",
     "cite.claims_n.label": "จำนวนรายการเบิกทั้งหมด",
@@ -1097,7 +1097,7 @@
     "ปฏิทินวันหยุด: {note}": "Holiday calendar: {note}",
     "ปฏิทินวันหยุด: ไม่ได้ใช้ — {v} จึงยังไม่ได้ตรวจวันหยุดนักขัตฤกษ์ รอบนี้ตรวจเฉพาะวันเสาร์–อาทิตย์": "Holiday calendar: not used — {v}, so public holidays were not checked; this run checks Saturdays and Sundays only",
     "ไม่ได้ตรวจวันหยุดนักขัตฤกษ์: {v} ตรวจเฉพาะวันเสาร์–อาทิตย์": "Public holidays were not checked: {v}; Saturdays and Sundays only",
-    "โมเดลที่เห็นใบเสร็จ: {model} ({place}) อ่านซ้ำ {n} ฉบับที่เป็นสแกนหรือรูปถ่าย เพื่อเทียบกับ OCR เท่านั้น": "Model that saw receipts: {model} ({place}) re-read {n} scanned or photographed receipts, only to compare with OCR",
+    "ผู้ช่วย AI ขององค์กร ({place}) อ่านซ้ำ {n} ฉบับที่เป็นสแกนหรือรูปถ่าย เพื่อเทียบกับ OCR เท่านั้น": "The organisation's AI assistant ({place}) re-read {n} scanned or photographed receipts, only to compare with OCR",
     "รันในองค์กร": "runs inside the organisation",
     "ผู้ให้บริการภายนอก": "an outside provider"
 ,

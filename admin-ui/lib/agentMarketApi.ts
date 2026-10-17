@@ -50,6 +50,8 @@ export interface OrgSettings {
   documents_may_leave: boolean;
   retention_years: number;
   storage_warn_mb: number;
+  // AM23 §3.2: a document whose words a model drafted says so in one neutral line (on by default)
+  assistant_line?: boolean;
 }
 
 export interface OrgMember {
@@ -90,6 +92,7 @@ export type OrgPatch = Partial<{
   documents_may_leave: boolean;
   retention_years: number;
   storage_warn_mb: number;
+  assistant_line: boolean; // AM23 §3.2
 }>;
 
 export interface SpendRow {

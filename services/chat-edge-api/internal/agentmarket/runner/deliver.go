@@ -610,7 +610,9 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 				"presentation": pres,
 				"run": map[string]any{"id": artifactRun.String(), "date": rc.today(), "agent_version": rc.pkg.Version,
 					"preparer": rc.preparer(ctx, parentRun), "organisation": rc.organisation(ctx), "kind": parentRun.Kind},
-				"model_info": map[string]any{"model": narrative.Model, "self_hosted": narrative.SelfHosted}}
+				"model_info": map[string]any{"model": narrative.Model, "self_hosted": narrative.SelfHosted},
+				// AM23 §3.2: the organisation's switch for the one neutral line (the engine names no model in a file)
+				"assistant_line": rc.assistantLine(ctx)}
 			if len(rc.instr) > 0 {
 				req["instructions"] = map[string]any{"apply": rc.instr}
 			}
@@ -888,6 +890,16 @@ func (rc *runCtx) preparer(ctx context.Context, run am.Run) string {
 // nobody prepared it, and it says so.
 const SamplePreparer = "ไฟล์ตัวอย่างของ agent (ไม่มีผู้จัดทำ)"
 
+// assistantLine is the organisation's switch for the neutral line on a file whose words a model drafted (AM23
+// §3.2): on unless an admin switched it off.
+func (rc *runCtx) assistantLine(ctx context.Context) bool {
+	o, err := rc.r.Store.OrgSettingsFor(ctx, orgOrDefault(rc.install.OrgID))
+	if err != nil {
+		return true
+	}
+	return o.AssistantLine
+}
+
 // organisation is the organisation's name, which a working paper's header
 // prints when the install has no company of its own (AM8).
 func (rc *runCtx) organisation(ctx context.Context) string {
@@ -1045,10 +1057,11 @@ func closingText(m am.Manifest, summary map[string]any, narrative narrativeOut, 
 	case narrative.Model == "":
 		return am.Text("%s คำอธิบายในรอบนี้เขียนจากกฎ เพราะไม่มีโมเดลที่ตอบได้ ตัวเลขทุกตัวยังมาจากสคริปต์เหมือนเดิม", am.Words(text))
 	case narrative.SelfHosted:
-		return am.Text("%s ตัวเลขทุกตัวมาจากสคริปต์ คำอธิบายเขียนด้วย %s ที่รันในองค์กร", am.Words(text), am.ModelName(narrative.Model))
+		// AM23 §3.1: the thread names no model, as no file does; the run's own record and the admin's view keep it
+		return am.Text("%s ตัวเลขทุกตัวมาจากสคริปต์ คำอธิบายร่างโดยผู้ช่วย AI ขององค์กร ที่รันในองค์กร", am.Words(text))
 	}
-	return am.Text("%s ตัวเลขทุกตัวมาจากสคริปต์ คำอธิบายเขียนด้วย %s (ผู้ให้บริการภายนอก เห็นเฉพาะตารางที่คำนวณแล้ว)",
-		am.Words(text), am.ModelName(narrative.Model))
+	return am.Text("%s ตัวเลขทุกตัวมาจากสคริปต์ คำอธิบายร่างโดยผู้ช่วย AI ขององค์กร ผ่านผู้ให้บริการภายนอก ซึ่งเห็นเฉพาะตารางที่คำนวณแล้ว",
+		am.Words(text))
 }
 
 // modelLine is what the outputs card always says about models (AM4): which
@@ -1107,8 +1120,9 @@ func documentsNote(summary map[string]any) am.PersonText {
 		if self, _ := mm["self_hosted"].(bool); self {
 			where = am.Text("รันในองค์กร")
 		}
-		text = am.Text("%s · โมเดลที่เห็นเอกสาร: %s (%s) อ่านซ้ำ %s ฉบับที่เป็นสแกนหรือรูปถ่าย เพื่อเทียบกับ OCR เท่านั้น",
-			am.Words(text), am.ModelName(name), am.Words(where), am.Count(int(numberOf(mm["documents"]))))
+		// AM23 §3.1: who read the scans, by what it is, not by its model's name
+		text = am.Text("%s · ผู้ช่วย AI ขององค์กร (%s) อ่านซ้ำ %s ฉบับที่เป็นสแกนหรือรูปถ่าย เพื่อเทียบกับ OCR เท่านั้น",
+			am.Words(text), am.Words(where), am.Count(int(numberOf(mm["documents"]))))
 	}
 	return text
 }

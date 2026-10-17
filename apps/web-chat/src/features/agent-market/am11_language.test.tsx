@@ -152,7 +152,9 @@ describe("AM11 — in English, not one Thai letter of the app's own", () => {
     filesCard();
     const card = screen.getByTestId("am-outputs");
     expect(card.textContent).toContain("Files from the September 2026 run");
-    expect(screen.getByTestId("am-outputs-seen-by").textContent).toContain("the commentary was written by qwen3.8-27b-fp8 (in the organisation)");
+    // AM23 §3.1: by what wrote it, and where it ran — never a model's name
+    expect(screen.getByTestId("am-outputs-seen-by").textContent).toContain("the commentary was drafted by the organisation's AI assistant (in the organisation)");
+    expect(screen.getByTestId("am-outputs-seen-by").textContent).not.toContain("qwen");
     expect(screen.getByTestId("am-outputs-details-body").textContent).toContain("Files reopened and rechecked — figures agreeing with the calculation: 61");
     // AM11b: the files card says nothing of what the run cost
     expect(card.textContent).not.toMatch(/credit/i);
@@ -193,7 +195,8 @@ describe("AM11 — in Thai, the Thai words, as they always were", () => {
     filesCard();
     const card = screen.getByTestId("am-outputs");
     expect(card.textContent).toContain("ไฟล์จากรอบ September 2026");
-    expect(screen.getByTestId("am-outputs-seen-by").textContent).toContain("คำบรรยายเขียนโดย qwen3.8-27b-fp8 (ในองค์กร)");
+    expect(screen.getByTestId("am-outputs-seen-by").textContent).toContain("คำบรรยายร่างโดยผู้ช่วย AI ขององค์กร (ในองค์กร)");
+    expect(screen.getByTestId("am-outputs-seen-by").textContent).not.toContain("qwen");
     expect(screen.getByTestId("am-outputs-details-body").textContent).toContain("เปิดไฟล์ตรวจซ้ำ: ตัวเลข 61 ค่าตรงกับที่คำนวณ");
     expect(card.textContent).toContain("ที่มาของตัวเลข");
   });

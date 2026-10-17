@@ -454,17 +454,15 @@ def build(computed: dict, req: dict) -> dict:
             val = money0(c["value"]) if numeric else (c["value"] or "")
         citation_rows.append([c["id"], c["label"], val, where, f"{c['script']} · {c['formula']}"])
 
-    about = [
-        S("docs.about.model", model=model.get("model") or S("docs.about.no_model"),
-          place=" " + S("docs.model.inside") if model.get("self_hosted") else (" " + S("docs.model.outside") if model.get("model") else "")),
-        S("docs.about.sees"),
+    from .look import commentary as _commentary
+
+    # AM23 §3.1/§3.2: no model's name; the one neutral line, when a model drafted the words and the organisation has it on
+    about = [line for line in (_commentary.closing_line(narrative, req),) if line] + [
         S("docs.about.computation", script=computed["script"], rules=computed["rules"]),
         S("docs.about.run", v=run.get("id", "—"), v2=run.get("agent_version", "—"), v3=req.get("theme", {}).get("name", ""), v4=req.get("theme", {}).get("version", 1)),
         S(SCOPE_NOTE),
         S(DOES_NOT),
     ]
-    if narrative.get("written_by") == "rules":
-        about.insert(1, S("docs.about.rules_wrote"))
 
     # AM11b: what the person asked of the documents (asked_of). Ordering by the difference needs one.
     ask = asked_of(req)
@@ -477,10 +475,9 @@ def build(computed: dict, req: dict) -> dict:
     sections = [
         {"key": "summary", "title": S("docs.section.summary"), "blocks": [b for b in (
             {"type": "paragraph", "runs": cite_runs(narrative["summary"], computed), "narrative": True},
-            # AM22 §1.1: a commentary the rules wrote says so on the page, under the words themselves; one a
-            # model wrote never carries the line (the appendix names the model)
-            {"type": "paragraph", "runs": [(S("doc.commentary.rules_unusable") if narrative.get("why") == "unusable"
-                                            else S("doc.commentary.rules_wrote"), None)], "muted": True}
+            # AM22 §1.1, AM23 §3.2: a commentary the rules composed says so on the page, under the words themselves,
+            # whatever the organisation's switch says; one a model drafted never carries the sentence
+            {"type": "paragraph", "runs": [(_commentary.rules_line(narrative), None)], "muted": True}
             if narrative.get("written_by") == "rules" else None,
         ) if b]},
         {"key": "pl", "title": S("docs.section.pl"), "blocks": [pl_table(computed)]},
@@ -543,6 +540,7 @@ def build(computed: dict, req: dict) -> dict:
         "narrative_cites": narrative_cites,
         "source_note": S("docs.report.source_note", file=src["primary"]["file"], v=src["primary"]["sha256"][:8], script=computed["script"]),
         "model": model,
+        "assistant_line": _commentary.assistant_on(req),  # AM23 §3.2: the organisation's switch, read by the deck
         "computed": computed,
         "asked": {"applied": [i for i in ask if i not in refused], "refused": refused},
     }

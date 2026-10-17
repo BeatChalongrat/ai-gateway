@@ -174,7 +174,7 @@ class AskedOfThePOMatching(unittest.TestCase):
 
     def test_its_manifest_declares_what_its_renderer_applies(self):
         m = _manifest_says(self, "po_matching", self.PM.DIRECTIVES, grouped=False)
-        self.assertEqual(m["version"], "1.10.0")
+        self.assertEqual(m["version"], "1.11.0")
 
 
 class AskedOfTheBankReconciliation(unittest.TestCase):
@@ -273,7 +273,7 @@ class AskedOfTheBankReconciliation(unittest.TestCase):
 
     def test_its_manifest_declares_what_its_renderer_applies(self):
         m = _manifest_says(self, "bank_reconciliation", self.BR.DIRECTIVES, grouped=True)
-        self.assertEqual(m["version"], "1.10.0")
+        self.assertEqual(m["version"], "1.11.0")
 
 
 class AskedOfTheInvoiceRegister(unittest.TestCase):
@@ -343,7 +343,7 @@ class AskedOfTheInvoiceRegister(unittest.TestCase):
 
     def test_its_manifest_declares_what_its_renderer_applies(self):
         m = _manifest_says(self, "invoice_processing", self.IP.DIRECTIVES, grouped=True)
-        self.assertEqual(m["version"], "1.13.0")
+        self.assertEqual(m["version"], "1.14.0")
         split = next(d for d in m["instructions"]["cannot"] if d["id"] == "split_by_seller")
         self.assertIn("ยอดรวมย่อย", split["why"])
 

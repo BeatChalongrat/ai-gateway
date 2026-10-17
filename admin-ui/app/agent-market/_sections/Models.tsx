@@ -4,7 +4,8 @@
 // organisation (off by default), how many years a run's evidence is kept,
 // and when an agent's storage is worth a warning. AM6: an admin no longer
 // names models by outcome; the agent's model menu is the chat's, and this
-// switch is the policy it follows.
+// switch is the policy it follows. AM23: whether a document whose commentary a model drafted says so, in one
+// neutral line (on by default).
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
@@ -19,6 +20,7 @@ export default function ModelsSection() {
   const { org, error, reload } = useOrg();
   const [settings, setSettings] = useState<OrgSettings | null>(null);
   const [leave, setLeave] = useState(false);
+  const [assistant, setAssistant] = useState(true);
   const [years, setYears] = useState("");
   const [warnMb, setWarnMb] = useState("");
   const [busy, setBusy] = useState(false);
@@ -27,6 +29,7 @@ export default function ModelsSection() {
   const adopt = useCallback((o: OrgSettings) => {
     setSettings(o);
     setLeave(!!o.documents_may_leave);
+    setAssistant(o.assistant_line !== false);
     setYears(String(o.retention_years ?? ""));
     setWarnMb(String(o.storage_warn_mb ?? ""));
   }, []);
@@ -51,7 +54,7 @@ export default function ModelsSection() {
     }
     setBusy(true);
     setMsg(null);
-    amAdmin.putOrg({ documents_may_leave: leave, retention_years: y, storage_warn_mb: w }).then(
+    amAdmin.putOrg({ documents_may_leave: leave, retention_years: y, storage_warn_mb: w, assistant_line: assistant }).then(
       (r) => {
         setBusy(false);
         if (r?.org) adopt(r.org);
@@ -107,6 +110,45 @@ export default function ModelsSection() {
       </section>
 
       <AgentEgressCard orgVersion={`${settings.documents_may_leave}:${settings.updated_at ?? ""}`} />
+
+      <section className="sran-card" aria-labelledby="am-assistant-title" data-testid="am-assistant">
+        <h2 id="am-assistant-title" style={h2}>
+          {t("am.models.assistantTitle")}
+        </h2>
+        <p style={{ ...muted, marginTop: "0.25rem", maxWidth: "52rem", lineHeight: 1.6 }}>{t("am.models.assistantBody")}</p>
+        <div role="radiogroup" aria-labelledby="am-assistant-title" style={{ marginTop: "0.8rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          {([true, false] as const).map((v) => {
+            const on = assistant === v;
+            return (
+              <label
+                key={String(v)}
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "0.6rem",
+                  cursor: "pointer",
+                  borderRadius: "var(--radius-lg)",
+                  padding: "0.65rem 0.85rem",
+                  border: `1px solid ${on ? "var(--accent-primary)" : "var(--border-default)"}`,
+                  background: on ? "var(--bg-elevated)" : "transparent",
+                  fontSize: "0.875rem",
+                  color: "var(--text-primary)",
+                }}
+              >
+                <input
+                  type="radio"
+                  name="am-assistant"
+                  checked={on}
+                  onChange={() => setAssistant(v)}
+                  style={{ marginTop: "0.2rem" }}
+                  data-testid={`am-assistant-${v ? "on" : "off"}`}
+                />
+                <span>{v ? t("am.models.assistantOn") : t("am.models.assistantOff")}</span>
+              </label>
+            );
+          })}
+        </div>
+      </section>
 
       <section className="sran-card" aria-labelledby="am-retention-title">
         <h2 id="am-retention-title" style={h2}>

@@ -55,7 +55,8 @@ describe("the files card says whether what a model was sent was masked", () => {
   it("the line is one more line: what the card already said about models is still there", () => {
     render(card({ uses: "text", choice: "auto", model: "qwen3.8-27b-fp8", self_hosted: true, masking: "off" }));
     expect(lines()).toHaveLength(2);
-    expect(lines()[0]).toContain("qwen3.8-27b-fp8 (ในองค์กร)");
+    expect(lines()[0]).toContain("ผู้ช่วย AI ขององค์กร (ในองค์กร)"); // AM23: never the model's name
+    expect(lines()[0]).not.toContain("qwen");
   });
 
   it("in English on an English screen", () => {

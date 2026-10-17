@@ -21,10 +21,14 @@ import (
 //	away    → the run is not held back for a commentary: it delivers, the commentary sheet carries the line
 //	          that the rules wrote it, the thread says so, and nothing is charged for a model step that did
 //	          not happen;
-//	present → the model's words are on the sheet, the sheet names the model, and the rules' line is nowhere
-//	          in the file (the fixture that catches the line left in by accident).
+//	present → the model's words are on the sheet with the one neutral line and no model's name (AM23), and the
+//	          rules' sentence is nowhere in the file (the fixture that catches the line left in by accident).
 
-const am22RulesLine = "คำอธิบายในส่วนนี้เขียนตามกฎของแพ็กเกจ เพราะไม่มีโมเดลที่ใช้ได้"
+// (AM23 §3.2: the sentence names no model; why no model's words were used is the run's record)
+const am22RulesLine = "คำอธิบายในส่วนนี้เรียบเรียงจากกฎของระบบ ไม่ได้เขียนขึ้นสำหรับรอบนี้"
+
+// am23AssistantLine is the one neutral line a file whose words a model drafted carries (AM23 §3.2).
+const am23AssistantLine = "คำอธิบายในเอกสารนี้ร่างโดยผู้ช่วย AI ขององค์กร ตัวเลขทุกตัวมาจากแหล่งที่อ้างไว้ข้างตัวเลขนั้น"
 
 // am22BankRun is a bank run with nothing typed beside its files: no words to read, so the commentary is the
 // first step that asks a model.
@@ -126,7 +130,7 @@ func TestAReconciliationWhoseModelIsAwayIsDeliveredWithTheRulesWordsSayingSo(t *
 	}
 }
 
-func TestAReconciliationAModelWroteNamesTheModelAndNeverCarriesTheRulesLine(t *testing.T) {
+func TestAReconciliationAModelWroteCarriesTheNeutralLineAndNeverTheRulesSentence(t *testing.T) {
 	e := newIT(t)
 	if e == nil {
 		return
@@ -142,8 +146,9 @@ func TestAReconciliationAModelWroteNamesTheModelAndNeverCarriesTheRulesLine(t *t
 	if strings.Contains(texts, am22RulesLine) {
 		t.Fatal("a commentary a model wrote carries the line that the rules wrote it")
 	}
-	if !strings.Contains(texts, "fake-self-hosted") || !strings.Contains(texts, "ค่าที่ปรึกษาเพิ่มขึ้นมาก") {
-		t.Fatalf("the sheet carries the model's words and names the model; the workbook holds:\n%s", trim(texts, 1200))
+	// AM23 §3.1/§3.2: the model's words, the one neutral line, and no model's name anywhere in the file
+	if strings.Contains(texts, "fake-self-hosted") || !strings.Contains(texts, "ค่าที่ปรึกษาเพิ่มขึ้นมาก") || !strings.Contains(texts, am23AssistantLine) {
+		t.Fatalf("the sheet carries the model's words and the neutral line, and names no model; the workbook holds:\n%s", trim(texts, 1200))
 	}
 	if got.ModelUsed == nil || *got.ModelUsed != "fake-self-hosted" {
 		t.Fatalf("the run names the model that wrote its words: %v", got.ModelUsed)

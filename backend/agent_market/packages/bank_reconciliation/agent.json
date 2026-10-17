@@ -1,7 +1,7 @@
 {
   "schema_version": "agent.market.v1",
   "id": "sran.bank-reconciliation",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "name": "กระทบยอดเงินฝากธนาคาร",
   "name_en": "Bank Reconciliation",
   "short_name": "กระทบยอดธนาคาร",

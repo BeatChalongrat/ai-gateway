@@ -30,7 +30,7 @@ from agent_market.engine import words
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)   # backend/agent_market
-RULES_LINE = "doc.commentary.rules_wrote"
+RULES_LINE = "doc.commentary.rules_composed"  # AM23 §3.2: one sentence, naming no model
 
 
 def texts_of_xlsx(path: str) -> list[str]:
@@ -164,13 +164,17 @@ class TheCommentarySheet(unittest.TestCase):
         self.assertIn(words.SHARED(RULES_LINE), texts_of_xlsx(path2))
         self.assertTrue(res2["passed"])
 
-    def test_when_a_model_answered_and_was_refused_the_file_says_that_and_not_that_none_was_available(self):
+    def test_when_a_model_answered_and_was_refused_the_file_says_the_same_and_names_no_model(self):
+        # AM23 §3.2: why no model's words were used (none reached, or none of its answers usable) is the run's record;
+        # the file says the one sentence, which names no model
         fb = dict(self.computed["fallback_narrative"], written_by="rules", why="unusable")
         res, path = self.render(fb)
         self.assertTrue(res["passed"], [(c["name"], c["detail"]) for c in self.checks(res).values() if not c["ok"]])
         texts = texts_of_xlsx(path)
-        self.assertIn(words.SHARED("doc.commentary.rules_unusable"), texts)
-        self.assertNotIn(words.SHARED(RULES_LINE), texts)
+        self.assertIn(words.SHARED(RULES_LINE), texts)
+        for lang in ("th", "en"):
+            with words.speaking(lang):
+                self.assertNotRegex(words.SHARED(RULES_LINE).lower(), "model|โมเดล")
 
     def test_a_run_a_model_wrote_never_carries_the_line_anywhere(self):
         nar = {"summary": "กระทบยอดงวดนี้ลงตัว ยอดหลังปรับปรุงฝั่งธนาคาร {adjusted_bank} เท่ากับฝั่งบัญชี {adjusted_book}",
@@ -180,8 +184,9 @@ class TheCommentarySheet(unittest.TestCase):
         self.assertTrue(res["passed"], [(c["name"], c["detail"]) for c in self.checks(res).values() if not c["ok"]])
         texts = texts_of_xlsx(path)
         self.assertNotIn(words.SHARED(RULES_LINE), texts)
-        self.assertNotIn(words.SHARED("doc.commentary.rules_unusable"), texts)
-        self.assertTrue(any("qwen3.8-27b-fp8" in t for t in texts), "the sheet names the model that wrote")
+        # AM23 §3.1/§3.2: no model's name anywhere in the file; the one neutral line instead
+        self.assertFalse(any("qwen3.8-27b-fp8" in t for t in texts), "no sheet names the model")
+        self.assertIn(words.SHARED("doc.assistant.line"), texts)
         # the figures are printed with their citations beside them, and no key is left as written
         self.assertTrue(any(self.computed["figures"]["adjusted_bank"]["text"] in t for t in texts))
         self.assertFalse(any("{adjusted_bank}" in t for t in texts))
@@ -190,10 +195,10 @@ class TheCommentarySheet(unittest.TestCase):
         from agent_market.deliverables.look import commentary
 
         left_in = dict(nar, written_by="rules")
-        bad = commentary.check(path, left_in, self.computed, {"model": "qwen3.8-27b-fp8", "self_hosted": True})
+        bad = commentary.check(path, left_in, self.computed, {"model_info": {"model": "qwen3.8-27b-fp8", "self_hosted": True}})
         self.assertFalse(bad["ok"])
         res_r, path_r = self.render(dict(nar, written_by="rules"))
-        extra = commentary.check(path_r, nar, self.computed, {"model": "qwen3.8-27b-fp8", "self_hosted": True})
+        extra = commentary.check(path_r, nar, self.computed, {"model_info": {"model": "qwen3.8-27b-fp8", "self_hosted": True}})
         self.assertFalse(extra["ok"], "a file that says the rules wrote, read against a model's narrative, does not pass")
 
     def test_nine_points_reach_the_sheet_as_nine(self):
@@ -286,7 +291,7 @@ class TheReport(unittest.TestCase):
         summary_at = docx.index(next(t for t in docx if t.startswith(fb["summary"].split("{")[0][:20])))
         self.assertLess(summary_at, at, "the line is under the summary paragraph")
         self.assertLess(at - summary_at, 3)
-        deck_line = words.SHARED("docs.about.rules_wrote")
+        deck_line = line  # AM23: the deck's closing slide says the same one sentence
         self.assertTrue(any(deck_line in t for t in texts["pptx"]), "the deck says so on its closing slide")
         model = dict(fb, written_by="model", model="qwen3.8-27b-fp8")
         res, texts, _ = self.render(model)

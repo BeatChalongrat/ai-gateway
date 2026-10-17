@@ -1,7 +1,7 @@
 {
   "schema_version": "agent.market.v1",
   "id": "sran.financial-report",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "name": "รายงานผลประกอบการ + สไลด์ผู้บริหาร",
   "name_en": "Financial Report + Executive Deck",
   "short_name": "รายงานผลประกอบการ",

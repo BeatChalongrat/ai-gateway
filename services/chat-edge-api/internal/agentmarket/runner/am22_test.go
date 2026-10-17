@@ -204,25 +204,29 @@ func TestTheClosingLineOfAnAgentThatReadsScansAndWritesWordsSaysBoth(t *testing.
 	summary := map[string]any{"models": []any{map[string]any{"model": "qwen3.8-27b-fp8", "self_hosted": true, "documents": float64(2)}}}
 	done := am.Text("เสร็จแล้วครับ")
 	byModel := closingText(m, summary, narrativeOut{Model: "qwen3.8-27b-fp8", SelfHosted: true}, false, done).String()
-	for _, want := range []string{"โมเดลที่เห็นเอกสาร: qwen3.8-27b-fp8", "คำอธิบายเขียนด้วย qwen3.8-27b-fp8 ที่รันในองค์กร"} {
+	// AM23 §3.1: by what read the scans and drafted the words — the organisation's AI assistant — never a model's name
+	for _, want := range []string{"ผู้ช่วย AI ขององค์กร (รันในองค์กร) อ่านซ้ำ 2 ฉบับ", "คำอธิบายร่างโดยผู้ช่วย AI ขององค์กร ที่รันในองค์กร"} {
 		if !strings.Contains(byModel, want) {
 			t.Fatalf("missing %q in %q", want, byModel)
 		}
 	}
+	if strings.Contains(byModel, "qwen") || strings.Contains(closingText(m, summary, narrativeOut{Model: "qwen3.8-27b-fp8", SelfHosted: true}, false, done).In(am.English), "qwen") {
+		t.Fatalf("the round's message names no model: %q", byModel)
+	}
 	byRules := closingText(m, summary, narrativeOut{}, false, done).String()
-	if !strings.Contains(byRules, "โมเดลที่เห็นเอกสาร") || !strings.Contains(byRules, "คำอธิบายในรอบนี้เขียนจากกฎ") {
+	if !strings.Contains(byRules, "ผู้ช่วย AI ขององค์กร (รันในองค์กร) อ่านซ้ำ") || !strings.Contains(byRules, "คำอธิบายในรอบนี้เขียนจากกฎ") {
 		t.Fatalf("the rules wrote: said beside the reader of the scans: %q", byRules)
 	}
 	// an agent whose words are still the rules' says only who saw the documents, as before
 	var rules am.Manifest
 	_ = json.Unmarshal([]byte(`{"narrative":"rules","capabilities":{"required":["document.extract.e2"],"optional":["model.vision"]}}`), &rules)
-	if got := closingText(rules, summary, narrativeOut{}, false, done).String(); strings.Contains(got, "คำอธิบาย") || !strings.Contains(got, "โมเดลที่เห็นเอกสาร") {
+	if got := closingText(rules, summary, narrativeOut{}, false, done).String(); strings.Contains(got, "คำอธิบาย") || !strings.Contains(got, "อ่านซ้ำ 2 ฉบับ") {
 		t.Fatalf("a rules agent's line is as it was: %q", got)
 	}
 	// the financial report (no scans) says who wrote, as before
 	var fin am.Manifest
 	_ = json.Unmarshal([]byte(`{"narrative":"model","capabilities":{"required":["model.text"]}}`), &fin)
-	if got := closingText(fin, map[string]any{}, narrativeOut{Model: "deepseek-v4-flash"}, false, done).String(); strings.Contains(got, "โมเดลที่เห็นเอกสาร") || !strings.Contains(got, "ผู้ให้บริการภายนอก") {
+	if got := closingText(fin, map[string]any{}, narrativeOut{Model: "deepseek-v4-flash"}, false, done).String(); strings.Contains(got, "อ่านซ้ำ") || !strings.Contains(got, "ผู้ให้บริการภายนอก") || strings.Contains(got, "deepseek") {
 		t.Fatalf("the report's line is as it was: %q", got)
 	}
 }

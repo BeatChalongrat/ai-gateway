@@ -130,8 +130,8 @@ export function OutputsCard({
   const gate = outputs.gate ?? null;
   const isDraft = !!outputs.draft;
   const count = (v: unknown) => (typeof v === "number" ? String(v) : "0");
-  const modelLine = outputs.model?.model ? `${outputs.model.model} · ${outputs.model.self_hosted ? t("ws.modelInOrg") : t("ws.modelExternal")}` : null;
-  const hasDetails = q.total > 0 || !!modelLine;
+  // AM23 §3.1: the files card names no model (the run's own record and the admin's run view keep it)
+  const hasDetails = q.total > 0;
 
   return (
     <div className="rounded-xl border border-border bg-bg-surface px-4 py-3" data-testid="am-outputs" data-run={outputs.run_id}>
@@ -260,9 +260,6 @@ export function OutputsCard({
                   </ul>
                 </div>
               ) : null}
-              {modelLine ? (
-                <p className="text-[11px] text-text-muted">{modelLine}</p>
-              ) : null}
             </div>
           ) : null}
         </div>
@@ -367,11 +364,13 @@ const MASKING_LINE = {
   mixed: "outputs.masking.mixed",
 } as const;
 
-/** AM4: the one line that always shows — which model saw the documents (or that none did). */
+/** AM4: the one line that always shows — what saw the documents (or that nothing did), and where it ran.
+ *  AM23 §3.1: by what it is — the organisation's AI assistant — never by a model's name. */
 export function SeenBy({ outputs }: { outputs: OutputsPayload }) {
   const t = useAmT();
   const m = outputs.model ?? {};
   const where = (self?: boolean) => (self ? t("where.inOrg") : t("where.outside"));
+  const places = (xs: { self_hosted?: boolean }[]) => Array.from(new Set(xs.map((x) => where(x.self_hosted)))).join(" · ");
   const summaryModels = (outputs.summary?.models as { model?: string; self_hosted?: boolean }[] | undefined) ?? [];
   const models = summaryModels.filter((x) => !!x.model);
   const lines: string[] = [];
@@ -379,15 +378,11 @@ export function SeenBy({ outputs }: { outputs: OutputsPayload }) {
     // AM12: a round on the web — a model read the request and the pages; the card names it, and never
     // says "no model saw the source files"
     const read = (m.web ?? []).filter((x) => !!x.model);
-    lines.push(
-      read.length
-        ? t("outputs.web.readBy", { models: read.map((x) => `${x.model} (${where(x.self_hosted)})`).join(", ") })
-        : t("outputs.web.readByNone"),
-    );
+    lines.push(read.length ? t("outputs.web.readBy", { where: places(read) }) : t("outputs.web.readByNone"));
   } else if (m.uses === "text") {
-    lines.push(m.model ? t("outputs.writtenBy", { model: m.model, where: where(m.self_hosted) }) : t("outputs.writtenByRules"));
+    lines.push(m.model ? t("outputs.writtenBy", { where: where(m.self_hosted) }) : t("outputs.writtenByRules"));
   } else if (models.length) {
-    for (const x of models) lines.push(t("outputs.seenBy", { model: x.model ?? "", where: where(x.self_hosted) }));
+    lines.push(t("outputs.seenBy", { where: places(models) }));
   } else {
     lines.push(t("outputs.seenNone"));
   }
@@ -397,16 +392,12 @@ export function SeenBy({ outputs }: { outputs: OutputsPayload }) {
     lines.push(
       m.written_by_rules || !m.model
         ? t("outputs.commentaryByRules")
-        : t("outputs.commentaryBy", { model: m.model, where: where(m.self_hosted) }),
+        : t("outputs.commentaryBy", { where: where(m.self_hosted) }),
     );
   }
   if (m.not_chosen && m.chosen_model) {
     const used = m.uses === "text" ? m.model : m.uses === "web" ? m.web?.[0]?.model : m.vision_model;
-    lines.push(
-      used
-        ? t("outputs.notChosen", { chosen: m.chosen_model, used, why: t("outputs.notChosenWhy") })
-        : t("outputs.noneInstead", { chosen: m.chosen_model }),
-    );
+    lines.push(used ? t("outputs.notChosen", { why: t("outputs.notChosenWhy") }) : t("outputs.noneInstead"));
   }
   // AM13b: what was done with the text of this run's model calls — said only when a model was called, in
   // the gateway's own word. AM16: "not masked" says it stayed inside only when nothing was sent out.

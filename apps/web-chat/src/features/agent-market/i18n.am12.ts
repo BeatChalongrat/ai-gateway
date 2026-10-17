@@ -81,7 +81,7 @@ export const am12Th = {
   "outputs.proc.chosen": "รายการที่ร่างใบขอซื้อ",
   "outputs.proc.gaps": "ช่องที่ยังกรอกไม่ได้",
   "outputs.proc.total": "ยอดรวมของร่าง (บาท)",
-  "outputs.web.readBy": "คำขอและหน้าเว็บที่บันทึกไว้อ่านโดย {models} · ทุกค่าที่ใช้ตรวจซ้ำกับหน้าที่บันทึกไว้ด้วยโปรแกรม",
+  "outputs.web.readBy": "คำขอและหน้าเว็บที่บันทึกไว้อ่านโดยผู้ช่วย AI ขององค์กร ({where}) · ทุกค่าที่ใช้ตรวจซ้ำกับหน้าที่บันทึกไว้ด้วยโปรแกรม",
   "outputs.web.readByNone": "รอบนี้ไม่มีโมเดลใดอ่านคำขอหรือหน้าเว็บ",
 
   "tpl.map.columnOf": "คอลัมน์ “{label}”",
@@ -159,7 +159,7 @@ export const am12En = {
   "outputs.proc.chosen": "Lines in the purchase request draft",
   "outputs.proc.gaps": "Fields that could not be filled",
   "outputs.proc.total": "Total of the draft (THB)",
-  "outputs.web.readBy": "The request and the saved web pages were read by {models} · every value used was checked again against the saved page by program",
+  "outputs.web.readBy": "The request and the saved web pages were read by the organisation's AI assistant ({where}) · every value used was checked again against the saved page by program",
   "outputs.web.readByNone": "No model read the request or a web page in this run",
 
   "tpl.map.columnOf": "Column “{label}”",

@@ -34,6 +34,8 @@ def _sha(path: str) -> str:
 
 
 def render_all(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
+    from .look import commentary as _commentary
+
     theme = resolve(req.get("theme"))
     req = {**req, "theme": theme}
     model = content_mod.build(computed, req)
@@ -104,6 +106,8 @@ def render_all(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
             all_ok = False
             continue
         checks = checks + [quality.fit_ok(meta.get("layouts") or [])]
+        # AM23 §3.1: no model's name in the finished file (the run's own record keeps it)
+        checks.append(_commentary.no_model_name(_commentary.file_texts(path), _commentary.model_names(model["narrative"], computed, req)))
         if fmt == carrier:
             checks = checks + run_level
         ok = all(c["ok"] for c in checks)

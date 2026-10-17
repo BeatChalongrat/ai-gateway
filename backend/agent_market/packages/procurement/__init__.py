@@ -329,7 +329,7 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
         # refused naming the section, and the file is not written
         narrative = req.get("narrative") or dict(view.get("fallback_narrative") or {}, written_by="rules")
         try:
-            meta = ComparisonWorkbook(view, theme, run, narrative=narrative, model_info=req.get("model_info")).write(path)
+            meta = ComparisonWorkbook(view, theme, run, narrative=narrative, req=req).write(path)
         except DoesNotFit as e:
             if os.path.exists(path):
                 os.remove(path)
@@ -340,7 +340,8 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
             if applied:
                 checks.append(_asked_check(path, view))
             with _words.speaking(view.get("lang")):
-                checks.append(commentary.check(path, narrative, view, req.get("model_info")))
+                checks.append(commentary.check(path, narrative, view, req))
+                checks.append(commentary.no_model_name(commentary.workbook_texts(path), commentary.model_names(narrative, view, req)))  # AM23 §3.1
             checks.append(quality.fit_ok(meta.get("layouts") or []))
             done(path, "xlsx", "table", checks, meta)
     # the request as a plain document — unless the organisation's own form is being filled this round, or
@@ -349,7 +350,8 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     if "docx" in wanted and request.get("lines") and not req.get("template"):
         path = os.path.join(out_dir, os.path.basename(names.get("docx") or "purchase_request.docx"))
         meta = RequestDraft(computed, theme, run).write(path, in_dir if os.path.isdir(in_dir) else None)
-        done(path, "docx", "request", check_draft(path, computed), meta)
+        done(path, "docx", "request", check_draft(path, computed) + [  # AM23 §3.1: no model's name in it
+            commentary.no_model_name(commentary.file_texts(path), commentary.model_names(req.get("narrative"), computed, req))], meta)
     elif "docx" in wanted:
         # AM23 §1.1: a file asked for and not made is accounted for with why (the comparison says so on its face):
         # the runner treats one left out with no word as a render that failed

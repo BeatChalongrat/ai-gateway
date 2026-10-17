@@ -55,6 +55,10 @@ type OrgSettings struct {
 	DocumentsMayLeave bool `json:"documents_may_leave"`
 	RetentionYears    int  `json:"retention_years"`
 	StorageWarnMB     int  `json:"storage_warn_mb"`
+	// AM23 §3.2: a file whose words a model drafted carries one neutral line in its closing block saying so (on
+	// by default; the admin's to switch off). Read apart from the row (assistantLineQ): a control plane deployed
+	// before migration 013 keeps reading the organisation.
+	AssistantLine bool `json:"assistant_line"`
 }
 
 // Member is one person on the access list.
@@ -291,7 +295,34 @@ func (s *Store) orgSettingsQ(ctx context.Context, q Querier, org string, lock bo
 	if errors.Is(err, pgx.ErrNoRows) {
 		return o, ErrNotFound
 	}
-	return o, err
+	if err != nil {
+		return o, err
+	}
+	o.AssistantLine = assistantLineQ(ctx, q, org, lock)
+	return o, nil
+}
+
+// assistantLineQ is the organisation's switch for the neutral line, on when the column is not there yet (a control
+// plane deployed before migration 013, which the runner applies at its start) or the row cannot be read: on is
+// what every document did before the switch existed. lock: the caller holds the row FOR UPDATE already, and an
+// error there aborts its transaction — so there the column is read in a savepoint.
+func assistantLineQ(ctx context.Context, q Querier, org string, lock bool) bool {
+	on := true
+	if !lock {
+		if err := q.QueryRow(ctx, `SELECT assistant_line FROM agent_market.org_settings WHERE org_id = $1`, org).Scan(&on); err != nil {
+			return true
+		}
+		return on
+	}
+	if _, err := q.Exec(ctx, `SAVEPOINT am23_assistant_line`); err != nil {
+		return true
+	}
+	if err := q.QueryRow(ctx, `SELECT assistant_line FROM agent_market.org_settings WHERE org_id = $1`, org).Scan(&on); err != nil {
+		_, _ = q.Exec(ctx, `ROLLBACK TO SAVEPOINT am23_assistant_line`)
+		return true
+	}
+	_, _ = q.Exec(ctx, `RELEASE SAVEPOINT am23_assistant_line`)
+	return on
 }
 
 const memberCols = `email, user_id, display_name, department, role, monthly_credits::float8, added_by, created_at, updated_at`

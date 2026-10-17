@@ -471,7 +471,7 @@ class SelfTest(unittest.TestCase):
     def test_the_manifest(self):
         m = S.manifest("bank_reconciliation")
         self.assertEqual((m["id"], m["python_package"], m["narrative"]), ("sran.bank-reconciliation", "bank_reconciliation", "model"))   # AM22: a model writes its words
-        self.assertEqual((m["version"], m["scope"], m["jurisdiction"]), ("1.10.0", "generic", "TH"))
+        self.assertEqual((m["version"], m["scope"], m["jurisdiction"]), ("1.11.0", "generic", "TH"))
         self.assertIn(".pdf", next(i for i in m["inputs"] if i["role"] == "bank")["accept"])
         self.assertTrue(m["completion_gate"])
         self.assertTrue(m["record_who_answered"])

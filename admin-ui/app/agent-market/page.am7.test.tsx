@@ -317,7 +317,7 @@ describe("access and models show the org row as returned (AM7)", () => {
     );
   });
 
-  it("models: the switch, years and warning hold the org's values; save sends exactly those three fields", async () => {
+  it("models: the switches, years and warning hold the org's values; save sends exactly those fields", async () => {
     nav.search = "section=models";
     api.me.mockResolvedValue(ADMIN_ME);
     renderPage();
@@ -333,7 +333,23 @@ describe("access and models show the org row as returned (AM7)", () => {
     fireEvent.change(input("am-retention-years"), { target: { value: "10" } });
     fireEvent.click(screen.getByTestId("am-models-save"));
     await waitFor(() => expect(api.putOrg).toHaveBeenCalledTimes(1));
-    expect(api.putOrg).toHaveBeenCalledWith({ documents_may_leave: false, retention_years: 10, storage_warn_mb: 4096 });
+    // AM23 §3.2: the neutral line is on unless the organisation says otherwise, and saved with the rest
+    expect(api.putOrg).toHaveBeenCalledWith({ documents_may_leave: false, retention_years: 10, storage_warn_mb: 4096, assistant_line: true });
+  });
+
+  it("models (AM23): the neutral line on documents is the organisation's switch — on by default, off when chosen", async () => {
+    nav.search = "section=models";
+    api.me.mockResolvedValue(ADMIN_ME);
+    renderPage();
+    await screen.findByTestId("am-assistant");
+    expect(input("am-assistant-on").checked).toBe(true);
+    expect(input("am-assistant-off").checked).toBe(false);
+    expect(screen.getByTestId("am-assistant").textContent).toContain("AI assistant");
+    expect(screen.getByTestId("am-assistant").textContent).not.toMatch(/qwen|deepseek|SRAN/i);
+    fireEvent.click(input("am-assistant-off"));
+    fireEvent.click(screen.getByTestId("am-models-save"));
+    await waitFor(() => expect(api.putOrg).toHaveBeenCalledTimes(1));
+    expect(api.putOrg).toHaveBeenCalledWith(expect.objectContaining({ assistant_line: false }));
   });
 
   it("models: years outside 1–30 are refused before anything is sent", async () => {

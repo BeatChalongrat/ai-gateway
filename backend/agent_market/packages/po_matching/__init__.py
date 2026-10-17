@@ -179,7 +179,7 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
         # one too long for its layout is refused naming the section, and the file is not written
         narrative = req.get("narrative") or dict(view.get("fallback_narrative") or {}, written_by="rules")
         try:
-            meta = MatchWorkbook(view, theme, req.get("run"), narrative=narrative, model_info=req.get("model_info")).write(path)
+            meta = MatchWorkbook(view, theme, req.get("run"), narrative=narrative, req=req).write(path)
         except DoesNotFit as e:
             if os.path.exists(path):
                 os.remove(path)
@@ -187,7 +187,8 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
             all_ok = False
             continue
         checks = check(path, view, req.get("run"))
-        checks.append(commentary.check(path, narrative, view, req.get("model_info")))
+        checks.append(commentary.check(path, narrative, view, req))
+        checks.append(commentary.no_model_name(commentary.workbook_texts(path), commentary.model_names(narrative, view, req)))  # AM23 §3.1
         checks.append(quality.fit_ok(meta.get("layouts") or []))
         if applied:
             checks.append(_asked_check(path, view, applied))

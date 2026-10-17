@@ -2,7 +2,7 @@
 # AM22 — the integration lane of the card, and from now on the gate's own last lane: AM18's (which runs AM16's,
 # AM15's and AM13's first), then the commentary of an agent whose words a model now writes: with its model away the
 # working paper is delivered with the rules' words and says so on its face; with its model there, the model's words
-# are on the sheet and the rules' line is nowhere in the file.
+# are on the sheet with the neutral line (AM23) and the rules' sentence is nowhere in the file.
 #
 #   bash scripts/gate/it/am22.sh          AM18's lane, then these (what scripts/gate.sh it runs last)
 #   bash scripts/gate/it/am22.sh new      these only
@@ -20,7 +20,7 @@ if [ "${1:-all}" != "new" ]; then
 fi
 CHUNKS=(
   '^(TestAReconciliationWhoseModelIsAwayIsDeliveredWithTheRulesWordsSayingSo)$'
-  '^(TestAReconciliationAModelWroteNamesTheModelAndNeverCarriesTheRulesLine)$'
+  '^(TestAReconciliationAModelWroteCarriesTheNeutralLineAndNeverTheRulesSentence)$'
 )
 for c in "${CHUNKS[@]}"; do
   echo "== chunk $c"

@@ -64,6 +64,7 @@ import (
 var productWords = wordSet(
 	// the product and its parts
 	"agent", "Agent", "Market", "OCR", "Sarabun", "LibreOffice", "SAP",
+	"AI", // AM23: "ผู้ช่วย AI ขององค์กร" — what drafted a document's words, by what it is
 	// kinds of file
 	"PDF", "Excel", "CSV", "XML", "JSON", "Word", "PowerPoint", "e-Tax",
 	"pdf", "xlsx", "xls", "csv", "xml", "docx", "pptx", "txt",

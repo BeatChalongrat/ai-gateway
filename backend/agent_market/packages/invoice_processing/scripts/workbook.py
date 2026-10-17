@@ -67,7 +67,7 @@ def method_th(method) -> str:
     if m.startswith("computed:"):
         return W("doc.method.computed_lines") if "lines" in m else W("doc.decided.computed")
     if m.startswith("vision:"):
-        return W("doc.method.vision", v=m.split(":", 1)[1])
+        return W("doc.method.vision")  # AM23 §3.1: who read it, by what it is — the model's name is the run's record
     return m
 STATUS_TH = W.table({"pass": "doc.status.pass", "fail": "doc.status.fail", "skip": "doc.status.skip"})
 
@@ -142,7 +142,7 @@ def msg_th(text) -> str | None:
          lambda m: W("doc.msg.missing_for") + " " + ", ".join(FIELD_TH.get(x.strip(), x.strip()) for x in m[2].split(","))),
         (r"^same supplier and (.+) as (.+)$", lambda m: W("doc.msg.same_supplier", v=_MATCH_TH.get(m[1], m[1]), v2=m[2])),
         (r"^(\w+):(\S+) read (.+), the document text (.+)$",
-         lambda m: (W("doc.msg.model", v=m[2]) if m[1] == "vision" else m[1]) + " " + W("doc.msg.read_vs_text", v=_val(m[3]), v2=_val(m[4]))),
+         lambda m: (W("doc.msg.model") if m[1] == "vision" else m[1]) + " " + W("doc.msg.read_vs_text", v=_val(m[3]), v2=_val(m[4]))),
         (r"^not after (\S+)$", lambda m: W("doc.msg.not_after", v=m[1])),
         (r"^(\S+)% of (\S+) is (\S+), printed (\S+)$", lambda m: W("doc.msg.pct_of", v=m[1], v2=m[2], v3=m[3], v4=m[4])),
         (r"^total − WHT = (\S+), net printed (\S+)$", lambda m: W("doc.msg.total_minus_wht", v=m[1], v2=m[2])),
@@ -198,11 +198,11 @@ def item_status(line: dict) -> str:
 
 class InvoiceWorkbook:
     def __init__(self, computed: dict, theme: dict, run: dict | None = None, narrative: dict | None = None,
-                 model_info: dict | None = None):
+                 req: dict | None = None):
         self.c, self.t, self.run = computed, theme, run or {}
         # AM22: the commentary (a model's or the rules', with who wrote it) printed on its own sheet after the face
         self.narrative = narrative or dict(computed.get("fallback_narrative") or {}, written_by="rules")
-        self.model_info = model_info or {}
+        self.req = req or {}  # AM23: the render request (the organisation's switch for the neutral line)
         self.commentary: dict = {}
         self.book = Book(theme, words.lang())
         self.wb = self.book.wb
@@ -232,7 +232,7 @@ class InvoiceWorkbook:
         if t["excluded"]:
             notes.insert(0, W("doc.note.excluded", not_included=W(NOT_INCLUDED), excluded=t["excluded"]))
         for m in self.c.get("models") or []:
-            notes.append(W("doc.note.models", model=m["model"], place=W("doc.model.inside") if m["self_hosted"] else W("doc.model.outside"),
+            notes.append(W("doc.note.models", place=W("doc.model.inside") if m["self_hosted"] else W("doc.model.outside"),
                            n=len(m["documents"])))
         if any(d["tier"] == "photo" for d in self.c["documents"]):
             notes.append(W("doc.note.photo"))
@@ -284,7 +284,7 @@ class InvoiceWorkbook:
         rows = []
         for p in self.c["provenance"]:
             # (a party the model read is shown as the name and its legal form, not as the engine wrote it down)
-            vision = "; ".join(f"{c['method']}: {_val(str(c['value']))}" for c in p.get("candidates") or [])
+            vision = "; ".join(f"{method_th(c['method'])}: {_val(str(c['value']))}" for c in p.get("candidates") or [])
             rows.append([p["name"], p["label"], p["value"] if not isinstance(p["value"], (int, float)) else str(p["value"]),
                          p["confidence"], method_th(p["method"]), p["page"], p["bbox"], p["raw_text"],
                          DECIDED_TH.get(p["decided_by"], p["decided_by"]),
@@ -331,7 +331,7 @@ class InvoiceWorkbook:
         # AM8: printable — the register's row number, date and document number repeat on every page (AM10: and
         # open its companion sheet)
         # AM22 §1.1: the commentary sheet, right after the face, with the line that says who wrote it
-        self.commentary = commentary.sheet(self.book, self.narrative, self.c, self.model_info)
+        self.commentary = commentary.sheet(self.book, self.narrative, self.c, self.req)
         self.book.finish(path, id_cols={W(S_REGISTER): ID_COLS[S_REGISTER], W(S_REGISTER_EV): ID_COLS[S_REGISTER], W("doc.sheet.provenance"): 2}, author=str(self.c.get("company") or self.run.get("organisation") or ""))
         return {"sheets": list(self.wb.sheetnames), "register_rows": self.c["totals"]["included"], "layouts": [self.commentary["layout"]]}
 

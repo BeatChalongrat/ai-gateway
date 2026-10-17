@@ -124,11 +124,11 @@ def parts(wb, sheet: str) -> list:
 
 class BankWorkbook:
     def __init__(self, computed: dict, theme: dict, run: dict | None = None, narrative: dict | None = None,
-                 model_info: dict | None = None):
+                 req: dict | None = None):
         self.c, self.t, self.run = computed, theme, run or {}
         # AM22: the commentary (a model's or the rules', with who wrote it) printed on its own sheet after the face
         self.narrative = narrative or dict(computed.get("fallback_narrative") or {}, written_by="rules")
-        self.model_info = model_info or {}
+        self.req = req or {}  # AM23: the render request (the organisation's switch for the neutral line)
         self.commentary: dict = {}
         self.book = Book(theme, words.lang())
         self.wb = self.book.wb
@@ -380,7 +380,7 @@ class BankWorkbook:
         # opening every companion sheet of a wide table)
         id_cols = {W(s): ID_COLS[main] for main, names in PARTS.items() for s in names}
         # AM22 §1.1: the commentary sheet, right after the face, with the line that says who wrote it
-        self.commentary = commentary.sheet(self.book, self.narrative, self.c, self.model_info)
+        self.commentary = commentary.sheet(self.book, self.narrative, self.c, self.req)
         self.book.finish(path, id_cols={**id_cols, W(S_JOURNAL): 2, W(S_IN): 2, W(S_AGE): 1, W(S_OUT): 3, W(S_CUTOFF): 2, W(S_EXC): 2,
                                           W(S_EVIDENCE): 2, W(S_LEFT): 1}, author=str(self.c.get("company") or self.run.get("organisation") or ""))
         t = self.c["totals"]

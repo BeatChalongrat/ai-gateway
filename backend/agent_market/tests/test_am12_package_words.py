@@ -211,7 +211,7 @@ class TheSampleGivesWhatItsVersionSays(unittest.TestCase):
             self.assertEqual((made["passed"], failed), (True, []), lang)
             self.assertEqual({c["name"] for a in made["artifacts"] for c in a["quality"]["checks"]},
                              {"xlsx.figures", "xlsx.print", "xlsx.print.one_across", "xlsx.look", "look.markers", "docx.request",
-                              "xlsx.commentary", "look.fit"}, lang)
+                              "xlsx.commentary", "look.fit", "file.no_model"}, lang)  # AM23 §3.1: no model's name in either file
             if lang == "en":
                 from docx import Document
                 from openpyxl import load_workbook

@@ -1436,3 +1436,33 @@ because of bugs found here, and `tests/test_am22_kept.py` with `runner/am22_test
    form's, not ours.
 3. **A new version is inspected again and diffed** (`template_out.diff`): kept, added, removed and moved — never a
    mapping carried by a key whose cell now means something else.
+
+## The file a person asks for, from any agent (AM23)
+
+**A kind of file the agent does not make is refused, never dropped.** Until AM23 a file set naming a kind of file the
+agent's manifest does not declare reached the engine, which made what it makes and dropped the rest without a word: a
+bank reconciliation whose set said Word alone finished "done" with no file. The settings page refuses such a set by
+name with what the agent makes (`settings.go` `check`, `outputset.go` `NotMadeText`); a round whose set still names one
+says so before any work, and one left with nothing it can make stops there, charged nothing (`format_not_offered`,
+`runner/pipeline.go` `refuseNotMade`). Every file the engine is asked for comes back made, refused with its reason, or
+left out with why (`not_made`: procurement's draft before anything is chosen) — anything else is a render that failed
+(`runner/deliver.go` `unaccounted`).
+
+**No model's name in any file** (`deliverables/look/commentary.py` `no_model_name`, run on every file every agent makes,
+read back from the finished file). The commentary sheet, the report's last section and the deck's closing slide no
+longer say which model wrote; the expense audit and the invoice register say the organisation's AI assistant re-read
+their scans, not which model did. The run's own record keeps the model — its steps, `model_used`, its progress card,
+the admin's run view and the cost lines — and the files card says what saw the documents and where it ran, by what it
+is, never by name.
+
+**One neutral line, the organisation's to switch off** (`org_settings.assistant_line`, migration `013_am23`, on by
+default; the admin's Models page, beside "may documents leave", every change in the audit log). A file whose words a
+model drafted carries one sentence in its closing block — the commentary sheet's references block in a workbook, the
+report's last section after the sources and their hashes, the deck's closing slide: "the commentary was drafted by the
+organisation's AI assistant; every figure is from the source cited beside it". It names no model, no vendor and not
+the platform, and it is never on the cover. When the system's rules composed the words, the file says so under them
+whatever the switch says — "the words of this section were composed from the system's rules, not written for this run"
+— because that changes what a reader should trust; why no model's words were used is the run's record. The control
+plane reads the switch apart from the organisation's row (`org.go` `assistantLineQ`), so one deployed before the runner
+has applied 013 still reads the organisation, with the line on. Fixtures: `tests/test_am23_closing.py`,
+`runner/am23_it_test.go`.

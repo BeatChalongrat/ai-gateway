@@ -278,7 +278,7 @@ describe("where a run on the web went (the run page)", () => {
 describe("the files card of a round on the web: which model read", () => {
   const seen = () => screen.getByTestId("am-outputs-seen-by").textContent ?? "";
 
-  it("names the models that read the request and the pages, and where each runs", () => {
+  it("says what read the request and the pages, and where each ran — naming no model (AM23)", () => {
     render(
       <SeenBy
         outputs={{
@@ -288,8 +288,8 @@ describe("the files card of a round on the web: which model read", () => {
         }}
       />,
     );
-    expect(seen()).toContain("คำขอและหน้าเว็บที่บันทึกไว้อ่านโดย deepseek-v4-flash (");
-    expect(seen()).toContain("qwen3.8-27b-fp8 (");
+    expect(seen()).toContain("คำขอและหน้าเว็บที่บันทึกไว้อ่านโดยผู้ช่วย AI ขององค์กร (นอกองค์กร · ในองค์กร)");
+    expect(seen()).not.toMatch(/deepseek|qwen/);
     expect(seen()).toContain("ตรวจซ้ำกับหน้าที่บันทึกไว้ด้วยโปรแกรม");
     expect(seen()).not.toContain("ไม่มีโมเดลใดเห็นไฟล์ต้นฉบับ");
     expect(seen()).not.toContain("กฎของ agent");
@@ -310,13 +310,15 @@ describe("the files card of a round on the web: which model read", () => {
         }}
       />,
     );
-    expect(seen()).toContain("คุณเลือก deepseek-v4-flash ไว้ แต่รอบนี้ใช้ qwen3.8-27b-fp8 แทน");
+    expect(seen()).toContain("รอบนี้ไม่ได้ใช้โมเดลที่คุณเลือกไว้");
+    expect(seen()).not.toMatch(/deepseek|qwen/);
   });
 
   it("in English", () => {
     useI18nStore.setState({ locale: "en" });
     render(<SeenBy outputs={{ run_id: "r-1", artifacts: [], model: { uses: "web", web: [{ model: "deepseek-v4-flash", self_hosted: false }] } }} />);
-    expect(seen()).toContain("The request and the saved web pages were read by deepseek-v4-flash (");
+    expect(seen()).toContain("The request and the saved web pages were read by the organisation's AI assistant (outside the organisation)");
+    expect(seen()).not.toContain("deepseek");
     expect(seen()).not.toMatch(/[฀-๿]/);
   });
 });

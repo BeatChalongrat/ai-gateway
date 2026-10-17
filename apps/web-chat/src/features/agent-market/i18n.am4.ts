@@ -66,15 +66,15 @@ export const am4Th = {
 
   // the run panel: the one line that always shows, the rest folded for members
   "outputs.details": "รายละเอียดการตรวจ และโมเดล",
-  "outputs.seenBy": "เอกสารที่เป็นสแกนหรือรูปถ่ายอ่านโดย {model} ({where})",
+  "outputs.seenBy": "เอกสารที่เป็นสแกนหรือรูปถ่ายอ่านโดยผู้ช่วย AI ขององค์กร ({where})",
   "outputs.seenNone": "ไม่มีโมเดลใดเห็นเอกสาร — ทุกค่าอ่านจากไฟล์และคำนวณด้วยสคริปต์",
-  "outputs.writtenBy": "ไม่มีโมเดลใดเห็นไฟล์ต้นฉบับ · คำบรรยายเขียนโดย {model} ({where}) จากตารางที่คำนวณแล้ว",
+  "outputs.writtenBy": "ไม่มีโมเดลใดเห็นไฟล์ต้นฉบับ · คำบรรยายร่างโดยผู้ช่วย AI ขององค์กร ({where}) จากตารางที่คำนวณแล้ว",
   "outputs.writtenByRules": "ไม่มีโมเดลใดเห็นไฟล์ต้นฉบับ · คำบรรยายเขียนด้วยกฎของ agent (ไม่มีโมเดลที่องค์กรอนุญาตตอบได้)",
-  "outputs.commentaryBy": "คำอธิบายรอบนี้เขียนโดย {model} ({where}) จากตารางที่คำนวณแล้ว ตัวเลขทุกตัวมาจากสคริปต์",
-  "outputs.commentaryByRules": "คำอธิบายรอบนี้เขียนด้วยกฎของ agent ไม่ได้ใช้คำตอบของโมเดล ไฟล์บอกเหตุผลไว้บนชีตคำอธิบาย",
-  "outputs.notChosen": "คุณเลือก {chosen} ไว้ แต่รอบนี้ใช้ {used} แทน — {why}",
+  "outputs.commentaryBy": "คำอธิบายรอบนี้ร่างโดยผู้ช่วย AI ขององค์กร ({where}) จากตารางที่คำนวณแล้ว ตัวเลขทุกตัวมาจากสคริปต์",
+  "outputs.commentaryByRules": "คำอธิบายรอบนี้เรียบเรียงจากกฎของระบบ ไม่ได้ใช้คำตอบของโมเดล ไฟล์บอกไว้บนชีตคำอธิบาย",
+  "outputs.notChosen": "รอบนี้ไม่ได้ใช้โมเดลที่คุณเลือกไว้ ผู้ช่วย AI ขององค์กรใช้โมเดลอื่นที่องค์กรอนุญาตแทน — {why}",
   "outputs.notChosenWhy": "โมเดลที่เลือกไม่ตอบ หรือองค์กรไม่อนุญาตให้ใช้ในตอนนี้",
-  "outputs.noneInstead": "คุณเลือก {chosen} ไว้ แต่รอบนี้ไม่มีโมเดลที่องค์กรอนุญาต จึงอ่านด้วยสคริปต์บนเครื่องขององค์กรเท่านั้น",
+  "outputs.noneInstead": "รอบนี้ไม่มีโมเดลที่องค์กรอนุญาตตอบได้แทนโมเดลที่คุณเลือกไว้ จึงอ่านด้วยสคริปต์บนเครื่องขององค์กรเท่านั้น",
   "where.inOrg": "ในองค์กร",
   "where.outside": "นอกองค์กร",
   // AM13b: masking follows where the data goes — which of the two this round used (what the gateway did)
@@ -184,15 +184,15 @@ export const am4En = {
 
   // the run panel: the one line that always shows, the rest folded for members
   "outputs.details": "Details of checks and models",
-  "outputs.seenBy": "Scanned or photographed documents were read by {model} ({where})",
+  "outputs.seenBy": "Scanned or photographed documents were read by the organisation's AI assistant ({where})",
   "outputs.seenNone": "No model saw the documents — every value was read from the files and calculated by scripts",
-  "outputs.writtenBy": "No model saw the original files · the commentary was written by {model} ({where}) from the calculated tables",
+  "outputs.writtenBy": "No model saw the original files · the commentary was drafted by the organisation's AI assistant ({where}) from the calculated tables",
   "outputs.writtenByRules": "No model saw the original files · the commentary was written by the agent's rules (no model the organisation allows could answer)",
-  "outputs.commentaryBy": "This run's commentary was written by {model} ({where}) from the calculated tables; every figure comes from the scripts",
-  "outputs.commentaryByRules": "This run's commentary was written by the agent's rules — no model's answer was used; the file says why on its commentary sheet",
-  "outputs.notChosen": "You chose {chosen}, but this run used {used} instead — {why}",
+  "outputs.commentaryBy": "This run's commentary was drafted by the organisation's AI assistant ({where}) from the calculated tables; every figure comes from the scripts",
+  "outputs.commentaryByRules": "This run's commentary was composed from the system's rules — no model's answer was used; the file says so on its commentary sheet",
+  "outputs.notChosen": "This run did not use the model you chose; the organisation's AI assistant used another model the organisation allows — {why}",
   "outputs.notChosenWhy": "the chosen model did not answer, or the organisation does not allow it at the moment",
-  "outputs.noneInstead": "You chose {chosen}, but no model the organisation allows was available for this run, so the documents were read only by scripts on the organisation's own machines",
+  "outputs.noneInstead": "No model the organisation allows was available for this run in place of the one you chose, so the documents were read only by scripts on the organisation's own machines",
   "where.inOrg": "in the organisation",
   "where.outside": "outside the organisation",
   // AM13b: masking follows where the data goes — which of the two this round used (what the gateway did)

@@ -231,6 +231,7 @@ var orgLabels = []struct {
 	{"documents_may_leave", "เอกสารส่งไปโมเดลนอกองค์กรได้"},
 	{"retention_years", "ระยะเก็บเอกสารบัญชี (ปี)"},
 	{"storage_warn_mb", "เตือนเมื่อพื้นที่เก็บไฟล์ของแต่ละคนเกิน (MB)"},
+	{"assistant_line", "บอกบนเอกสารว่าผู้ช่วย AI ขององค์กรร่างคำอธิบาย"}, // AM23 §3.2
 }
 
 // wireOf is a value as the API sends it (what the log records as from / to).

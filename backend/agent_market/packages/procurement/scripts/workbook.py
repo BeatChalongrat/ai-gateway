@@ -55,11 +55,11 @@ def _quote(ev) -> str:
 
 class ComparisonWorkbook:
     def __init__(self, computed: dict, theme: dict, run: dict | None = None, narrative: dict | None = None,
-                 model_info: dict | None = None):
+                 req: dict | None = None):
         self.c, self.t, self.run = computed, theme, run or {}
         # AM22: the commentary (a model's or the rules', with who wrote it) printed on its own sheet after the face
         self.narrative = narrative or dict(computed.get("fallback_narrative") or {}, written_by="rules")
-        self.model_info = model_info or {}
+        self.req = req or {}  # AM23: the render request (the organisation's switch for the neutral line)
         self.commentary: dict = {}
         self.lang = computed.get("lang") or "th"
         self.book = Book(theme, self.lang)
@@ -190,7 +190,7 @@ class ComparisonWorkbook:
         # AM22 §1.1: the commentary sheet, right after the face, with the line that says who wrote it — in the
         # language of the comparison (this package carries its language in its table; the shared words follow it)
         with _words.speaking(self.lang):
-            self.commentary = commentary.sheet(self.book, self.narrative, self.c, self.model_info)
+            self.commentary = commentary.sheet(self.book, self.narrative, self.c, self.req)
         name = path.replace("\\", "/").rsplit("/", 1)[-1]
         main = self.w("sheet.candidates")
         ids = {s.title: ID_COLS for s in self.wb.worksheets if s.title.split(workpaper.COMPANION)[0] == main}

@@ -367,16 +367,18 @@ class DeckWriter:
         items = [f"{EXC_LABEL.get(e['code'], S('docs.exc.to_check'))}: {e['title']} — {e['detail']}" for e in exc] or [S("docs.exc.none")]
         self.bullets(S("docs.deck.exceptions", n=len(exc)), items, [e["cite"] for e in exc if e.get("cite")], lead=S("docs.deck.exceptions_note"))
         self.bullets(S("docs.sub.next"), list(nar.get("next_steps") or []), list(nc.get("next_steps") or []))
-        model = m.get("model") or {}
         refs = sorted(set(c for per in self.cites for c in per), key=lambda x: (len(x), x))
         closing = [S("docs.deck.primary", file=c["source"]["primary"]["file"], rows_used=f"{c['source']['primary']['rows_used']:,}"),
                    m["source_note"],
                    S("docs.deck.computed", script=c["script"]),
-                   S("docs.deck.model") + " " + (model.get("model") or S("docs.deck.no_model")) + (" " + S("docs.deck.inside") if model.get("self_hosted") else ""),
                    S("docs.deck.readonly"), S("docs.deck.scope")]
-        if nar.get("written_by") == "rules":
-            # AM22 §1.1: a commentary the rules wrote says so on the deck's face too, beside the model line
-            closing.insert(4, S("doc.commentary.rules_unusable") if nar.get("why") == "unusable" else S("docs.about.rules_wrote"))
+        # AM23 §3.1/§3.2: no model's name on any slide; beside the sources and the references, the rules' sentence when
+        # they composed the words (always), or the one neutral line when a model drafted them and the organisation has it on
+        from .look import commentary as _commentary
+
+        last = _commentary.rules_line(nar) if nar.get("written_by") == "rules" else _commentary.closing_line(nar, {"assistant_line": m.get("assistant_line")})
+        if last:
+            closing.insert(3, last)
         closing += [a["text"] for a in m["assumptions"]]
         closing += [(S("docs.deck.cites") + " " if i == 0 else "    ") + line for i, line in enumerate(_chunks(", ".join(refs), 110))]
         self.closing(closing)
