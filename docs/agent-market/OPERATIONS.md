@@ -499,6 +499,43 @@ moment the card's piece started, taking two failures of the AM10 chunks with it,
 wrote over each other's lines. Every lane tees with `-a` now; `scripts/tests/test_am22_lane_output_kept.py`
 fails on a lane that does not.
 
+**A green that means green (AM24).** A check that says it passed must have looked at something and been able to
+fail. One helper, `scripts/gate/ledger.py`, holds every lane, every chunk of the integration lane and the smoke to
+three rules: a selector that matched nothing is red (a lane whose output names no check that ran; a chunk that ran
+no test, or in which a name its selector lists ran as no test — `scripts/gate/it/lib.sh run_chunk`, which every lane
+script uses); a check over nothing is a skip, never a pass (a lane whose every check was skipped; the smoke's
+`portal.billing_api` when the organisation sells no pack); and a count that falls on its own is red — each run's
+count is held to the lane's last green run, and a check removed on purpose is removed with a line in
+`scripts/gate/removed_checks.txt` saying what replaced it, which is what lets the count fall. The smoke holds its
+checks by name the same way (`smoke.count`), so a check gone is named.
+
+**One verdict, from pieces (AM24).** The host cannot hold the whole gate at once, so it runs in pieces — and from
+AM19 to AM23 nobody saw every lane green at one commit. Every lane now writes, when it ends, the commit it ran at,
+when, its count and its result to the gate's ledger (`scripts/gate/results/ledger.jsonl`); a lane run with
+uncommitted changes under it is recorded as such and never counts. `bash scripts/gate.sh verdict` (and the last line
+of every `lanes` run) is green only when every lane, every chunk, the build, the test stack and the smoke have a
+green result at HEAD; otherwise it names each one that has not, with the commit its last result carries.
+`scripts/tests/test_am24_ledger.py` holds each rule with a fixture shown red, and a run with a lane left out.
+
+**A swap that swapped nothing is not a pass, and a slow one says so (AM24).** On 16 Oct 2026 the admin's swap was run
+against the web chat's compose file: Compose said "no such service", nothing was recreated, and the tool printed a
+pass. The swap now asks the compose files which services they hold before it touches anything (a service they do not
+name is red, exit 6, naming both), is red when Compose refuses the swap (exit 7), and red when the service still runs
+the container it ran before (exit 10). Every measured swap is told against a ceiling — 5 s without a 200 for a door,
+20 s for a health check (`SWAP_CEILING_S`): above every ordinary swap measured since AM11b (doors 0.5–4.6 s, health
+checks 5.8–6.7 s) and, for a door, half of the 10 s the front door holds a request before it fails it — and over it
+says `SLOW`, with where the time went from Docker's events (the old container's stop, the new one's start and health),
+and still exits 0: a slow swap is not a failed one, and is something to tell the owner. Every swap adds a line to
+`scripts/ops/results/swap_series.tsv` (seeded with the gaps the reports recorded since AM11b), so a gap that grows is
+seen at 2×, not at 23×. `scripts/tests/test_am24_swap.py`.
+
+**A failed Agent Market smoke check pages (AM24).** The core pager leaves the `agent_market.*` checks out (AM1b:
+Agent Market never pages the core channel), and until AM24 nothing else read them. Agent Market's own pager
+(`app/ops/agent_market_alerts.py`) now reads the same smoke record as the core and pages its own topic
+(`AGENT_MARKET_NTFY_URL`) with the failed agent checks; a green run closes it. It reads the record only on a tick
+Prometheus answers — while Prometheus is down Agent Market's pager is still blind (AM15 §10). Test:
+`backend/tests/test_am24_agent_smoke_pages.py`.
+
 **The smoke can fail, and the gate proves it each time**: `gate.sh smoke` takes the model away on
 the test stack (`scripts/smoke/dead_primary.js red`) and demands a RED suite in which every turn
 names the model it asked, then puts it back and demands GREEN (`green`).

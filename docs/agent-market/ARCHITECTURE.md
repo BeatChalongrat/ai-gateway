@@ -1558,3 +1558,26 @@ generic heading is printed only when a part has none of its own; a part that fou
 or under none, is asked for once more. Every file a commentary is printed in prints the same headings, and the gates
 read them back. The organisation's own voice is the customer's to add, not this product's. Tests:
 `runner/am23_narrative_test.go`, `tests/test_am23_commentary.py`.
+
+**Thai a reader sees as a typo** (AM24 §1.2; `runner/marks_am24.go`, `engine/e2/marks.py`). The in-house model
+wrote a Thai mark twice on one letter ("ร่่าง", "กัับ") in 4 of the 7 commentaries it wrote on live after AM23 — one
+Thai sentence in nine, measured over 123 cases, whichever card's prompt. Whether a commentary marks Thai as Thai writes
+it is read by the rules the PDF repair already holds (a cluster's marks vowel first, then the tone mark, then the
+nikhahit; at most one of each; a nikhahit only as the first half of sara am; mai taikhu with no tone mark), through
+the engine's platform op `thai_marks`, run with the runner's current engine — so an install pinned to an older engine
+is checked the same. An answer with a slip is sent back with the words it is in, in the run's language, through the
+retry that exists (`askNarrative`, which the narrative step and its tests both run). When no attempt is free of
+slips, the last answer whose every slip has exactly one reading — a mark written twice, a cluster's marks in another
+order — is used with those slips written as Thai writes them, and each text is recorded on the run's narrative step
+as written and as used (`marks_mended`); a slip with no one reading (two tone marks, a mark on a vowel or after a
+space) is never mended, and such an answer is not used. A check that could not run says so (`marks_unchecked`); it
+is never recorded as one that passed. It is not charged to the run. What it cannot see: a mark the model dropped
+("ไม" for ไม่) is well-formed Thai to any rule of marks — only a dictionary could tell, and none is in the engine.
+Tests: `runner/am24_marks_test.go`, `tests/test_am24_marks.py`.
+
+**An agent's page does not hold a swap** (AM24 Part 2; `api.go` EndStreams). A thread's stream runs until its page
+goes or ten minutes pass, and `http.Server.Shutdown` waits for every open request: an agent's page left open kept the
+old chat-edge's stop waiting its full ten seconds (the swap of 17 Oct 2026: 11.7 s without an answer, the old copy's
+stop 11.4 s of it; AM12's 11.9 s the same). The server registers `EndStreams` with `RegisterOnShutdown`: once it has
+stopped listening, each open stream sends the `reconnect` it already sends at its deadline and ends, and the page
+reconnects with its cursor through the front door, to the copy that answers next. Test: `am24_streams_test.go`.
