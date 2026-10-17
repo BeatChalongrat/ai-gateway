@@ -158,6 +158,42 @@ class AFigurePrintedTwoWaysFails(unittest.TestCase):
         self.assertNotIn("sample.xlsx", res["where"].get("difference") or [], "the workbook's dash is not compared")
 
 
+class EveryAgentsFigurePrintedTwoWaysFails(unittest.TestCase):
+    """Part 4, fixture 6, for each of the four agents: a figure of its report's figures table written without its
+    commas — the round's files fail, naming the figure and both strings."""
+
+    def test_each_agent(self):
+        for pkg in FOUR:
+            with self.subTest(pkg=pkg):
+                words.use(None)
+                d, r = _render(pkg)
+                try:
+                    view = r["computed"]
+                    key = next(k for k, f in view["figures"].items() if "," in f["text"])
+                    fig = view["figures"][key]
+                    docx = next(a["name"] for a in r["render"]["artifacts"] if a["format"] == "docx")
+                    doc = Document(os.path.join(d, docx))
+                    n = 0
+                    for t in doc.tables:
+                        for row in t.rows:
+                            cells = row.cells
+                            if len(cells) == 3 and agree._norm(cells[0].text) == agree._norm(fig["label"]) and cells[2].text.strip() == fig["cite"]:
+                                runs = cells[1].paragraphs[0].runs
+                                runs[0].text = fig["text"].replace(",", "")
+                                for run in runs[1:]:
+                                    run.text = ""
+                                n += 1
+                    self.assertEqual(n, 1)
+                    doc.save(os.path.join(d, docx))
+                    res = agree.check(d, r["render"]["artifacts"], view, _pkg(pkg))
+                    self.assertFalse(res["ok"])
+                    self.assertEqual({s for _, s in res["places"]}, {fig["text"], fig["text"].replace(",", "")})
+                    self.assertIn(docx, res["bad"])
+                    self.assertIn(fig["label"], res["check"]["detail"])
+                finally:
+                    shutil.rmtree(d, ignore_errors=True)
+
+
 class TheFinancialReportsWorkbookPrintsItsReportsFigures(unittest.TestCase):
     """What the check found first: until AM23 the financial report's workbook printed satang (3,820.55; 12,480,300.00)
     where its report and deck printed whole baht (3,821; 12,480,300) — the same figure, two roundings. The workbook
