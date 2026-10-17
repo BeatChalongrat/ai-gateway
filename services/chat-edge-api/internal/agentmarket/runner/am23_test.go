@@ -48,3 +48,31 @@ func am23Manifest(t *testing.T, pkg string) am.Manifest {
 	}
 	return m
 }
+
+// §1.6 and Part 4 fixture 4: a .xls is never written. Asked for, the answer is one sentence in either language — the
+// 65,536 rows, no frozen header row, no print area the working paper depends on — and the .xlsx made instead. And a
+// person typing "xlsx" is not asking for a .xls.
+func TestAnXLSIsNeverWrittenAndTheReasonIsOneSentence(t *testing.T) {
+	said := xlsSaid()
+	for _, l := range []am.Lang{am.Thai, am.English} {
+		s := said.In(l)
+		if !strings.Contains(s, "65,536") || !strings.Contains(s, ".xlsx") || strings.Count(s, ".") > 4 {
+			t.Fatalf("%s: %q", l, s)
+		}
+	}
+	for _, typed := range []string{"ขอไฟล์ xls", "send it as .xls please", "ขอเป็น excel 97"} {
+		if !asksForXLS(typed) {
+			t.Fatalf("asks for a .xls: %q", typed)
+		}
+	}
+	for _, typed := range []string{"ขอไฟล์ xlsx", "the .xlsx is fine", "excel"} {
+		if asksForXLS(typed) {
+			t.Fatalf("does not ask for a .xls: %q", typed)
+		}
+	}
+	for _, pkg := range []string{"bank_reconciliation", "expense_audit", "invoice_processing", "po_matching", "financial_report", "procurement"} {
+		if m := am23Manifest(t, pkg); m.FormatAllowed("xls") || m.FormatAllowed("doc") {
+			t.Fatalf("%s declares a kind of file it never writes", pkg)
+		}
+	}
+}

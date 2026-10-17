@@ -278,3 +278,24 @@ func TestAnAnswerToARefusalMakesWhatWasPickedAndTheWorkbookAloneNothing(t *testi
 		t.Fatalf("the round stays finished: %s", r.Status)
 	}
 }
+
+// §1.6: the agents take .xls beside .xlsx and .doc beside a PDF, converted on the way in (runner/convert_am23.go).
+func TestTheAgentsTakeXLSAndDOCWhereTheyTakeXLSXAndPDF(t *testing.T) {
+	for _, pkg := range []string{"bank_reconciliation", "expense_audit", "invoice_processing", "po_matching", "financial_report"} {
+		up := am23Manifest(t, pkg).UploadTypes()
+		if contains(up, ".xlsx") != contains(up, ".xls") || contains(up, ".pdf") != contains(up, ".doc") {
+			t.Fatalf("%s takes %v", pkg, up)
+		}
+	}
+	if !contains(defaultUploadTypes, ".xls") || !contains(defaultUploadTypes, ".doc") {
+		t.Fatalf("an agent that declares nothing takes them too: %v", defaultUploadTypes)
+	}
+	// and never go out: a manifest that declares one as an output is refused when it is read
+	base := `{"schema_version":"agent.market.v1","id":"x","version":"1.0.0","name":"x","python_package":"x",
+		"permissions":{"default":"read_only"},"outputs":[{"format":"xlsx"},{"format":"%s"}]}`
+	for _, f := range []string{"xls", "doc"} {
+		if _, err := ParseManifest(json.RawMessage(strings.Replace(base, "%s", f, 1))); err == nil {
+			t.Fatalf("a manifest declaring .%s is refused", f)
+		}
+	}
+}

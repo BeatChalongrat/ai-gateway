@@ -162,6 +162,9 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 		var parsed []parsedFile
 		for _, f := range files {
 			p, err := rc.parse(ctx, f)
+			if errors.Is(err, errNotConverted) {
+				continue // AM23 §1.6: refused by name with what failed (said once); the round goes on without it
+			}
 			if err != nil {
 				return rc.stepFailed("parse", err)
 			}
@@ -562,6 +565,11 @@ func (rc *runCtx) mapping() map[string]any {
 
 func (rc *runCtx) parse(ctx context.Context, f am.File) (parsedFile, error) {
 	mapping := rc.mapping()
+	// AM23 §1.6: an .xls or a .doc is converted on the way in (a copy); the run records and cites the original
+	conv, err := rc.convertIn(ctx, f)
+	if err != nil {
+		return parsedFile{}, err
+	}
 	key := am.StepKey(rc.run.ID, "parse", f.SHA256, f.Name, mapping)
 	out, err := rc.step(ctx, "parse:"+f.Name, "ingest", key, map[string]any{"file": f.Name, "sha256": f.SHA256, "size": f.Size}, true,
 		func(ctx context.Context) (any, float64, string, string, error) {
@@ -571,8 +579,18 @@ func (rc *runCtx) parse(ctx context.Context, f am.File) (parsedFile, error) {
 			}
 			defer cleanup()
 			input := "in_" + f.ID.String()[:8] + filepath.Ext(f.Name)
+			file := map[string]any{"name": f.Name, "input": input}
+			if conv != nil {
+				cpath, cclean, err := rc.localBlob(ctx, conv.Ref.Key)
+				if err != nil {
+					return nil, 0, "", "", err
+				}
+				defer cclean()
+				path, input = cpath, "in_"+f.ID.String()[:8]+"."+conv.To
+				file = map[string]any{"name": f.Name, "input": input, "as": conv.As, "sha256": f.SHA256, "converted_from": conv.From}
+			}
 			res, err := rc.exec(ctx, map[string]any{"op": "parse", "package": rc.pkg.PyPackage,
-				"file": map[string]any{"name": f.Name, "input": input}, "mapping": mapping},
+				"file": file, "mapping": mapping},
 				[]Input{{Name: input, LocalPath: path}})
 			if err != nil {
 				return nil, 0, "", "", err

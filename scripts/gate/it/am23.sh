@@ -25,6 +25,8 @@ CHUNKS=(
   '^(TestADeckOfMoreItemsThanSlidesHoldIsAskedAboutBeforeAnyFileIsWritten)$'
   '^(TestWordsTypedWithTheFilesAskForTheFilesAndAnXLSIsAnsweredWithWhy)$'
   '^(TestADeckAskedOfAFinishedRoundIsAskedAboutOnTheRound)$'
+  '^(TestAnXLSStatementIsConvertedOnTheWayInAndTheOriginalIsWhatTheRunCites)$'
+  '^(TestAnXLSThatWillNotConvertIsRefusedByNameWithWhatFailed)$'
 )
 for c in "${CHUNKS[@]}"; do
   echo "== chunk $c"

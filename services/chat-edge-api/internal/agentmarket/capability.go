@@ -145,7 +145,7 @@ func (m Manifest) ScopeSaid() string { return ScopeOf(m.Scope) }
 
 // defaultUploadTypes is what an agent that declares no input types accepts
 // (AM1's spreadsheets and PDFs).
-var defaultUploadTypes = []string{".xlsx", ".xlsm", ".csv", ".txt", ".pdf"}
+var defaultUploadTypes = []string{".xlsx", ".xlsm", ".xls", ".csv", ".txt", ".pdf", ".doc"} // AM23 §1.6: .xls and .doc, converted
 
 // UploadTypes are the file extensions the agent's inputs accept.
 func (m Manifest) UploadTypes() []string {
@@ -211,6 +211,10 @@ func ParseManifest(raw json.RawMessage) (Manifest, error) {
 		return m, fmt.Errorf("manifest: %w", err)
 	}
 	for _, o := range m.Outputs {
+		// AM23 §1.6: an .xls or a .doc is never written — 65,536 rows, no frozen header row, no print area
+		if o.Format == "xls" || o.Format == "doc" {
+			return m, fmt.Errorf("manifest: a .%s is never written; declare .xlsx or .docx", o.Format)
+		}
 		// AM23 §1.4: there is no PDF writer — a PDF prints a document the agent makes, or it cannot be declared
 		if o.Format == "pdf" {
 			of := m.PDFOf()

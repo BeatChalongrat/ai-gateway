@@ -25,7 +25,7 @@
     "tagline": "อ่านอย่างเดียว · ตรวจด้วยกฎ · ค่าที่ไม่แน่ใจต้องมีคนยืนยัน"
   },
   "inputs": [
-    {"role": "documents", "label": "ใบกำกับภาษี ใบเสร็จ ใบแจ้งหนี้ หรือไฟล์ e-Tax", "note": "PDF ดิจิทัลหรือสแกน 200–300 DPI · XML ของ e-Tax · รูปถ่ายอ่านได้เท่าที่ภาพชัด", "required": true, "accept": [".pdf", ".xml", ".jpg", ".jpeg", ".png"]}
+    {"role": "documents", "label": "ใบกำกับภาษี ใบเสร็จ ใบแจ้งหนี้ หรือไฟล์ e-Tax", "note": "PDF ดิจิทัลหรือสแกน 200–300 DPI · XML ของ e-Tax · รูปถ่ายอ่านได้เท่าที่ภาพชัด", "required": true, "accept": [".pdf", ".doc", ".xml", ".jpg", ".jpeg", ".png"]}
   ],
   "outputs": [
     {"format": "xlsx", "label": "ทะเบียน .xlsx", "default": true},

@@ -101,6 +101,27 @@ def _preview(path: str, name: str, pf) -> dict:
             "proposal": proposal, "candidates": candidates, "fields": dict(FIELD_LABEL), "doc_type": pf.doc_type}
 
 
+def _as_original(d, read_as: str, name: str, sha256: str, converted_from: str):
+    """A parsed file read from a converted copy, given back its own name wherever the copy's name was written, its own
+    SHA-256 as the file's, and a note of the conversion (AM23 §1.6)."""
+    def walk(v):
+        if isinstance(v, dict):
+            return {k: walk(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        if isinstance(v, str) and read_as in v:
+            return v.replace(read_as, name)
+        return v
+
+    out = walk(d)
+    if isinstance(out, dict):
+        if sha256 and "sha256" in out:
+            out["sha256_copy"] = out["sha256"]
+            out["sha256"] = sha256
+        out["converted_from"] = converted_from
+    return out
+
+
 def _fill_template(pkg, computed: dict, t: dict, req: dict | None = None) -> dict:
     """The customer's own template filled with this run's values (AM2 Phase E): one more artifact."""
     import hashlib
@@ -174,8 +195,14 @@ def run(req: dict) -> dict:
     load = getattr(pkg, "load", dataset.load)
     if op == "parse":
         f = req["file"]
-        pf = pkg.parse(_in(f["input"]), f["name"], req.get("mapping") or {})
-        _write_json("parsed.json", dump(pf))
+        # AM23 §1.6: a file converted on the way in (an .xls to .xlsx, a .doc to PDF) is read under the name of its
+        # converted kind; what is kept is the original's — its name, and its SHA-256, which the run cites
+        read_as = f.get("as") or f["name"]
+        pf = pkg.parse(_in(f["input"]), read_as, req.get("mapping") or {})
+        dumped = dump(pf)
+        if f.get("as"):
+            dumped = _as_original(dumped, read_as, f["name"], f.get("sha256") or "", f.get("converted_from") or "")
+        _write_json("parsed.json", dumped)
         out = {"summary": pf.summary()}
         if hasattr(pkg, "parse_extras"):
             out["summary"].update(pkg.parse_extras(pf, _in(f["input"]), JOB_OUT))

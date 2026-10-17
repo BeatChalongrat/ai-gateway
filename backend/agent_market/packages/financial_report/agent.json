@@ -25,9 +25,9 @@
     "tagline": "รู้หน้าที่ของตัวเอง · อ่านอย่างเดียว · คำนวณด้วยสคริปต์"
   },
   "inputs": [
-    {"role": "primary", "label": "บัญชีแยกประเภทของเดือนที่จะทำรายงาน", "note": "จำเป็น (หรืองบทดลอง / งบกำไรขาดทุน)", "required": true, "accept": [".xlsx", ".xlsm", ".csv", ".txt", ".pdf"]},
-    {"role": "budget", "label": "งบประมาณของงวดนั้น", "note": "ถ้ามี จะได้เทียบส่วนต่างให้", "required": false, "accept": [".xlsx", ".xlsm", ".csv"]},
-    {"role": "prior", "label": "เดือนก่อนหน้า", "note": "ถ้ามี จะได้ดูแนวโน้ม", "required": false, "accept": [".xlsx", ".xlsm", ".csv"]}
+    {"role": "primary", "label": "บัญชีแยกประเภทของเดือนที่จะทำรายงาน", "note": "จำเป็น (หรืองบทดลอง / งบกำไรขาดทุน)", "required": true, "accept": [".xlsx", ".xls", ".xlsm", ".csv", ".txt", ".pdf", ".doc"]},
+    {"role": "budget", "label": "งบประมาณของงวดนั้น", "note": "ถ้ามี จะได้เทียบส่วนต่างให้", "required": false, "accept": [".xlsx", ".xls", ".xlsm", ".csv"]},
+    {"role": "prior", "label": "เดือนก่อนหน้า", "note": "ถ้ามี จะได้ดูแนวโน้ม", "required": false, "accept": [".xlsx", ".xls", ".xlsm", ".csv"]}
   ],
   "outputs": [
     {"format": "docx", "label": "รายงาน .docx", "default": true},

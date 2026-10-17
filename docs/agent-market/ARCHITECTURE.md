@@ -1506,3 +1506,15 @@ whichever way the file was asked for. The words typed with a round's files are a
 makes joins the round's set, what it does not is refused by name with what it makes (the settings page's sentence),
 and a `.xls` is answered with why it is never made. Fixtures: `tests/test_am23_refusals.py`,
 `runner/am23_it_test.go` (a deck of 37 reconciling items, `kbank_sep_many_fees.xlsx`).
+
+**.xls and .doc come in; they never go out** (`runner/convert_am23.go`, `engine/step.py` `_as_original`). Thai
+accounting still passes both around, and until AM23 they were refused at the door. The agents take an `.xls` wherever
+they take an `.xlsx` and a `.doc` wherever they take a PDF; the converter already there makes a copy on the way in (an
+`.xlsx`, a PDF) once, as a recorded step, and the engine reads the copy under its converted kind. What the run records
+and cites is the original — its name and its SHA-256, the copy's kept beside it — and the round says the file was
+converted. A file that will not convert is refused by name with what failed, and never half-read: the converter's own
+refusal of it, or a copy that holds nothing or that LibreOffice read as undecodable text (it "converts" a damaged
+`.xls` that way without a word — found by this card's fixture `broken.xls`). The round goes on without it, asking for
+it when it was what the round needed. Neither kind is ever written: no manifest may declare one, and a request for a
+`.xls` is answered with why — 65,536 rows, no frozen header row repeated on every page, no print area — and the
+`.xlsx` is made instead. Fixtures: `runner/am23_it_test.go` (`kbank_sep.xls`, `broken.xls`), `runner/am23_test.go`.

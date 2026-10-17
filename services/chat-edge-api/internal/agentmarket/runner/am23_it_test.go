@@ -330,3 +330,81 @@ func (e *itEnv) renderJobOf(parent am.Run, params string) am.Run {
 	}
 	return job
 }
+
+// §1.6: an .xls comes in. The bank's own statement saved as an .xls is converted to .xlsx on the way in and read
+// from the copy; what the round records and cites is the original — its name and its SHA-256 — and the round says it
+// was converted.
+func TestAnXLSStatementIsConvertedOnTheWayInAndTheOriginalIsWhatTheRunCites(t *testing.T) {
+	e := newIT(t)
+	if e == nil {
+		return
+	}
+	ctx := context.Background()
+	e.setupBankInstall()
+	conv := startConverter(t)
+	run := e.bankRun("kbank_sep.xls", "ledger_sep.xlsx")
+	if _, err := e.store.Pool.Exec(ctx, `UPDATE agent_market.agent_runs SET message = '' WHERE id = $1`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	r := e.runner("r1")
+	r.Converter = conv
+	got := e.drive(r, run.ID, 6*time.Minute, parkedOrTerminal)
+	if got.Status != am.RunSucceeded {
+		t.Fatalf("%s %s", got.Status, got.StatusReason)
+	}
+	files, _ := e.store.RunFiles(ctx, run.ID, "active")
+	var original string
+	for _, f := range files {
+		if f.Name == "kbank_sep.xls" {
+			original = f.SHA256
+		}
+	}
+	c := e.computedMap(run.ID)
+	seen := false
+	for _, f := range c["files"].([]any) {
+		m := f.(map[string]any)
+		if m["name"] == "kbank_sep.xls" {
+			seen = m["sha256"] == original && original != ""
+		}
+	}
+	if !seen {
+		t.Fatalf("the round cites the original .xls and its SHA-256 (%s): %v", original, c["files"])
+	}
+	thread := strings.Join(e.threadOf(run.ID), "\n")
+	if !strings.Contains(thread, "แปลงเป็น .xlsx ก่อนอ่าน") || !strings.Contains(thread, "kbank_sep.xls") {
+		t.Fatalf("the round says it was converted:\n%s", trim(thread, 1500))
+	}
+}
+
+// §1.6 and Part 4 fixture 5: an .xls that will not convert is refused by name, with what failed, and never half-read —
+// the round goes on without it, asking for the statement it lacks.
+func TestAnXLSThatWillNotConvertIsRefusedByNameWithWhatFailed(t *testing.T) {
+	e := newIT(t)
+	if e == nil {
+		return
+	}
+	ctx := context.Background()
+	e.setupBankInstall()
+	conv := startConverter(t)
+	run := e.bankRun("broken.xls", "ledger_sep.xlsx")
+	if _, err := e.store.Pool.Exec(ctx, `UPDATE agent_market.agent_runs SET message = '' WHERE id = $1`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	r := e.runner("r1")
+	r.Converter = conv
+	got := e.drive(r, run.ID, 6*time.Minute, parkedOrTerminal)
+	thread := strings.Join(e.threadOf(run.ID), "\n")
+	if !strings.Contains(thread, "“broken.xls” อ่านไม่ได้: แปลงเป็น .xlsx ไม่สำเร็จ") {
+		t.Fatalf("refused by name, with what failed:\n%s", trim(thread, 1500))
+	}
+	for _, s := range e.steps(run.ID) {
+		if s.Name == "parse:broken.xls" {
+			t.Fatal("never half-read")
+		}
+	}
+	if got.Status == am.RunSucceeded {
+		if arts, _ := e.store.RunArtifacts(ctx, run.ID); len(arts) > 0 {
+			t.Fatal("no working paper without the bank's statement")
+		}
+	}
+}
