@@ -63,6 +63,11 @@ func (rc *runCtx) planFiles(ctx context.Context, formats []string, computed blob
 				req["deck_over"] = deckOver
 			}
 			res, err := rc.exec(ctx, req, []Input{{Name: "computed.json", LocalPath: cpath}})
+			if err != nil && strings.Contains(err.Error(), "unknown op 'plan'") {
+				// an engine released before AM23 (an install pinned to it) has no plan: it refuses nothing, and its
+				// files are made as they always were
+				return json.RawMessage(`{"refusals":[]}`), 0, "", "", nil
+			}
 			if err != nil {
 				return nil, 0, "", "", err
 			}
