@@ -346,31 +346,15 @@ func am22Stub(t *testing.T, answers ...string) *ModelClient {
 	return &ModelClient{BaseURL: s.URL, APIKey: "k", Primary: "primary", Timeout: 5 * time.Second, HTTP: http.DefaultClient}
 }
 
-// what the narrative step does with a model's answers (deliver.go), without a run around it
+// what the narrative step does with a model's answers (deliver.go askNarrative — the step's own code), without a run
+// around it and with no Thai check (AM24's tests give it one)
 func am22Narrative(t *testing.T, m *ModelClient, cv computedView) (map[string]any, string, error) {
 	t.Helper()
-	var parsed, long map[string]any
-	var longBy string
-	c, tried, err := m.CompleteWithInBy(context.Background(), am.Thai, []string{"primary"}, "s", "u", func(model, s string) error {
-		v, err := checkNarrative(am.Thai, s, cv)
-		var tl *tooLongErr
-		if errors.As(err, &tl) {
-			long, longBy = v, model
-		}
-		if err != nil {
-			return err
-		}
-		parsed = v
-		return nil
-	})
+	ans, c, _, err := askNarrative(context.Background(), m, am.Thai, []string{"primary"}, "s", "u", cv, nil)
 	if err != nil {
-		if v, model, ok := overLength(long, longBy); ok {
-			return v, model, nil
-		}
 		return nil, "", err
 	}
-	_ = tried
-	return parsed, c.Model, nil
+	return ans.parsed, c.Model, nil
 }
 
 // AM22 §1.2, the three stubs of the card: a nine-point list refused on attempt 1 for one long point and complete on

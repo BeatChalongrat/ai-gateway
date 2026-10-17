@@ -196,6 +196,16 @@ def run(req: dict) -> dict:
         out.update(ok=True, op=op, ms=int((time.monotonic() - t0) * 1000),
                    engine=__import__("agent_market").ENGINE_VERSION)
         return out
+    if op == "thai_marks":
+        # AM24 §1.2: whether the words a model wrote mark Thai as Thai writes it (e2/marks.py), and the one
+        # reading of a slip that has one — a platform op (no package): the runner runs it with its current engine,
+        # whatever engine the run's install is pinned to
+        from .e2 import marks
+
+        out = {"texts": [marks.mend(str(t)) for t in req.get("texts") or []]}
+        out.update(ok=True, op=op, ms=int((time.monotonic() - t0) * 1000),
+                   engine=__import__("agent_market").ENGINE_VERSION)
+        return out
     pkg = _load_package(req.get("package", ""))
     dump = getattr(pkg, "dump", dataset.dump)
     load = getattr(pkg, "load", dataset.load)

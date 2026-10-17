@@ -431,3 +431,59 @@ def _decide_document(path: str, damaged: list, glyphs: set, fonts: dict, ocr_fn,
         pages.clear()
         crops.clear()
     return known
+
+
+# ── a text a model wrote (AM24) ─────────────────────────────────────────────
+#
+# The same rules read a commentary a model wrote: a mark written twice on one base (ร่่าง, กัับ) is a
+# slip of the bytes with exactly one correct reading, and so is a cluster whose marks are all there in
+# another order (a tone mark before its vowel). Anything else that is not Thai — two tone marks, a
+# mark on a vowel or a space — has no reading the text proves, and is never mended.
+
+def slips(text: str) -> list[dict]:
+    """Each cluster of ``text`` whose marks are not as Thai writes them: {at, written, as}, where ``at``
+    is the base's index, ``written`` the base and its marks as written, and ``as`` the same cluster with
+    each mark once in Thai's order — or None when that is still not Thai."""
+    out: list[dict] = []
+    i, n = 0, len(text)
+    while i < n:
+        j = i + 1 if text[i] not in _MARKS else i
+        while j < n and text[j] in _MARKS:
+            j += 1
+        ms = list(text[i + 1:j]) if text[i] not in _MARKS else list(text[i:j])
+        if text[i] in _MARKS or text[i].isspace():
+            # marks with no base before them: nothing to read them as
+            if ms:
+                out.append({"at": i, "written": text[i:j], "as": None})
+            i = j
+            continue
+        if ms:
+            am = j < n and text[j] == SARA_AM
+            nb = SARA_AA if am else (text[j] if j < n else None)
+            if not _as_thai(text[i], ms, am, nb):
+                once = _ordered(list(dict.fromkeys(ms)))
+                out.append({"at": i, "written": text[i:j],
+                            "as": text[i] + "".join(once) if _as_thai(text[i], once, am, nb) else None})
+        i = j
+    return out
+
+
+def _as_thai(base: str, ms: list[str], am: bool, next_base: str | None) -> bool:
+    """A cluster as Thai writes it: well formed (with the nikhahit of a sara am after it), in order."""
+    full = list(ms) + ([NIKHAHIT] if am else [])
+    return well_formed(base, full, next_base) and full == _ordered(full)
+
+
+def mend(text: str) -> dict:
+    """{slips, mended}: ``mended`` is ``text`` with every slip written as Thai writes it, or None when
+    one of them has no such reading (``slips`` empty: the text is as Thai writes it)."""
+    found = slips(text)
+    if not found or any(s["as"] is None for s in found):
+        return {"slips": found, "mended": None}
+    out, last = [], 0
+    for s in found:
+        out.append(text[last:s["at"]])
+        out.append(s["as"])
+        last = s["at"] + len(s["written"])
+    out.append(text[last:])
+    return {"slips": found, "mended": "".join(out)}

@@ -92,6 +92,10 @@ type narrativeOut struct {
 	// Why (AM22) the rules wrote, when they did: "unusable" — a model answered and no answer could be used;
 	// "unavailable" — no model it may use could be asked or reached. The file and the message say which.
 	Why string `json:"why,omitempty"`
+	// AM24 §1.2: the texts used with their Thai slips mended (each as written and as used), and why the Thai could
+	// not be checked when it could not — a check that did not look is never recorded as one that passed
+	MarksMended    []markFix `json:"marks_mended,omitempty"`
+	MarksUnchecked string    `json:"marks_unchecked,omitempty"`
 }
 
 func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey string) (narrativeOut, string, error) {
@@ -113,28 +117,15 @@ func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey st
 			// reads the answer as a text of that language
 			l := rc.docLang(ctx)
 			user := narrativePrompt(l, cv)
-			var parsed, long map[string]any
-			var longBy string
 			cv.NarrativeNever = rc.pkg.Manifest.NarrativeNever   // AM22: the package's declaration
 			cv.NarrativeHedges = rc.pkg.Manifest.NarrativeHedges // AM23 §3.3: and its hedges
-			c, tried, err := rc.r.Model.CompleteWithInBy(ctx, l, models, rc.pkg.Instructions, user, func(model, s string) error {
-				v, err := checkNarrative(l, s, cv)
-				var tl *tooLongErr
-				if errors.As(err, &tl) {
-					long, longBy = v, model // (AM22: kept, in case no attempt fits — see overLength)
-				}
-				if err != nil {
-					return err
-				}
-				parsed = v
-				return nil
-			})
-			if err != nil && !errors.Is(err, ErrModelUnreachable) && ctx.Err() == nil {
-				if v, model, ok := overLength(long, longBy); ok {
-					// AM22 §1.2: the model's words, too long after both attempts — the renderer's ladder decides
-					parsed, err = v, nil
-					c.Model = model
-				}
+			ans, c, tried, err := askNarrative(ctx, rc.r.Model, l, models, rc.pkg.Instructions, user, cv, rc.engineMarks)
+			parsed, fixes, unchecked := ans.parsed, ans.fixes, ans.unchecked
+			if len(fixes) > 0 {
+				rc.log.Info("narrative marks mended", "texts", len(fixes), "model", c.Model)
+			}
+			if unchecked != "" {
+				rc.log.Warn("narrative marks not checked", "why", trim(unchecked, 200))
 			}
 			if errors.Is(err, ErrModelUnreachable) && ctx.Err() == nil && rc.pkg.Manifest.NarrativeWhenAway != "rules" {
 				// AM15: no model that may see the table could be reached. The rules stand in for a model
@@ -158,7 +149,7 @@ func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey st
 				fb["why"] = why
 				nb, _ := json.Marshal(fb)
 				// Refused answers were still paid for: the budget counts them.
-				return narrativeOut{Narrative: nb, Tried: tried, Tokens: c.Tokens, CostUSD: c.CostUSD, Why: why},
+				return narrativeOut{Narrative: nb, Tried: tried, Tokens: c.Tokens, CostUSD: c.CostUSD, Why: why, MarksUnchecked: unchecked},
 					c.CostUSD * rc.r.CreditsPerUSD, "metrics.py:fallback_narrative", "", nil
 			}
 			parsed["written_by"] = "model"
@@ -167,7 +158,8 @@ func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey st
 			self := rc.r.Model.IsSelfHosted(c.Model)
 			model := c.Model
 			_ = rc.r.Store.SetRunFields(ctx, rc.run.ID, nil, &model, &self)
-			return narrativeOut{Narrative: nb, Model: c.Model, SelfHosted: self, Tried: tried, Tokens: c.Tokens, CostUSD: c.CostUSD},
+			return narrativeOut{Narrative: nb, Model: c.Model, SelfHosted: self, Tried: tried, Tokens: c.Tokens, CostUSD: c.CostUSD,
+					MarksMended: fixes, MarksUnchecked: unchecked},
 				c.CostUSD * rc.r.CreditsPerUSD, "", c.Model, nil
 		})
 	if err != nil {
@@ -175,6 +167,68 @@ func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey st
 	}
 	var n narrativeOut
 	return n, key, json.Unmarshal(out, &n)
+}
+
+// narrativeAnswer is what the narrative step made of a model's answers (askNarrative).
+type narrativeAnswer struct {
+	parsed    map[string]any
+	fixes     []markFix // AM24 §1.2: the texts used with their Thai slips mended
+	unchecked string    // AM24 §1.2: why the Thai could not be checked, when it could not
+}
+
+// askNarrative asks models for the commentary and reads every answer — checkNarrative, then its Thai (AM24 §1.2,
+// marks) — with one retry on the reason: the narrative step's whole use of a model, apart from the step so that a
+// test runs exactly this. After the last attempt an answer whose only faults were Thai slips with one reading each
+// is used mended; failing that, one whose only fault was its length goes to the renderer's ladder (overLength).
+func askNarrative(ctx context.Context, m *ModelClient, l am.Lang, models []string, system, user string, cv computedView,
+	marks marksFunc) (narrativeAnswer, Completion, []string, error) {
+	var out narrativeAnswer
+	var long, mended map[string]any
+	var longBy, mendedBy string
+	var longFixes, mendedFixes []markFix
+	c, tried, err := m.CompleteWithInBy(ctx, l, models, system, user, func(model, s string) error {
+		v, err := checkNarrative(l, s, cv)
+		var tl *tooLongErr
+		isLong := errors.As(err, &tl)
+		if err != nil && !isLong {
+			return err
+		}
+		mv := judgeMarks(ctx, l, v, marks)
+		if mv.unchecked != "" {
+			out.unchecked = mv.unchecked
+		}
+		switch {
+		case mv.reason != "" && mv.mended == nil:
+			// a slip with no one reading: this answer is never used
+			if isLong {
+				return errors.New(tl.reason + "; " + mv.reason)
+			}
+			return errors.New(mv.reason)
+		case mv.reason != "" && isLong:
+			long, longBy, longFixes = mv.mended, model, mv.fixes
+			return &tooLongErr{reason: tl.reason + "; " + mv.reason}
+		case mv.reason != "":
+			mended, mendedBy, mendedFixes = mv.mended, model, mv.fixes
+			return errors.New(mv.reason)
+		case isLong:
+			long, longBy, longFixes = v, model, nil // (AM22: kept, in case no attempt fits — see overLength)
+			return err
+		}
+		out.parsed = v
+		return nil
+	})
+	if err != nil && !errors.Is(err, ErrModelUnreachable) && ctx.Err() == nil {
+		if mended != nil {
+			// AM24 §1.2: no attempt free of slips — the last whose every slip has one reading, mended and recorded
+			out.parsed, out.fixes, err = mended, mendedFixes, nil
+			c.Model = mendedBy
+		} else if v, model, ok := overLength(long, longBy); ok {
+			// AM22 §1.2: the model's words, too long after both attempts — the renderer's ladder decides
+			out.parsed, out.fixes, err = v, longFixes, nil
+			c.Model = model
+		}
+	}
+	return out, c, tried, err
 }
 
 // checkNarrative reads a model's answer as the report's words, or says why

@@ -257,6 +257,8 @@ var notASentence = map[string]string{
 	"runner/narrative_am23.go:paddingFillerTH": "reads a model's answer: the Thai words a sentence restating a figure is made of besides its label, set aside when a point's new words are counted",
 	"runner/narrative_am23.go:paddingReason":   "addressed to a model: the reason a point that only restates the facts is sent back with (AM23 §3.3)",
 	"runner/narrative_am23.go:hedgeReason":     "addressed to a model: the reason an answer with a hedge of the package's is sent back with (AM23 §3.3)",
+	// AM24 §1.2: the Thai marks of a commentary, read by e2/marks.py (runner/marks_am24.go)
+	"runner/marks_am24.go:judgeMarks": "addressed to a model: the reason an answer whose Thai marks are not as Thai writes them is sent back with (AM24 §1.2)",
 	"runner/narrative_am23.go:headingReason":   "addressed to a model: the reason a part under its generic heading or none is sent back with (AM23 §3.3)",
 	"runner/narrative_am23.go:headingTooLong":  "addressed to a model: the reason a heading over the catalogue's title is sent back with (AM23 §3.3)",
 	"runner/modellang.go:noFigureNames":        "addressed to a model: the reason an agent with no figure table has its {names} sent back with (AM22)",
