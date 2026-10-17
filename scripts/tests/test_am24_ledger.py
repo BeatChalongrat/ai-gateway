@@ -118,6 +118,14 @@ class Ledger(unittest.TestCase):
         self.assertFalse(got["ok"])
         self.assertIn("gone: desktop.session, desktop.turn, desktop.closed", got["detail"])
 
+    def test_a_test_name_dropped_from_every_chunk_list_is_red(self):
+        # (no chunk runs it any more, so no chunk is red: the lists together are held to their last green run)
+        first = self.run_it("selectors", "it_names", "^(TestA|TestB)$", "^(TestC)$")
+        self.assertEqual(first.returncode, 0, first.stdout)
+        r = self.run_it("selectors", "it_names", "^(TestA)$", "^(TestC)$")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("gone: TestB", json.loads(r.stdout)["detail"])
+
     # ── Part 4: the verdict ─────────────────────────────────────────────────────────────────────────────
 
     def test_a_run_in_pieces_with_one_lane_left_out_is_not_green_and_names_it(self):

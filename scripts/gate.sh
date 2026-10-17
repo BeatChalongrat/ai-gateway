@@ -68,7 +68,7 @@ LANES="tracks python_lane look_gallery go_units go_vet gofmt backend_lane backen
 # AM24: what the gate's verdict needs a green result of, at one commit — every lane, every chunk of the integration
 # lane (scripts/gate/it/chunk.sh ids), the build, the test stack and the smoke on it
 verdict_lanes() {
-  echo "$LANES $(bash scripts/gate/it/chunk.sh ids 2>/dev/null | tr -d '\r' | tr '\n' ' ') build_images build_runner build_fetcher stack_up stack_web clients_build clients_up smoke_test_on smoke_dead_primary_red smoke_dead_primary_green smoke_test_off"
+  echo "$LANES it_names $(bash scripts/gate/it/chunk.sh ids 2>/dev/null | tr -d '\r' | tr '\n' ' ') build_images build_runner build_fetcher stack_up stack_web clients_build clients_up smoke_test_on smoke_dead_primary_red smoke_dead_primary_green smoke_test_off"
 }
 at_commit() { # the commit a run is for, and whether anything tracked is changed under it (GATE_FOR_SHA: a built commit)
   if [ -n "${GATE_FOR_SHA:-}" ]; then echo "${GATE_FOR_SHA:0:7} 0"; return; fi
@@ -237,6 +237,8 @@ case "$phase" in
     [ "$(grep -a -c -E '_lane_exit=0$' "$out")" -ge 3 ] || rc=1
     # AM24: each chunk of the file in the gate's ledger — a file emptied partway, or a chunk short of a name, is red
     GATE_COMMIT="${at% *}" GATE_DIRTY="${at#* }" python scripts/gate/ledger.py it-lane "$out" > "$RESULTS/it_ledger.txt" 2>&1 || rc=1
+    mapfile -t ITC < <(for f in scripts/gate/it/am*.sh; do grep -o "^ *'\^(.*)\$'" "$f" | sed "s/^ *'//; s/'\$//"; done)
+    GATE_COMMIT="${at% *}" GATE_DIRTY="${at#* }" python scripts/gate/ledger.py selectors it_names "${ITC[@]}" >> "$RESULTS/it_ledger.txt" 2>&1 || rc=1
     grep -a -v ' GREEN ' "$RESULTS/it_ledger.txt" | sed 's/^/    /' | head -20
     say "integration: $(grep -a -c '^--- PASS' "$out") passed, $(grep -a -c '^--- FAIL' "$out") failed · $(grep -a -E '_lane_exit=' "$out" | tr '\n' ' ')→ $out"
     exit $rc

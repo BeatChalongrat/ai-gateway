@@ -48,6 +48,8 @@ case "${1:-list}" in
     grep -a -q '^--- PASS' "$tmp" || { echo "chunk_ran_nothing $n" >> "$OUT"; rc=1; }
     # AM24: nor one in which a name it lists ran as no test; and its run goes to the gate's ledger
     python scripts/gate/ledger.py record-chunk "$c" "$tmp" "$rc" >> "$OUT" || rc=1
+    # and every name the chunks list, all of them, held to the last green run's: a name gone from every list is red
+    python scripts/gate/ledger.py selectors it_names "${CHUNKS[@]}" >> "$OUT" || rc=1
     echo "chunk_exit=$rc" >> "$OUT"
     echo "chunk $n exit=$rc · $(grep -a -c '^--- PASS' "$tmp") passed · $(grep -a -c '^--- FAIL' "$tmp") failed · $(grep -a -E '^ok |^FAIL\s' "$tmp" | tail -1 | awk '{print $NF}')"
     grep -a -E '^--- FAIL|gate (STOPPED|REFUSED)' "$tmp" | cut -c1-200 || true

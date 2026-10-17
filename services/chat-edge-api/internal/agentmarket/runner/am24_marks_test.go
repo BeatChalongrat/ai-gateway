@@ -125,6 +125,9 @@ func TestATooLongAnswerIsMendedOnItsWayAndAnUncheckedOneSaysSo(t *testing.T) {
 	if err != nil || len(ans.fixes) != 1 || !strings.HasSuffix(ans.parsed["movements"].([]any)[3].(string), " ร่าง") {
 		t.Fatalf("too long and a slip, twice: mended on its way to the renderer: %v %+v %q", err, ans.fixes, tried)
 	}
+	if calls != 1 {
+		t.Fatalf("an answer only too long is read once, when it is the one used: %d readings", calls)
+	}
 	down := func(context.Context, []string) ([]markResult, error) { return nil, errors.New("sandbox: no engine") }
 	ans, _, _, err = am24Ask(t, down, am.Thai, `{"summary":"ร่่างนี้ {revenue}"}`)
 	if err != nil || ans.unchecked == "" || !strings.Contains(ans.unchecked, "no engine") {
@@ -142,20 +145,32 @@ func TestTheRecordSaysWhetherTheAnswerUsedWasChecked(t *testing.T) {
 		}
 		return make([]markResult, len(texts)), nil
 	}
-	// the first answer is too long and could not be checked; the second fits, is checked, and is the one used
+	// the first answer has a slip with one reading (read, kept mended, asked again); the second is clean, but the
+	// engine cannot read it: the answer used is the second, unchecked — the record says so, of it
+	ans, _, _, err := am24Ask(t, func(ctx context.Context, texts []string) ([]markResult, error) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			return am24Marks(new(int32))(ctx, texts)
+		}
+		return nil, errors.New("sandbox: busy")
+	}, am.Thai, `{"summary":"ร่่าง {revenue}"}`, `{"summary":"ยอดเท่ากัน {revenue}"}`)
+	if err != nil || ans.unchecked == "" || ans.parsed["summary"] != "ยอดเท่ากัน {revenue}" {
+		t.Fatalf("the answer used (the second) could not be checked, and the record says so: %v %q %v", err, ans.unchecked, ans.parsed)
+	}
+	// an answer only too long is not read until it is the one used: the clean second answer is the only one read
+	calls = 0
 	long := make([]string, 9)
 	for i := range long {
 		long[i] = "ข้อ " + strings.Repeat("ก", i+1)
 	}
 	long[3] = strings.Repeat("ยาวเกินไป", 8)
-	ans, _, _, err := am24Ask(t, flaky, am.Thai, am22Answer(long, "สรุป {revenue}"), `{"summary":"ยอดเท่ากัน {revenue}"}`)
+	ans, _, _, err = am24Ask(t, flaky, am.Thai, am22Answer(long, "สรุป {revenue}"), `{"summary":"ยอดเท่ากัน {revenue}"}`)
+	if err != nil || calls != 1 || ans.unchecked == "" {
+		t.Fatalf("one reading, of the answer used (the engine was busy for it): %v %d %q", err, calls, ans.unchecked)
+	}
+	calls = 1 // (the engine reads the next one)
+	ans, _, _, err = am24Ask(t, flaky, am.Thai, `{"summary":"ยอดเท่ากัน {revenue}"}`)
 	if err != nil || ans.unchecked != "" {
 		t.Fatalf("the answer used was checked; the record must not say otherwise: %v %q", err, ans.unchecked)
-	}
-	calls = 0
-	ans, _, _, err = am24Ask(t, flaky, am.Thai, `{"summary":"ยอดเท่ากัน {revenue}"}`)
-	if err != nil || ans.unchecked == "" {
-		t.Fatalf("the answer used could not be checked; the record says so: %v %q", err, ans.unchecked)
 	}
 	rc := &runCtx{r: &Runner{}}
 	if _, err := rc.engineMarks(context.Background(), []string{"ร่่าง"}); err == nil || !strings.Contains(err.Error(), "no engine") {

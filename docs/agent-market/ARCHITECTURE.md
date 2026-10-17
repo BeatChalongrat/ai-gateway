@@ -1571,7 +1571,9 @@ slips, the last answer whose every slip has exactly one reading — a mark writt
 order — is used with those slips written as Thai writes them, and each text is recorded on the run's narrative step
 as written and as used (`marks_mended`); a slip with no one reading (two tone marks, a mark on a vowel or after a
 space) is never mended, and such an answer is not used. A check that could not run says so (`marks_unchecked`); it
-is never recorded as one that passed. It is not charged to the run. What it cannot see: a mark the model dropped
+is never recorded as one that passed. It is not charged to the run. Each reading is a sandbox call (≈ 2.5 s here),
+so only an answer that could be used is read: one only too long is asked again for its length and read once, if
+it is the one used. What it cannot see: a mark the model dropped
 ("ไม" for ไม่) is well-formed Thai to any rule of marks — only a dictionary could tell, and none is in the engine.
 Tests: `runner/am24_marks_test.go`, `tests/test_am24_marks.py`.
 

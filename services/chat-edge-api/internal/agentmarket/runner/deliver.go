@@ -179,38 +179,31 @@ type narrativeAnswer struct {
 // askNarrative asks models for the commentary and reads every answer — checkNarrative, then its Thai (AM24 §1.2,
 // marks) — with one retry on the reason: the narrative step's whole use of a model, apart from the step so that a
 // test runs exactly this. After the last attempt an answer whose only faults were Thai slips with one reading each
-// is used mended; failing that, one whose only fault was its length goes to the renderer's ladder (overLength).
+// is used mended; failing that, one whose only fault was its length goes to the renderer's ladder (overLength) —
+// its Thai read then, once: an answer only too long is asked again for its length anyway, and each reading of the
+// Thai is a sandbox call (a Thai round's commentary made the integration lane's slowest chunk 60 % slower).
 func askNarrative(ctx context.Context, m *ModelClient, l am.Lang, models []string, system, user string, cv computedView,
 	marks marksFunc) (narrativeAnswer, Completion, []string, error) {
 	var out narrativeAnswer
 	var long, mended map[string]any
-	var longBy, mendedBy, longUnchecked string
-	var longFixes, mendedFixes []markFix
+	var longBy, mendedBy string
+	var mendedFixes []markFix
 	c, tried, err := m.CompleteWithInBy(ctx, l, models, system, user, func(model, s string) error {
 		v, err := checkNarrative(l, s, cv)
 		var tl *tooLongErr
-		isLong := errors.As(err, &tl)
-		if err != nil && !isLong {
+		if errors.As(err, &tl) {
+			long, longBy = v, model // (AM22: kept, in case no attempt fits — see overLength; its Thai is read if used)
+		}
+		if err != nil {
 			return err
 		}
 		mv := judgeMarks(ctx, l, v, marks)
 		switch {
 		case mv.reason != "" && mv.mended == nil:
-			// a slip with no one reading: this answer is never used
-			if isLong {
-				return errors.New(tl.reason + "; " + mv.reason)
-			}
-			return errors.New(mv.reason)
-		case mv.reason != "" && isLong:
-			long, longBy, longFixes = mv.mended, model, mv.fixes
-			return &tooLongErr{reason: tl.reason + "; " + mv.reason}
+			return errors.New(mv.reason) // a slip with no one reading: this answer is never used
 		case mv.reason != "":
 			mended, mendedBy, mendedFixes = mv.mended, model, mv.fixes
 			return errors.New(mv.reason)
-		case isLong:
-			// (AM22: kept, in case no attempt fits — see overLength; AM24: with whether its Thai could be read)
-			long, longBy, longFixes, longUnchecked = v, model, nil, mv.unchecked
-			return err
 		}
 		// the record says whether the answer USED was checked — not whether some attempt could not be
 		out.parsed, out.unchecked = v, mv.unchecked
@@ -222,9 +215,16 @@ func askNarrative(ctx context.Context, m *ModelClient, l am.Lang, models []strin
 			out.parsed, out.fixes, err = mended, mendedFixes, nil
 			c.Model = mendedBy
 		} else if v, model, ok := overLength(long, longBy); ok {
-			// AM22 §1.2: the model's words, too long after both attempts — the renderer's ladder decides
-			out.parsed, out.fixes, out.unchecked, err = v, longFixes, longUnchecked, nil
-			c.Model = model
+			// AM22 §1.2: the model's words, too long after both attempts — the renderer's ladder decides. AM24: once its
+			// Thai is read: mended when every slip has one reading, never used when one has none (the rules write)
+			switch mv := judgeMarks(ctx, l, v, marks); {
+			case mv.reason == "":
+				out.parsed, out.unchecked, err = v, mv.unchecked, nil
+				c.Model = model
+			case mv.mended != nil:
+				out.parsed, out.fixes, err = mv.mended, mv.fixes, nil
+				c.Model = model
+			}
 		}
 	}
 	return out, c, tried, err

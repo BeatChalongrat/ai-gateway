@@ -507,7 +507,8 @@ script uses); a check over nothing is a skip, never a pass (a lane whose every c
 `portal.billing_api` when the organisation sells no pack); and a count that falls on its own is red — each run's
 count is held to the lane's last green run, and a check removed on purpose is removed with a line in
 `scripts/gate/removed_checks.txt` saying what replaced it, which is what lets the count fall. The smoke holds its
-checks by name the same way (`smoke.count`), so a check gone is named.
+checks by name the same way (`smoke.count`), so a check gone is named; and so are the names every chunk of the
+integration lane lists, all together (`it_names`): a test dropped from every list leaves no chunk to fail.
 
 **One verdict, from pieces (AM24).** The host cannot hold the whole gate at once, so it runs in pieces — and from
 AM19 to AM23 nobody saw every lane green at one commit. Every lane now writes, when it ends, the commit it ran at,

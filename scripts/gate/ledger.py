@@ -22,6 +22,7 @@ is named on the last line with its commit. A run in pieces is then a verdict, no
     python scripts/gate/ledger.py record-chunk <regex> <output> <exit code>   a chunk's run (chunk.sh), as it:<first test>+n
     python scripts/gate/ledger.py it-lane <it_lane.txt>                       a whole integration run, chunk by chunk
     python scripts/gate/ledger.py chunk-id <regex>                            a chunk's name in the ledger
+    python scripts/gate/ledger.py selectors it_names <regex…>                 every name the chunks list, held (rule 3)
     python scripts/gate/ledger.py names <lane> <names file>                   a run's check names against the last (rule 3)
     python scripts/gate/ledger.py verdict <lane…>                             green only when every lane is green at HEAD
 """
@@ -297,6 +298,20 @@ def it_lane(lane_file: str) -> int:
     return rc
 
 
+def selectors(lane: str, regexes: list[str]) -> int:
+    """Every test the integration lane's chunks name, all lists together, held to the last green run's (rule 3): a
+    name dropped from every list leaves no chunk to run it and nothing red — this is what is red then. Prints one line."""
+    import tempfile
+
+    names_all = sorted({n for r in regexes for n in chunk_names(r)})
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+        json.dump(names_all, f)
+    try:
+        return names(lane, f.name)
+    finally:
+        os.unlink(f.name)
+
+
 # ── the smoke's check names ──────────────────────────────────────────────────────────────────────────────
 
 def names(lane: str, names_file: str) -> int:
@@ -370,6 +385,8 @@ def main(argv: list[str]) -> int:
         return 0
     if len(argv) == 2 and argv[0] == "it-lane":
         return it_lane(argv[1])
+    if len(argv) >= 3 and argv[0] == "selectors":
+        return selectors(argv[1], argv[2:])
     if len(argv) == 3 and argv[0] == "names":
         return names(argv[1], argv[2])
     if len(argv) >= 2 and argv[0] == "verdict":
