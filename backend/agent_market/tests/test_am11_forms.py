@@ -146,10 +146,11 @@ class AFilledFormIsOpenedAgain(unittest.TestCase):
         self.assertEqual([ws["C9"].value, float(ws["C10"].value)], ["Net profit (THB)", 1747242.0])
         self.assertEqual([ws["D9"].value, ws["D10"].value], ["Headcount", None])
         self.assertEqual([ws["B12"].value, ws["C12"].value], ["Cash at bank (THB):", None])
-        # an amount is written the way an amount reads — thousands separated, two decimals — when the
-        # form's blank said nothing about it; it is still a number, so the form's own formula works
-        self.assertEqual(ws["C6"].number_format, "#,##0.00")
-        self.assertEqual(ws["B10"].number_format, "#,##0.00")
+        # an amount is written the way it reads — thousands separated, its own decimals (the financial report's
+        # figures are whole baht since AM23, as its report and workbook print them) — when the form's blank said
+        # nothing about it; it is still a number, so the form's own formula works
+        self.assertEqual(ws["C6"].number_format, "#,##0")
+        self.assertEqual(ws["B10"].number_format, "#,##0")
         self.assertIsInstance(ws["C6"].value, (int, float))
         self.assertEqual(ws["C4"].number_format, "General")  # a name is not an amount
         # the title and the note got nothing, and are no gap

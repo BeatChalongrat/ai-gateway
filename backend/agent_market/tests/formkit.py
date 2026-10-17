@@ -57,8 +57,8 @@ REQUEST_LABELS = [
 
 # the report agent's fields with a run's values, as its template_values gives them
 VALUES = {
-    "company": "บริษัท ตัวอย่างการค้า จำกัด", "period": "กันยายน 2569", "revenue": "12,480,300.00",
-    "gross_profit": "4,992,120.00", "total_expenses": "10,733,058.00", "net_profit": "1,747,242.00",
+    "company": "บริษัท ตัวอย่างการค้า จำกัด", "period": "กันยายน 2569", "revenue": "12,480,300",
+    "gross_profit": "4,992,120", "total_expenses": "10,733,058", "net_profit": "1,747,242",
 }
 
 SPEC = {"fields": {

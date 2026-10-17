@@ -1536,7 +1536,8 @@ where its report and deck printed whole baht (3,821); the workbook now prints ea
 baht, a percentage to one decimal, a ratio's change in points to two (`look/xlsx_styles.py` BAHT, PCT1, POINTS) —
 while each cell keeps its exact value, and the ledger and the recomputation sheet keep the satang. (Printing satang in
 the report instead was tried: its P&L table of six amount columns no longer fits a portrait page.) The print proof
-states each amount at the decimals its cell prints (`workpaper.money_value`). Tests: `tests/test_am23_agree.py` (Part 4 fixture 6: a figure written without its commas, with another
+states each amount at the decimals its cell prints (`workpaper.money_value`). Its customer's form is filled with
+the figures as printed, whole baht (the form wrote satang beside them until the check caught it on a filled memo). Tests: `tests/test_am23_agree.py` (Part 4 fixture 6: a figure written without its commas, with another
 value, under another number format, in the form; the financial report's old two-decimal workbook),
 `runner/am23_it_test.go`.
 

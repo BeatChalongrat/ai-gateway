@@ -70,19 +70,22 @@ def summarize(computed: dict) -> dict:
 
 
 def template_values(computed: dict) -> dict:
-    """The values a customer's template can take (the manifest's templates block): money as printed text."""
+    """The values a customer's template can take (the manifest's templates block): money as printed text — as the
+    round's figures table, its report and its workbook print it (AM23 Part 2: whole baht; the form wrote satang beside
+    them until AM23, and the check that every file says the same number caught it)."""
     from ...engine.thai import fmt_money
 
     lines = {l["key"]: l for l in computed["lines"]}
+    figures = computed.get("figures") or {}
+
+    def baht(v):
+        return fmt_money(v, 0) if v is not None else ""
 
     def m(key):
-        v = (lines.get(key) or {}).get("current")
-        return fmt_money(v) if v is not None else ""
+        return (figures.get(key) or {}).get("text") or baht((lines.get(key) or {}).get("current"))
     return {"company": computed.get("company") or "", "period": computed["period_label"], "revenue": m("revenue"),
             "gross_profit": m("gross_profit"), "total_expenses": m("total_expenses"), "net_profit": m("net_profit"),
-            "lines": [{"label": l["label"], "current": fmt_money(l["current"]) if l["current"] is not None else "",
-                       "prior": fmt_money(l["prior"]) if l.get("prior") is not None else "",
-                       "budget": fmt_money(l["budget"]) if l.get("budget") is not None else ""}
+            "lines": [{"label": l["label"], "current": baht(l["current"]), "prior": baht(l.get("prior")), "budget": baht(l.get("budget"))}
                       for l in computed["lines"]]}
 
 
