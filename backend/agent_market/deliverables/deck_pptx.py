@@ -149,6 +149,14 @@ class DeckWriter:
                 t.text = self.footer
                 r.append(t)
                 p.append(r)
+            else:
+                # AM24: the slide-number field's cached text is this slide's number — PowerPoint and LibreOffice draw
+                # the field's own number either way, and a text extractor (search, a screen reader, a check that reads
+                # the deck back) reads this text: it read "1" on every slide
+                fld = el.find(".//{%s}fld" % A_NS)
+                t = fld.find("{%s}t" % A_NS) if fld is not None else None
+                if t is not None:
+                    t.text = str([x.slide_id for x in self.prs.slides].index(slide.slide_id) + 1)
             slide.shapes._spTree.append(el)
 
     def _choose(self, layout: str, content: dict, section: str) -> catalogue.Choice:
