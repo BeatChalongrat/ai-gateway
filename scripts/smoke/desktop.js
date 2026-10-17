@@ -104,13 +104,19 @@ function installedConfig() {
   try { return JSON.parse(fs.readFileSync(path.join(path.dirname(EXE), "resources", "desktop.config.json"), "utf8")); } catch { return {}; }
 }
 
+// AM24 §3.1: the desktop's four checks are always on record — passed, failed, or skipped with why. Until AM24 a
+// run with the desktop off recorded desktop.startup as a skip and the other three not at all, so the live smoke
+// counted 49 checks with the desktop and 46 without, and the three read as gone.
+const CHECKS = ["desktop.startup", "desktop.session", "desktop.turn", "desktop.closed"];
+function skipAll(R, why) { for (const name of CHECKS) R.skip(name, why); }
+
 module.exports = async function desktop(R) {
-  if (process.platform !== "win32") { R.skip("desktop.startup", "the desktop check runs on Windows only"); return; }
-  if (!fs.existsSync(EXE)) { R.skip("desktop.startup", `not installed: ${EXE}`); return; }
+  if (process.platform !== "win32") { skipAll(R, "the desktop check runs on Windows only"); return; }
+  if (!fs.existsSync(EXE)) { skipAll(R, `not installed: ${EXE}`); return; }
   let chromium = null;
   const pwDirs = [L.env("SMOKE_PLAYWRIGHT_DIR"), path.join(L.ROOT, "apps", "web-chat", "node_modules", "playwright-core"), path.join(L.ROOT, "apps", "desktop", "node_modules", "playwright-core")].filter(Boolean);
   for (const d of pwDirs) { try { ({ chromium } = require(d)); break; } catch { /* next */ } }
-  if (!chromium) { R.skip("desktop.startup", `playwright-core not found (apps/web-chat/node_modules — npm install there — or SMOKE_PLAYWRIGHT_DIR)`); return; }
+  if (!chromium) { skipAll(R, `playwright-core not found (apps/web-chat/node_modules — npm install there — or SMOKE_PLAYWRIGHT_DIR)`); return; }
   const cfg = installedConfig();
   const pageUrl = cfg.pageUrl || "https://localhost:3002/chat";
   const chatEdgeUrl = cfg.chatEdgeUrl || "https://localhost:4000";
@@ -121,7 +127,7 @@ module.exports = async function desktop(R) {
     // CARD-RULES §4: never close the owner's app while it is in use — a turn, a stream, a tool
     // or a composer line in its own log inside the last 10 minutes means SKIP, not taskkill.
     const busy = logSince(new Date(Date.now() - 10 * 60_000).toISOString()).filter((l) => /turn|stream|message|tool|composer|send/i.test(l) && !SESSION_LINE.test(l));
-    if (busy.length) { R.skip("desktop.startup", `the app was used in the last 10 minutes (${busy.length} log lines); not closing it`); return; }
+    if (busy.length) { skipAll(R, `the app was used in the last 10 minutes (${busy.length} log lines); not closing it`); return; }
     kill(); await waitFor(async () => !running(), 15000);
   }
   let since = new Date(Date.now() - 1000).toISOString();
@@ -129,7 +135,7 @@ module.exports = async function desktop(R) {
     // Attached to an app that is already running with the debugging port: its boot
     // happened before this check, so read the log from that run's first line
     // ("SRAN Desktop <version> pid=…"), not from now.
-    const bootLines = logSince("0000").filter((l) => /INFO  SRAN Desktop \S+ pid=\d+/.test(l));
+    const bootLines = logSince("0000").filter((l) => /\bINFO  SRAN Desktop \S+ pid=\d+/.test(l));
     if (bootLines.length) since = bootLines[bootLines.length - 1].slice(0, 24);
   }
   if (!hadPort) launch([`--remote-debugging-port=${PORT}`]);
@@ -214,8 +220,8 @@ module.exports = async function desktop(R) {
       }
       return result;
     });
-  } else if (!signedIn) {
-    R.skip("desktop.turn", "no desktop session (see desktop.session)");
+  } else {
+    R.skip("desktop.turn", signedIn ? "no app window to type in (see desktop.session)" : "no desktop session (see desktop.session)");
   }
 
   await R.run("desktop.closed", async () => {
@@ -228,4 +234,6 @@ module.exports = async function desktop(R) {
 };
 
 module.exports.isStopButton = isStopButton;
+module.exports.CHECKS = CHECKS;
+module.exports.skipAll = skipAll;
 module.exports.turnVerdict = turnVerdict;
