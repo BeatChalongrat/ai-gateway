@@ -15,6 +15,13 @@ from ..words import W
 from .workbook import L_BANK_ADJ, L_BANK_BAL, L_BOOK_ADJ, L_BOOK_BAL, L_DIFF, S_ITEMS, S_STATEMENT
 
 
+def face(view: dict) -> dict:
+    """Where the workbook's face prints each figure (AM23 Part 2: deliverables/agree.py compares it with every other
+    file of the round): the statement's balances, the adjusted balances and their difference, by the face's label."""
+    return {"bank_balance": W(L_BANK_BAL), "book_balance": W(L_BOOK_BAL), "adjusted_bank": W(L_BANK_ADJ),
+            "adjusted_book": W(L_BOOK_ADJ), "difference": W(L_DIFF)}
+
+
 def _money(v) -> str:
     return fmt_money(Decimal(str(v))) if v not in (None, "") else "—"
 

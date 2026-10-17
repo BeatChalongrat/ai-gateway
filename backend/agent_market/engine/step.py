@@ -162,6 +162,11 @@ def _fill_template(pkg, computed: dict, t: dict, req: dict | None = None) -> dic
         rep["passed"] = all(c["ok"] for c in rep["checks"])
     with open(path, "rb") as fh:
         sha = hashlib.sha256(fh.read()).hexdigest()
+    from ..deliverables import agree
+
+    # AM23 Part 2: the figures the filled form holds — every slot its gate found holding its value, a form with blanks
+    # nothing can fill included — for the check that every file says the same number (taken off the artifact once compared)
+    printed = agree.form_printed(pkg, values, t.get("saved") or {}, rep, computed.get("figures") or {})
     # AM8: what the filled file was found to lack travels with its quality, which the download card shows —
     # every slot without its value, by name (a reason kept only in the run's JSON reached nobody)
     return {"name": name, "format": "template", "kind": "template", "size": os.path.getsize(path), "sha256": sha,
@@ -172,7 +177,8 @@ def _fill_template(pkg, computed: dict, t: dict, req: dict | None = None) -> dic
                      "unfilled": rep.get("unfilled") or [],
                      # AM22: the places this round had no concept of, taken off the face — recorded, not printed
                      "not_applicable": [{k: o.get(k) for k in ("key", "label", "field", "why", "done")}
-                                        for o in rep.get("not_applicable") or []]}}
+                                        for o in rep.get("not_applicable") or []]},
+            "_printed": printed}
 
 
 def run(req: dict) -> dict:
@@ -249,6 +255,19 @@ def run(req: dict) -> dict:
             # blanks is worse than no form)
             why = pkg.template_why_not(computed) if hasattr(pkg, "template_why_not") else ""
             out["template_not_made"] = {"why": why}
+        # AM23 Part 2: every file of the round says the same number — read back from the finished files, this render's
+        # and the round's made before it; a figure printed two ways fails the two files that print it
+        from ..deliverables import agree
+
+        arts = out.get("artifacts") or []
+        prior = [{**p, "path": _in(p["input"])} for p in req.get("prior") or [] if p.get("input")]
+        res = agree.check(JOB_OUT, arts, computed, pkg, prior=prior)
+        if res is not None:
+            if not agree.attach(res, arts):
+                out["passed"] = False
+            out["agree"] = {k: res[k] for k in ("ok", "counts", "files", "bad") if k in res}
+        for a in arts:
+            a.pop("_printed", None)
     elif op == "inspect_template":
         from ..deliverables import template_fill, template_out
 

@@ -42,18 +42,19 @@ class XlsxWriter:
             rows.append([rt["label"], _num(rt["current"]), _num(rt["prior"]), _num(rt["change_points"]), None, None, None, rt["cite"]])
         self.book.table(ws, 4, heads, rows, money_cols=(2, 3, 4, 6, 7), pct_cols=(5,), freeze=False, filter=False)
         n_lines = len(c["lines"])
+        # AM23 Part 2: each figure as the report prints it — whole baht, a percentage to one decimal (the value stays exact)
+        for i in range(n_lines):
+            self._as(ws, 5 + i, (2, 3, 4, 6, 7), "baht")
+            self._as(ws, 5 + i, (5,), "pct1")
         for i, rt in enumerate(c["ratios"]):
             r = 5 + n_lines + i
-            for j in (2, 3):
-                self.book.fmt(ws, r, j, "pct")
-            self.book.fmt(ws, r, 4, "qty")
+            self._as(ws, r, (2, 3), "pct1")
+            self._as(ws, r, (4,), "points")
         for i, l in enumerate(c["lines"]):
             if l["key"] in ("gross_profit", "net_profit", "total_expenses"):
                 r = 5 + i
                 self.book.style(ws.cell(row=r, column=1), "AM Label Strong")
-                for j in (2, 3, 4, 6, 7):
-                    self.book.style(ws.cell(row=r, column=j), "AM Money Strong")
-                self.book.style(ws.cell(row=r, column=5), "AM Pct")
+                self._as(ws, r, (2, 3, 4, 6, 7), "baht_strong")
 
     def accounts(self):
         ws = self.book.sheet(S("docs.sheet.accounts"))
@@ -64,6 +65,14 @@ class XlsxWriter:
         rows = [[a["code"], a["name"], group_name.get(a["group"], a["group"]), _num(a["current"]), _num(a["prior"]), _num(a["var_prior"]),
                  _num(a["var_prior_pct"]), _num(a["budget"]), _num(a["var_budget"]), a["rows"], a["cite"]] for a in self.c["accounts"]]
         self.book.table(ws, 4, heads, rows, money_cols=(4, 5, 6, 8, 9), pct_cols=(7,), count_cols=(10,), text_cols=(1,))
+        for i in range(len(rows)):   # (AM23 Part 2: as the report prints them)
+            self._as(ws, 5 + i, (4, 5, 6, 8, 9), "baht")
+            self._as(ws, 5 + i, (7,), "pct1")
+
+    def _as(self, ws, r: int, cols, kind: str) -> None:
+        """AM23 Part 2: these cells as the report prints their figures (the money and percentage meanings of the report)."""
+        for j in cols:
+            self.book.fmt(ws, r, j, kind)
 
     def ledger(self):
         ws = self.book.sheet(S("docs.sheet.ledger"))
@@ -104,6 +113,8 @@ class XlsxWriter:
         rows = [[e["code"], e["title"], e["detail"], e.get("account"), _num(e.get("amount")), ", ".join(str(x) for x in e["rows"][:30]), e.get("cite")]
                 for e in self.c["exceptions"]] or [[None, S("docs.exc.none"), None, None, None, None, None]]
         self.book.table(ws, 4, heads, rows, money_cols=(5,), wrap_cols=(2, 3, 6))
+        for i in range(len(rows)):
+            self._as(ws, 5 + i, (5,), "baht")
 
         ws = self.book.sheet(S("docs.sheet.assumptions"))
         self.book.title(ws, S("docs.section.assumptions"))
@@ -123,6 +134,10 @@ class XlsxWriter:
                          src.get("file") or (S("docs.cite.derived") + " " + ", ".join(cit.get("derived_from", [])[:10])),
                          src.get("sheet"), src.get("cells"), cit["script"], cit["formula"]])
         self.book.table(ws, 4, heads, rows, money_cols=(3,), wrap_cols=(2, 4, 6, 8))
+        # each citation's value as the report's appendix prints it: a ratio to one decimal, a change in points, an amount
+        # in whole baht (a count prints the same either way)
+        for i, cit in enumerate(self.c["citations"]):
+            self._as(ws, 5 + i, (3,), {"pct": "pct1", "points": "points"}.get(cit.get("unit") or "", "baht"))
 
     def write(self, path: str, organisation: str = "") -> dict:
         self.summary()

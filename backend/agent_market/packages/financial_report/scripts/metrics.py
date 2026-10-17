@@ -582,7 +582,7 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
             p = Decimal(a["prior"])
             if p > 0 and cur > p * 2 and cur - p >= materiality:
                 exceptions.append({"code": "expense_spike",
-                                   "title": W("doc.exc.spike.title", v=a["name"] or a["code"], v2=fmt_pct(pct(cur - p, p), 0)),
+                                   "title": W("doc.exc.spike.title", v=a["name"] or a["code"], v2=fmt_pct(pct(cur - p, p))),
                                    "detail": f"{fmt_money(p, 0)} → {fmt_money(cur, 0)}", "account": a["code"],
                                    "amount": a["current"], "rows": [r.row for r in rows_by_acct.get(a["code"], [])][:30],
                                    "cite": a["cite"]})

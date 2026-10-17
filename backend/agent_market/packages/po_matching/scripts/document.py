@@ -16,6 +16,17 @@ from .match import never_written
 from .workbook import S_INVOICES
 
 
+def face(view: dict) -> dict:
+    """Where the workbook's face prints each figure (AM23 Part 2: deliverables/agree.py compares it with every other
+    file of the round): the results table's rows (a status's count, then its value) and the face's own lines."""
+    from .match import BLOCKED, PASS, PERSON, STATUS_TH
+    from .workbook import L_ACCRUED, L_INVOICES, L_PREPAID
+
+    return {"invoices": W(L_INVOICES), "passed": (STATUS_TH[PASS], 1), "value_passed": (STATUS_TH[PASS], 2),
+            "blocked": (STATUS_TH[BLOCKED], 1), "value_blocked": (STATUS_TH[BLOCKED], 2), "person": (STATUS_TH[PERSON], 1),
+            "received_not_billed": W(L_ACCRUED), "billed_not_received": W(L_PREPAID)}
+
+
 def _abs(v) -> Decimal:
     try:
         return abs(Decimal(str(v)))

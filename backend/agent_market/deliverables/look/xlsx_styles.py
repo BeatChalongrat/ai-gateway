@@ -33,8 +33,16 @@ MONEY = '#,##0.00;(#,##0.00);"-"'
 QTY = '#,##0.##;(#,##0.##);"-"'
 PCT = '0.00"%";(0.00"%");"-"'
 COUNT = '#,##0;(#,##0);"-"'
+# AM23 Part 2: a working paper whose report prints its figures another way prints them the report's way, so that every
+# file of a round says the same number — the cell keeps its exact value, the formula bar shows it: money in whole baht
+# (the "_)" keeps a positive in line with a negative's parenthesis), a percentage to one decimal with a minus sign, and
+# a ratio's change in percentage points with its sign
+BAHT = '#,##0_);(#,##0);"-"'
+PCT1 = '0.0"%";-0.0"%";"-"'
+POINTS = '+0.00;-0.00;"-"'
 TEXT = "@"
-FORMATS = {"money": MONEY, "qty": QTY, "pct": PCT, "count": COUNT, "text": TEXT, "general": "General"}
+FORMATS = {"money": MONEY, "qty": QTY, "pct": PCT, "count": COUNT, "baht": BAHT, "pct1": PCT1, "points": POINTS, "text": TEXT,
+           "general": "General"}
 BAD_SHEET_CHARS = re.compile(r"[\[\]:*?/\\]")
 SHEET_NAME_MAX = 31
 # widths, in Excel's character units (the default font's digit), that a column may not go under or over
@@ -117,7 +125,8 @@ class Book:
         self._add("AM Cell", self._font("body", "ink"), border=self._rule(), align=top)
         self._add("AM Cell Wrap", self._font("body", "ink"), border=self._rule(), align=wrap)
         self._add("AM Cell Text", self._font("body", "ink"), border=self._rule(), align=top, number_format=TEXT)
-        for kind, fmt in (("Money", MONEY), ("Qty", QTY), ("Pct", PCT), ("Count", COUNT)):
+        for kind, fmt in (("Money", MONEY), ("Qty", QTY), ("Pct", PCT), ("Count", COUNT), ("Baht", BAHT), ("Pct1", PCT1),
+                          ("Points", POINTS)):
             self._add(f"AM {kind}", self._font("body", "ink"), border=self._rule(), align=right, number_format=fmt)
             self._add(f"AM {kind} Strong", self._font("body", "ink", bold=True), border=self._rule(), align=right, number_format=fmt)
         self._add("AM Label", self._font("body", "ink"), border=self._rule(), align=wrap)
@@ -190,7 +199,8 @@ class Book:
     def fmt(self, ws, r: int, c: int, kind: str) -> None:
         """A cell's number format by meaning (money, qty, pct, count, text)."""
         cell = ws.cell(row=r, column=c)
-        name = {"money": "AM Money", "qty": "AM Qty", "pct": "AM Pct", "count": "AM Count", "text": "AM Cell Text"}[kind]
+        name = {"money": "AM Money", "qty": "AM Qty", "pct": "AM Pct", "count": "AM Count", "baht": "AM Baht", "pct1": "AM Pct1",
+                "points": "AM Points", "text": "AM Cell Text", "baht_strong": "AM Baht Strong"}[kind]
         self.style(cell, name)
 
     def table(self, ws, top: int, headers: list, rows: list, widths=None, *, money_cols=(), qty_cols=(), pct_cols=(), count_cols=(),
@@ -371,6 +381,8 @@ def _formatted(value, number_format: str) -> str:
     v = abs(value)
     if "0.00" in fmt and "%" in fmt:
         s = f"{v:,.2f}%"
+    elif "0.0" in fmt and "%" in fmt:
+        s = f"{v:,.1f}%"
     elif "0.00" in fmt:
         s = f"{v:,.2f}"
     elif "0.##" in fmt:

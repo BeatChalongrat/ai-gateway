@@ -14,6 +14,19 @@ from ..words import W
 from .workbook import S_CLAIMS
 
 
+def face(view: dict) -> dict:
+    """Where the workbook's face prints each figure (AM23 Part 2: deliverables/agree.py compares it with every other
+    file of the round), by the summary sheet's label."""
+    return {"claims": W("doc.face.all_claims"), "pass": W("doc.face.passed"), "exception": W("doc.face.exceptions_review"),
+            "question": W("doc.face.judgement"), "claimed_thb": W("doc.face.total_claimed"), "pass_thb": W("doc.face.total_passed"),
+            "exception_thb": W("doc.face.total_exceptions"), "question_thb": W("doc.face.total_judgement"),
+            "review": W("doc.face.exceptions_rows")}
+
+
+# the fields of a customer's form that hold a figure under another name (the others are named as the figures are)
+FORM_FIGURES = {"passed": "pass", "exceptions": "exception", "judgement": "question"}
+
+
 def _money(v) -> str:
     return fmt_money(Decimal(str(v))) if v not in (None, "") else "—"
 

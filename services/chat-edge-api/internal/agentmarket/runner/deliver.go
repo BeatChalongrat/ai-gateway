@@ -635,6 +635,14 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 				req["template"] = map[string]any{"input": input, "name": names["template"],
 					"saved": map[string]any{"slots": tpl.Slots, "mapping": tpl.Mapping}}
 			}
+			// AM23 Part 2: the round's files made before this render are read back beside it — a deck asked of a
+			// finished round must say the same numbers as the round's workbook (deliverables/agree.py)
+			prior, pinputs, pclean := rc.priorFiles(ctx, artifactRun, pyFormats)
+			defer pclean()
+			if len(prior) > 0 {
+				inputs = append(inputs, pinputs...)
+				req["prior"] = prior
+			}
 			if logo != nil {
 				lpath, lclean, err := rc.r.Files.OpenLocalCopy(ctx, *logo)
 				if err == nil {

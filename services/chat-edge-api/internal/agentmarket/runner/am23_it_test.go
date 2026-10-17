@@ -166,6 +166,10 @@ func TestABankRoundMakesTheReportTheDeckAndThePDFOfItsWorkbookWhenAsked(t *testi
 		if strings.Join(have, ",") != strings.Join(c.want, ",") {
 			t.Fatalf("%s delivers %v, not %v", c.formats, have, c.want)
 		}
+		// Part 2: the workbook, the report and the deck were read back and say the same numbers — once, run-level
+		if len(c.want) > 1 && agreed(arts) != "(3 ไฟล์)" {
+			t.Fatalf("every file says the same number, read back from the three: %q", agreed(arts))
+		}
 		outs := e.outputsOf(run.ID)
 		if len(outs) != 1 || outs[0]["pdf_of"] != "xlsx" {
 			t.Fatalf("the files card says what the PDF prints: %v", outs)
@@ -315,6 +319,37 @@ func TestADeckAskedOfAFinishedRoundIsAskedAboutOnTheRound(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("the smaller deck: %d", n)
 	}
+	// Part 2: a deck made after the round is read back beside the round's workbook, and says the same numbers
+	if agreed(arts) != "(2 ไฟล์)" {
+		t.Fatalf("the deck is compared with the round's workbook: %q", agreed(arts))
+	}
+}
+
+// agreed is what the one files.agree check of a round's files says it read ("(3 ไฟล์)"), "" when there is none or
+// more than one, or one that did not pass.
+func agreed(arts []am.Artifact) string {
+	var found []string
+	for _, a := range arts {
+		var q struct {
+			Checks []gateCheck `json:"checks"`
+		}
+		_ = json.Unmarshal(a.Validation, &q)
+		for _, c := range q.Checks {
+			if c.Name == "files.agree" {
+				d := c.Detail.In(am.Thai)
+				if !c.OK {
+					return "failed: " + d
+				}
+				if i := strings.LastIndex(d, "("); i >= 0 {
+					found = append(found, d[i:])
+				}
+			}
+		}
+	}
+	if len(found) != 1 {
+		return strings.Join(found, " · ")
+	}
+	return found[0]
 }
 
 // renderJobOf is a render job of a finished round, as the API makes one.

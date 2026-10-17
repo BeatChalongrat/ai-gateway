@@ -155,7 +155,7 @@ def kpis(computed: dict) -> list[dict]:
                     "value_short": fmt_millions(Decimal(l["current"])), "delta": delta, "tone": tone,
                     "good": good, "cite": l["cite"]})
     nm = _ratio(computed, "net_margin")
-    delta = S("docs.points", change_points=f"{Decimal(nm['change_points']):+.1f}") if nm["change_points"] is not None else None
+    delta = S("docs.points", change_points=f"{Decimal(nm['change_points']):+.2f}") if nm["change_points"] is not None else None
     tone = "flat" if not nm["change_points"] else ("up" if Decimal(nm["change_points"]) > 0 else "down")
     out.append({"key": "net_margin", "label": S("docs.kpi.net_margin"), "value": pct_or_dash(nm["current"], signed=False),
                 "value_short": pct_or_dash(nm["current"], signed=False), "delta": delta, "tone": tone,
@@ -193,7 +193,7 @@ def pl_table(computed: dict) -> dict:
         r = [rt["label"], pct_or_dash(rt["current"], signed=False)]
         if has_prior:
             r += [pct_or_dash(rt["prior"], signed=False),
-                  "—" if rt["change_points"] is None else S("docs.points", change_points=f"{Decimal(rt['change_points']):+.1f}"), ""]
+                  "—" if rt["change_points"] is None else S("docs.points", change_points=f"{Decimal(rt['change_points']):+.2f}"), ""]
         if has_budget:
             r += ["", ""]
         r.append(rt["cite"])

@@ -1518,3 +1518,24 @@ refusal of it, or a copy that holds nothing or that LibreOffice read as undecoda
 it when it was what the round needed. Neither kind is ever written: no manifest may declare one, and a request for a
 `.xls` is answered with why — 65,536 rows, no frozen header row repeated on every page, no print area — and the
 `.xlsx` is made instead. Fixtures: `runner/am23_it_test.go` (`kbank_sep.xls`, `broken.xls`), `runner/am23_test.go`.
+
+**Every file of a round says the same number** (`deliverables/agree.py`, run by `engine/step.py`'s render op on the
+finished files; `runner/agree_am23.go`). Since AM23 an agent makes two or more kinds of file with figures in each, and
+a figure printed one way in one and another way in the next is the worst bug this product can have — AM14's was
+`3600` in one place and `3,600.00` in another. So every finished file is read back — the workbook as Excel prints each
+cell under its number format, the report's tables, cover and cited paragraphs, the deck's slides, the customer's form
+as its own gate found it filled — and every printed number that is one of the run's figures is compared: beside the
+figure's label (the figure's own, or the label the package's workbook face gives it, `face(view)` in its
+`scripts/document.py`), or in a line that cites it, where the same amount printed with more or fewer decimals is the
+same figure (3,820.55 and 3,821) and a small whole number counts only when it prints exactly the same. A figure
+printed two ways fails both files that print it — no winner is picked — naming the figure, the two places and the two
+strings, and the round fails its gate. A deck made after the round is compared with the round's own workbook and
+report (the runner hands them to the render as `prior`). A zero the workbook prints as the accounting dash is not a
+second way of printing it. What the check found first: the financial report's workbook printed satang (3,820.55)
+where its report and deck printed whole baht (3,821); the workbook now prints each figure the report's way — whole
+baht, a percentage to one decimal, a ratio's change in points to two (`look/xlsx_styles.py` BAHT, PCT1, POINTS) —
+while each cell keeps its exact value, and the ledger and the recomputation sheet keep the satang. (Printing satang in
+the report instead was tried: its P&L table of six amount columns no longer fits a portrait page.) The print proof
+states each amount at the decimals its cell prints (`workpaper.money_value`). Tests: `tests/test_am23_agree.py` (Part 4 fixture 6: a figure written without its commas, with another
+value, under another number format, in the form; the financial report's old two-decimal workbook),
+`runner/am23_it_test.go`.

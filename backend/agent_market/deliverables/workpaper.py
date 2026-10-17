@@ -272,27 +272,35 @@ def bands(ws) -> list[list[int]]:
 
 
 def _money(cell) -> bool:
+    fmt = str(cell.number_format or "")
     return isinstance(cell.value, (int, float, Decimal)) and not isinstance(cell.value, bool) \
-        and "#,##0.00" in str(cell.number_format or "")
+        and ("#,##0.00" in fmt or fmt.startswith("#,##0_)"))
 
 
-def money_text(value) -> str:
-    """An amount as the working papers' money format prints it: 1,234.50 · (1,234.50) · - for zero."""
+def _places(cell) -> int:
+    """The decimals an amount's cell prints: two, or none in whole baht (AM23 Part 2: the financial report's figures)."""
+    return 0 if str(cell.number_format or "").startswith("#,##0_)") else 2
+
+
+def money_text(value, places: int = 2) -> str:
+    """An amount as the working papers' money format prints it: 1,234.50 · (1,234.50) · - for zero (``places``: 0 for a
+    cell in whole baht)."""
     try:
-        d = Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        d = Decimal(str(value)).quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
     except (InvalidOperation, ValueError):
         return str(value)
     if d == 0:
         return "-"
-    s = f"{abs(d):,.2f}"
+    s = f"{abs(d):,.{places}f}"
     return f"({s})" if d < 0 else s
 
 
-def money_value(value) -> str | None:
-    """An amount as a number, at the two decimals the money format prints: ``3600.00`` · ``-1234.50``.
-    None for a zero (it prints as a dash: there is no number on the page) and for what is not a number."""
+def money_value(value, places: int = 2) -> str | None:
+    """An amount as a number, at the two decimals the money format prints: ``3600.00`` · ``-1234.50`` (``places``: 0 for a
+    cell in whole baht — ``3821`` for 3,820.55, as its page prints it). None for a zero (it prints as a dash: there is no
+    number on the page) and for what is not a number."""
     try:
-        d = Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        d = Decimal(str(value)).quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
     except (InvalidOperation, ValueError):
         return None
     return None if d == 0 else format(d, "f")
@@ -325,10 +333,10 @@ def print_rows(path: str, limit: int = 3000) -> list[dict]:
             money = [c for c in ws[r] if _money(c)]
             if not money:
                 continue
-            amounts = [money_text(c.value) for c in money]
+            amounts = [money_text(c.value, _places(c)) for c in money]
             # AM14: an amount is stated as a number. The runner reads the numbers a page prints and looks
             # for these among them; the printed form above stays for a runner older than this engine.
-            values = [v for v in (money_value(c.value) for c in money) if v is not None]
+            values = [v for v in (money_value(c.value, _places(c)) for c in money) if v is not None]
             # … and a row is named by its words: a summary row holds its amount in a repeated column, and
             # naming the row by it (3600, as Python writes the cell) was looking for what no page prints
             named = [ws.cell(row=r, column=c) for c in ident]

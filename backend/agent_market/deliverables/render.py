@@ -115,7 +115,7 @@ def render_all(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
         meta.pop("path", None)
         artifacts.append({"name": name, "format": fmt, "kind": FORMATS[fmt], "size": os.path.getsize(path),
                           "sha256": _sha(path), "quality": {"passed": ok, "checks": checks},
-                          "meta": {k: v for k, v in meta.items() if k in ("slides", "sheets", "embedded_fonts", "ledger_rows", "layouts")},
+                          "meta": {k: v for k, v in meta.items() if k in ("slides", "sheets", "embedded_fonts", "ledger_rows", "layouts", "slide_cites")},
                           "chart_bindings": meta.get("chart_bindings") or (chart_bindings if fmt == "docx" else []),
                           "citations": len(computed["citations"])})
     return {"passed": all_ok, "artifacts": artifacts, "refused": refused,

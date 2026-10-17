@@ -431,7 +431,7 @@ def render(fmt: str, view: dict, req: dict, spec: dict, path: str, *, in_dir: st
         sha = hashlib.sha256(f.read()).hexdigest()
     return {"name": os.path.basename(path), "format": fmt, "kind": FORMATS[fmt], "size": os.path.getsize(path), "sha256": sha,
             "quality": {"passed": ok, "checks": checks},
-            "meta": {k: v for k, v in meta.items() if k in ("slides", "embedded_fonts", "layouts")}, "chart_bindings": [],
+            "meta": {k: v for k, v in meta.items() if k in ("slides", "embedded_fonts", "layouts", "slide_cites")}, "chart_bindings": [],
             "citations": len(view.get("citations") or [])}, None
 
 

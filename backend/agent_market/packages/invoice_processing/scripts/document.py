@@ -15,6 +15,16 @@ from ..words import W
 from .workbook import S_REGISTER
 
 
+def face(view: dict) -> dict:
+    """Where the workbook's face prints each figure (AM23 Part 2: deliverables/agree.py compares it with every other
+    file of the round), by the summary sheet's label."""
+    from .workbook import NOT_INCLUDED
+
+    return {"documents": W("doc.face.received"), "included": W("doc.face.recorded"),
+            "excluded": W("doc.face.not_included", not_included=W(NOT_INCLUDED)),
+            "vat_thb": W("doc.face.vat_thb"), "total_thb": W("doc.col.total_thb")}
+
+
 def _abs(v) -> Decimal:
     try:
         return abs(Decimal(str(v)))
