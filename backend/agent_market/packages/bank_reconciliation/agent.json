@@ -30,11 +30,14 @@
     {"role": "carried", "label": "รายการค้างยกมาจากเดือนก่อน (ถ้ามี)", "note": "ใช้งบกระทบยอดของเดือนก่อนที่ agent นี้ทำได้เลย agent จะอ่านชีต “รายการค้างยกไป” เอง", "required": false, "accept": [".xlsx", ".xlsm", ".csv"]}
   ],
   "outputs": [
-    {"format": "xlsx", "label": "งบกระทบยอด .xlsx", "default": true}
+    {"format": "xlsx", "label": "งบกระทบยอด .xlsx", "default": true},
+    {"format": "docx", "label": "รายงานกระทบยอด .docx", "default": false},
+    {"format": "pptx", "label": "สไลด์สรุปการกระทบยอด .pptx", "default": false},
+    {"format": "pdf", "label": "งบกระทบยอด PDF (พิมพ์จาก .xlsx)", "default": false, "of": "xlsx"}
   ],
   "capabilities": {
     "required": ["document.match.e3", "spreadsheet.read.xlsx", "compute.python.decimal", "deliverable.table.xlsx"],
-    "optional": ["model.text"]
+    "optional": ["model.text", "deliverable.report.docx", "deliverable.deck.pptx", "deliverable.pdf"]
   },
   "install": {
     "defaults": {
@@ -94,7 +97,10 @@
       }
     },
     "outputs": {
-      "xlsx": "งบกระทบยอด 11 แผ่นหลัก: งบกระทบยอด รายการกระทบยอด รายการที่จับคู่ รายการน่าสงสัย ร่างรายการปรับปรุง อายุรายการค้าง รายการค้างยกมา รายการค้างยกไป รายการข้ามงวด ข้อยกเว้น และหลักฐาน ตารางที่กว้างแยกเป็นแผ่นหลักกับแผ่นคู่ “… · หลักฐาน” ที่อ่านเทียบกันตามเลขแถว ทุกแผ่นพิมพ์กว้างหน้าเดียว"
+      "xlsx": "งบกระทบยอด 11 แผ่นหลัก: งบกระทบยอด รายการกระทบยอด รายการที่จับคู่ รายการน่าสงสัย ร่างรายการปรับปรุง อายุรายการค้าง รายการค้างยกมา รายการค้างยกไป รายการข้ามงวด ข้อยกเว้น และหลักฐาน ตารางที่กว้างแยกเป็นแผ่นหลักกับแผ่นคู่ “… · หลักฐาน” ที่อ่านเทียบกันตามเลขแถว ทุกแผ่นพิมพ์กว้างหน้าเดียว",
+      "docx": "รายงานจากตัวเลขชุดเดียวกับงบกระทบยอด: หน้าปกพร้อมยอดหลังปรับปรุงสองฝั่งและผลต่าง ผลการกระทบยอด ตัวเลขทุกตัวพร้อมรหัสอ้างอิง งบกระทบยอด รายการกระทบยอดที่ยอดสูงสุด คำอธิบาย และที่มาของข้อมูล ไฟล์ Excel ยังเป็นกระดาษทำการ",
+      "pptx": "สไลด์จากตัวเลขชุดเดียวกัน: ผลต่าง ยอดสองฝั่ง ผลการกระทบยอด รายการกระทบยอดทุกรายการ คำอธิบาย และที่มาของข้อมูล ถ้ารายการมากเกินกว่าที่สไลด์จะแสดงได้ จะถามก่อนว่าจะเอาแบบไหน",
+      "pdf": "งบกระทบยอดฉบับเดียวกับไฟล์ Excel พิมพ์เป็น PDF ตามที่ตั้งการพิมพ์ไว้ หัวตารางซ้ำทุกหน้า กว้างหน้าเดียว"
     },
     "questions": "จะถามเมื่อรายการสองฝั่งน่าจะเป็นรายการเดียวกันแต่ไม่ตรงกันทุกตัว เมื่อรายการที่ไม่มีคู่มียอดสูงกว่าที่ตั้งไว้ เมื่อไฟล์ไม่บอกว่าเป็นของธนาคารหรือของบริษัท และเมื่อไฟล์ไม่มียอดคงเหลือ",
     "model_inputs": {
@@ -629,6 +635,12 @@
     "form.not_made": "รอบนี้ไม่มียอดคงเหลือของฝั่งธนาคารหรือฝั่งบัญชี จึงไม่มีงบกระทบยอดให้กรอกลงแบบฟอร์ม"
   },
   "en": {
+    "รายงานกระทบยอด .docx": "Reconciliation report (.docx)",
+    "รายงานจากตัวเลขชุดเดียวกับงบกระทบยอด: หน้าปกพร้อมยอดหลังปรับปรุงสองฝั่งและผลต่าง ผลการกระทบยอด ตัวเลขทุกตัวพร้อมรหัสอ้างอิง งบกระทบยอด รายการกระทบยอดที่ยอดสูงสุด คำอธิบาย และที่มาของข้อมูล ไฟล์ Excel ยังเป็นกระดาษทำการ": "A report from the same figures as the reconciliation: a cover with the two adjusted balances and their difference, the result, every figure with its reference, the statement, the largest reconciling items, the commentary and the sources. The workbook stays the working paper.",
+    "สไลด์สรุปการกระทบยอด .pptx": "Reconciliation slides (.pptx)",
+    "สไลด์จากตัวเลขชุดเดียวกัน: ผลต่าง ยอดสองฝั่ง ผลการกระทบยอด รายการกระทบยอดทุกรายการ คำอธิบาย และที่มาของข้อมูล ถ้ารายการมากเกินกว่าที่สไลด์จะแสดงได้ จะถามก่อนว่าจะเอาแบบไหน": "Slides from the same figures: the difference, both balances, the result, every reconciling item, the commentary and the sources. If there are more items than slides can show, you are asked first which you would like.",
+    "งบกระทบยอด PDF (พิมพ์จาก .xlsx)": "Reconciliation as PDF (printed from the .xlsx)",
+    "งบกระทบยอดฉบับเดียวกับไฟล์ Excel พิมพ์เป็น PDF ตามที่ตั้งการพิมพ์ไว้ หัวตารางซ้ำทุกหน้า กว้างหน้าเดียว": "The same reconciliation as the workbook, printed to PDF as it is set to print: the header row on every page, one page wide.",
     "เรียงรายการค้างจากยอดมาก · เรียงตามจำนวนเงิน · เอารายการยอดใหญ่ขึ้นก่อน": "order the outstanding items from the largest · order by amount · the big items first",
     "เรียงตามวันที่ · เอารายการเก่าสุดขึ้นก่อน · เรียงตามอายุรายการ": "order by date · the oldest items first · order by the age of the items",
     "เรียงรายการกระทบยอดจากจำนวนเงินมากที่สุด": "Reconciling items ordered from the largest amount",

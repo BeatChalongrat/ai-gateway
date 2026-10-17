@@ -138,6 +138,12 @@ func OutputSetFinding(l Lang, m Manifest, defaults []Default, current []string) 
 	if m.FromRequest() {
 		return nil
 	}
+	if len(m.DefaultFormats()) < 2 {
+		// AM23 §1.3: an agent whose job is one file — the working paper — is not asked which files a round makes:
+		// a report, a deck or a PDF of it are what a person asks for, and a round nobody asked anything of makes
+		// the workbook alone, as it always did (asked, the card's default would override what was asked)
+		return nil
+	}
 	shapes := OutputShapes(l, m)
 	if len(shapes) < 2 {
 		return nil

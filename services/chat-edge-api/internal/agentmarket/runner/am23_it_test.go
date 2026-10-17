@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -109,6 +110,65 @@ func TestTheNeutralLineOnAWorkingPaperFollowsTheOrganisationsSwitch(t *testing.T
 			if json.Unmarshal([]byte(line), &item) == nil && strings.Contains(item.Text, "fake-self-hosted") {
 				t.Fatalf("the thread names no model either: %s", trim(item.Text, 300))
 			}
+		}
+	}
+}
+
+// §1.2–§1.4: a bank reconciliation asked for its workbook, a report, a deck and a PDF delivers the four — the report
+// and the deck written from the same computed table, the PDF the workbook as it prints, every figure in it as the
+// workbook prints it — and a round asked for the PDF alone delivers the PDF alone (the workbook it prints is made for
+// it and not delivered). The files card calls the PDF what it prints.
+func TestABankRoundMakesTheReportTheDeckAndThePDFOfItsWorkbookWhenAsked(t *testing.T) {
+	e := newIT(t)
+	if e == nil {
+		return
+	}
+	ctx := context.Background()
+	e.setupBankInstall()
+	conv := startConverter(t)
+	r := e.runner("r1")
+	r.Converter = conv
+	for _, c := range []struct {
+		formats string
+		want    []string
+	}{{`["xlsx","docx","pptx","pdf"]`, []string{"docx", "pdf", "pptx", "xlsx"}}, {`["pdf"]`, []string{"pdf"}}} {
+		run := e.am22BankRun()
+		if _, err := e.store.Pool.Exec(ctx, `UPDATE agent_market.agent_runs SET formats = $2 WHERE id = $1`, run.ID, c.formats); err != nil {
+			t.Fatal(err)
+		}
+		got := e.drive(r, run.ID, 6*time.Minute, parkedOrTerminal)
+		if got.Status != am.RunSucceeded {
+			t.Fatalf("%s: %s %s", c.formats, got.Status, got.StatusReason)
+		}
+		arts, _ := e.store.RunArtifacts(ctx, run.ID)
+		var have []string
+		for _, a := range arts {
+			have = append(have, a.Format)
+			var q struct {
+				Passed bool        `json:"passed"`
+				Checks []gateCheck `json:"checks"`
+			}
+			_ = json.Unmarshal(a.Validation, &q)
+			if !q.Passed {
+				t.Fatalf("%s: %s did not pass its gate: %+v", c.formats, a.Format, q.Checks)
+			}
+			if a.Format == "pdf" {
+				names := map[string]bool{}
+				for _, k := range q.Checks {
+					names[k.Name] = k.OK
+				}
+				if !names["pdf.pages"] || !names["pdf.figures"] {
+					t.Fatalf("the workbook's PDF is gated on its pages and its figures: %+v", q.Checks)
+				}
+			}
+		}
+		sort.Strings(have)
+		if strings.Join(have, ",") != strings.Join(c.want, ",") {
+			t.Fatalf("%s delivers %v, not %v", c.formats, have, c.want)
+		}
+		outs := e.outputsOf(run.ID)
+		if len(outs) != 1 || outs[0]["pdf_of"] != "xlsx" {
+			t.Fatalf("the files card says what the PDF prints: %v", outs)
 		}
 	}
 }

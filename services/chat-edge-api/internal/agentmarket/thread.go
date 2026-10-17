@@ -211,6 +211,9 @@ type OutputsPayload struct {
 	// MoreFormats (AM8) are the formats this agent can still make from the round's numbers — its
 	// manifest's outputs, PDF only while a converter is there: the card offers these and no others.
 	MoreFormats []string `json:"more_formats,omitempty"`
+	// PDFOf (AM23 §1.4) is the document the agent's PDF prints ("docx": the report, "xlsx": the workbook), so the
+	// card names a PDF for what it is.
+	PDFOf string `json:"pdf_of,omitempty"`
 }
 
 // OutputsModel is what the files card says about models (AM4).

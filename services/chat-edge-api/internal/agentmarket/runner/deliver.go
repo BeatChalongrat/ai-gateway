@@ -544,18 +544,20 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 	pres := rc.presentation()
 	// PDF (AM2): the finished .docx converted by LibreOffice and gated; the
 	// .docx is rendered for it even when it was not asked for (and then not
-	// delivered).
+	// delivered). AM23 §1.4: a PDF prints the document the manifest names — the
+	// report, or the workbook as it prints — and there is no PDF writer.
 	wantPDF := contains(formats, "pdf")
+	pdfOf := rc.pkg.Manifest.PDFOf()
 	pyFormats := []string{} // never nil: the engine takes [] as "no file", null as its defaults
 	for _, f := range formats {
 		if f != "pdf" {
 			pyFormats = append(pyFormats, f)
 		}
 	}
-	hiddenDocx := wantPDF && !contains(pyFormats, "docx")
-	if hiddenDocx {
-		pyFormats = append(pyFormats, "docx")
-		names["docx"] = strings.TrimSuffix(names["pdf"], ".pdf") + ".docx"
+	hiddenSrc := wantPDF && !contains(pyFormats, pdfOf)
+	if hiddenSrc {
+		pyFormats = append(pyFormats, pdfOf)
+		names[pdfOf] = strings.TrimSuffix(names["pdf"], ".pdf") + "." + pdfOf
 	}
 	// The customer's own template, filled on every run once one is saved (AM2).
 	// AM10: a form dropped into this round comes first, for this round only.
@@ -671,7 +673,7 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 				ro.NotMade = r.TemplateNotMade.Why
 			}
 			var failed []string
-			docxPath := ""
+			srcPath := "" // the document the PDF prints (AM23 §1.4)
 			for _, a := range r.Artifacts {
 				var meta struct {
 					Name          string          `json:"name"`
@@ -733,9 +735,9 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 						}
 					}
 				}
-				if meta.Format == "docx" {
-					docxPath = path
-					if hiddenDocx {
+				if meta.Format == pdfOf && meta.Kind != "template" {
+					srcPath = path
+					if hiddenSrc {
 						continue // rendered for the PDF only
 					}
 				}
@@ -767,7 +769,7 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 			}
 			failed = append(failed, refusedLines(am.LangOf(ctx), r.Refused)...)
 			if wantPDF && len(failed) == 0 {
-				pdfArt, why, err := rc.deliverPDF(ctx, artifactRun, docxPath, names, versions)
+				pdfArt, why, err := rc.deliverPDF(ctx, artifactRun, srcPath, pdfOf, cpath, names, versions)
 				if err != nil {
 					return nil, 0, "", "", err
 				}
@@ -802,6 +804,14 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 type notMadeFormat struct {
 	Format string `json:"format"`
 	Why    string `json:"why"`
+}
+
+// pdfOf is the document the agent's PDF prints, "" when it makes no PDF (AM23 §1.4).
+func (rc *runCtx) pdfOf() string {
+	if !rc.pkg.Manifest.FormatAllowed("pdf") {
+		return ""
+	}
+	return rc.pkg.Manifest.PDFOf()
 }
 
 // unaccounted: the formats asked of the engine that it neither made, refused nor left out with a reason (a
@@ -985,7 +995,7 @@ func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts [
 		return err
 	}
 	out := am.OutputsPayload{RunID: artifactRun.String(), Summary: summary, Rendered: rerender,
-		Model: rc.modelLine(ctx, run, narrative), MoreFormats: rc.moreFormats()}
+		Model: rc.modelLine(ctx, run, narrative), MoreFormats: rc.moreFormats(), PDFOf: rc.pdfOf()}
 	if run.Period != nil {
 		out.PeriodLabel = am.Text("%s", am.Period(*run.Period))
 	}

@@ -6,11 +6,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -85,17 +87,24 @@ func (rc *runCtx) pdfFromDocx(ctx context.Context, name string, docx []byte) ([]
 // deliverPDF converts the rendered .docx, gates the PDF and stores it as an
 // artifact of artifactRun. why lists the failed checks (nothing is stored);
 // err is only for a storage failure.
-func (rc *runCtx) deliverPDF(ctx context.Context, artifactRun uuid.UUID, docxPath string, names map[string]string,
+func (rc *runCtx) deliverPDF(ctx context.Context, artifactRun uuid.UUID, srcPath, of, computedPath string, names map[string]string,
 	versions map[string]int) (renderedArt, []string, error) {
 	l := am.LangOf(ctx)
-	if docxPath == "" {
-		return renderedArt{}, []string{am.T(l, "pdf: แปลงเป็น PDF (agent ตัวนี้ไม่มีรายงาน .docx ให้แปลง)")}, nil
+	if srcPath == "" {
+		// (by construction the document a PDF prints is rendered with it: an engine that did not make it said why)
+		return renderedArt{}, []string{am.T(l, "pdf: แปลงเป็น PDF (ไม่มีเอกสารที่ PDF นี้พิมพ์ในรอบนี้)")}, nil
 	}
-	docx, err := os.ReadFile(docxPath)
+	src, err := os.ReadFile(srcPath)
 	if err != nil {
 		return renderedArt{}, nil, err
 	}
-	pdf, checks := rc.pdfFromDocx(ctx, names["docx"], docx)
+	var pdf []byte
+	var checks []gateCheck
+	if of == "xlsx" {
+		pdf, checks = rc.pdfFromWorkbook(ctx, names["xlsx"], src, figureTexts(computedPath))
+	} else {
+		pdf, checks = rc.pdfFromDocx(ctx, names["docx"], src)
+	}
 	var why []string
 	for _, c := range checks {
 		if !c.OK {
@@ -113,8 +122,92 @@ func (rc *runCtx) deliverPDF(ctx context.Context, artifactRun uuid.UUID, docxPat
 	sum := sha256.Sum256(pdf)
 	// the checks are read on the files card: kept in the run's language (their texts carry both)
 	q, _ := am.MarshalIn(l, map[string]any{"passed": true, "checks": checks})
-	return renderedArt{Name: name, Format: "pdf", Kind: "report", Key: key, Size: int64(len(pdf)),
-		SHA256: hex.EncodeToString(sum[:]), Version: versions["pdf"], Quality: q}, nil, nil
+	kind := "report"
+	if of == "xlsx" {
+		kind = "table"
+	}
+	meta, _ := json.Marshal(map[string]any{"of": of}) // AM23: what the PDF prints, for the files card's word for it
+	return renderedArt{Name: name, Format: "pdf", Kind: kind, Key: key, Size: int64(len(pdf)),
+		SHA256: hex.EncodeToString(sum[:]), Version: versions["pdf"], Quality: q, Meta: meta}, nil, nil
+}
+
+// pdfFromWorkbook prints a finished workbook to PDF with the converter (AM23 §1.4): as it is set to print — its print
+// area, its header row repeated, one page wide (AM21) — and gates it: every page renders, and every figure of the
+// run's figures table that the workbook prints is in the PDF exactly as printed.
+func (rc *runCtx) pdfFromWorkbook(ctx context.Context, name string, xlsx []byte, figures []string) ([]byte, []gateCheck) {
+	if !rc.r.Converter.Available() {
+		return nil, []gateCheck{{Name: "pdf.convert", Label: am.Text("แปลงเป็น PDF"), Detail: am.Text("ยังไม่มีตัวแปลงเอกสารในระบบ")}}
+	}
+	pdf, err := rc.r.Converter.Convert(ctx, name, xlsx, "pdf")
+	if err != nil {
+		rc.technical(ctx, "pdf.convert", err)
+		return nil, []gateCheck{{Name: "pdf.convert", Label: am.Text("แปลงเป็น PDF"), Detail: am.Text(converterDown)}}
+	}
+	chk, err := rc.r.Converter.Check(ctx, pdf)
+	if err != nil {
+		rc.technical(ctx, "pdf.check", err)
+		return nil, []gateCheck{{Name: "pdf.check", Label: am.Text("ตรวจ PDF"), Detail: am.Text(converterDown)}}
+	}
+	return pdf, pdfPrintGate(chk, figures)
+}
+
+// pdfPrintGate: a workbook's PDF renders every page, and holds every figure as the workbook prints it.
+func pdfPrintGate(chk CheckResult, figures []string) []gateCheck {
+	want := chk.Pages
+	if want > maxCheckedPages {
+		want = maxCheckedPages
+	}
+	var bad []string
+	for i, ink := range chk.PageInk {
+		if ink < minPageInk || ink > maxPageInk {
+			bad = append(bad, fmt.Sprint(i+1))
+		}
+	}
+	pages := gateCheck{Name: "pdf.pages", Label: am.Text("ทุกหน้าแสดงผลได้"),
+		OK:     chk.Pages > 0 && chk.RenderedPages == want && len(chk.PageInk) == want && len(bad) == 0,
+		Detail: am.Text("%s หน้า แสดงผลได้ %s หน้า", am.Count(chk.Pages), am.Count(chk.RenderedPages))}
+	if len(bad) > 0 {
+		pages.Detail = am.Text("%s · หน้าว่างหรือผิดปกติ: %s", am.Words(pages.Detail), am.Name(strings.Join(bad, ", ")))
+	}
+	text := squashSpace(chk.Text + " " + chk.RawText)
+	var missing []string
+	for _, f := range figures {
+		if f = squashSpace(f); f != "" && !strings.Contains(text, f) {
+			missing = append(missing, f)
+		}
+	}
+	figs := gateCheck{Name: "pdf.figures", Label: am.Text("ตัวเลขใน PDF ตรงกับที่ไฟล์ Excel พิมพ์"), OK: len(missing) == 0,
+		Detail: am.Text("ตัวเลข %s ตัว อยู่ใน PDF ตามที่พิมพ์", am.Count(len(figures)))}
+	if len(missing) > 0 {
+		figs.Detail = am.Text("ไม่พบใน PDF: %s", am.Name(strings.Join(missing, ", ")))
+	}
+	return []gateCheck{pages, figs}
+}
+
+func squashSpace(s string) string { return strings.Join(strings.Fields(s), "") }
+
+// figureTexts are the printed texts of the run's figures table (computed.json "figures"), "" entries dropped.
+func figureTexts(computedPath string) []string {
+	data, err := os.ReadFile(computedPath)
+	if err != nil {
+		return nil
+	}
+	var c struct {
+		Figures map[string]struct {
+			Text string `json:"text"`
+		} `json:"figures"`
+	}
+	if json.Unmarshal(data, &c) != nil {
+		return nil
+	}
+	var out []string
+	for _, f := range c.Figures {
+		if strings.TrimSpace(f.Text) != "" {
+			out = append(out, f.Text)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // pdfGate checks a PDF against the report it was converted from. AM11: which

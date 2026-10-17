@@ -30,11 +30,14 @@
     {"role": "policy_document", "label": "เอกสารระเบียบการเบิก (ถ้ามี)", "note": "ใช้เป็นบริบทเท่านั้น วงเงินมาจากตารางนโยบายที่ตั้งไว้ใน agent เสมอ", "required": false, "accept": [".docx", ".txt"]}
   ],
   "outputs": [
-    {"format": "xlsx", "label": "ผลตรวจ .xlsx", "default": true}
+    {"format": "xlsx", "label": "ผลตรวจ .xlsx", "default": true},
+    {"format": "docx", "label": "รายงานผลตรวจ .docx", "default": false},
+    {"format": "pptx", "label": "สไลด์สรุปผลตรวจ .pptx", "default": false},
+    {"format": "pdf", "label": "ผลตรวจ PDF (พิมพ์จาก .xlsx)", "default": false, "of": "xlsx"}
   ],
   "capabilities": {
     "required": ["document.extract.e2", "compute.python.decimal", "deliverable.table.xlsx", "spreadsheet.read.xlsx"],
-    "optional": ["model.vision", "model.text"]
+    "optional": ["model.vision", "model.text", "deliverable.report.docx", "deliverable.deck.pptx", "deliverable.pdf"]
   },
   "install": {
     "defaults": {
@@ -98,7 +101,10 @@
       }
     },
     "outputs": {
-      "xlsx": "ผลตรวจ 6 แผ่นหลัก: สรุป รายการเบิก ผลตรวจแต่ละกฎ ข้อยกเว้น (รอคนตัดสิน พร้อมหลักฐานและทางเลือก) ใบเสร็จ และนโยบายที่ใช้ตรวจ ตารางที่กว้างแยกเป็นแผ่นหลักกับแผ่นคู่ “… · หลักฐาน” และ “… · ผลตามกฎ” ที่อ่านเทียบกันตามเลขแถว ทุกแผ่นพิมพ์กว้างหน้าเดียว"
+      "xlsx": "ผลตรวจ 6 แผ่นหลัก: สรุป รายการเบิก ผลตรวจแต่ละกฎ ข้อยกเว้น (รอคนตัดสิน พร้อมหลักฐานและทางเลือก) ใบเสร็จ และนโยบายที่ใช้ตรวจ ตารางที่กว้างแยกเป็นแผ่นหลักกับแผ่นคู่ “… · หลักฐาน” และ “… · ผลตามกฎ” ที่อ่านเทียบกันตามเลขแถว ทุกแผ่นพิมพ์กว้างหน้าเดียว",
+      "docx": "รายงานจากตัวเลขชุดเดียวกับผลตรวจ: หน้าปกพร้อมยอดเบิก ยอดที่เป็นข้อยกเว้น และยอดที่ต้องใช้วิจารณญาณ ผลการตรวจ ตัวเลขทุกตัวพร้อมรหัสอ้างอิง รายการเบิกที่ยังไม่ผ่านที่ยอดสูงสุด คำอธิบาย และที่มาของข้อมูล ไฟล์ Excel ยังเป็นกระดาษทำการ",
+      "pptx": "สไลด์จากตัวเลขชุดเดียวกัน: ยอดที่เป็นข้อยกเว้น ยอดสำคัญ ผลการตรวจ รายการเบิกที่ยังไม่ผ่านทุกรายการ คำอธิบาย และที่มาของข้อมูล ถ้ารายการมากเกินกว่าที่สไลด์จะแสดงได้ จะถามก่อนว่าจะเอาแบบไหน",
+      "pdf": "ผลตรวจฉบับเดียวกับไฟล์ Excel พิมพ์เป็น PDF ตามที่ตั้งการพิมพ์ไว้ หัวตารางซ้ำทุกหน้า กว้างหน้าเดียว"
     },
     "questions": "จะถามเรื่องที่ต้องใช้วิจารณญาณ เช่น รายการที่เบิกในวันหยุดเป็นงานของบริษัทหรือไม่ หรือรายละเอียดที่ยังไม่บอกว่าเบิกเพื่ออะไร และจะถามยอดในใบเสร็จที่อ่านไม่ชัด",
     "model_inputs": {
@@ -520,6 +526,7 @@
     "doc.policy.root": "นโยบาย",
     "doc.policy.not_a_limit": "ไม่ใช้ (บริบทเท่านั้น)",
     "doc.title.summary": "ผลตรวจการเบิกค่าใช้จ่าย · {period_label}",
+    "doc.title.held": "รายการเบิกที่ยังไม่ผ่าน",
     "doc.face.prepared": "จัดทำ {prepared_on}",
     "doc.face.all_claims": "รายการเบิกทั้งหมด",
     "doc.face.passed": "ผ่านทุกกฎ",
@@ -629,6 +636,12 @@
     "form.not_made": "รอบนี้ไม่มีรายการเบิกที่อ่านได้ จึงไม่มีอะไรให้กรอกลงแบบฟอร์ม"
   },
   "en": {
+    "รายงานผลตรวจ .docx": "Audit report (.docx)",
+    "รายงานจากตัวเลขชุดเดียวกับผลตรวจ: หน้าปกพร้อมยอดเบิก ยอดที่เป็นข้อยกเว้น และยอดที่ต้องใช้วิจารณญาณ ผลการตรวจ ตัวเลขทุกตัวพร้อมรหัสอ้างอิง รายการเบิกที่ยังไม่ผ่านที่ยอดสูงสุด คำอธิบาย และที่มาของข้อมูล ไฟล์ Excel ยังเป็นกระดาษทำการ": "A report from the same figures as the audit: a cover with the amounts claimed, in exceptions and needing judgement, the result, every figure with its reference, the largest claims that did not pass, the commentary and the sources. The workbook stays the working paper.",
+    "สไลด์สรุปผลตรวจ .pptx": "Audit slides (.pptx)",
+    "สไลด์จากตัวเลขชุดเดียวกัน: ยอดที่เป็นข้อยกเว้น ยอดสำคัญ ผลการตรวจ รายการเบิกที่ยังไม่ผ่านทุกรายการ คำอธิบาย และที่มาของข้อมูล ถ้ารายการมากเกินกว่าที่สไลด์จะแสดงได้ จะถามก่อนว่าจะเอาแบบไหน": "Slides from the same figures: the amount in exceptions, the key amounts, the result, every claim that did not pass, the commentary and the sources. If there are more claims than slides can show, you are asked first which you would like.",
+    "ผลตรวจ PDF (พิมพ์จาก .xlsx)": "Audit as PDF (printed from the .xlsx)",
+    "ผลตรวจฉบับเดียวกับไฟล์ Excel พิมพ์เป็น PDF ตามที่ตั้งการพิมพ์ไว้ หัวตารางซ้ำทุกหน้า กว้างหน้าเดียว": "The same audit as the workbook, printed to PDF as it is set to print: the header row on every page, one page wide.",
     "เรียงรายการเบิกจากยอดสูงสุด": "Claims ordered from the largest amount",
     "ชีตรายการเบิกและผลตรวจ กับชีตหลักฐานและชีตผลของแต่ละกฎ เรียงจากรายการที่ยอดเบิกสูงสุดลงไป ผลตรวจและตัวเลขไม่เปลี่ยน เปลี่ยนแค่ลำดับ และทุกรายการยังบอกแถวในไฟล์ที่ส่งมา": "The sheet of claims and results, with its evidence sheet and its sheet of each rule's result, runs from the largest claim down. No result and no figure changes, only the order, and every claim still names its row in the file that was sent.",
     "เอาเฉพาะรายการที่มีปัญหา": "Only the claims with a problem",
@@ -1030,6 +1043,7 @@
     "นโยบาย": "Policy",
     "ไม่ใช้ (บริบทเท่านั้น)": "Not used (context only)",
     "ผลตรวจการเบิกค่าใช้จ่าย · {period_label}": "Expense audit · {period_label}",
+    "รายการเบิกที่ยังไม่ผ่าน": "Claims that did not pass",
     "จัดทำ {prepared_on}": "Prepared {prepared_on}",
     "รายการเบิกทั้งหมด": "All claims",
     "ผ่านทุกกฎ": "Passed every rule",

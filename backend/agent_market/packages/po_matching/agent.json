@@ -30,11 +30,14 @@
     {"role": "gr", "label": "ใบรับของ (ถ้าบริษัทออกใบรับของ)", "note": "ไฟล์ Excel หรือ CSV ของรายการรับสินค้า มีเลขที่ใบรับของ วันที่รับ เลขที่ใบสั่งซื้อ และจำนวนที่รับ บริษัทที่ไม่ออกใบรับของไม่ต้องส่ง", "required": false, "accept": [".xlsx", ".xlsm", ".csv"]}
   ],
   "outputs": [
-    {"format": "xlsx", "label": "ผลตรวจใบแจ้งหนี้กับใบสั่งซื้อ .xlsx", "default": true}
+    {"format": "xlsx", "label": "ผลตรวจใบแจ้งหนี้กับใบสั่งซื้อ .xlsx", "default": true},
+    {"format": "docx", "label": "รายงานผลตรวจใบแจ้งหนี้ .docx", "default": false},
+    {"format": "pptx", "label": "สไลด์สรุปผลตรวจใบแจ้งหนี้ .pptx", "default": false},
+    {"format": "pdf", "label": "ผลตรวจ PDF (พิมพ์จาก .xlsx)", "default": false, "of": "xlsx"}
   ],
   "capabilities": {
     "required": ["document.match.e3", "document.extract.e2", "spreadsheet.read.xlsx", "compute.python.decimal", "deliverable.table.xlsx"],
-    "optional": ["model.vision", "model.text"]
+    "optional": ["model.vision", "model.text", "deliverable.report.docx", "deliverable.deck.pptx", "deliverable.pdf"]
   },
   "install": {
     "defaults": {
@@ -122,7 +125,10 @@
       }
     },
     "outputs": {
-      "xlsx": "ผลตรวจ 10 แผ่นหลัก: สรุป (จำนวนและมูลค่าตามสถานะ เหตุผล และจำนวนบรรทัดที่ตรวจ 3 ทางและ 2 ทาง) ผลตรวจใบแจ้งหนี้ ผลตรวจรายบรรทัด (ชี้ไปที่บรรทัดของใบสั่งซื้อและใบรับของที่ใช้ตรวจ) ยอดสะสมตามใบสั่งซื้อ รับของแล้วยังไม่ถูกเรียกเก็บและเรียกเก็บแล้วยังไม่ได้รับของ ค่าใช้จ่ายที่ไม่ได้สั่งซื้อ ใบลดหนี้และใบเพิ่มหนี้ การจับคู่ ข้อยกเว้น และหลักฐาน ตารางที่กว้างแยกเป็นแผ่นหลักกับแผ่นคู่ “… · หลักฐาน” ที่อ่านเทียบกันตามเลขแถว ทุกแผ่นพิมพ์กว้างหน้าเดียว"
+      "xlsx": "ผลตรวจ 10 แผ่นหลัก: สรุป (จำนวนและมูลค่าตามสถานะ เหตุผล และจำนวนบรรทัดที่ตรวจ 3 ทางและ 2 ทาง) ผลตรวจใบแจ้งหนี้ ผลตรวจรายบรรทัด (ชี้ไปที่บรรทัดของใบสั่งซื้อและใบรับของที่ใช้ตรวจ) ยอดสะสมตามใบสั่งซื้อ รับของแล้วยังไม่ถูกเรียกเก็บและเรียกเก็บแล้วยังไม่ได้รับของ ค่าใช้จ่ายที่ไม่ได้สั่งซื้อ ใบลดหนี้และใบเพิ่มหนี้ การจับคู่ ข้อยกเว้น และหลักฐาน ตารางที่กว้างแยกเป็นแผ่นหลักกับแผ่นคู่ “… · หลักฐาน” ที่อ่านเทียบกันตามเลขแถว ทุกแผ่นพิมพ์กว้างหน้าเดียว",
+      "docx": "รายงานจากตัวเลขชุดเดียวกับผลตรวจ: หน้าปกพร้อมมูลค่าที่ผ่าน มูลค่าที่ติดเงื่อนไข และจำนวนที่ต้องให้คนตัดสิน ผลการตรวจ ตัวเลขทุกตัวพร้อมรหัสอ้างอิง ใบแจ้งหนี้ที่ยังไม่ผ่านที่ยอดสูงสุด คำอธิบาย และที่มาของข้อมูล ไฟล์ Excel ยังเป็นกระดาษทำการ",
+      "pptx": "สไลด์จากตัวเลขชุดเดียวกัน: มูลค่าที่ติดเงื่อนไข ตัวเลขสำคัญ ผลการตรวจ ใบแจ้งหนี้ที่ยังไม่ผ่านทุกฉบับ คำอธิบาย และที่มาของข้อมูล ถ้าใบแจ้งหนี้มากเกินกว่าที่สไลด์จะแสดงได้ จะถามก่อนว่าจะเอาแบบไหน",
+      "pdf": "ผลตรวจฉบับเดียวกับไฟล์ Excel พิมพ์เป็น PDF ตามที่ตั้งการพิมพ์ไว้ หัวตารางซ้ำทุกหน้า กว้างหน้าเดียว"
     },
     "questions": "จะถามเมื่อใบแจ้งหนี้ไม่ได้ระบุบรรทัดของใบสั่งซื้อและมีบรรทัดที่น่าจะเป็นคู่ เมื่อใบแจ้งหนี้อาจซ้ำกับฉบับที่ส่งมาก่อน เมื่อบอกไม่ได้ว่าเป็นผู้ขายรายเดียวกัน เมื่อหน่วยนับไม่ตรงกันและไม่มีอัตราแปลง เมื่ออ่านค่าในเอกสารไม่ชัด และถามครั้งเดียวว่าบริษัทออกใบรับของหรือไม่ บริษัทที่ไม่ออกใบรับของจะไม่ถูกถามเรื่องใบรับของที่ไม่มี",
     "model_inputs": {
@@ -723,6 +729,7 @@
     "doc.where.row": "แถว {row}",
     "doc.where.page": "หน้า {page}",
     "doc.title.summary": "ผลตรวจใบแจ้งหนี้กับใบสั่งซื้อ · {period_label}",
+    "doc.title.held": "ใบแจ้งหนี้ที่ยังไม่ผ่าน",
     "doc.face.depth_line": "ตรวจ 3 ทาง {three_way} บรรทัด · ตรวจ 2 ทาง {two_way} บรรทัด",
     "doc.face.unlinked_line": "· ยังไม่ได้ตรวจกับ PO {unlinked} บรรทัด",
     "doc.face.prepared_line": "{preparer} · จัดทำวันที่ {made} · ด้วย agent รุ่น {v}",
@@ -815,6 +822,12 @@
     "form.not_made": "รอบนี้ไม่มีใบแจ้งหนี้ที่ตรวจได้ จึงไม่มีอะไรให้กรอกลงแบบฟอร์ม"
   },
   "en": {
+    "รายงานผลตรวจใบแจ้งหนี้ .docx": "Invoice matching report (.docx)",
+    "รายงานจากตัวเลขชุดเดียวกับผลตรวจ: หน้าปกพร้อมมูลค่าที่ผ่าน มูลค่าที่ติดเงื่อนไข และจำนวนที่ต้องให้คนตัดสิน ผลการตรวจ ตัวเลขทุกตัวพร้อมรหัสอ้างอิง ใบแจ้งหนี้ที่ยังไม่ผ่านที่ยอดสูงสุด คำอธิบาย และที่มาของข้อมูล ไฟล์ Excel ยังเป็นกระดาษทำการ": "A report from the same figures as the matching: a cover with the value that passed, the value blocked and how many need a decision, the result, every figure with its reference, the largest invoices that did not pass, the commentary and the sources. The workbook stays the working paper.",
+    "สไลด์สรุปผลตรวจใบแจ้งหนี้ .pptx": "Invoice matching slides (.pptx)",
+    "สไลด์จากตัวเลขชุดเดียวกัน: มูลค่าที่ติดเงื่อนไข ตัวเลขสำคัญ ผลการตรวจ ใบแจ้งหนี้ที่ยังไม่ผ่านทุกฉบับ คำอธิบาย และที่มาของข้อมูล ถ้าใบแจ้งหนี้มากเกินกว่าที่สไลด์จะแสดงได้ จะถามก่อนว่าจะเอาแบบไหน": "Slides from the same figures: the value blocked, the key figures, the result, every invoice that did not pass, the commentary and the sources. If there are more invoices than slides can show, you are asked first which you would like.",
+    "ผลตรวจ PDF (พิมพ์จาก .xlsx)": "Matching as PDF (printed from the .xlsx)",
+    "ผลตรวจฉบับเดียวกับไฟล์ Excel พิมพ์เป็น PDF ตามที่ตั้งการพิมพ์ไว้ หัวตารางซ้ำทุกหน้า กว้างหน้าเดียว": "The same matching as the workbook, printed to PDF as it is set to print: the header row on every page, one page wide.",
     "เรียงจากรายการที่ต่างมากที่สุด · เรียงตามส่วนต่างราคา · เอาบรรทัดที่ราคาต่างจาก PO มากขึ้นก่อน": "order from the line that differs most · order by price difference · the lines whose price is furthest from the PO first",
     "เรียงบรรทัดจากส่วนต่างราคามากที่สุด": "Lines ordered from the largest price difference",
     "ชีตผลตรวจรายบรรทัด กับชีตหลักฐานและชีตเกณฑ์ที่ใช้ของมัน เรียงจากบรรทัดที่ส่วนต่างราคารวมกับ PO มากที่สุดลงไป บรรทัดที่ไม่มีส่วนต่างอยู่ถัดไปตามลำดับในไฟล์ สถานะและตัวเลขไม่เปลี่ยน เปลี่ยนแค่ลำดับ และทุกบรรทัดยังบอกไฟล์ แผ่น และแถวที่อ่าน": "The line results sheet, with its evidence sheet and its criteria sheet, runs from the line whose total price difference from the PO is largest. Lines with no difference follow in the order of the file. No status and no figure changes, only the order, and every line still names the file, sheet and row it was read from.",
@@ -1386,6 +1399,7 @@
     "แถว {row}": "row {row}",
     "หน้า {page}": "page {page}",
     "ผลตรวจใบแจ้งหนี้กับใบสั่งซื้อ · {period_label}": "Invoices matched to purchase orders · {period_label}",
+    "ใบแจ้งหนี้ที่ยังไม่ผ่าน": "Invoices that did not pass",
     "ตรวจ 3 ทาง {three_way} บรรทัด · ตรวจ 2 ทาง {two_way} บรรทัด": "Three-way match: {three_way} lines · two-way match: {two_way} lines",
     "· ยังไม่ได้ตรวจกับ PO {unlinked} บรรทัด": "· not matched to a PO: {unlinked} lines",
     "{preparer} · จัดทำวันที่ {made} · ด้วย agent รุ่น {v}": "{preparer} · prepared on {made} · by agent version {v}",

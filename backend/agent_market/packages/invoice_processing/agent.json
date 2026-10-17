@@ -28,11 +28,14 @@
     {"role": "documents", "label": "ใบกำกับภาษี ใบเสร็จ ใบแจ้งหนี้ หรือไฟล์ e-Tax", "note": "PDF ดิจิทัลหรือสแกน 200–300 DPI · XML ของ e-Tax · รูปถ่ายอ่านได้เท่าที่ภาพชัด", "required": true, "accept": [".pdf", ".xml", ".jpg", ".jpeg", ".png"]}
   ],
   "outputs": [
-    {"format": "xlsx", "label": "ทะเบียน .xlsx", "default": true}
+    {"format": "xlsx", "label": "ทะเบียน .xlsx", "default": true},
+    {"format": "docx", "label": "รายงานทะเบียน .docx", "default": false},
+    {"format": "pptx", "label": "สไลด์สรุปทะเบียน .pptx", "default": false},
+    {"format": "pdf", "label": "ทะเบียน PDF (พิมพ์จาก .xlsx)", "default": false, "of": "xlsx"}
   ],
   "capabilities": {
     "required": ["document.extract.e2", "compute.python.decimal", "deliverable.table.xlsx"],
-    "optional": ["model.vision", "model.text"]
+    "optional": ["model.vision", "model.text", "deliverable.report.docx", "deliverable.deck.pptx", "deliverable.pdf"]
   },
   "install": {
     "defaults": {"formats": ["xlsx"], "language": "th", "currency": "THB", "theme": {"id": "navy"}},
@@ -66,7 +69,10 @@
       }
     },
     "outputs": {
-      "xlsx": "ทะเบียนเอกสารซื้อ 7 แผ่นหลัก: สรุป ทะเบียน (หนึ่งแถวต่อเอกสาร) เอกสารที่ยังไม่ได้รวม (ทุกฉบับที่ไม่อยู่ในทะเบียน พร้อมเหตุผลและวิธีนำกลับมารวม) รายการสินค้า ที่มาของทุกค่า (หน้า ตำแหน่ง วิธีอ่าน ความมั่นใจ และใครยืนยัน) ข้อยกเว้น และผลการตรวจ ตารางที่กว้างแยกเป็นแผ่นหลักกับแผ่นคู่ “… · หลักฐาน” ที่อ่านเทียบกันตามเลขแถว ทุกแผ่นพิมพ์กว้างหน้าเดียว"
+      "xlsx": "ทะเบียนเอกสารซื้อ 7 แผ่นหลัก: สรุป ทะเบียน (หนึ่งแถวต่อเอกสาร) เอกสารที่ยังไม่ได้รวม (ทุกฉบับที่ไม่อยู่ในทะเบียน พร้อมเหตุผลและวิธีนำกลับมารวม) รายการสินค้า ที่มาของทุกค่า (หน้า ตำแหน่ง วิธีอ่าน ความมั่นใจ และใครยืนยัน) ข้อยกเว้น และผลการตรวจ ตารางที่กว้างแยกเป็นแผ่นหลักกับแผ่นคู่ “… · หลักฐาน” ที่อ่านเทียบกันตามเลขแถว ทุกแผ่นพิมพ์กว้างหน้าเดียว",
+      "docx": "รายงานจากตัวเลขชุดเดียวกับทะเบียน: หน้าปกพร้อมยอดรวม ภาษีมูลค่าเพิ่ม และจำนวนเอกสารที่บันทึก ผลของรอบ ตัวเลขทุกตัวพร้อมรหัสอ้างอิง เอกสารที่มีหมายเหตุที่ยอดสูงสุด คำอธิบาย และที่มาของข้อมูล ไฟล์ Excel ยังเป็นกระดาษทำการ",
+      "pptx": "สไลด์จากตัวเลขชุดเดียวกัน: ยอดรวม ยอดสำคัญ ผลของรอบ เอกสารที่มีหมายเหตุทุกฉบับ คำอธิบาย และที่มาของข้อมูล ถ้าเอกสารมากเกินกว่าที่สไลด์จะแสดงได้ จะถามก่อนว่าจะเอาแบบไหน",
+      "pdf": "ทะเบียนฉบับเดียวกับไฟล์ Excel พิมพ์เป็น PDF ตามที่ตั้งการพิมพ์ไว้ หัวตารางซ้ำทุกหน้า กว้างหน้าเดียว"
     },
     "questions": "จะถามเมื่ออ่านค่าไหนไม่ชัด (เช่น ยอดรวมในสแกนที่ไม่คม) เมื่อกฎตรวจไม่ผ่าน (VAT ไม่เท่ากับ 7% เลขผู้เสียภาษีผิด เอกสารไม่ได้ออกในนามบริษัทคุณ) หรือเมื่อเจอเอกสารที่เคยส่งมาแล้ว กดเลือกคำตอบ หรือพิมพ์ค่าที่ถูกต้องตามที่เห็นในเอกสาร",
     "model_inputs": {
@@ -354,6 +360,7 @@
     "doc.status.system_passed": "ระบบอ่าน · ตัวเลขผ่านการตรวจ (ยังไม่มีคนตรวจ)",
     "doc.status.system_review": "ระบบอ่าน · ต้องตรวจ",
     "doc.title.summary": "ทะเบียนเอกสารซื้อ · {period_label}",
+    "doc.title.noted": "เอกสารที่มีหมายเหตุ",
     "doc.face.tax_id": "เลขผู้เสียภาษี {company_tax_id}",
     "doc.face.prepared": "จัดทำ {prepared_on}",
     "doc.face.received": "เอกสารที่ได้รับ",
@@ -430,6 +437,12 @@
     "fact.inv.currency": "สกุลเงิน {code}: {n} ฉบับ"
   },
   "en": {
+    "รายงานทะเบียน .docx": "Register report (.docx)",
+    "รายงานจากตัวเลขชุดเดียวกับทะเบียน: หน้าปกพร้อมยอดรวม ภาษีมูลค่าเพิ่ม และจำนวนเอกสารที่บันทึก ผลของรอบ ตัวเลขทุกตัวพร้อมรหัสอ้างอิง เอกสารที่มีหมายเหตุที่ยอดสูงสุด คำอธิบาย และที่มาของข้อมูล ไฟล์ Excel ยังเป็นกระดาษทำการ": "A report from the same figures as the register: a cover with the total, the VAT and the documents recorded, the result, every figure with its reference, the largest documents with a note, the commentary and the sources. The workbook stays the working paper.",
+    "สไลด์สรุปทะเบียน .pptx": "Register slides (.pptx)",
+    "สไลด์จากตัวเลขชุดเดียวกัน: ยอดรวม ยอดสำคัญ ผลของรอบ เอกสารที่มีหมายเหตุทุกฉบับ คำอธิบาย และที่มาของข้อมูล ถ้าเอกสารมากเกินกว่าที่สไลด์จะแสดงได้ จะถามก่อนว่าจะเอาแบบไหน": "Slides from the same figures: the total, the key amounts, the result, every document with a note, the commentary and the sources. If there are more documents than slides can show, you are asked first which you would like.",
+    "ทะเบียน PDF (พิมพ์จาก .xlsx)": "Register as PDF (printed from the .xlsx)",
+    "ทะเบียนฉบับเดียวกับไฟล์ Excel พิมพ์เป็น PDF ตามที่ตั้งการพิมพ์ไว้ หัวตารางซ้ำทุกหน้า กว้างหน้าเดียว": "The same register as the workbook, printed to PDF as it is set to print: the header row on every page, one page wide.",
     "เรียงตามผู้ขาย · จัดกลุ่มตามร้าน · เอาเอกสารของผู้ขายรายเดียวกันไว้ติดกัน": "order by seller · group by shop · keep one seller's documents together",
     "เรียงตามวันที่ · เอาเอกสารเก่าสุดขึ้นก่อน": "order by date · the oldest documents first",
     "เรียงจากยอดมาก · เรียงตามยอดรวม · เอาใบยอดใหญ่ขึ้นก่อน": "order from the largest total · order by total · the big invoices first",
@@ -711,6 +724,7 @@
     "ระบบอ่าน · ตัวเลขผ่านการตรวจ (ยังไม่มีคนตรวจ)": "System-read · figures passed the checks (not yet reviewed by a person)",
     "ระบบอ่าน · ต้องตรวจ": "System-read · needs review",
     "ทะเบียนเอกสารซื้อ · {period_label}": "Purchase document register · {period_label}",
+    "เอกสารที่มีหมายเหตุ": "Documents with a note",
     "เลขผู้เสียภาษี {company_tax_id}": "Tax ID {company_tax_id}",
     "จัดทำ {prepared_on}": "Prepared {prepared_on}",
     "เอกสารที่ได้รับ": "Documents received",

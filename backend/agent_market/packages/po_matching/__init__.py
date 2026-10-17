@@ -162,6 +162,8 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
 
     from ...deliverables import quality
     from ...deliverables.formats import wanted_formats
+    from ...deliverables import document as _document
+    from .scripts.document import spec as _doc_spec
     from ...deliverables.look import commentary
     from ...deliverables.look.catalogue import DoesNotFit
     from ...deliverables.theme import resolve
@@ -172,7 +174,14 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     theme = resolve(req.get("theme"))
     names = req.get("names") or {}
     artifacts, refused, all_ok = [], [], True
-    for fmt in [f for f in wanted_formats(req, ["xlsx"]) if f == "xlsx"]:
+    for fmt in wanted_formats(req, ["xlsx"]):
+        if fmt != "xlsx":
+            # AM23 §1.2: a report or a deck a person asks for is a document of its own, written from the same
+            # computed table through the same renderer (deliverables/document.py) — never the workbook's sheets laid
+            # into Word; the workbook stays the authority. (Until AM23 this loop dropped every format but the workbook.)
+            all_ok &= _document.into(fmt, view, req, _doc_spec(view, applied), names, "po_matching", out_dir, artifacts, refused,
+                                     in_dir=in_dir)
+            continue
         name = os.path.basename(names.get(fmt) or "po_matching.xlsx")
         path = os.path.join(out_dir, name)
         # AM22 §1.1: the commentary — a model's, or the rules' saying so — on its own sheet, read back by the gate;

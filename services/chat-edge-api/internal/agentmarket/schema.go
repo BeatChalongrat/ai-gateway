@@ -362,7 +362,7 @@ var itemSchema = map[string]field{
 	}),
 	"outputs": field{class: asObject, declares: namesOf("artifacts", "summary.not_included", "summary.excluded_list"), fields: map[string]field{
 		"run_id": id, "period_label": label(fromPackage), "credits": number, "rerender": number, "draft": number,
-		"more_formats": list(code),
+		"more_formats": list(code), "pdf_of": code,
 		"artifacts": list(field{class: asObject, declares: namesOf(), fields: map[string]field{"id": id, "name": file, "format": code,
 			"size": number, "version": number, "quality": qualityChecks}}),
 		"summary": summary,

@@ -21,6 +21,7 @@ fi
 CHUNKS=(
   '^(TestARoundAskedOnlyForAFileItsAgentDoesNotMakeStopsBeforeAnyWorkAndSaysWhy)$'
   '^(TestTheNeutralLineOnAWorkingPaperFollowsTheOrganisationsSwitch)$'
+  '^(TestABankRoundMakesTheReportTheDeckAndThePDFOfItsWorkbookWhenAsked)$'
 )
 for c in "${CHUNKS[@]}"; do
   echo "== chunk $c"

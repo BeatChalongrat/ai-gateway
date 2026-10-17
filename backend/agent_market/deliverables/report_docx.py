@@ -249,7 +249,7 @@ class ReportWriter:
             self._para("AM Body")
         self.tiles()
         note = self._para("AM Small Muted")
-        self._broken(note, S("docs.cover.cite_note"), "small", width_pt)
+        self._broken(note, m.get("cite_note") or S("docs.cover.cite_note"), "small", width_pt)  # AM23: a document's own
         self._para("AM Body").add_run().add_break(WD_BREAK.PAGE)
 
     def tiles(self):
@@ -275,7 +275,8 @@ class ReportWriter:
             style = "AM Tile Up" if kp["good"] is True else ("AM Tile Down" if kp["good"] is False else "AM Tile Flat")
             dp = self._para(style, where=c)
             arrow = {"up": "▲ ", "down": "▼ ", "flat": ""}[kp["tone"]]
-            text = (arrow + kp["delta"]) if kp["delta"] else S("docs.kpi.no_compare")
+            # AM23: a figure with nothing to compare it with (a working paper's) carries its reference alone
+            text = "" if kp["delta"] is None else ((arrow + kp["delta"]) if kp["delta"] else S("docs.kpi.no_compare"))
             last = self._broken(dp, text, "small", avail)
             cite = f"  [{kp['cite']}]"
             if measure.width_pt(last + cite, LOOK.pt(FMT, "small")) > avail:

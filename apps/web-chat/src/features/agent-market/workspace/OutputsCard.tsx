@@ -50,8 +50,16 @@ export function moreFormatsOf(outputs: { more_formats?: string[] | null }): stri
 // rows say what they are; the office files' names already do.
 const ROW_LABELLED = new Set(["template", "pdf"]);
 
-export function artifactLabelKey(format: string): AmKey | null {
+export function artifactLabelKey(format: string, pdfOf?: string | null): AmKey | null {
+  // AM23 §1.4: a PDF is called for what it prints — the report, or the workbook as it prints
+  if (format === "pdf" && pdfOf === "xlsx") return "outputs.fmt.pdfOfXlsx";
   return ROW_LABELLED.has(format) ? FORMAT_KEYS[format] ?? null : null;
+}
+
+/** The word for a format a card offers: a PDF is called for what it prints (AM23 §1.4). */
+export function formatLabelKey(format: string, pdfOf?: string | null): AmKey {
+  if (format === "pdf" && pdfOf === "xlsx") return "outputs.fmt.pdfOfXlsx";
+  return FORMAT_KEYS[format] ?? "outputs.fmt.xlsx";
 }
 
 /** The extension a row's icon shows: a filled template's own (…_template_v1.xlsx), else the format's. */
@@ -205,7 +213,7 @@ export function OutputsCard({
       {artifacts.length ? (
         <ul className="mt-3 flex flex-col divide-y divide-border-subtle rounded-lg border border-border-subtle">
           {artifacts.map((a) => (
-            <ArtifactRow key={a.id} artifact={a} />
+            <ArtifactRow key={a.id} artifact={a} pdfOf={outputs.pdf_of} />
           ))}
         </ul>
       ) : null}
@@ -267,7 +275,7 @@ export function OutputsCard({
 
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border-subtle pt-3">
         {/* a draft is neither signed nor made into other files: the agent's gate did not pass */}
-        {!isDraft && moreFormatsOf(outputs).length ? <MoreFilesMenu runId={outputs.run_id} formats={moreFormatsOf(outputs)} /> : null}
+        {!isDraft && moreFormatsOf(outputs).length ? <MoreFilesMenu runId={outputs.run_id} formats={moreFormatsOf(outputs)} pdfOf={outputs.pdf_of} /> : null}
         {canSignOff && !outputs.review && !isDraft ? <SignOffButton runId={outputs.run_id} /> : null}
         <ButtonLink href={provenanceHref(outputs.run_id)} variant="secondary" size="sm">
           {t("ws.provenance")}
@@ -417,10 +425,13 @@ export function SeenBy({ outputs }: { outputs: OutputsPayload }) {
 export function ArtifactRow({
   artifact,
   download: downloadWith,
+  pdfOf,
 }: {
   artifact: Pick<OutputArtifact, "id" | "name" | "format" | "size" | "version"> & Partial<Pick<OutputArtifact, "quality">>;
   /** AM4: an admin's reason-gated download instead of the owner's. */
   download?: () => Promise<void>;
+  /** AM23 §1.4: what the agent's PDF prints, so its row is called for what it is. */
+  pdfOf?: string | null;
 }) {
   const t = useAmT();
   const [busy, setBusy] = useState(false);
@@ -439,7 +450,7 @@ export function ArtifactRow({
       },
     );
   };
-  const label = artifactLabelKey(artifact.format);
+  const label = artifactLabelKey(artifact.format, pdfOf);
   // AM8: a file delivered without passing (a customer form not fully filled) says so on its own row, with
   // every slot it lacks — not only in the folded details
   const failed = artifact.quality?.passed === false;
@@ -517,7 +528,7 @@ export function ArtifactRow({
 // the files whose pages the converter can picture: the office files and the PDF (a filled template too)
 const PREVIEWABLE = new Set(["docx", "pptx", "xlsx", "pdf", "template"]);
 
-function MoreFilesMenu({ runId, formats }: { runId: string; formats: string[] }) {
+function MoreFilesMenu({ runId, formats, pdfOf }: { runId: string; formats: string[]; pdfOf?: string | null }) {
   const t = useAmT();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -548,7 +559,7 @@ function MoreFilesMenu({ runId, formats }: { runId: string; formats: string[] })
     amApi.formats(runId, [fmt]).then(
       () => {
         setBusy(false);
-        setNote({ text: t("outputs.requested", { fmt: t(FORMAT_KEYS[fmt] ?? "outputs.fmt.xlsx") }), error: false });
+        setNote({ text: t("outputs.requested", { fmt: t(formatLabelKey(fmt, pdfOf)) }), error: false });
       },
       (err) => {
         setBusy(false);
@@ -585,7 +596,7 @@ function MoreFilesMenu({ runId, formats }: { runId: string; formats: string[] })
                 className="focus-ring flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-text-primary hover:bg-bg-elevated"
               >
                 <FileTypeBadge extension={extensionOf(fmt)} size="sm" />
-                <span>{t(FORMAT_KEYS[fmt] ?? "outputs.fmt.xlsx")}</span>
+                <span>{t(formatLabelKey(fmt, pdfOf))}</span>
               </button>
             ))}
           </div>

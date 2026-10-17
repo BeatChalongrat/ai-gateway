@@ -21,6 +21,7 @@ func am23Manifest(t *testing.T, pkg string) Manifest {
 	if err != nil {
 		t.Fatal(err)
 	}
+	AddPackageEnglish(raw) // (its labels' English, as the platform learns them reading the definition)
 	return m
 }
 
@@ -152,5 +153,69 @@ func TestMigration013AddsTheSwitchAndTheOrganisationIsReadWithoutIt(t *testing.T
 	}
 	if o, _ := e.store.OrgSettingsFor(ctx, DefaultOrg); !o.AssistantLine {
 		t.Fatal("on for every organisation")
+	}
+}
+
+// §1.4 and Part 4 fixture 7: a PDF is how a document prints. A PDF with no document to print cannot be declared —
+// the manifest is refused — so it is impossible, not handled: every agent's PDF prints a document it makes, the
+// four whose job is the workbook print the workbook, and the financial report its report.
+func TestAPDFWithoutADocumentToPrintCannotBeDeclared(t *testing.T) {
+	base := `{"schema_version":"agent.market.v1","id":"x","version":"1.0.0","name":"x","python_package":"x",
+		"permissions":{"default":"read_only"},"outputs":%s}`
+	for _, outs := range []string{
+		`[{"format":"xlsx"},{"format":"pdf","of":"docx"}]`, // a report it does not make
+		`[{"format":"pdf"}]`, // nothing at all: the report is assumed, and not made
+		`[{"format":"xlsx"},{"format":"pdf","of":"pdf"}]`,
+		`[{"format":"xlsx","of":"docx"}]`, // only a PDF prints another document
+	} {
+		if _, err := ParseManifest(json.RawMessage(strings.Replace(base, "%s", outs, 1))); err == nil {
+			t.Fatalf("refused: %s", outs)
+		}
+	}
+	if m, err := ParseManifest(json.RawMessage(strings.Replace(base, "%s", `[{"format":"xlsx"},{"format":"pdf","of":"xlsx"}]`, 1))); err != nil || m.PDFOf() != "xlsx" {
+		t.Fatalf("a PDF of the workbook: %v %q", err, m.PDFOf())
+	}
+	want := map[string]string{"bank_reconciliation": "xlsx", "expense_audit": "xlsx", "invoice_processing": "xlsx", "po_matching": "xlsx",
+		"financial_report": "docx"}
+	for pkg, of := range want {
+		m := am23Manifest(t, pkg)
+		if !m.FormatAllowed("pdf") || m.PDFOf() != of || !m.FormatAllowed(of) {
+			t.Fatalf("%s: its PDF prints %q (want %q)", pkg, m.PDFOf(), of)
+		}
+	}
+}
+
+// §1.3: the four agents whose job is the workbook make a report, a deck and a PDF of the workbook when asked; the
+// workbook alone is still what a round nobody changed makes.
+func TestTheFourWorkbookAgentsOfferEveryFormatAndDefaultToTheWorkbook(t *testing.T) {
+	for _, pkg := range []string{"bank_reconciliation", "expense_audit", "invoice_processing", "po_matching"} {
+		m := am23Manifest(t, pkg)
+		if got := strings.Join(m.OutputFormats(), ","); got != "xlsx,docx,pptx,pdf" {
+			t.Fatalf("%s makes %s", pkg, got)
+		}
+		if got := strings.Join(m.DefaultFormats(), ","); got != "xlsx" {
+			t.Fatalf("%s defaults to %s — defaults do not change", pkg, got)
+		}
+		for _, o := range m.Outputs {
+			if l := LabelFromPackage(o.Label, NoText); l.EmptyIn(Thai) || l.EmptyIn(English) || l.In(English) == l.In(Thai) {
+				t.Fatalf("%s: %s has a label in each language: %q / %q", pkg, o.Format, l.In(Thai), l.In(English))
+			}
+		}
+	}
+}
+
+// §1.3: offering more files does not make a round ask which files it makes. The four agents whose job is the
+// workbook are never asked (a report, a deck, a PDF are asked for); the financial report, whose round makes two
+// files by default, still is.
+func TestAOneFileAgentIsNeverAskedWhichFilesItsRoundMakes(t *testing.T) {
+	copied := []Default{{Key: "formats", Value: json.RawMessage(`["xlsx"]`), Source: "install"}}
+	for _, pkg := range []string{"bank_reconciliation", "expense_audit", "invoice_processing", "po_matching"} {
+		if f := OutputSetFinding(Thai, am23Manifest(t, pkg), copied, []string{"xlsx"}); f != nil {
+			t.Fatalf("%s asks which files: %+v", pkg, f)
+		}
+	}
+	fr := am23Manifest(t, "financial_report")
+	if f := OutputSetFinding(Thai, fr, []Default{{Key: "formats", Value: json.RawMessage(`["docx","pptx"]`), Source: "install"}}, []string{"docx", "pptx"}); f == nil {
+		t.Fatal("the financial report still asks")
 	}
 }

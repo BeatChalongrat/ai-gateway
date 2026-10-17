@@ -673,12 +673,28 @@ export function FormatsStep({ installId, manifest, onBack, onNext }: { installId
       <fieldset className="mt-4">
         <legend className="text-sm text-text-secondary">{t("formats.files")}</legend>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          {outputs.map((o) => (
-            <label key={o.format} className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-border bg-bg-base px-3 py-2.5 text-sm text-text-primary hover:bg-bg-elevated">
-              <input type="checkbox" checked={formats.includes(o.format)} onChange={() => toggle(o.format)} className="h-4 w-4 accent-current" />
-              <span>{o.label}</span>
-            </label>
-          ))}
+          {/* AM23 §1.4: a PDF is how a document prints — an option on the document it prints, never a file beside it */}
+          {outputs
+            .filter((o) => o.format !== "pdf")
+            .map((o) => {
+              const pdf = outputs.find((x) => x.format === "pdf" && (x.of ?? "docx") === o.format);
+              return (
+                <div key={o.format} className="flex flex-col gap-1.5" data-testid={`am-format-${o.format}`}>
+                  <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-border bg-bg-base px-3 py-2.5 text-sm text-text-primary hover:bg-bg-elevated">
+                    <input type="checkbox" checked={formats.includes(o.format)} onChange={() => toggle(o.format)} className="h-4 w-4 accent-current" />
+                    <span>{o.label}</span>
+                  </label>
+                  {pdf ? (
+                    <label className="ml-6 flex cursor-pointer items-center gap-2 text-xs text-text-secondary" data-testid="am-format-pdf-of">
+                      <input type="checkbox" checked={formats.includes("pdf")} onChange={() => toggle("pdf")} className="h-3.5 w-3.5 accent-current" />
+                      <span>
+                        {t("formats.pdfOf")} · {pdf.label}
+                      </span>
+                    </label>
+                  ) : null}
+                </div>
+              );
+            })}
         </div>
         {formats.length === 0 ? <p className="mt-2 text-xs text-status-warning">{t("formats.needOne")}</p> : null}
       </fieldset>

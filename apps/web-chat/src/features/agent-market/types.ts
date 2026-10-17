@@ -15,6 +15,8 @@ export interface ManifestOutput {
   format: string;
   label: string;
   default?: boolean;
+  /** AM23 §1.4: the document a PDF prints ("docx" the report, "xlsx" the workbook) — a PDF is an option on it. */
+  of?: string;
 }
 
 export interface Manifest {
@@ -652,6 +654,8 @@ export interface OutputsPayload {
   gate?: { passed: boolean; what: string; next?: string } | null;
   /** AM8: the formats this agent can still make from the round's numbers (absent on older cards) */
   more_formats?: string[] | null;
+  /** AM23 §1.4: the document this agent's PDF prints, so the card calls the PDF what it is. */
+  pdf_of?: string | null;
 }
 
 /** AM4: what the files card always says about models. */

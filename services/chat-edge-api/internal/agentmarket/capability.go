@@ -51,11 +51,7 @@ type Manifest struct {
 		Required bool     `json:"required"`
 		Accept   []string `json:"accept"`
 	} `json:"inputs"`
-	Outputs []struct {
-		Format  string `json:"format"`
-		Label   string `json:"label"`
-		Default bool   `json:"default"`
-	} `json:"outputs"`
+	Outputs      []ManifestOutput `json:"outputs"`
 	Capabilities struct {
 		Required []string `json:"required"`
 		Optional []string `json:"optional"`
@@ -214,7 +210,39 @@ func ParseManifest(raw json.RawMessage) (Manifest, error) {
 	if err := checkDeclared(m.Install.Settings); err != nil {
 		return m, fmt.Errorf("manifest: %w", err)
 	}
+	for _, o := range m.Outputs {
+		// AM23 §1.4: there is no PDF writer — a PDF prints a document the agent makes, or it cannot be declared
+		if o.Format == "pdf" {
+			of := m.PDFOf()
+			if of == "pdf" || !m.FormatAllowed(of) {
+				return m, fmt.Errorf("manifest: the PDF prints %q, which the agent does not make", of)
+			}
+		} else if o.Of != "" {
+			return m, fmt.Errorf("manifest: only a PDF prints another document (%s says of=%q)", o.Format, o.Of)
+		}
+	}
 	return m, nil
+}
+
+// PDFOf is the document the agent's PDF prints: the one its manifest names, the report for one that names none
+// (the financial report's PDF was the report converted since AM2).
+func (m Manifest) PDFOf() string {
+	for _, o := range m.Outputs {
+		if o.Format == "pdf" && o.Of != "" {
+			return o.Of
+		}
+	}
+	return "docx"
+}
+
+// ManifestOutput is one kind of file an agent makes.
+type ManifestOutput struct {
+	Format  string `json:"format"`
+	Label   string `json:"label"`
+	Default bool   `json:"default"`
+	// AM23 §1.4: a PDF is how a document prints — the document this one prints ("docx": the report, "xlsx": the
+	// workbook as it prints). A PDF names one the agent declares, or the manifest is refused.
+	Of string `json:"of,omitempty"`
 }
 
 // DefaultFormats are the package's default output set.

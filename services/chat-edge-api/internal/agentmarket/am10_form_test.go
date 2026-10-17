@@ -162,11 +162,8 @@ func TestAFormDroppedAfterARoundIsThatRoundsOnly(t *testing.T) {
 }
 
 func TestWhichFilesIsAskedOnlyWhenTheInstallDoesNotSay(t *testing.T) {
-	m := Manifest{Outputs: []struct {
-		Format  string `json:"format"`
-		Label   string `json:"label"`
-		Default bool   `json:"default"`
-	}{{"docx", "รายงาน", true}, {"pptx", "สไลด์", true}, {"xlsx", "ตาราง", false}, {"pdf", "PDF", false}}}
+	m := Manifest{Outputs: []ManifestOutput{{"docx", "รายงาน", true, ""}, {"pptx", "สไลด์", true, ""}, {"xlsx", "ตาราง", false, ""},
+		{"pdf", "PDF", false, ""}}}
 	shapes := OutputShapes(Thai, m)
 	if len(shapes) != 4 || shapes[0].Label != "รายงาน Word + สไลด์ (ชุดมาตรฐาน)" || len(shapes[1].Formats) != 3 || shapes[2].Label != "รายงาน Word อย่างเดียว" {
 		t.Fatalf("shapes: %+v", shapes)
@@ -188,11 +185,7 @@ func TestWhichFilesIsAskedOnlyWhenTheInstallDoesNotSay(t *testing.T) {
 	if OutputSetFinding(Thai, m, []Default{{Key: "answers.output_set", Value: json.RawMessage(`["pptx"]`), Source: "answer"}}, nil) != nil {
 		t.Fatal("a remembered answer is the install saying")
 	}
-	one := Manifest{Outputs: []struct {
-		Format  string `json:"format"`
-		Label   string `json:"label"`
-		Default bool   `json:"default"`
-	}{{"xlsx", "ทะเบียน", true}}}
+	one := Manifest{Outputs: []ManifestOutput{{"xlsx", "ทะเบียน", true, ""}}}
 	if OutputSetFinding(Thai, one, copied, nil) != nil {
 		t.Fatal("one shape: nothing to ask")
 	}

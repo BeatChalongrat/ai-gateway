@@ -33,7 +33,7 @@
     {"format": "docx", "label": "รายงาน .docx", "default": true},
     {"format": "pptx", "label": "สไลด์ .pptx", "default": true},
     {"format": "xlsx", "label": "ตารางตัวเลข .xlsx", "default": false},
-    {"format": "pdf", "label": "รายงาน PDF (แปลงจาก .docx)", "default": false}
+    {"format": "pdf", "label": "รายงาน PDF (แปลงจาก .docx)", "default": false, "of": "docx"}
   ],
   "capabilities": {
     "required": ["spreadsheet.read.xlsx", "compute.python.decimal", "deliverable.report.docx", "deliverable.deck.pptx", "model.text"],

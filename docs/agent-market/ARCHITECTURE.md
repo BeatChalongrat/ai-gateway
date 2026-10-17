@@ -1466,3 +1466,27 @@ whatever the switch says — "the words of this section were composed from the s
 plane reads the switch apart from the organisation's row (`org.go` `assistantLineQ`), so one deployed before the runner
 has applied 013 still reads the organisation, with the line on. Fixtures: `tests/test_am23_closing.py`,
 `runner/am23_it_test.go`.
+
+**Every agent makes the file a person asks for** (`deliverables/document.py`, each package's `scripts/document.py`). The
+bank reconciliation, the expense audit, the invoice register and the PO matching make a report and a deck as well as
+their workbook. A package says what its content *is* — the title and who and what period, two or three figures for
+the cover, the one table a reader needs (the reconciling items, the claims or invoices that did not pass, the
+documents with a note), and the bank's reconciliation statement — and `document.py` writes the rest from the run's
+computed table: what the run found (the package's own `narrative_facts`), every figure of the `figures` table with
+its reference, the commentary, and a closing block with the files' SHA-256, the assumptions and the references. The
+report and the deck go through the financial report's writers and the layout catalogue; a package sets no font, size,
+colour, coordinate or box. A document is never the workbook's sheets laid into Word: it reads no sheet, shows the part
+of a long table a reader needs (the largest twenty, or the order a person asked for) and says the workbook has every
+row; the deck holds every row of its table or refuses. The workbook stays the authority, and a round nobody asked
+anything of makes the workbook alone — its cells are the same with or without a document beside it, and a one-file
+agent is never asked which files its round makes (`OutputSetFinding`). Fixtures: `tests/test_am23_documents.py`,
+`runner/am23_it_test.go`.
+
+**A PDF is how a document prints, not a fourth writer.** The manifest says which document an agent's PDF prints
+(`outputs[].of`: the report for the financial report, the workbook for the four), and a PDF that names no document the
+agent makes is refused when the manifest is read — a PDF with nothing to print cannot be declared. The runner renders
+that document (made and not delivered when only the PDF was asked for), converts it with the converter, and gates the
+PDF: a report's PDF holds the report's paragraphs in order (AM2), a workbook's PDF renders every page as the workbook is
+set to print (its print area, its header row on every page, one page wide — AM21) and holds every figure exactly as
+the workbook prints it (`runner/pdf.go` `pdfPrintGate`). Nothing in the engine writes a PDF. The picker shows a PDF
+under the document it prints ("…and a PDF of it"), and the files card calls it what it prints.
