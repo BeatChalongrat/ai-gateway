@@ -82,6 +82,7 @@ export const en = {
   "obs.usage.allProjects": "All projects",
   "obs.usage.errorUser": "Failed to load usage data",
   "obs.usage.errorSystem": "Failed to load AI review cost data",
+  "obs.usage.noPermission": "This account may not see usage — it takes a project admin or above.",
 
   "obs.usage.stat.requests": "Total requests",
   "obs.usage.stat.requestsSub": "~{n} tokens/request avg",
@@ -427,6 +428,7 @@ export const th: Record<keyof typeof en, string> = {
   "obs.usage.allProjects": "ทุกโปรเจกต์",
   "obs.usage.errorUser": "โหลดข้อมูลการใช้งานไม่สำเร็จ",
   "obs.usage.errorSystem": "โหลดข้อมูลค่าใช้จ่ายของการตรวจสอบด้วย AI ไม่สำเร็จ",
+  "obs.usage.noPermission": "บัญชีนี้ไม่มีสิทธิ์ดูการใช้งาน ต้องเป็นผู้ดูแลโปรเจกต์ขึ้นไป",
 
   "obs.usage.stat.requests": "คำขอทั้งหมด",
   "obs.usage.stat.requestsSub": "เฉลี่ย ~{n} โทเคนต่อคำขอ",

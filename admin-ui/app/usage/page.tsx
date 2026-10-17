@@ -15,7 +15,7 @@ import ErrorState from "../../components/ui/ErrorState";
 import EmptyState from "../../components/ui/EmptyState";
 import { Icon } from "../../components/ui/Icon";
 import { useApi } from "../../lib/useApi";
-import { api } from "../../lib/api";
+import { api, ApiError } from "../../lib/api";
 import { useDateLocale, useT, type DictKey } from "../../lib/i18n";
 
 ChartJS.register(ArcElement, BarElement, CategoryScale, LinearScale, Tooltip);
@@ -237,7 +237,9 @@ export default function UsagePage() {
         typeof err === "object" && err && "body" in err
           ? ((err as { body?: { error?: { message?: string } } }).body?.error?.message ?? null)
           : null;
-      setUsageError(msg || t("obs.usage.errorUser"));
+      // AM24: a role that may not see usage is told so in the page's language — the gateway's own sentence for
+      // it ("Insufficient permissions for admin operations.") is English whatever the screen
+      setUsageError(err instanceof ApiError && err.status === 403 ? t("obs.usage.noPermission") : msg || t("obs.usage.errorUser"));
       setUsage(null);
     } finally {
       setLoadingUsage(false);
@@ -273,7 +275,7 @@ export default function UsagePage() {
         typeof err === "object" && err && "body" in err
           ? ((err as { body?: { error?: { message?: string } } }).body?.error?.message ?? null)
           : null;
-      setSystemError(msg || t("obs.usage.errorSystem"));
+      setSystemError(err instanceof ApiError && err.status === 403 ? t("obs.usage.noPermission") : msg || t("obs.usage.errorSystem"));
     } finally {
       setLoadingSystem(false);
     }
