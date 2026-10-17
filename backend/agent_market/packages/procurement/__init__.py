@@ -345,11 +345,16 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
             done(path, "xlsx", "table", checks, meta)
     # the request as a plain document — unless the organisation's own form is being filled this round, or
     # nothing was chosen (then there is no request to draft, and the comparison says so)
+    not_made: list = []
     if "docx" in wanted and request.get("lines") and not req.get("template"):
         path = os.path.join(out_dir, os.path.basename(names.get("docx") or "purchase_request.docx"))
         meta = RequestDraft(computed, theme, run).write(path, in_dir if os.path.isdir(in_dir) else None)
         done(path, "docx", "request", check_draft(path, computed), meta)
-    return {"passed": all_ok, "artifacts": artifacts, "refused": refused,
+    elif "docx" in wanted:
+        # AM23 §1.1: a file asked for and not made is accounted for with why (the comparison says so on its face):
+        # the runner treats one left out with no word as a render that failed
+        not_made.append({"format": "docx", "why": "form_filled" if req.get("template") else "nothing_chosen"})
+    return {"passed": all_ok, "artifacts": artifacts, "refused": refused, "not_made": not_made,
             "theme": {"id": theme["id"], "version": theme.get("version", 1)}, "asked": {"applied": applied, "refused": asked_refused}}
 
 

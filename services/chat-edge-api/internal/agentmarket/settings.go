@@ -228,10 +228,12 @@ func (d DeclaredSetting) Check(raw json.RawMessage) (json.RawMessage, PersonText
 type settingRules struct {
 	declared map[string]DeclaredSetting
 	order    []DeclaredSetting
+	// AM23: the kinds of file the agent makes — the only ones its "formats" setting may name
+	outputs Manifest
 }
 
 func rulesOf(m Manifest) settingRules {
-	r := settingRules{declared: map[string]DeclaredSetting{}, order: m.Install.Settings}
+	r := settingRules{declared: map[string]DeclaredSetting{}, order: m.Install.Settings, outputs: m}
 	for _, d := range m.Install.Settings {
 		r.declared[d.Key] = d
 	}
@@ -296,6 +298,18 @@ func (r settingRules) check(key string, raw json.RawMessage) (kept json.RawMessa
 			return nil, "BAD_SETTING", why
 		}
 		return kept, "", NoText
+	}
+	if key == "formats" && len(r.outputs.Outputs) > 0 {
+		// AM23 §1.1: the file set names only what the agent makes. Until AM23 any list was kept, and a bank
+		// reconciliation whose set said Word alone finished "done" with no file at all.
+		var fs []string
+		if json.Unmarshal(raw, &fs) != nil || len(fs) == 0 {
+			return nil, "BAD_VALUE", InBoth(func(l Lang) string { return settingProblem(l, key, raw) })
+		}
+		if _, notMade := r.outputs.MadeOf(fs); len(notMade) > 0 {
+			return nil, "BAD_SETTING", NotMadeText(notMade, r.outputs.OutputFormats())
+		}
+		return raw, "", NoText
 	}
 	if !validSettingValue(key, raw) {
 		return nil, "BAD_VALUE", InBoth(func(l Lang) string { return settingProblem(l, key, raw) })

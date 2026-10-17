@@ -97,6 +97,15 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 			return r.fail(ctx, run, "self_test_seed", err)
 		}
 	}
+	// AM23 §1.1: a kind of file the agent does not make is refused by name, with what it makes, before any
+	// work; a round left with nothing it can make stops there, charged nothing. Until AM23 such a set was
+	// handed to the engine, which kept what it makes and dropped the rest without a word — a bank
+	// reconciliation whose file set said Word alone finished "done" with no file at all.
+	if stop, err := rc.refuseNotMade(ctx); err != nil {
+		return r.fail(ctx, run, "load", err)
+	} else if stop {
+		return r.fail(ctx, run, "format_not_offered", errors.New("the agent makes none of the kinds of file this run asked for"))
+	}
 	var computedRef blobRef
 	var computeKey, period string
 	var summary map[string]any
@@ -983,10 +992,33 @@ func (rc *runCtx) formats() []string {
 	}
 	var f []string
 	_ = json.Unmarshal(rc.run.Formats, &f)
+	f, _ = rc.pkg.Manifest.MadeOf(f) // AM23: never a kind of file the agent does not make (refuseNotMade said so)
 	if len(f) == 0 {
 		f = rc.pkg.Manifest.DefaultFormats()
 	}
 	return f
+}
+
+// refuseNotMade says, once, which kinds of file of the round's set its agent does not make, with what it makes,
+// and keeps on the run only those it makes. stop: none is left.
+func (rc *runCtx) refuseNotMade(ctx context.Context) (stop bool, err error) {
+	var f []string
+	_ = json.Unmarshal(rc.run.Formats, &f)
+	made, notMade := rc.pkg.Manifest.MadeOf(f)
+	if len(notMade) == 0 {
+		return false, nil
+	}
+	if err := rc.r.Store.PostText(ctx, rc.run, am.NotMadeText(notMade, rc.pkg.Manifest.OutputFormats())); err != nil {
+		return false, err
+	}
+	if made == nil {
+		made = []string{}
+	}
+	if err := rc.r.Store.SetFormats(ctx, rc.r.Store.Pool, rc.run.ID, made); err != nil {
+		return false, err
+	}
+	rc.run.Formats, _ = json.Marshal(made)
+	return len(made) == 0, nil
 }
 
 // outputSetFinding is the "which files" question for this round, or nil

@@ -21,7 +21,51 @@ import (
 // OutputSetCode is the finding's code (and the remembered default "answers.output_set").
 const OutputSetCode = "output_set"
 
-var outputWords = map[string]wording{"docx": "รายงาน Word", "pptx": "สไลด์", "xlsx": "ตาราง Excel"}
+var outputWords = map[string]wording{"docx": "รายงาน Word", "pptx": "สไลด์", "xlsx": "ตาราง Excel", "pdf": "PDF"}
+
+// FilesNamed is kinds of file as a person reads them ("ตาราง Excel · สไลด์"); a kind the platform has no word
+// for is its extension (".xls").
+func FilesNamed(fs []string) PersonText {
+	var out []PersonText
+	for _, f := range fs {
+		if w, ok := outputWords[f]; ok {
+			out = append(out, Text(w))
+		} else {
+			out = append(out, Text("%s", Name("."+strings.TrimPrefix(f, "."))))
+		}
+	}
+	return Join(" · ", out...)
+}
+
+// NotMadeText is AM23's refusal of a kind of file an agent does not make, by name, with what it does make —
+// the one sentence the settings page and the runner both say (until AM23 the settings page took any file set,
+// and the engine kept what it makes and dropped the rest without a word).
+func NotMadeText(notMade, makes []string) PersonText {
+	return Text("agent ตัวนี้ไม่ได้ทำ %s — ทำได้: %s", Words(FilesNamed(notMade)), Words(FilesNamed(makes)))
+}
+
+// MadeOf splits formats into those the manifest declares and those it does not, each in its order.
+func (m Manifest) MadeOf(formats []string) (made, notMade []string) {
+	for _, f := range formats {
+		if m.FormatAllowed(f) {
+			made = append(made, f)
+		} else {
+			notMade = append(notMade, f)
+		}
+	}
+	return made, notMade
+}
+
+// OutputFormats is every kind of file the manifest says the agent makes, in its order.
+func (m Manifest) OutputFormats() []string {
+	var out []string
+	for _, o := range m.Outputs {
+		if o.Format != "" && !contains(out, o.Format) {
+			out = append(out, o.Format)
+		}
+	}
+	return out
+}
 
 // OutputShape is one sensible set of files.
 type OutputShape struct {

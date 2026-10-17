@@ -650,9 +650,19 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 				TemplateNotMade *struct {
 					Why string `json:"why"`
 				} `json:"template_not_made"`
+				// AM23: a file asked for that the package leaves out on purpose, with why (procurement's draft
+				// before anything was chosen)
+				NotMade []notMadeFormat `json:"not_made"`
 			}
 			if err := json.Unmarshal(mustJSON(res.Result), &r); err != nil {
 				return nil, 0, "", "", err
+			}
+			if !rc.formOnly {
+				// AM23 §1.1: every file the engine was asked for comes back made, or refused with its reason. One
+				// it leaves out it said nothing about — and a round reported "done" with a file it never made.
+				if missing := unaccounted(pyFormats, r.Artifacts, r.Refused, r.NotMade); len(missing) > 0 {
+					return nil, 0, "", "", fmt.Errorf("the engine made no %s and gave no reason", strings.Join(missing, ", "))
+				}
 			}
 			ro := renderOut{Theme: r.Theme, Passed: r.Passed, Asked: r.Asked}
 			if r.TemplateNotMade != nil {
@@ -784,6 +794,42 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 	}
 	ro.form = roundForm
 	return ro, key, nil
+}
+
+// notMadeFormat is a file the package leaves out on purpose, and why.
+type notMadeFormat struct {
+	Format string `json:"format"`
+	Why    string `json:"why"`
+}
+
+// unaccounted: the formats asked of the engine that it neither made, refused nor left out with a reason (a
+// template is the form's own).
+func unaccounted(asked []string, artifacts []json.RawMessage, refused []refusedFormat, notMade []notMadeFormat) []string {
+	have := map[string]bool{}
+	for _, a := range artifacts {
+		var m struct {
+			Format string `json:"format"`
+			Kind   string `json:"kind"`
+		}
+		if json.Unmarshal(a, &m) == nil && m.Kind != "template" {
+			have[m.Format] = true
+		}
+	}
+	for _, r := range refused {
+		have[r.Format] = true
+	}
+	for _, n := range notMade {
+		if n.Why != "" {
+			have[n.Format] = true
+		}
+	}
+	var out []string
+	for _, f := range asked {
+		if !have[f] {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // moreFormats are the formats a person may ask this round for afterwards: the manifest's outputs, PDF

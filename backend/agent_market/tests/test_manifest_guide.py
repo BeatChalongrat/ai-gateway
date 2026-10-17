@@ -92,7 +92,7 @@ class Guide(unittest.TestCase):
     def test_versions_were_bumped_with_the_guide(self):
         self.assertEqual({p: manifest(p)["version"] for p in PACKAGES},
                          {"financial_report": "1.12.0", "invoice_processing": "1.13.0", "expense_audit": "1.12.0",
-                          "bank_reconciliation": "1.10.0", "po_matching": "1.10.0", "procurement": "1.3.0"})
+                          "bank_reconciliation": "1.10.0", "po_matching": "1.10.0", "procurement": "1.4.0"})
 
     def test_every_package_says_whom_it_is_for_and_whose_law_it_follows(self):
         # AM6 "generic by default": scope and jurisdiction are the manifest's, never assumed
