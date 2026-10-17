@@ -349,7 +349,7 @@ def check(out_dir: str, artifacts: list, view: dict, pkg, *, prior: list | None 
         return {"ok": False, "check": chk, "files": read, "bad": sorted({f1, f2}), "counts": counts, "where": where,
                 "figure": key, "places": [[p1, s1], [p2, s2]]}
     chk = {"name": "files.agree", "ok": True, "label": S("check.agree.label"),
-           "detail": S("check.agree.ok", n=compared, files=len(read), pairs=len(pairs))}
+           "detail": S("check.agree.ok", n=compared, files=len(read))}
     return {"ok": True, "check": chk, "files": read, "bad": [], "counts": counts, "where": where}
 
 
