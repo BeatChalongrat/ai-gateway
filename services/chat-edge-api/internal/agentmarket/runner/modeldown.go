@@ -28,12 +28,15 @@ func (r *Runner) parkForModel(rc *runCtx) error {
 	if n, err := r.Store.ModelWaits(bg, rc.run); err == nil && n >= am.MaxModelWaits {
 		return r.fail(rc.ctx, rc.run, am.ReasonModelUnreachable, ErrModelUnreachable)
 	}
-	if err := r.Store.Park(bg, rc.run.ID, r.ID, am.ReasonModelUnreachable); err != nil {
-		return err
-	}
-	// it has delivered nothing: what its finished steps were charged is held while it waits (am.Store.HoldCharges)
+	// it has delivered nothing: what its finished steps were charged is held while it waits (am.Store.HoldCharges) —
+	// before it is seen waiting, so that no one reads a waiting run with its charge still on it (AM23's integration
+	// lane read one between the two, once)
 	if err := r.Store.HoldCharges(bg, r.Store.Pool, rc.run.ID); err != nil {
 		rc.log.Warn("the charges of a run that waits for its model were not held", "err", err)
+	}
+	if err := r.Store.Park(bg, rc.run.ID, r.ID, am.ReasonModelUnreachable); err != nil {
+		_ = r.Store.ChargeAgain(bg, r.Store.Pool, rc.run.ID) // (not parked: its charge stands)
+		return err
 	}
 	_ = r.Store.AddNotice(bg, r.Store.Pool, rc.run, am.Notice{Text: am.ModelAwayNotice(), Tone: "warning", Reason: am.ReasonModelUnreachable})
 	r.syncProgress(bg, rc.run.ID)
