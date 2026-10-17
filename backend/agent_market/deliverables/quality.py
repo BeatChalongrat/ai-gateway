@@ -736,7 +736,9 @@ def check_pptx(path: str, deck: dict, computed: dict, theme: dict, asked=()) -> 
     allowed_forms = set()
     for f in (computed.get("figures") or {}).values():
         allowed_forms |= {_squash(f["text"]), _squash(content_mod.figure_text(f, "abs"))}
-    sslide = next((s for s in prs.slides if S("docs.section.summary") in _slide_text(s)), None)
+    # (AM23 §3.3: the summary slide is titled by the commentary's own heading; the writer says which)
+    title = (deck or {}).get("summary_title") or S("docs.section.summary")
+    sslide = next((s for s in prs.slides if title in _slide_text(s)), None)
     if sslide is not None:
         body = _blank_ids(_slide_text(sslide), set(computed.get("quotable_ids") or []))
         for tok in NUMBER.findall(body.split(S("docs.source_prefix"))[0]):

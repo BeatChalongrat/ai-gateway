@@ -159,6 +159,9 @@ _WRITING = {"pptx": {"summary": ("statement", "text"), "item": ("bullets", "item
                      "ceiling": ("commentary", "items")}}
 # a commentary printed in a deck is printed in its report too (financial_report): the tighter of the two holds
 _PRINTED_WITH = {"pptx": ("pptx", "docx"), "docx": ("docx",), "xlsx": ("xlsx",)}
+# AM23 §3.3: a heading of the commentary is a slide's title, a report's subheading and a sheet's section — the tightest
+# of the three holds it, whichever file prints it
+_HEADING = (("pptx", "bullets"), ("docx", "section"), ("xlsx", "commentary"))
 
 
 def writing_limits(fmt: str = "pptx", lang: str | None = None) -> dict:
@@ -193,6 +196,7 @@ def writing_limits(fmt: str = "pptx", lang: str | None = None) -> dict:
     # it fails the reading of the whole table. AM22's model measurement found that before any run did.)
     if "sentence" in _WRITING[fmt]:
         out["sentence_chars"] = int(limit("sentence") / ratio)
+    out["heading_chars"] = int(min(LOOK.catalogue(f)[lay]["takes"]["title"] for f, lay in _HEADING) / ratio)
     return out
 
 

@@ -41,7 +41,9 @@ THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
 # What in a manifest is data, not words: a sample file's path, and the values an install starts with
 # (the expense policy's categories and prohibited merchants are saved as the customer's own and are
 # matched against the customer's Thai files). They are never translated, on any screen.
-DATA = re.compile(r"(^|\.)sample(\[\d+\])?$|^install\.defaults(\.|$)")
+# AM23 §3.3: and the hedges a package's commentary never writes — phrases matched against what was written, in each
+# language as it is written, never shown to a person
+DATA = re.compile(r"(^|\.)sample(\[\d+\])?$|^install\.defaults(\.|$)|^narrative_hedges(\[\d+\])?$")
 # A literal a person must find or type exactly as their files have it — a sheet's name, a word in a
 # bank statement — stays as written inside quotes in the English, with what it means beside it.
 QUOTED = re.compile(r"“([^”]+)”")

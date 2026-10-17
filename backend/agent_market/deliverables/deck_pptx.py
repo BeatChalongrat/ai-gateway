@@ -331,8 +331,12 @@ class DeckWriter:
         kpis = {k["key"]: k for k in m["kpis"]}
         self.figure(kpis["net_profit"])
         self.figures([k for k in m["kpis"] if k["key"] != "net_profit"])
-        self.statement(S("docs.section.summary"), nar["summary"], list(nc.get("summary") or []))
-        self.bullets(S("docs.sub.watch"), list(nar.get("watch") or []), list(nc.get("watch") or []))
+        # AM23 §3.3: each part's heading written from what it found (the generic one only when it has none)
+        from .look.commentary import heading
+
+        self.summary_title = heading(nar, "summary", c, S("docs.section.summary"))
+        self.statement(self.summary_title, nar["summary"], list(nc.get("summary") or []))
+        self.bullets(heading(nar, "watch", c, S("docs.sub.watch")), list(nar.get("watch") or []), list(nc.get("watch") or []))
         charts = {ch["id"]: ch for ch in m["charts"]}
         if "trend" in charts:
             self.chart(charts["trend"])
@@ -362,11 +366,11 @@ class DeckWriter:
                     r += [money0(mv["prior"]), money0(mv["change"]), pct_or_dash(mv["change_pct"])]
                 rows.append(r)
             self.table(S("docs.section.movements"), heads, rows, [mv["cite"] for mv in c["top_movements"][:6]], caption=S("docs.caption.unit_baht"))
-            self.bullets(S("docs.section.movements"), list(nar.get("movements") or []), list(nc.get("movements") or []))
+            self.bullets(heading(nar, "movements", c, S("docs.section.movements")), list(nar.get("movements") or []), list(nc.get("movements") or []))
         exc = c["exceptions"]
         items = [f"{EXC_LABEL.get(e['code'], S('docs.exc.to_check'))}: {e['title']} — {e['detail']}" for e in exc] or [S("docs.exc.none")]
         self.bullets(S("docs.deck.exceptions", n=len(exc)), items, [e["cite"] for e in exc if e.get("cite")], lead=S("docs.deck.exceptions_note"))
-        self.bullets(S("docs.sub.next"), list(nar.get("next_steps") or []), list(nc.get("next_steps") or []))
+        self.bullets(heading(nar, "next_steps", c, S("docs.sub.next")), list(nar.get("next_steps") or []), list(nc.get("next_steps") or []))
         refs = sorted(set(c for per in self.cites for c in per), key=lambda x: (len(x), x))
         closing = [S("docs.deck.primary", file=c["source"]["primary"]["file"], rows_used=f"{c['source']['primary']['rows_used']:,}"),
                    m["source_note"],
@@ -388,4 +392,4 @@ class DeckWriter:
         self.prs.save(path)
         embedded = potx.embed_fonts(path, LOOK.family)
         return {"path": path, "slides": len(self.prs.slides), "chart_bindings": self.bindings, "slide_cites": self.cites,
-                "layouts": self.layouts, "embedded_fonts": embedded}
+                "layouts": self.layouts, "embedded_fonts": embedded, "summary_title": getattr(self, "summary_title", None)}

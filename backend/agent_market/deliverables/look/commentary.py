@@ -43,6 +43,31 @@ def printed(text: str, figures: dict) -> tuple[str, list[str]]:
     return "".join(out), cites
 
 
+def generic_headings(report: bool = False) -> dict:
+    """The generic heading of each part of a commentary, in the run's language: what a part is called when it found
+    nothing of its own to say (AM23 §3.3). The runner reads them from computed.json and asks again for a part that found
+    something under one; ``report``: the financial report's (its sections' names)."""
+    if report:
+        return {"summary": S("docs.section.summary"), "movements": S("docs.section.movements"), "watch": S("docs.sub.watch"),
+                "next_steps": S("docs.sub.next")}
+    return {k: S(v) for k, v in HEADING.items()}
+
+
+def counted(kind: str, n: int) -> str:
+    """The rules' heading of what to watch (``watch``) or what to do next (``next``): how many there are (AM23 §3.3)."""
+    return S(f"doc.h.{kind}_1") if n == 1 else S(f"doc.h.{kind}_n", n=n)
+
+
+def heading(narrative: dict | None, part: str, computed: dict | None = None, generic: str | None = None) -> str:
+    """A part's heading as every file prints it (AM23 §3.3): the commentary's own — a model's, held by the runner's
+    validator to the catalogue's title limit, or the rules', composed by the package from what the round found — each
+    figure named by its key printed as the figures table prints it; the generic heading only when it has none."""
+    h = ((narrative or {}).get("headings") or {}).get(part)
+    if isinstance(h, str) and h.strip():
+        return printed(h.strip(), (computed or {}).get("figures") or {})[0]
+    return generic if generic is not None else S(HEADING[part])
+
+
 def rows(narrative: dict, computed: dict) -> list[tuple[str, str, list[str]]]:
     """(part, the printed sentence, its citations) for every sentence of the commentary, in print order."""
     figures = computed.get("figures") or {}
@@ -75,6 +100,16 @@ def closing_line(narrative: dict, req: dict | None) -> str | None:
     if narrative.get("written_by") == "rules" or not assistant_on(req):
         return None
     return S("doc.assistant.line")
+
+
+def no_hedge(texts: list[str], hedges: list[str]) -> dict:
+    """AM23 §3.3: the commentary a finished file prints holds none of the package's hedges — its manifest's
+    narrative_hedges, the list the runner refuses a model's answer for (a hedge with nothing to do in it:
+    "ควรพิจารณาตรวจสอบเพิ่มเติม")."""
+    low = "\n".join(texts).lower()
+    found = next((w for w in hedges if w and w.lower() in low), None)
+    return {"name": "file.no_hedge", "ok": found is None, "label": S("check.hedge.label"),
+            "detail": S("check.hedge.found", word=found) if found else S("check.hedge.ok")}
 
 
 def model_names(narrative: dict | None, computed: dict | None, req: dict | None) -> list[str]:
@@ -156,10 +191,10 @@ def sheet(book, narrative: dict, computed: dict, req: dict | None = None) -> dic
     for key in LISTS:
         points = [t for part, t, _ in lines if part == key]
         if points:
-            got = catalogue.choose("xlsx", {"title": name, "items": points}, f"{name} · {S(HEADING[key])}", kinds=("commentary",))
+            got = catalogue.choose("xlsx", {"title": name, "items": points}, f"{name} · {heading(narrative, key, computed)}", kinds=("commentary",))
             if len(got.parts) > 1:
                 # a heading over the sheet's ceiling is refused, never broken or cut: a sheet has no next page
-                raise catalogue.DoesNotFit(f"{name} · {S(HEADING[key])}", got.reason)
+                raise catalogue.DoesNotFit(f"{name} · {heading(narrative, key, computed)}", got.reason)
             if got.fill > choice.fill:
                 choice = got
     ws = book.sheet(name)
@@ -168,7 +203,7 @@ def sheet(book, narrative: dict, computed: dict, req: dict | None = None) -> dic
     part_at = None
     for part, text, cites in lines:
         if part != part_at:
-            book.section(ws, r, S(HEADING[part]))
+            book.section(ws, r, heading(narrative, part, computed))
             r += 1
             part_at = part
         book.note(ws, r, text, cols=TEXT_COLS)
@@ -208,7 +243,9 @@ def check(path: str, narrative: dict, computed: dict, req: dict | None = None) -
     texts = [str(c.value) for row in wb[name].iter_rows() for c in row if isinstance(c.value, str)]
     squashed = {"".join(t.split()) for t in texts}
     want = rows(narrative, computed)
-    missing = [t for _, t, _ in want if "".join(t.split()) not in squashed]
+    # (AM23 §3.3: and every part's heading as it was written)
+    heads = [heading(narrative, part, computed) for part in dict.fromkeys(p for p, _, _ in want)]
+    missing = [t for t in [t for _, t, _ in want] + heads if "".join(t.split()) not in squashed]
     if missing:
         return ck(False, S("check.commentary.missing", n=len(missing), text=missing[0][:80]), len(want))
     braces = [t for t in texts if "{" in t or "}" in t]

@@ -473,7 +473,9 @@ def build(computed: dict, req: dict) -> dict:
     for c in chart_specs:
         chart_blocks += [{"type": "chart", "chart": c["id"]}, chart_table(c)]
     sections = [
-        {"key": "summary", "title": S("docs.section.summary"), "blocks": [b for b in (
+        # AM23 §3.3: each section's heading written from what it found — the commentary's own, the generic one only
+        # when it has none
+        {"key": "summary", "title": _commentary.heading(narrative, "summary", computed, S("docs.section.summary")), "blocks": [b for b in (
             {"type": "paragraph", "runs": cite_runs(narrative["summary"], computed), "narrative": True},
             # AM22 §1.1, AM23 §3.2: a commentary the rules composed says so on the page, under the words themselves,
             # whatever the organisation's switch says; one a model drafted never carries the sentence
@@ -482,7 +484,7 @@ def build(computed: dict, req: dict) -> dict:
         ) if b]},
         {"key": "pl", "title": S("docs.section.pl"), "blocks": [pl_table(computed)]},
         {"key": "charts", "title": SECTION_TITLES["charts"], "blocks": chart_blocks},
-        {"key": "movements", "title": SECTION_TITLES["movements"], "blocks": [b for b in (
+        {"key": "movements", "title": _commentary.heading(narrative, "movements", computed, SECTION_TITLES["movements"]), "blocks": [b for b in (
             movement_table(computed),
             {"type": "bullets", "items": [cite_runs(t, computed) for t in sentences(narrative, "movements")],
              "narrative": True}
@@ -493,9 +495,9 @@ def build(computed: dict, req: dict) -> dict:
             {"type": "paragraph", "runs": [(S("docs.exceptions.note"), None)], "muted": True},
             exceptions_table(computed)]},
         {"key": "insights", "title": S("docs.section.insights"), "blocks": [
-            {"type": "subheading", "text": S("docs.sub.watch")},
+            {"type": "subheading", "text": _commentary.heading(narrative, "watch", computed, S("docs.sub.watch"))},
             {"type": "bullets", "items": [cite_runs(t, computed) for t in sentences(narrative, "watch")], "narrative": True},
-            {"type": "subheading", "text": S("docs.sub.next")},
+            {"type": "subheading", "text": _commentary.heading(narrative, "next_steps", computed, S("docs.sub.next"))},
             {"type": "bullets", "items": [cite_runs(t, computed) for t in sentences(narrative, "next_steps")],
              "narrative": True},
         ]},

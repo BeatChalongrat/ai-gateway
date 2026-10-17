@@ -268,6 +268,26 @@ def run(req: dict) -> dict:
             out["agree"] = {k: res[k] for k in ("ok", "counts", "files", "bad") if k in res}
         for a in arts:
             a.pop("_printed", None)
+        # AM23 §3.3: no hedge of the package's (its manifest's narrative_hedges, the list the runner holds a model's
+        # answer to) in the commentary of any finished file that prints it — its sentences and its headings, as printed
+        # (the file's commentary gate proves they are in the file as written); the round's own data is not the
+        # commentary's to answer for (a claim's description may say "ตามความเหมาะสม")
+        from ..deliverables.look import commentary as _commentary
+
+        hedges = words.manifest(pkg.__name__).get("narrative_hedges") or []
+        narrative = req.get("narrative") or computed.get("fallback_narrative") or {}
+        said = _commentary.rows(narrative, computed) if hedges and narrative.get("summary") else []
+        printed = [t for _, t, _ in said] + [_commentary.heading(narrative, p, computed) for p in dict.fromkeys(p for p, _, _ in said)]
+        first = "".join(said[0][1].split()) if said else ""
+        for a in arts if first else []:
+            path = os.path.join(JOB_OUT, a.get("name") or "")
+            if a.get("kind") == "template" or not os.path.exists(path) or first not in "".join("".join(_commentary.file_texts(path)).split()):
+                continue
+            chk = _commentary.no_hedge(printed, hedges)
+            a["quality"]["checks"].append(chk)
+            if not chk["ok"]:
+                a["quality"]["passed"] = False
+                out["passed"] = False
     elif op == "inspect_template":
         from ..deliverables import template_fill, template_out
 

@@ -690,6 +690,7 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
               for r in cur_rows]
 
     from ....deliverables.look.catalogue import writing_limits
+    from ....deliverables.look.commentary import generic_headings as _generic_headings
 
     # AM22: a figure the model may name is one the report can cite. A line that is zero with no row behind it (income
     # tax in a month that has none) has a citation with no source, and the gate refuses that citation: a model that
@@ -703,6 +704,8 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
         "rules": RULES_VERSION,
         # AM21 §6.1: the catalogue's limits, told to the model before it writes (the runner puts them in its prompt)
         "writing_limits": writing_limits(),
+        # AM23 §3.3: what a section is called when it found nothing of its own (the runner asks again for one that did)
+        "headings_generic": _generic_headings(report=True),
         "period": period,
         "period_label": _words.period(period),
         "prior_period": prep["prior_period"],
@@ -794,5 +797,17 @@ def fallback_narrative(c: dict) -> dict:
             steps.append(W("doc.narr.check", label=EXC_TH.get(e["code"], W("doc.narr.item")), name=name))
     if not steps:
         steps = [W("doc.narr.review_figures")]
-    return {"summary": summary, "movements": movers, "watch": watch, "next_steps": steps,
+    # AM23 §3.3: the rules' headings, written from what the round found (the generic one only where it found nothing)
+    from ....deliverables.look.commentary import counted
+
+    heads = {}
+    net = lines.get("net_profit")
+    if net is not None and "net_profit" in f:
+        heads["summary"] = W("doc.h.profit", net_profit="{net_profit}") if Decimal(net["current"]) >= 0 else W("doc.h.loss", loss="{net_profit:abs}")
+    if c["top_movements"]:
+        heads["movements"] = W("doc.h.mover", name=c["top_movements"][0]["name"] or c["top_movements"][0]["code"])
+    if c["exceptions"]:
+        heads["watch"] = counted("watch", len(c["exceptions"]))
+        heads["next_steps"] = counted("next", len(steps))
+    return {"summary": summary, "movements": movers, "watch": watch, "next_steps": steps, "headings": heads,
             "written_by": "rules", "model": None}

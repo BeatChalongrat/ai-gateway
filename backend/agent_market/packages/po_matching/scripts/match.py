@@ -961,8 +961,19 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
                               W("fact.po.grir", received_not_billed="{received_not_billed}", billed_not_received="{billed_not_received}")]),
         (W("fact.h.reasons"), [W("narr.reason", label=r["label"], invoices=r["invoices"]) for r in summary["by_reason"]]
          + ([W("narr.over", n=len(over))] if over else [])))
+    # AM23 §3.3: the rules' headings, written from what the round found (the generic one only where it found nothing)
+    from ....deliverables.look.commentary import counted, generic_headings
+
+    held = by[BLOCKED]["count"] or by[PERSON]["count"]
+    heads = {"summary": W("doc.h.held", blocked="{blocked}", person="{person}", invoices="{invoices}") if held
+             else W("doc.h.all_passed", invoices="{invoices}"),
+             "movements": W("doc.h.depth", d3=d3, d2=d2)}
+    if watch:
+        heads["watch"] = counted("watch", len(summary["by_reason"]) + (1 if over else 0))
+    heads["next_steps"] = counted("next", len(fallback["next_steps"]))
+    fallback["headings"] = heads
     return {
-        "figures": figures, "narrative_facts": facts, "writing_limits": writing_limits("xlsx"),
+        "figures": figures, "narrative_facts": facts, "writing_limits": writing_limits("xlsx"), "headings_generic": generic_headings(),
         "schema": SCHEMA, "period": period, "period_label": label, "period_source": rv.period_source,
         "prepared_on": (today or rv.today).isoformat(), "company": rv.settings.company,
         "company_tax_id": rv.settings.company_tax_id, "currency": rv.settings.currency,

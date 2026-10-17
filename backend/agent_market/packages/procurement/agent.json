@@ -108,6 +108,7 @@
   },
   "narrative": "model",
   "narrative_when_away": "rules",
+  "narrative_hedges": ["ควรพิจารณาตรวจสอบ", "ตรวจสอบเพิ่มเติม", "ติดตามอย่างใกล้ชิด", "ตามความเหมาะสม", "หากจำเป็น", "อาจต้องมีการ", "ควรระมัดระวัง", "เพื่อความถูกต้อง", "ควรให้ความสำคัญ", "ควรเปรียบเทียบราคาเพิ่มเติม", "further review", "further investigation", "further analysis", "monitor closely", "keep an eye on", "as appropriate", "if necessary", "if needed", "may need to", "consider reviewing", "for accuracy", "pay attention to", "compare more prices"],
   "templates": {
     "reads": [
       "rows",

@@ -253,9 +253,15 @@ var notASentence = map[string]string{
 	"runner/modellang.go:notAList":          "addressed to a model: the reason a list sent as something else is sent back with (AM22 §1.2)",
 	"runner/modellang.go:notASentence":      "addressed to a model: the reason a list member that is not a sentence is sent back with (AM22 §1.2)",
 	"runner/modellang.go:wordNeverWritten":  "addressed to a model: the reason an answer with a word the agent's documents never contain is sent back with (AM22)",
-	"runner/modellang.go:noFigureNames":     "addressed to a model: the reason an agent with no figure table has its {names} sent back with (AM22)",
-	"runner/model.go:Vision":                "addressed to a vision model: what is added to the prompt on its retry",
-	"runner/clarify.go:classify":            "addressed to a model: the prompt that reads a typed answer as one of a card's options (the language typed in: modellang.go)",
+	// AM23 §3.3: what makes a commentary read machine-made, held by the validator (runner/narrative_am23.go)
+	"runner/narrative_am23.go:paddingFillerTH": "reads a model's answer: the Thai words a sentence restating a figure is made of besides its label, set aside when a point's new words are counted",
+	"runner/narrative_am23.go:paddingReason":   "addressed to a model: the reason a point that only restates the facts is sent back with (AM23 §3.3)",
+	"runner/narrative_am23.go:hedgeReason":     "addressed to a model: the reason an answer with a hedge of the package's is sent back with (AM23 §3.3)",
+	"runner/narrative_am23.go:headingReason":   "addressed to a model: the reason a part under its generic heading or none is sent back with (AM23 §3.3)",
+	"runner/narrative_am23.go:headingTooLong":  "addressed to a model: the reason a heading over the catalogue's title is sent back with (AM23 §3.3)",
+	"runner/modellang.go:noFigureNames":        "addressed to a model: the reason an agent with no figure table has its {names} sent back with (AM22)",
+	"runner/model.go:Vision":                   "addressed to a vision model: what is added to the prompt on its retry",
+	"runner/clarify.go:classify":               "addressed to a model: the prompt that reads a typed answer as one of a card's options (the language typed in: modellang.go)",
 	// AM11b: what a person asked of an agent's documents
 	"instructions.go:askedSystem": "addressed to a model: the system message of the question that reads a person's words into the directives a package declares",
 	"instructions.go:AskedPrompt": "addressed to a model: the headings of the two lists, of the person's words and of the answer's shape",

@@ -454,8 +454,21 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
         (W("fact.h.ageing"), [W("fact.bank.older", older="{older}")] + ([W("fact.bank.stale", n="{stale}")] if stale else [])),
         # the run's exceptions by their reasons — words, no amounts (the records themselves are not shown to the model)
         (W("fact.h.exceptions"), sorted({e["reason"] for e in run_ex})))
+    # AM23 §3.3: the rules' headings, written from what the round found (the generic one only where it found nothing)
+    from ....deliverables.look.commentary import counted, generic_headings
+
+    heads = {"movements": W("doc.h.items", items="{items}") if items else W("doc.h.no_items")}
+    if st["tied"]:
+        heads["summary"] = W("doc.h.tied")
+    elif "difference" in figures:
+        heads["summary"] = W("doc.h.not_tied", difference="{difference}")
+    if fallback["watch"]:
+        heads["watch"] = counted("watch", len(gate["reasons"]))
+    if fallback["next_steps"]:
+        heads["next_steps"] = W("doc.h.journal", n=len(journal)) if journal else counted("next", len(fallback["next_steps"]))
+    fallback["headings"] = heads
     return {
-        "figures": figures, "narrative_facts": facts, "writing_limits": writing_limits("xlsx"),
+        "figures": figures, "narrative_facts": facts, "writing_limits": writing_limits("xlsx"), "headings_generic": generic_headings(),
         "schema": SCHEMA, "period": period, "period_label": label, "as_of": rv.end.isoformat(), "period_start": rv.start.isoformat(),
         "period_source": rv.period_source, "prepared_on": (today or rv.today).isoformat(),
         "company": str(rv.defaults.get("company") or ""), "account": {**rv.account, "gl_code": rv.gl_code or ""},

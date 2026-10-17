@@ -235,16 +235,21 @@ def _read(path: str) -> dict:
         return json.load(f)
 
 
-def of(package: str) -> Words:
-    """The words of a package: its manifest's ``strings`` and ``en``."""
+def manifest(package: str) -> dict:
+    """A package's manifest (agent.json), read from the engine's zip or from a checkout."""
     try:
         from importlib.resources import files
 
-        m = json.loads(files(package).joinpath("agent.json").read_text(encoding="utf-8"))
+        return json.loads(files(package).joinpath("agent.json").read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001 — run from a checkout whose package is not importable by that name (the tests)
         import importlib
 
-        m = _read(os.path.join(os.path.dirname(os.path.abspath(importlib.import_module(package).__file__)), "agent.json"))
+        return _read(os.path.join(os.path.dirname(os.path.abspath(importlib.import_module(package).__file__)), "agent.json"))
+
+
+def of(package: str) -> Words:
+    """The words of a package: its manifest's ``strings`` and ``en``."""
+    m = manifest(package)
     return Words(m.get("strings"), m.get("en"), m.get("en_by_key"))
 
 

@@ -66,6 +66,7 @@
   },
   "narrative": "model",
   "narrative_when_away": "rules",
+  "narrative_hedges": ["ควรพิจารณาตรวจสอบ", "ตรวจสอบเพิ่มเติม", "ติดตามอย่างใกล้ชิด", "ตามความเหมาะสม", "หากจำเป็น", "อาจต้องมีการ", "ควรระมัดระวัง", "เพื่อความถูกต้อง", "ควรให้ความสำคัญ", "ควรเข้มงวดกับนโยบาย", "further review", "further investigation", "further analysis", "monitor closely", "keep an eye on", "as appropriate", "if necessary", "if needed", "may need to", "consider reviewing", "for accuracy", "pay attention to", "tighten controls"],
   "document_index": {"retention_days": 730},
   "guide": {
     "for": "สำหรับผู้ตรวจการเบิกค่าใช้จ่ายพนักงานประจำเดือน ที่อยากให้ตรวจทุกรายการตามนโยบายของบริษัทก่อนส่งให้ผู้อนุมัติ",
@@ -161,6 +162,9 @@
     }
   },
   "strings": {
+    "doc.h.exceptions": "ข้อยกเว้น {exception} จาก {claims} รายการ",
+    "doc.h.all_passed": "ผ่านทุกกฎทั้ง {claims} รายการ",
+    "doc.h.review": "ข้อยกเว้น {review} ข้อรอคนตัดสิน",
     "weekday.0": "วันจันทร์",
     "weekday.1": "วันอังคาร",
     "weekday.2": "วันพุธ",
@@ -636,6 +640,9 @@
     "form.not_made": "รอบนี้ไม่มีรายการเบิกที่อ่านได้ จึงไม่มีอะไรให้กรอกลงแบบฟอร์ม"
   },
   "en": {
+    "ข้อยกเว้น {exception} จาก {claims} รายการ": "{exception} exceptions out of {claims} claims",
+    "ผ่านทุกกฎทั้ง {claims} รายการ": "All {claims} claims passed every rule",
+    "ข้อยกเว้น {review} ข้อรอคนตัดสิน": "{review} exceptions await a person",
     "รายงานผลตรวจ .docx": "Audit report (.docx)",
     "รายงานจากตัวเลขชุดเดียวกับผลตรวจ: หน้าปกพร้อมยอดเบิก ยอดที่เป็นข้อยกเว้น และยอดที่ต้องใช้วิจารณญาณ ผลการตรวจ ตัวเลขทุกตัวพร้อมรหัสอ้างอิง รายการเบิกที่ยังไม่ผ่านที่ยอดสูงสุด คำอธิบาย และที่มาของข้อมูล ไฟล์ Excel ยังเป็นกระดาษทำการ": "A report from the same figures as the audit: a cover with the amounts claimed, in exceptions and needing judgement, the result, every figure with its reference, the largest claims that did not pass, the commentary and the sources. The workbook stays the working paper.",
     "สไลด์สรุปผลตรวจ .pptx": "Audit slides (.pptx)",

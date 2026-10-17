@@ -78,6 +78,7 @@
   },
   "narrative": "model",
   "narrative_when_away": "rules",
+  "narrative_hedges": ["ควรพิจารณาตรวจสอบ", "ตรวจสอบเพิ่มเติม", "ติดตามอย่างใกล้ชิด", "ตามความเหมาะสม", "หากจำเป็น", "อาจต้องมีการ", "ควรระมัดระวัง", "เพื่อความถูกต้อง", "ควรให้ความสำคัญ", "ควรติดตามสถานะ", "further review", "further investigation", "further analysis", "monitor closely", "keep an eye on", "as appropriate", "if necessary", "if needed", "may need to", "consider reviewing", "for accuracy", "pay attention to", "follow up as needed"],
   "narrative_never": ["อนุมัติแล้ว", "จ่ายแล้ว", "approved", "paid"],
   "document_index": {"retention_days": 1825},
   "record_who_answered": true,
@@ -186,6 +187,9 @@
     }
   },
   "strings": {
+    "doc.h.held": "ติดเงื่อนไข {blocked} · ให้คนตัดสิน {person} จาก {invoices} ฉบับ",
+    "doc.h.all_passed": "ผ่านครบทั้ง {invoices} ฉบับ",
+    "doc.h.depth": "ตรวจ 3 ทาง {d3} บรรทัด · 2 ทาง {d2} บรรทัด",
     "kind.po": "ใบสั่งซื้อ (PO)",
     "card.kind.po.d": "รายการที่ตกลงซื้อ: สินค้า จำนวน และราคาต่อหน่วย",
     "kind.gr": "ใบรับของ (GR)",
@@ -822,6 +826,9 @@
     "form.not_made": "รอบนี้ไม่มีใบแจ้งหนี้ที่ตรวจได้ จึงไม่มีอะไรให้กรอกลงแบบฟอร์ม"
   },
   "en": {
+    "ติดเงื่อนไข {blocked} · ให้คนตัดสิน {person} จาก {invoices} ฉบับ": "{blocked} blocked and {person} for a person, of {invoices} invoices",
+    "ผ่านครบทั้ง {invoices} ฉบับ": "All {invoices} invoices passed",
+    "ตรวจ 3 ทาง {d3} บรรทัด · 2 ทาง {d2} บรรทัด": "{d3} lines matched three ways, {d2} two ways",
     "รายงานผลตรวจใบแจ้งหนี้ .docx": "Invoice matching report (.docx)",
     "รายงานจากตัวเลขชุดเดียวกับผลตรวจ: หน้าปกพร้อมมูลค่าที่ผ่าน มูลค่าที่ติดเงื่อนไข และจำนวนที่ต้องให้คนตัดสิน ผลการตรวจ ตัวเลขทุกตัวพร้อมรหัสอ้างอิง ใบแจ้งหนี้ที่ยังไม่ผ่านที่ยอดสูงสุด คำอธิบาย และที่มาของข้อมูล ไฟล์ Excel ยังเป็นกระดาษทำการ": "A report from the same figures as the matching: a cover with the value that passed, the value blocked and how many need a decision, the result, every figure with its reference, the largest invoices that did not pass, the commentary and the sources. The workbook stays the working paper.",
     "สไลด์สรุปผลตรวจใบแจ้งหนี้ .pptx": "Invoice matching slides (.pptx)",

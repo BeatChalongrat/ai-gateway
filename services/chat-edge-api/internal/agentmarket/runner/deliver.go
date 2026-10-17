@@ -49,6 +49,10 @@ type computedView struct {
 	// AM22: the words the package's documents never contain (its manifest's narrative_never, set by the narrative
 	// step — never read from computed.json, whose result never holds them); an answer with one is asked again
 	NarrativeNever []string `json:"-"`
+	// AM23 §3.3: the hedges of the package's manifest (set by the narrative step, like NarrativeNever), and the generic
+	// heading of each part of the commentary in the document's language (the engine's: computed.json)
+	NarrativeHedges []string          `json:"-"`
+	HeadingsGeneric map[string]string `json:"headings_generic"`
 }
 
 type narrativeFact struct {
@@ -111,7 +115,8 @@ func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey st
 			user := narrativePrompt(l, cv)
 			var parsed, long map[string]any
 			var longBy string
-			cv.NarrativeNever = rc.pkg.Manifest.NarrativeNever // AM22: the package's declaration
+			cv.NarrativeNever = rc.pkg.Manifest.NarrativeNever   // AM22: the package's declaration
+			cv.NarrativeHedges = rc.pkg.Manifest.NarrativeHedges // AM23 §3.3: and its hedges
 			c, tried, err := rc.r.Model.CompleteWithInBy(ctx, l, models, rc.pkg.Instructions, user, func(model, s string) error {
 				v, err := checkNarrative(l, s, cv)
 				var tl *tooLongErr
@@ -226,9 +231,38 @@ func checkNarrative(l am.Lang, s string, cv computedView) (map[string]any, error
 		}
 		v[k] = lines
 	}
+	// AM23 §3.3: a point of the findings or of what to watch that only says again what the facts, the figures' labels or
+	// the summary say is padding — sent back once, like a point too long; then its headings, written from what each
+	// part found
+	known := knownToTheReader(cv, sum)
+	for _, k := range []string{"movements", "watch"} {
+		for i, x := range v[k].([]any) {
+			if isPadding(l, k, x.(string), known) {
+				long = append(long, paddingReason(l, k, i+1))
+			}
+		}
+	}
+	hs, soft, err := checkHeadings(l, v, cv)
+	if err != nil {
+		return nil, err
+	}
+	if len(hs) > 0 {
+		v["headings"] = hs
+		for _, k := range narrativeParts {
+			if h, ok := hs[k]; ok {
+				all = append(all, h)
+			}
+		}
+	} else {
+		delete(v, "headings")
+	}
+	long = append(long, soft...)
 	joined := strings.Join(all, "\n")
 	if w := neverWritten(joined, cv.NarrativeNever); w != "" {
 		return nil, errors.New(wordNeverWritten(l, w))
+	}
+	if w := neverWritten(joined, cv.NarrativeHedges); w != "" {
+		return nil, errors.New(hedgeReason(l, w)) // AM23 §3.3: refused, the way a never-written word is
 	}
 	if len(cv.Figures) > 0 {
 		if err := guardFigures(l, joined, cv); err != nil {
@@ -248,7 +282,8 @@ func checkNarrative(l am.Lang, s string, cv computedView) (map[string]any, error
 }
 
 // tooLongErr (AM22 §1.2) is an answer whose only fault is its length: the reason is sent back for the one retry;
-// after the last attempt the answer itself goes on to the renderer's ladder (overLength).
+// after the last attempt the answer itself goes on to the renderer's ladder (overLength). AM23 §3.3: and an answer whose
+// only faults are those or its padding or its headings — what the reader is spared is asked for, never cut.
 type tooLongErr struct{ reason string }
 
 func (e *tooLongErr) Error() string { return e.reason }
@@ -423,6 +458,9 @@ func writingLimitsLine(l am.Lang, cv computedView) string {
 		} else {
 			s += fmt.Sprintf(" · %d points to a page; more go on to the next", lim["bullets_max"])
 		}
+		if lim["heading_chars"] > 0 {
+			s += fmt.Sprintf(" · each heading up to %d", lim["heading_chars"])
+		}
 		return s + " · How to write: draft everything that needs saying first, then edit it down to these lengths without dropping " +
 			"a point, the way a copy editor trims a manuscript; send only the edited version\n"
 	}
@@ -432,6 +470,9 @@ func writingLimitsLine(l am.Lang, cv computedView) string {
 		s += fmt.Sprintf(" · หนึ่งหัวข้อมีได้ไม่เกิน %d ข้อ (%d ข้อต่อหน้า เกินนั้นขึ้นหน้าใหม่)", lim["items_max"], lim["bullets_max"])
 	} else {
 		s += fmt.Sprintf(" · %d ข้อต่อหน้า เกินนั้นขึ้นหน้าใหม่", lim["bullets_max"])
+	}
+	if lim["heading_chars"] > 0 {
+		s += fmt.Sprintf(" · หัวข้อแต่ละหัวข้อไม่เกิน %d", lim["heading_chars"])
 	}
 	return s + " · วิธีเขียน: ร่างสิ่งที่ต้องบอกให้ครบก่อน แล้วเกลาถ้อยคำให้อยู่ในความยาวนี้โดยไม่ตัดประเด็นใดทิ้ง เหมือนบรรณาธิการเกลาต้นฉบับ ส่งเฉพาะฉบับที่เกลาแล้ว\n"
 }

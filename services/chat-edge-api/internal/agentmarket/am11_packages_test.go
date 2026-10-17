@@ -72,6 +72,7 @@ func TestTheShippedPackagesReadInEnglishOnAnEnglishScreen(t *testing.T) {
 		delete(original, "en")
 		delete(original, "strings")
 		delete(original, "en_by_key")
+		delete(original, "narrative_hedges")
 		if !reflect.DeepEqual(th, original) {
 			t.Errorf("%s: a Thai screen's manifest is not the package's own", pkg)
 		}

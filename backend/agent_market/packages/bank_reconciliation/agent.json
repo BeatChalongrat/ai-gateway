@@ -53,6 +53,7 @@
   },
   "narrative": "model",
   "narrative_when_away": "rules",
+  "narrative_hedges": ["ควรพิจารณาตรวจสอบ", "ตรวจสอบเพิ่มเติม", "ติดตามอย่างใกล้ชิด", "ตามความเหมาะสม", "หากจำเป็น", "อาจต้องมีการ", "ควรระมัดระวัง", "เพื่อความถูกต้อง", "ควรให้ความสำคัญ", "ควรกระทบยอดอย่างสม่ำเสมอ", "further review", "further investigation", "further analysis", "monitor closely", "keep an eye on", "as appropriate", "if necessary", "if needed", "may need to", "consider reviewing", "for accuracy", "pay attention to", "reconcile regularly"],
   "completion_gate": true,
   "record_who_answered": true,
   "review": {"separate_reviewer": true},
@@ -171,6 +172,11 @@
     }
   },
   "strings": {
+    "doc.h.tied": "ลงตัว: ยอดหลังปรับปรุงสองฝั่งเท่ากัน",
+    "doc.h.not_tied": "ยังไม่ลงตัว: ต่างกัน {difference}",
+    "doc.h.items": "รายการกระทบยอด {items} รายการ",
+    "doc.h.no_items": "จับคู่ได้ทุกรายการ ไม่มีรายการกระทบยอด",
+    "doc.h.journal": "ร่างรายการปรับปรุง {n} รายการรอตรวจ",
     "reason.match_unconfirmed": "คู่ที่เสนอยังไม่มีคนยืนยัน",
     "reason.possible_duplicate": "อาจบันทึกซ้ำ",
     "reason.unclassified_item": "รายการที่ยังไม่ได้จัดประเภท",
@@ -635,6 +641,11 @@
     "form.not_made": "รอบนี้ไม่มียอดคงเหลือของฝั่งธนาคารหรือฝั่งบัญชี จึงไม่มีงบกระทบยอดให้กรอกลงแบบฟอร์ม"
   },
   "en": {
+    "ลงตัว: ยอดหลังปรับปรุงสองฝั่งเท่ากัน": "Tied: the two adjusted balances agree",
+    "ยังไม่ลงตัว: ต่างกัน {difference}": "Not tied: they differ by {difference}",
+    "รายการกระทบยอด {items} รายการ": "{items} reconciling items",
+    "จับคู่ได้ทุกรายการ ไม่มีรายการกระทบยอด": "Every row matched: no reconciling item",
+    "ร่างรายการปรับปรุง {n} รายการรอตรวจ": "{n} draft adjusting entries to review",
     "รายงานกระทบยอด .docx": "Reconciliation report (.docx)",
     "รายงานจากตัวเลขชุดเดียวกับงบกระทบยอด: หน้าปกพร้อมยอดหลังปรับปรุงสองฝั่งและผลต่าง ผลการกระทบยอด ตัวเลขทุกตัวพร้อมรหัสอ้างอิง งบกระทบยอด รายการกระทบยอดที่ยอดสูงสุด คำอธิบาย และที่มาของข้อมูล ไฟล์ Excel ยังเป็นกระดาษทำการ": "A report from the same figures as the reconciliation: a cover with the two adjusted balances and their difference, the result, every figure with its reference, the statement, the largest reconciling items, the commentary and the sources. The workbook stays the working paper.",
     "สไลด์สรุปการกระทบยอด .pptx": "Reconciliation slides (.pptx)",

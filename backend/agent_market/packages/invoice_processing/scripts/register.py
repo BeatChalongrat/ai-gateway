@@ -260,8 +260,14 @@ def compute(docs: list[R.Doc], roles: dict, period: str, *, answers: dict | None
                               total=fmt_money(totals["total"]), vat_amount=fmt_money(totals["vat_amount"]))
                             + (" " + W("say.summary.excluded", excluded=counts["excluded"]) if counts["excluded"] else "")),
                 "movements": [], "watch": _capped(sorted({e["reason"] for e in exceptions})), "next_steps": []}
+    # AM23 §3.3: the rules' headings, written from what the round found (the generic one only where it found nothing)
+    from ....deliverables.look.commentary import counted, generic_headings
+
+    fallback["headings"] = {"summary": W("doc.h.recorded", included="{included}", documents="{documents}")}
+    if fallback["watch"]:
+        fallback["headings"]["watch"] = counted("watch", len({e["reason"] for e in exceptions}))
     return {"schema": SCHEMA, "period": period, "period_label": label,
-            "figures": figures, "narrative_facts": facts, "writing_limits": writing_limits("xlsx"),
+            "figures": figures, "narrative_facts": facts, "writing_limits": writing_limits("xlsx"), "headings_generic": generic_headings(),
             "prepared_on": (today or _dt.date.today()).isoformat(), "company": (defaults or {}).get("company") or "",
             "company_tax_id": (R.org_from(defaults or {}) or {}).get("tax_id"),
             "documents": documents, "line_items": lines, "provenance": prov, "exceptions": exceptions, "checks": checks,

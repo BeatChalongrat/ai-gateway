@@ -34,7 +34,7 @@ func TestANineItemListWithOneLongItemIsRefusedNotTrimmedAndANineItemListThatFits
 	cv := am22Limits()
 	items := make([]string, 9)
 	for i := range items {
-		items[i] = "ข้อสังเกตข้อ " + strings.Repeat("ก", i+1)
+		items[i] = "เช็คค้างจ่ายต้องขอสำเนา" + strings.Repeat("ก", i+1) // (a point that says something: AM23 refuses padding)
 	}
 	long := append([]string{}, items...)
 	long[6] = strings.Repeat("ยาวเกินไป", 8) // 72 columns over a limit of 30
@@ -102,7 +102,7 @@ func TestLengthIsMeasuredInTheCharactersAReaderSees(t *testing.T) {
 
 func TestAnEngineThatSendsNoLimitsIsCheckedAsBefore(t *testing.T) {
 	cv := computedView{}
-	v, err := checkNarrative(am.Thai, am22Answer([]string{strings.Repeat("ยาวมาก", 100)}, strings.Repeat("ยาว", 500)), cv)
+	v, err := checkNarrative(am.Thai, am22Answer([]string{strings.Repeat("ยาวมากกว่าที่หน้ากระดาษรับ", 30)}, strings.Repeat("ยาว", 500)), cv)
 	if err != nil || len(v["movements"].([]any)) != 1 {
 		t.Fatalf("no limits, no length check: %v", err)
 	}

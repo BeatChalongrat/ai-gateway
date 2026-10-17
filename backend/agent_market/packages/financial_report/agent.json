@@ -127,7 +127,11 @@
       "lines": {"label": "งบกำไรขาดทุน (หนึ่งแถวต่อหนึ่งรายการ)", "columns": {"label": "รายการ", "current": "งวดนี้", "prior": "งวดก่อน", "budget": "งบประมาณ"}}
     }
   },
+  "narrative_hedges": ["ควรพิจารณาตรวจสอบ", "ตรวจสอบเพิ่มเติม", "ติดตามอย่างใกล้ชิด", "ตามความเหมาะสม", "หากจำเป็น", "อาจต้องมีการ", "ควรระมัดระวัง", "เพื่อความถูกต้อง", "ควรให้ความสำคัญ", "ควรวิเคราะห์เพิ่มเติม", "ควรควบคุมค่าใช้จ่าย", "further review", "further investigation", "further analysis", "monitor closely", "keep an eye on", "as appropriate", "if necessary", "if needed", "may need to", "consider reviewing", "for accuracy", "pay attention to", "control costs"],
   "strings": {
+    "doc.h.profit": "กำไรสุทธิ {net_profit} บาท",
+    "doc.h.loss": "ขาดทุนสุทธิ {loss} บาท",
+    "doc.h.mover": "เปลี่ยนมากที่สุด: {name}",
     "doc.gl": "บัญชีแยกประเภท",
     "doc.tb": "งบทดลอง",
     "doc.pl": "งบกำไรขาดทุน",
@@ -405,6 +409,9 @@
     "doc.narr.account": "บัญชี"
   },
   "en": {
+    "กำไรสุทธิ {net_profit} บาท": "Net profit of {net_profit} baht",
+    "ขาดทุนสุทธิ {loss} บาท": "A net loss of {loss} baht",
+    "เปลี่ยนมากที่สุด: {name}": "The largest change: {name}",
     "ขอสั้นๆ · ฉบับย่อ · สรุปสั้นๆ · ขอหน้าเดียว": "Keep it short \u00b7 A short version \u00b7 A short summary \u00b7 One page please",
     "ไม่ใส่กราฟ": "No charts",
     "รายงานและสไลด์ไม่มีกราฟและไม่มีตารางตัวเลขของกราฟ ตัวเลขอื่นเหมือนเดิมทุกตัว": "The report and the slides have no charts and no tables of a chart's figures; every other figure is the same.",

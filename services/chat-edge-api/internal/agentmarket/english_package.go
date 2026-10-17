@@ -138,6 +138,7 @@ func ManifestIn(l Lang, raw json.RawMessage) json.RawMessage {
 	delete(m, "en")
 	delete(m, "strings")
 	delete(m, "en_by_key")
+	delete(m, "narrative_hedges") // AM23 §3.3: phrases the runner refuses in a commentary, matched as written — no screen's
 	if l == English && len(en) > 0 {
 		for k, v := range m {
 			m[k] = withEnglish(v, en, k)

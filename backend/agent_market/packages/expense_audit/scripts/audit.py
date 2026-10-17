@@ -319,8 +319,18 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
                               W("fact.exp.review", review="{review}")]),
         (W("fact.h.reasons"), [W("fact.exp.reason", reason=r) for r in reasons]),
         (W("fact.h.policy"), [W("fact.exp.policy.shipped") if p.source == "package_sample" else W("fact.exp.policy.set"), _calendar_fact(cal)]))
+    # AM23 §3.3: the rules' headings, written from what the round found (the generic one only where it found nothing)
+    from ....deliverables.look.commentary import counted, generic_headings
+
+    heads = {"summary": W("doc.h.exceptions", exception="{exception}", claims="{claims}") if count["exception"]
+             else W("doc.h.all_passed", claims="{claims}")}
+    if fallback["watch"]:
+        heads["watch"] = counted("watch", len(reasons))
+    if fallback["next_steps"]:
+        heads["next_steps"] = W("doc.h.review", review="{review}") if review_n else counted("next", len(fallback["next_steps"]))
+    fallback["headings"] = heads
     return {
-        "figures": figures, "narrative_facts": facts, "writing_limits": writing_limits("xlsx"),
+        "figures": figures, "narrative_facts": facts, "writing_limits": writing_limits("xlsx"), "headings_generic": generic_headings(),
         "schema": SCHEMA, "period": period, "period_label": label,
         "prepared_on": (today or _dt.date.today()).isoformat(), "company": (defaults or {}).get("company") or "",
         "claims": claims, "run_exceptions": run_ex, "receipts": receipts,

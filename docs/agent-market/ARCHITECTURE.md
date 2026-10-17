@@ -1539,3 +1539,21 @@ the report instead was tried: its P&L table of six amount columns no longer fits
 states each amount at the decimals its cell prints (`workpaper.money_value`). Tests: `tests/test_am23_agree.py` (Part 4 fixture 6: a figure written without its commas, with another
 value, under another number format, in the form; the financial report's old two-decimal workbook),
 `runner/am23_it_test.go`.
+
+**What makes a commentary read machine-made** (AM23 §3.3; `runner/narrative_am23.go`, `deliverables/look/commentary.py`).
+Measured over AM22's 246 model commentaries: ten points each where the rules write five, one in eight only saying
+again what the round's facts, its figures' labels or the commentary's own summary already say, and the same headings
+on every document. The validator now holds an answer to what a reader would. **Padding**: a point of the findings or
+of what to watch that adds next to nothing to what is already said — in English at most two words, in Thai (written
+without spaces between words) at most six character trigrams, filler aside — is sent back once with its place, the way
+a point too long is, and never cut; a next step is something to do and never padding. **Hedges**: each package
+declares the hedges its commentary never writes (`narrative_hedges`, both languages: "ควรพิจารณาตรวจสอบเพิ่มเติม",
+"further review"); the runner refuses an answer with one, saying what to write instead, and the engine's gate reads the
+same list in the commentary every finished file prints (one list, the manifest's; no screen is sent it). **Headings**:
+each part's heading is written from what it found — the model's (`headings` in its answer, held to the tightest title
+it is printed under, `heading_chars`, and to the number guard), or the rules' (each package composes them from the
+round's figures: "ลงตัว…", "รายการกระทบยอด {items} รายการ", "ข้อยกเว้น {exception} จาก {claims} รายการ") — and the
+generic heading is printed only when a part has none of its own; a part that found something under the generic one,
+or under none, is asked for once more. Every file a commentary is printed in prints the same headings, and the gates
+read them back. The organisation's own voice is the customer's to add, not this product's. Tests:
+`runner/am23_narrative_test.go`, `tests/test_am23_commentary.py`.

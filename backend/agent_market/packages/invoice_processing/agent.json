@@ -43,6 +43,7 @@
   },
   "narrative": "model",
   "narrative_when_away": "rules",
+  "narrative_hedges": ["ควรพิจารณาตรวจสอบ", "ตรวจสอบเพิ่มเติม", "ติดตามอย่างใกล้ชิด", "ตามความเหมาะสม", "หากจำเป็น", "อาจต้องมีการ", "ควรระมัดระวัง", "เพื่อความถูกต้อง", "ควรให้ความสำคัญ", "ควรตรวจสอบความถูกต้องของเอกสาร", "further review", "further investigation", "further analysis", "monitor closely", "keep an eye on", "as appropriate", "if necessary", "if needed", "may need to", "consider reviewing", "for accuracy", "pay attention to", "verify the accuracy"],
   "document_index": {"retention_days": 730},
   "guide": {
     "for": "สำหรับฝ่ายบัญชีเจ้าหนี้หรือจัดซื้อ ที่ต้องบันทึกใบกำกับภาษีและใบเสร็จซื้อเข้าทะเบียน และอยากให้ตรวจเลขผู้เสียภาษี VAT และเอกสารซ้ำให้ก่อน",
@@ -127,6 +128,7 @@
     }
   },
   "strings": {
+    "doc.h.recorded": "บันทึก {included} จาก {documents} ฉบับ",
     "doc.full_tax_invoice": "ใบกำกับภาษีเต็มรูป",
     "doc.abbreviated_tax_invoice": "ใบกำกับภาษีอย่างย่อ",
     "doc.receipt": "ใบเสร็จรับเงิน",
@@ -437,6 +439,7 @@
     "fact.inv.currency": "สกุลเงิน {code}: {n} ฉบับ"
   },
   "en": {
+    "บันทึก {included} จาก {documents} ฉบับ": "{included} of {documents} documents recorded",
     "รายงานทะเบียน .docx": "Register report (.docx)",
     "รายงานจากตัวเลขชุดเดียวกับทะเบียน: หน้าปกพร้อมยอดรวม ภาษีมูลค่าเพิ่ม และจำนวนเอกสารที่บันทึก ผลของรอบ ตัวเลขทุกตัวพร้อมรหัสอ้างอิง เอกสารที่มีหมายเหตุที่ยอดสูงสุด คำอธิบาย และที่มาของข้อมูล ไฟล์ Excel ยังเป็นกระดาษทำการ": "A report from the same figures as the register: a cover with the total, the VAT and the documents recorded, the result, every figure with its reference, the largest documents with a note, the commentary and the sources. The workbook stays the working paper.",
     "สไลด์สรุปทะเบียน .pptx": "Register slides (.pptx)",

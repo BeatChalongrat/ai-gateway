@@ -166,6 +166,9 @@ def content(view: dict, req: dict, spec: dict) -> dict:
         "sources": _sources(view), "assumptions": [a["text"] for a in view.get("assumptions") or [] if a.get("text")],
         "references": list(dict.fromkeys(c for c in cited if c)),
         "closing_line": commentary.closing_line(narrative, req),
+        # AM23 §3.3: each part's heading written from what it found (the generic one only when it has none of its own)
+        "headings": {part: commentary.heading(narrative, part, view) for part in ("summary",) + commentary.LISTS},
+        "commentary_title": commentary.heading(narrative, "summary", view, generic=S("doc.sheet.commentary")),
         "rules_line": commentary.rules_line(narrative) if narrative.get("written_by") == "rules" else None,
         "source_note": S("doc.d.source_note", script=view.get("script") or ""),
         "never": list(spec.get("never") or []),
@@ -215,10 +218,10 @@ def report_model(doc: dict) -> dict:
     for key in commentary.LISTS:
         items = [_runs(text, cites) for part, text, cites in doc["commentary"] if part == key]
         if items:
-            blocks += [{"type": "subheading", "text": S(commentary.HEADING[key])}, {"type": "bullets", "items": items, "narrative": True}]
+            blocks += [{"type": "subheading", "text": doc["headings"][key]}, {"type": "bullets", "items": items, "narrative": True}]
     if doc.get("rules_line"):
         blocks.append({"type": "paragraph", "runs": [(doc["rules_line"], None)], "muted": True})
-    sections.append({"key": "commentary", "title": S("doc.sheet.commentary"), "blocks": blocks})
+    sections.append({"key": "commentary", "title": doc["commentary_title"], "blocks": blocks})
     closing = [{"type": "table", "columns": [S("docs.col.file"), S("docs.col.role"), "SHA-256"], "rows": doc["sources"],
                 "strong_rows": [], "numeric_from": None, "cite_col": None, "small": True}]
     if doc["assumptions"]:
@@ -327,11 +330,11 @@ class _Deck:
             w.table(t["title"], heads, rows, [], numeric_from=num_from, caption=t.get("caption") or S("doc.d.all_in_workbook", sheet=t["sheet"]))
         for part, text, cites in d["commentary"]:
             if part == "summary":
-                w.statement(S("doc.commentary.summary"), text, cites)
+                w.statement(d["headings"]["summary"], text, cites)
         for key in commentary.LISTS:
             items = [(text, cites) for part, text, cites in d["commentary"] if part == key]
             if items:
-                w.bullets(S(commentary.HEADING[key]), [x for x, _ in items], [c for _, cs in items for c in cs])
+                w.bullets(d["headings"][key], [x for x, _ in items], [c for _, cs in items for c in cs])
         closing = [S("doc.d.deck.source", file=f, role=role, sha=sha[:16] + "…") for f, role, sha in d["sources"]]
         closing += [d["source_note"]] + d["assumptions"]
         if d.get("rules_line"):
@@ -376,6 +379,10 @@ def check(path: str, fmt: str, doc: dict, req: dict, view: dict) -> list[dict]:
                 "detail": S("check.d.figures.missing", text=missing[0][:80]) if missing else S("check.d.figures.ok", n=len(shown)),
                 "values": len(shown)})
     said = [t for _, t, _ in doc["commentary"]] + [t for t, _ in doc["found"]["lines"]]
+    # (AM23 §3.3: and the headings, as each part's was written)
+    parts = dict.fromkeys(p for p, _, _ in doc["commentary"])
+    said += [doc["commentary_title"] if fmt == "docx" else doc["headings"]["summary"]] if "summary" in parts else []
+    said += [doc["headings"][p] for p in parts if p != "summary"]
     lost = [t for t in said if not has(t)]
     out.append({"name": f"{fmt}.words", "ok": not lost, "label": S("check.d.words.label"),
                 "detail": S("check.d.words.missing", text=lost[0][:80]) if lost else S("check.d.words.ok", n=len(said))})

@@ -88,7 +88,11 @@ type Manifest struct {
 	// matching's paper never says "approved" or "paid"). The runner refuses a model's answer that has one, with
 	// the reason, and asks again; the package's own gate would refuse the file.
 	NarrativeNever []string `json:"narrative_never,omitempty"`
-	DocumentIndex  *struct {
+	// AM23 §3.3: the hedges with nothing to do in them that the package's commentary never writes, in both languages
+	// ("ควรพิจารณาตรวจสอบเพิ่มเติม", "further review"). The runner refuses an answer with one, saying what to write
+	// instead; the engine's gate reads the same list in the finished files.
+	NarrativeHedges []string `json:"narrative_hedges,omitempty"`
+	DocumentIndex   *struct {
 		RetentionDays int `json:"retention_days"`
 	} `json:"document_index"`
 	PhotoNotice string `json:"photo_notice"`
