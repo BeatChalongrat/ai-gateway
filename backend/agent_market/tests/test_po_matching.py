@@ -482,7 +482,9 @@ class NoModel(unittest.TestCase):
     def test_no_model_decides_a_link_a_number_or_a_status(self):
         m = samplekit.manifest("po_matching")
         # AM22: model.text writes the commentary from the computed table; no model decides a link, a number or a status
-        self.assertEqual(m["capabilities"]["optional"], ["model.vision", "model.text"])
+        # (AM23: the report, the deck and the PDF of the workbook a person asks for)
+        self.assertEqual(m["capabilities"]["optional"], ["model.vision", "model.text", "deliverable.report.docx", "deliverable.deck.pptx",
+                                                         "deliverable.pdf"])
         self.assertNotIn("model.text", m["capabilities"]["required"])
         base = os.path.dirname(os.path.abspath(pkg.__file__))
         for root, _, names in os.walk(base):

@@ -358,7 +358,9 @@ class Hooks(unittest.TestCase):
         self.assertEqual(m["install"]["questions"], ["company", "policy", "theme", "formats"])
         self.assertEqual(sorted(m["capabilities"]["required"]),
                          sorted(["document.extract.e2", "compute.python.decimal", "deliverable.table.xlsx", "spreadsheet.read.xlsx"]))
-        self.assertEqual(m["capabilities"]["optional"], ["model.vision", "model.text"])   # AM22: model.text writes the commentary
+        # AM22: model.text writes the commentary; AM23: the report, the deck and the PDF of the workbook a person asks for
+        self.assertEqual(m["capabilities"]["optional"], ["model.vision", "model.text", "deliverable.report.docx", "deliverable.deck.pptx",
+                                                         "deliverable.pdf"])
         for d in ("email_send", "accounting_write", "payment", "schedule"):
             self.assertIn(d, m["permissions"]["denied"])
 
