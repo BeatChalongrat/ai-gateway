@@ -59,6 +59,9 @@ def narrative_for(case: str, lang: str, base: dict, limits: dict) -> dict:
     nar = dict(base)
     if case == "typical":
         return nar
+    # (AM23 §3.3: the rules' headings are written from the sample's own words; a commentary made up here keeps the
+    # generic headings its pictures were approved with)
+    nar.pop("headings", None)
     if case == "short":
         one = "กำไรสุทธิเพิ่มขึ้น" if lang == "th" else "Net profit rose."
         return {**nar, "summary": one, "movements": [one], "watch": [one], "next_steps": [one]}
