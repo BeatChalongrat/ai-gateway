@@ -86,9 +86,12 @@ func (r *Runner) renderJob(ctx context.Context, job am.Run, log *slog.Logger) er
 		// person asked of the round's documents — and what they asked (to say what became of it)
 		Instructions []string  `json:"instructions"`
 		Asked        *am.Asked `json:"asked"`
+		// AM23 §1.5: the deck picked on a refusal, of the rows at or above this amount
+		DeckOver string `json:"deck_over"`
 	}
 	_ = json.Unmarshal(job.Params, &params)
 	rc.formOnly = params.FormOnly
+	rc.deckOver = params.DeckOver
 	// AM11b: a file made later for the same round is made the way the round's documents are made now
 	if params.Asked != nil {
 		rc.instr = params.Instructions
@@ -109,6 +112,29 @@ func (r *Runner) renderJob(ctx context.Context, job am.Run, log *slog.Logger) er
 		return r.fail(ctx, job, "bad_format", fmt.Errorf("no supported format in %v", formats))
 	}
 	rc.run.Period = ps.run.Period
+	if !rc.formOnly {
+		// AM23 §1.5: what of this request the round's content cannot be is asked on the round — the package's words,
+		// the same as at the start of a round — and only the rest is made
+		refusals, err := rc.planFiles(ctx, ok, ps.computed, ps.computeKey, ps.narrative, rc.deckOver)
+		if err != nil {
+			return rc.stepFailed("plan", err)
+		}
+		for _, ref := range refusals {
+			if err := r.refusalCard(ctx, ps.run, ref); err != nil {
+				return r.fail(ctx, job, "render_failed", err)
+			}
+			var rest []string
+			for _, f := range ok {
+				if f != ref.Format {
+					rest = append(rest, f)
+				}
+			}
+			ok = rest
+		}
+		if len(ok) == 0 {
+			return r.finish(rc, am.RunSucceeded, "asked")
+		}
+	}
 	rendered, renderKey, err := rc.render(ctx, ps.run.ID, ps.computed, ps.computeKey, ps.narrative, ps.narrKey, ok, "render")
 	if err != nil {
 		var qe *qualityErr
@@ -239,13 +265,18 @@ func (r *Runner) replyJob(ctx context.Context, job am.Run, log *slog.Logger) err
 		return handled || err != nil
 	}
 	switch {
+	case asksForXLS(text) && len(detectFormats(text)) == 0:
+		// AM23 §1.6: a .xls is never made — why, in one sentence, and the .xlsx instead
+		_ = post(xlsSaid())
 	case asksForPDF(text) && !rc.pdfOffered() && len(detectFormats(text)) == 0:
 		_ = post(am.Text("agent ตัวนี้ยังทำไฟล์ PDF ไม่ได้ในตอนนี้ครับ " +
 			"ระหว่างนี้เปิดไฟล์ที่ได้แล้วสั่ง “บันทึกเป็น PDF” ได้เลย"))
 	case len(detectFormatsFor(text, rc.pdfOffered())) > 0 && len(rc.allowedOf(detectFormatsFor(text, rc.pdfOffered()))) == 0:
-		// asked for a kind of file this agent does not make (AM3: say so, never fail a render)
-		_ = post(am.Text("agent ตัวนี้ทำไฟล์ได้เฉพาะ %s ครับ — ถ้าต้องการไฟล์แบบอื่น "+
-			"เปิดไฟล์ที่ได้แล้วบันทึกเป็นแบบที่ต้องการได้เลย ไฟล์เดิมของรอบนี้ยังอยู่ครบ", am.Words(formatNames(rc.outputFormats()))))
+		// asked for a kind of file this agent does not make (AM3: say so, never fail a render). AM23: by name, with
+		// what it makes — the settings page's sentence and the round's (the old one told a person to save a workbook
+		// as the Word document they asked for)
+		_, notMade := rc.pkg.Manifest.MadeOf(detectFormatsFor(text, rc.pdfOffered()))
+		_ = post(am.NotMadeText(notMade, rc.outputFormats()))
 	case len(detectFormatsFor(text, rc.pdfOffered())) > 0:
 		formats := rc.allowedOf(detectFormatsFor(text, rc.pdfOffered()))
 		switch {

@@ -59,6 +59,90 @@ def _sources(view: dict) -> list[list[str]]:
     return rows
 
 
+def deck_capacity() -> int:
+    """The most rows a deck's table holds: a slide's rows times the slides the catalogue lets a table break across."""
+    from .look.tokens import LOOK
+
+    takes = LOOK.layout("pptx", "table")["takes"]
+    return int(takes["rows"]) * int(takes.get("parts_max", 1))
+
+
+_ROUND = [Decimal(m) * (Decimal(10) ** k) for k in range(0, 10) for m in (1, 2, 5)]
+
+
+def threshold_for(amounts: list, cap: int) -> Decimal | None:
+    """The smallest round amount (1, 2 or 5 times a power of ten) whose rows at or above it fit ``cap``, with at least
+    one row — or, when no round amount does, the amount of the cap-th largest row: the alternative a refusal offers is
+    computed from the run's own amounts, never invented."""
+    vals = sorted((a for a in (amount(x) for x in amounts) if a is not None), reverse=True)
+    for t in _ROUND:
+        n = sum(1 for v in vals if v >= t)
+        if 0 < n <= cap:
+            return t
+    # no round amount leaves between one row and a deck's worth (amounts spread evenly: 500 leaves too many, 1,000
+    # none): the amount of the cap-th largest row itself, raised past a tie with the rows below it
+    for i in range(min(cap, len(vals)) - 1, -1, -1):
+        n = sum(1 for v in vals if v >= vals[i])
+        if 0 < n <= cap:
+            return vals[i]
+    return None
+
+
+def plan(fmt: str, view: dict, req: dict, spec: dict) -> dict | None:
+    """Whether the run's content can be the document asked for (AM23 §1.5), before any file is written: None when it
+    can; else what cannot be made and why, in the run's language, with what can be made instead — one question with
+    options a person picks in one tap ({"formats", "deck_over"} each), the first of them the workbook alone (what the
+    round makes anyway, never a new file). A deck asked for with more rows than a deck holds offers a deck of the
+    rows at or above a round amount the run's own amounts give; a document asked for from a run with nothing to say
+    offers the workbook."""
+    from ..engine.thai import fmt_money
+
+    if fmt not in FORMATS:
+        return None
+    doc = S(f"doc.plan.doc.{fmt}")
+    narrative = req.get("narrative") or view.get("fallback_narrative") or {}
+    said = any(narrative.get(k) for k in commentary.LISTS)
+    if spec.get("nothing_to_say") and not said:
+        # everything matched, no exception, and the commentary has no point to make (the card's three): a document
+        # would be a heading and white space
+        return {"format": fmt, "code": "nothing_to_say", "header": S("doc.plan.header"), "question": S("doc.plan.nothing", doc=doc),
+                "options": [{"label": S("doc.plan.opt.workbook_only", doc=doc), "value": {"formats": ["xlsx"]}}]}
+    t = spec.get("table") or {}
+    rows = t.get("rows") or []
+    cap = deck_capacity()
+    if fmt != "pptx" or len(rows) <= cap or req.get("deck_over") not in (None, ""):
+        return None
+    unit = S(f"doc.unit.{t.get('unit') or 'items'}")
+    first = {"label": S("doc.plan.opt.workbook", doc=doc), "value": {"formats": ["xlsx"]}}
+    th = threshold_for(t.get("amounts") or [], cap)
+    if th is None:
+        return {"format": fmt, "code": "deck_long", "header": S("doc.plan.header"),
+                "question": S("doc.plan.deck_long_none", unit=unit, n=len(rows), cap=cap),
+                "options": [first, {"label": S("doc.plan.opt.report"), "value": {"formats": ["docx"]}}]}
+    m = sum(1 for a in t.get("amounts") or [] if amount(a) is not None and amount(a) >= th)
+    money = fmt_money(th, 0)
+    return {"format": fmt, "code": "deck_long", "header": S("doc.plan.header"),
+            "question": S("doc.plan.deck_long", unit=unit, n=len(rows), cap=cap, m=m, threshold=money),
+            "options": [first, {"label": S("doc.plan.opt.deck_over", m=m, threshold=money), "value": {"formats": ["pptx"], "deck_over": str(th)}}]}
+
+
+def over(spec: dict, threshold) -> dict:
+    """The spec with its table held to the rows at or above ``threshold`` — the deck a person picked when every row
+    would not go on slides — its title and caption saying so."""
+    from ..engine.thai import fmt_money
+
+    t = dict(spec.get("table") or {})
+    th = amount(threshold)
+    if not t or th is None:
+        return spec
+    keep = [i for i, a in enumerate(t.get("amounts") or []) if amount(a) is not None and amount(a) >= th]
+    money = fmt_money(th, 0)
+    t.update(rows=[t["rows"][i] for i in keep], amounts=[t["amounts"][i] for i in keep],
+             title=S("doc.plan.over_title", title=t["title"], threshold=money),
+             caption=S("doc.plan.over_caption", m=len(keep), n=len(spec["table"]["rows"]), threshold=money, sheet=t["sheet"]))
+    return dict(spec, table=t)
+
+
 def content(view: dict, req: dict, spec: dict) -> dict:
     """The one content model a report and a deck are written from."""
     figures = view.get("figures") or {}
@@ -240,7 +324,7 @@ class _Deck:
             rows = [[r[j] for j in cols] for r in t["rows"]]
             nf = t.get("numeric_from")
             num_from = next((i for i, j in enumerate(cols) if nf is not None and j >= nf), len(cols))
-            w.table(t["title"], heads, rows, [], numeric_from=num_from, caption=S("doc.d.all_in_workbook", sheet=t["sheet"]))
+            w.table(t["title"], heads, rows, [], numeric_from=num_from, caption=t.get("caption") or S("doc.d.all_in_workbook", sheet=t["sheet"]))
         for part, text, cites in d["commentary"]:
             if part == "summary":
                 w.statement(S("doc.commentary.summary"), text, cites)
@@ -309,6 +393,9 @@ def check(path: str, fmt: str, doc: dict, req: dict, view: dict) -> list[dict]:
     out.append({"name": f"{fmt}.closing", "ok": closing_ok and rules_ok and line_ok, "label": S("check.d.closing.label"),
                 "detail": S("check.d.closing.ok") if closing_ok and rules_ok and line_ok else S("check.d.closing.bad")})
     out.append(commentary.no_model_name(texts, commentary.model_names(doc["narrative"], view, req)))
+    if fmt == "pptx" and t and len(t["rows"]) > deck_capacity():
+        # (never written: the deck's table holds every row or the deck is refused — §1.5, the catalogue's parts_max)
+        out.append({"name": "pptx.table_fits", "ok": False, "label": S("check.d.table.label"), "detail": S("check.d.table.missing", row="…")})
     if doc.get("never"):
         # the words the package's paper never says (the PO matching's: approved, paid) — nor does its document
         low = joined.lower()
@@ -328,6 +415,8 @@ def render(fmt: str, view: dict, req: dict, spec: dict, path: str, *, in_dir: st
 
     theme = resolve(req.get("theme"))
     logo = os.path.join(in_dir, os.path.basename(req["logo"])) if req.get("logo") and in_dir else None
+    if fmt == "pptx" and req.get("deck_over") not in (None, ""):
+        spec = over(spec, req["deck_over"])  # AM23 §1.5: the deck a person picked, of the rows over a threshold
     doc = content(view, req, spec)
     organisation = str((req.get("run") or {}).get("organisation") or "")
     try:

@@ -41,6 +41,15 @@ func (rc *runCtx) readAsked(ctx context.Context) (context.Context, am.Asked, int
 	if err != nil {
 		return ctx, asked, actNone, err
 	}
+	// AM23 §1.5: words that ask for a kind of file are a format request (formatsInWords), not a directive the agent
+	// cannot follow — the reader filed "ขอเป็น Word" under "other", and the round said it could only sort the items
+	var kept []am.AskedCannot
+	for _, c := range asked.Cannot {
+		if !(c.ID == am.AskedOther && isFormatRequest(c.Words)) {
+			kept = append(kept, c)
+		}
+	}
+	asked.Cannot = kept
 	spec := rc.spec()
 	// what a person chose on a card asked earlier in this round, for a request that could mean two things
 	for _, id := range am.AskedChoices(rc.answers) {

@@ -423,6 +423,17 @@ def truth(book: list, bank: list, *, opening_bank=OPENING, opening_book=OPENING,
             "adjusted_book": money(adj_book), "difference": money(adj_bank - adj_book), "tied": adj_bank == adj_book}
 
 
+def write_many_fees(fx: str) -> str:
+    """AM23 §1.5: September's statement with thirty small bank charges the ledger does not have — 37 reconciling items,
+    more than a deck's table holds (runner/am23_it_test.go: a deck asked for is refused, with what can be made instead).
+    Not an eval case: the eval set is as it was."""
+    book, bank = september()
+    fees = [Bn(1 + k % 29, "ค่าธรรมเนียมบริการ", f"-{10 + k * 3}.00", tag="fee") for k in range(30)]
+    path = os.path.join(fx, "kbank_sep_many_fees.xlsx")
+    write_kbank(path, bank + fees, OPENING)
+    return path
+
+
 def main(argv: list | None = None) -> None:
     with_pdf = "--no-pdf" not in (argv or [])          # the PDFs need the host's Chrome; without it the ones on disk are kept
     sample = os.path.join(PKG, "sample-data")

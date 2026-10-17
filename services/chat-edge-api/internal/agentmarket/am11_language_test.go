@@ -214,6 +214,7 @@ var notASentence = map[string]string{
 	"expense_policy.go:policyCurrencyWords": "reads an amount an admin typed into the policy table: the currency's word and sign are taken off — the package's own two, and no more until the package takes more",
 	"runner/jobs.go:formatWords":            "reads a person's typed message: the words that name a kind of file",
 	"runner/jobs.go:pdfWords":               "reads a person's typed message: the words that ask for a PDF",
+	"runner/plan_am23.go:xlsWords":          "reads a person's typed message: the words that ask for a .xls file (AM23)",
 	"runner/jobs.go:questionWords":          "reads a person's typed message: the words that make it a question",
 	"runner/jobs.go:moreFilesWords":         "reads a person's typed message: a request for more files without naming a kind",
 	"runner/explain.go:whyWords":            "reads a person's typed question: the words that ask for a reason or an origin",

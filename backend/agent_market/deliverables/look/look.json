@@ -220,15 +220,16 @@
           "refuses": "one figure (that is a figure slide) or more than three"
         },
         "table": {
-          "for": "a table of up to ten rows; longer tables break across slides with the header repeated",
+          "for": "a table of up to ten rows; longer tables break across at most two slides with the header repeated",
           "takes": {
             "title": 60,
             "columns": 7,
             "rows": 10,
             "cell": 40,
-            "caption": 120
+            "caption": 120,
+            "parts_max": 2
           },
-          "refuses": "more than seven columns, or a cell over 40 characters"
+          "refuses": "more than seven columns, a cell over 40 characters, or more rows than two slides hold"
         },
         "chart": {
           "for": "one chart with its title and a caption of up to two lines at the small size",

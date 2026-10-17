@@ -49,6 +49,8 @@ def spec(view: dict, applied: list | tuple = ()) -> dict:
         "subtitle": c.get("company") or c["period_label"],
         "cover_lines": [],
         "tiles": ["total_thb", "vat_thb", "documents"], "headline": "total_thb",
+        # (AM23 §1.5: every document entered with no note and no exception — a document would have nothing to say)
+        "nothing_to_say": not rows and not (c.get("exceptions") or []),
         "table": {"title": W("doc.title.noted"), "rows": rows, "numeric_from": 2, "deck_columns": [0, 1, 2],
                   "columns": [W("doc.col.number"), W("doc.col.seller"), W("doc.col.total"), W("doc.col.reason")],
                   "sheet": W(S_REGISTER), "order": "asked" if applied else "amount",

@@ -51,6 +51,9 @@ type runCtx struct {
 	// formOnly (AM10): this render job fills the round's own form and makes
 	// no other file.
 	formOnly bool
+	// deckOver (AM23 §1.5): the deck a person picked when every row would not go on slides — the rows at or above
+	// this amount
+	deckOver string
 	// standing (AM18): the directives the install keeps as its own way, in force on this round
 	standing []string
 	// instr (AM11b): the directives this round's documents are made with — read out of what the person
@@ -105,6 +108,10 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 		return r.fail(ctx, run, "load", err)
 	} else if stop {
 		return r.fail(ctx, run, "format_not_offered", errors.New("the agent makes none of the kinds of file this run asked for"))
+	}
+	// AM23 §1.5: the kinds of file the words typed with the files ask for are the round's request too
+	if err := rc.formatsInWords(ctx); err != nil {
+		return r.fail(ctx, run, "load", err)
 	}
 	var computedRef blobRef
 	var computeKey, period string
@@ -241,6 +248,12 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 	narrative, narrKey, err := rc.narrative(ctx, computedRef, computeKey)
 	if err != nil {
 		return rc.stepFailed("narrative", err)
+	}
+	// AM23 §1.5: a report or a deck this round's content cannot be is asked about before any file is written
+	if act, err := rc.askPlan(ctx, computedRef, computeKey, narrative); err != nil {
+		return rc.stepFailed("plan", err)
+	} else if act == actPark {
+		return r.park(rc, "waiting_postcompute")
 	}
 	formats := rc.formats()
 	read := rc.answers // what the files are made with (reloadAnswers replaces the map, it never edits it)
@@ -987,6 +1000,7 @@ func (rc *runCtx) seedSelfTest(ctx context.Context) error {
 // otherwise; AM10: an answered "which files" wins, and becomes the run's).
 func (rc *runCtx) formats() []string {
 	if fs := am.OutputSetOf(rc.answers); fs != nil {
+		fs = rc.fileChoices(fs)
 		_ = rc.r.Store.SetFormats(rc.ctx, rc.r.Store.Pool, rc.run.ID, fs)
 		return fs
 	}
@@ -996,7 +1010,7 @@ func (rc *runCtx) formats() []string {
 	if len(f) == 0 {
 		f = rc.pkg.Manifest.DefaultFormats()
 	}
-	return f
+	return rc.fileChoices(f) // AM23 §1.5: what was picked on a refusal
 }
 
 // refuseNotMade says, once, which kinds of file of the round's set its agent does not make, with what it makes,

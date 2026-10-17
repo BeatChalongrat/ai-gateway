@@ -198,6 +198,10 @@ def run(req: dict) -> dict:
             out = pkg.postcompute(files, req["roles"], req["period"], computed,
                                   answers=req.get("answers") or {}, defaults=req.get("defaults") or {},
                                   **({"lang": req.get("lang") or "th"} if _accepts(pkg.postcompute, "lang") else {}))
+    elif op == "plan":
+        # AM23 §1.5: what of the files asked for this run's content cannot be, before any is written
+        computed = _read_json(req["computed"])
+        out = {"refusals": pkg.plan(computed, req) if hasattr(pkg, "plan") else []}
     elif op == "render":
         computed = _read_json(req["computed"])
         out = pkg.render(computed, req, in_dir=JOB_IN, out_dir=JOB_OUT)

@@ -119,6 +119,11 @@ def choose(fmt: str, content: dict, section: str, kinds: tuple | None = None) ->
             continue
         # a counted field over its limit breaks into parts; the fill is of one part
         parts = _parts(content, takes)
+        if len(parts) > takes.get("parts_max", len(parts)):
+            # AM23 §1.5: PowerPoint's ladder ends in spilling — this one ends in a refusal: a deck's table breaks across
+            # at most parts_max slides, and more than that is not a deck (the run offers what can be made instead)
+            reasons.append(f"{name}: {len(parts)} parts > {takes['parts_max']}")
+            continue
         part = measure(parts[0])
         for role, scale in (("body", 1.0), ("small", shrink)):
             if role == "small" and not lay.get("shrink"):

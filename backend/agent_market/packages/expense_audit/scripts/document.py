@@ -42,6 +42,8 @@ def spec(view: dict, applied: list | tuple = ()) -> dict:
         "subtitle": c.get("company") or c["period_label"],
         "cover_lines": [],
         "tiles": ["claimed_thb", "exception_thb", "question_thb"], "headline": "exception_thb",
+        # (AM23 §1.5: every claim passed and no exception — a document would have nothing to say)
+        "nothing_to_say": not rows and not (c.get("exceptions") or []),
         "table": {"title": W("doc.title.held"), "rows": rows, "numeric_from": 3, "deck_columns": [0, 3, 5],
                   "columns": [W("doc.col.claim_no"), W("doc.col.employee"), W("doc.col.category"), W("doc.col.amount"), W("doc.col.reason"),
                               W("doc.col.outcome")],

@@ -219,3 +219,62 @@ func TestAOneFileAgentIsNeverAskedWhichFilesItsRoundMakes(t *testing.T) {
 		t.Fatal("the financial report still asks")
 	}
 }
+
+// §1.5: a refusal asked of a finished round is answered with one tap — picked, the smaller deck is made, with its
+// threshold; the workbook alone makes nothing (the round has it). The round stays finished either way.
+func TestAnAnswerToARefusalMakesWhatWasPickedAndTheWorkbookAloneNothing(t *testing.T) {
+	e := newEnv(t)
+	if e == nil {
+		return
+	}
+	ctx := context.Background()
+	in := e.install()
+	run := e.finishedRun(in, "2026-09", "")
+	if err := e.store.SetFormats(ctx, e.store.Pool, run.ID, []string{"xlsx"}); err != nil {
+		t.Fatal(err)
+	}
+	q := Question{Key: "output_format", Code: "file_refused", Severity: "cosmetic", Header: "ไฟล์ที่ขอ", Question: "37 รายการเกินสไลด์",
+		Options: []Option{{Label: "ไฟล์ Excel", Value: json.RawMessage(`{"formats":["xlsx"]}`)},
+			{Label: "สไลด์ 20 รายการ", Value: json.RawMessage(`{"formats":["pptx"],"deck_over":"200"}`)}},
+		Default: json.RawMessage(`{"formats":["xlsx"]}`)}
+	card := func() Card {
+		qs, _ := json.Marshal([]Question{q})
+		c, err := e.store.CreateCard(ctx, e.store.Pool, Card{RunID: run.ID, InstallID: in.ID, TenantID: in.TenantID, UserID: in.UserID,
+			Moment: "run", Kind: "output_format", Blocking: false, Questions: qs})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	jobs := func() []string {
+		rows, _ := e.store.Pool.Query(ctx, `SELECT params::text FROM agent_market.agent_runs WHERE parent_run_id = $1 AND kind = 'render' ORDER BY created_at`, run.ID)
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var p string
+			_ = rows.Scan(&p)
+			out = append(out, p)
+		}
+		return out
+	}
+	c1 := card()
+	if code, body := e.do("POST", "/cards/"+c1.ID.String()+"/answer", map[string]any{"answers": map[string]any{
+		"output_format": map[string]any{"labels": []string{"ไฟล์ Excel"}}}}); code != 200 {
+		t.Fatalf("answer: %d %v", code, body)
+	}
+	if got := jobs(); len(got) != 0 {
+		t.Fatalf("the workbook alone makes nothing: %v", got)
+	}
+	c2 := card()
+	if code, body := e.do("POST", "/cards/"+c2.ID.String()+"/answer", map[string]any{"answers": map[string]any{
+		"output_format": map[string]any{"labels": []string{"สไลด์ 20 รายการ"}}}}); code != 200 {
+		t.Fatalf("answer: %d %v", code, body)
+	}
+	got := jobs()
+	if len(got) != 1 || !strings.Contains(got[0], `"deck_over": "200"`) || !strings.Contains(got[0], "pptx") {
+		t.Fatalf("the smaller deck, with its threshold: %v", got)
+	}
+	if r, _ := e.store.RunByID(ctx, run.ID); r.Status != RunSucceeded {
+		t.Fatalf("the round stays finished: %s", r.Status)
+	}
+}

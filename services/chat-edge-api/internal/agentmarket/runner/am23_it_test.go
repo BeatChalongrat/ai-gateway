@@ -172,3 +172,161 @@ func TestABankRoundMakesTheReportTheDeckAndThePDFOfItsWorkbookWhenAsked(t *testi
 		}
 	}
 }
+
+// §1.5 and Part 4 fixture 1: a deck asked for with a round of 37 reconciling items — more than a deck's table holds —
+// is asked about before any file is written: one blocking question, the package's words (how many, how many a deck
+// holds, the rows at or above an amount the round's own items give), its first option the workbook alone. The
+// round makes nothing until it is answered; answered with the smaller deck, it makes the workbook and that deck.
+func TestADeckOfMoreItemsThanSlidesHoldIsAskedAboutBeforeAnyFileIsWritten(t *testing.T) {
+	e := newIT(t)
+	if e == nil {
+		return
+	}
+	ctx := context.Background()
+	e.setupBankInstall()
+	run := e.bankRun("kbank_sep_many_fees.xlsx", "ledger_sep.xlsx")
+	if _, err := e.store.Pool.Exec(ctx, `UPDATE agent_market.agent_runs SET formats = '["xlsx","pptx"]', message = '' WHERE id = $1`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	r := e.runner("r1")
+	got := e.drive(r, run.ID, 6*time.Minute, parkedOrTerminal)
+	if got.Status != am.RunAwaitingInput {
+		t.Fatalf("the round waits for the question: %s %s", got.Status, got.StatusReason)
+	}
+	if arts, _ := e.store.RunArtifacts(ctx, run.ID); len(arts) != 0 {
+		t.Fatalf("no file is written before it is answered: %d", len(arts))
+	}
+	card, qs := e.openCard(run.ID)
+	if !card.Blocking || len(qs) != 1 || qs[0].Key != fileRefusedCode+".pptx" || qs[0].Code != fileRefusedCode {
+		t.Fatalf("one blocking question about the deck: %+v %+v", card, qs)
+	}
+	q := qs[0]
+	if !strings.Contains(q.Question, "37") || !strings.Contains(q.Question, "20") || len(q.Options) != 2 {
+		t.Fatalf("how many, how many a deck holds, and two ways on: %q %+v", q.Question, q.Options)
+	}
+	var first, smaller fileChoice
+	_ = json.Unmarshal(q.Options[0].Value, &first)
+	_ = json.Unmarshal(q.Options[1].Value, &smaller)
+	if strings.Join(first.Formats, ",") != "xlsx" || smaller.DeckOver == "" || strings.Join(smaller.Formats, ",") != "pptx" {
+		t.Fatalf("the workbook alone, or the deck of the rows at or above an amount: %+v %+v", first, smaller)
+	}
+	e.answerCard(card, map[string]json.RawMessage{q.Key: q.Options[1].Value})
+	got = e.drive(r, run.ID, 6*time.Minute, parkedOrTerminal)
+	if got.Status != am.RunSucceeded {
+		t.Fatalf("answered, the round goes on: %s %s", got.Status, got.StatusReason)
+	}
+	arts, _ := e.store.RunArtifacts(ctx, run.ID)
+	var have []string
+	for _, a := range arts {
+		have = append(have, a.Format)
+	}
+	sort.Strings(have)
+	if strings.Join(have, ",") != "pptx,xlsx" {
+		t.Fatalf("the workbook and the smaller deck: %v", have)
+	}
+}
+
+// §1.5: the words typed with a round's files are a format request too — Word joins the round (the agent makes it),
+// a .xls is answered with why it is never made — and the reader of the package's directives does not say it cannot
+// sort them into a Word document.
+func TestWordsTypedWithTheFilesAskForTheFilesAndAnXLSIsAnsweredWithWhy(t *testing.T) {
+	e := newIT(t)
+	if e == nil {
+		return
+	}
+	ctx := context.Background()
+	e.setupBankInstall()
+	run := e.bankRunSaying("ขอเป็น Word ด้วย และขอไฟล์ xls")
+	r := e.runner("r1")
+	got := e.drive(r, run.ID, 6*time.Minute, parkedOrTerminal)
+	if got.Status != am.RunSucceeded {
+		t.Fatalf("%s %s", got.Status, got.StatusReason)
+	}
+	arts, _ := e.store.RunArtifacts(ctx, run.ID)
+	var have []string
+	for _, a := range arts {
+		have = append(have, a.Format)
+	}
+	sort.Strings(have)
+	if strings.Join(have, ",") != "docx,xlsx" {
+		t.Fatalf("the workbook and the Word report asked for: %v", have)
+	}
+	thread := strings.Join(e.threadOf(run.ID), "\n")
+	if !strings.Contains(thread, "65,536") || !strings.Contains(thread, ".xlsx") {
+		t.Fatalf("the .xls is answered with why:\n%s", trim(thread, 1500))
+	}
+	if strings.Contains(thread, "ปรับเอกสารตามคำขอได้เฉพาะ") {
+		t.Fatalf("not refused as a directive:\n%s", trim(thread, 1500))
+	}
+}
+
+// §1.5: a deck asked of a finished round whose content will not go on slides is asked about on the round — the same
+// words — and made only as picked: a card on the round, no file; picked, the smaller deck.
+func TestADeckAskedOfAFinishedRoundIsAskedAboutOnTheRound(t *testing.T) {
+	e := newIT(t)
+	if e == nil {
+		return
+	}
+	ctx := context.Background()
+	e.setupBankInstall()
+	run := e.bankRun("kbank_sep_many_fees.xlsx", "ledger_sep.xlsx")
+	if _, err := e.store.Pool.Exec(ctx, `UPDATE agent_market.agent_runs SET message = '' WHERE id = $1`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	r := e.runner("r1")
+	if got := e.drive(r, run.ID, 6*time.Minute, parkedOrTerminal); got.Status != am.RunSucceeded {
+		t.Fatalf("the round: %s %s", got.Status, got.StatusReason)
+	}
+	job := e.renderJobOf(run, `{"formats":["pptx"],"why":"api"}`)
+	if got := e.drive(r, job.ID, 6*time.Minute, parkedOrTerminal); got.Status != am.RunSucceeded {
+		t.Fatalf("the job: %s %s", got.Status, got.StatusReason)
+	}
+	if arts, _ := e.store.RunArtifacts(ctx, run.ID); len(arts) != 1 {
+		t.Fatalf("no deck is made: %d files", len(arts))
+	}
+	cards, _ := e.store.RunCards(ctx, run.ID)
+	var asked *am.Card
+	for i := range cards {
+		if cards[i].Kind == "output_format" && cards[i].Status == "open" {
+			asked = &cards[i]
+		}
+	}
+	if asked == nil {
+		t.Fatal("a card on the round asks which")
+	}
+	var qs []am.Question
+	_ = json.Unmarshal(asked.Questions, &qs)
+	if len(qs) != 1 || !strings.Contains(qs[0].Question, "37") || len(qs[0].Options) != 2 {
+		t.Fatalf("the same question as at the start of a round: %+v", qs)
+	}
+	var smaller fileChoice
+	_ = json.Unmarshal(qs[0].Options[1].Value, &smaller)
+	job2 := e.renderJobOf(run, `{"formats":["pptx"],"why":"format_card","deck_over":"`+smaller.DeckOver+`"}`)
+	if got := e.drive(r, job2.ID, 6*time.Minute, parkedOrTerminal); got.Status != am.RunSucceeded {
+		t.Fatalf("picked: %s %s", got.Status, got.StatusReason)
+	}
+	arts, _ := e.store.RunArtifacts(ctx, run.ID)
+	n := 0
+	for _, a := range arts {
+		if a.Format == "pptx" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("the smaller deck: %d", n)
+	}
+}
+
+// renderJobOf is a render job of a finished round, as the API makes one.
+func (e *itEnv) renderJobOf(parent am.Run, params string) am.Run {
+	e.t.Helper()
+	pid := parent.ID
+	job, _, err := e.store.CreateRun(context.Background(), e.store.Pool, am.Run{InstallID: parent.InstallID, ParentRunID: &pid,
+		TenantID: parent.TenantID, UserID: parent.UserID, Kind: am.KindRender, Params: json.RawMessage(params),
+		DefinitionVersion: parent.DefinitionVersion, Checksum: parent.Checksum, EngineChecksum: parent.EngineChecksum,
+		BindingVersion: parent.BindingVersion}, "")
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return job
+}

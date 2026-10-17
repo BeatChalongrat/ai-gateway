@@ -592,6 +592,9 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 		// AM11b: documents made another way are another render (a round nobody asked anything of keeps its key)
 		keyParts = append(keyParts, map[string]any{"instructions": rc.instr})
 	}
+	if rc.deckOver != "" {
+		keyParts = append(keyParts, map[string]any{"deck_over": rc.deckOver}) // AM23 §1.5
+	}
 	key := am.StepKey(rc.run.ID, name, keyParts...)
 	out, err := rc.step(ctx, name, "deliverable", key, map[string]any{"formats": formats, "names": names, "theme_version": themeVersion}, true,
 		func(ctx context.Context) (any, float64, string, string, error) {
@@ -615,6 +618,9 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 				"model_info": map[string]any{"model": narrative.Model, "self_hosted": narrative.SelfHosted},
 				// AM23 §3.2: the organisation's switch for the one neutral line (the engine names no model in a file)
 				"assistant_line": rc.assistantLine(ctx)}
+			if rc.deckOver != "" {
+				req["deck_over"] = rc.deckOver // AM23 §1.5: the deck a person picked, of the rows at or above it
+			}
 			if len(rc.instr) > 0 {
 				req["instructions"] = map[string]any{"apply": rc.instr}
 			}

@@ -1490,3 +1490,19 @@ PDF: a report's PDF holds the report's paragraphs in order (AM2), a workbook's P
 set to print (its print area, its header row on every page, one page wide — AM21) and holds every figure exactly as
 the workbook prints it (`runner/pdf.go` `pdfPrintGate`). Nothing in the engine writes a PDF. The picker shows a PDF
 under the document it prints ("…and a PDF of it"), and the files card calls it what it prints.
+
+**Asked for, cannot be done: refused before any file is written, with what can be made instead**
+(`deliverables/document.py` `plan`, each package's `plan`, `runner/plan_am23.go`). A deck's table breaks across at
+most two slides (the catalogue's `parts_max`: PowerPoint's ladder ends in spilling, this one in a refusal); a deck
+asked for with more rows than that, or a report or a deck of a round with nothing to say (everything matched, no
+exception, and a commentary with no point to make), is refused by the package in the run's language, with two to four
+options computed from the round's own figures — the workbook alone first (what the round makes anyway), then the
+deck of the rows at or above the smallest round amount that leaves at most a deck's worth (or the amount of the
+twentieth largest row when no round amount does), or the Word report. Asked with the round it is a blocking question
+of the clarification engine, asked after the commentary is written and before the files are made; it is never answered
+by its default (re-asked at most twice, then left for a tap). Asked of a finished round — typed, from the "more files"
+menu, or a card — it is a card on the round whose answer makes what was picked. The words are the package's, the same
+whichever way the file was asked for. The words typed with a round's files are a format request too: what the agent
+makes joins the round's set, what it does not is refused by name with what it makes (the settings page's sentence),
+and a `.xls` is answered with why it is never made. Fixtures: `tests/test_am23_refusals.py`,
+`runner/am23_it_test.go` (a deck of 37 reconciling items, `kbank_sep_many_fees.xlsx`).

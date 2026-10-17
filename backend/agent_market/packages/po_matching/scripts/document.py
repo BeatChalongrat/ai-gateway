@@ -42,6 +42,8 @@ def spec(view: dict, applied: list | tuple = ()) -> dict:
         "subtitle": c.get("company") or c["period_label"],
         "cover_lines": [],
         "tiles": ["value_blocked", "person", "received_not_billed"], "headline": "value_blocked",
+        # (AM23 §1.5: every invoice passed and no exception — a document would have nothing to say)
+        "nothing_to_say": not rows and not (c.get("exceptions") or []),
         "table": {"title": W("doc.title.held"), "rows": rows, "numeric_from": 2, "deck_columns": [0, 2, 3],
                   "columns": [W("doc.col.number"), W("doc.col.seller"), W("doc.col.total"), W("doc.col.status"), W("doc.col.reason")],
                   "sheet": W(S_INVOICES), "order": "asked" if applied else "amount",

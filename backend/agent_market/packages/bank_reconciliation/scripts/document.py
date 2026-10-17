@@ -48,6 +48,8 @@ def spec(view: dict, applied: list | tuple = ()) -> dict:
         "subtitle": " · ".join(x for x in (acc.get("bank"), acc.get("number"), acc.get("name")) if x) or c["period_label"],
         "cover_lines": [f"{W('doc.face.as_of')} {words.date(c['as_of'])}" if c.get("as_of") else c["period_label"]],
         "tiles": ["adjusted_bank", "adjusted_book", "difference"], "headline": "difference",
+        # (AM23 §1.5: tied, no reconciling item and no exception — a document would have nothing to say)
+        "nothing_to_say": bool((c.get("gate") or {}).get("passed")) and not rows and not (c.get("exceptions") or []),
         "statement": {"title": W(S_STATEMENT), "columns": [W("doc.col.description"), W("doc.col.amount")], "rows": statement,
                       "strong_rows": strong, "numeric_from": 1},
         "table": {"title": W(S_ITEMS), "rows": rows, "numeric_from": 4, "deck_columns": [0, 1, 2, 4],

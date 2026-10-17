@@ -314,6 +314,18 @@ func (rc *runCtx) interpretCards(ctx context.Context) (bool, error) {
 		status, via := "answered", "text"
 		var assumptions []am.Assumption
 		if len(missing) > 0 {
+			if c.Attempts >= am.MaxReprompts && refusalIn(missing) {
+				// AM23 §1.5: a file the round cannot be is never answered by its default — asked twice again, the
+				// card stays for a tap and the round waits
+				if err := st.ReopenForReask(ctx, c.ID, "uninterpretable"); err != nil {
+					return false, err
+				}
+				c.Status = "open"
+				_ = st.SyncCardItem(ctx, st.Pool, c)
+				_ = st.PostText(ctx, rc.run, am.Text("ช่วยกดเลือกจากปุ่มในการ์ดด้านบนได้ไหมครับ คำถามนี้ไม่มีคำตอบให้เลือกแทน"))
+				parked = true
+				continue
+			}
 			if c.Attempts < am.MaxReprompts {
 				if err := st.ReopenForReask(ctx, c.ID, "uninterpretable"); err != nil {
 					return false, err

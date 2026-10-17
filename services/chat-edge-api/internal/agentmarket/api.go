@@ -1739,13 +1739,40 @@ func (a *API) applyFormats(ctx context.Context, tx pgx.Tx, run Run, answers map[
 		return nil
 	}
 	var formats []string
+	deckOver := ""
 	if err := json.Unmarshal(ans.Value, &formats); err != nil {
 		var one string
+		var choice struct {
+			Formats  []string `json:"formats"`
+			DeckOver string   `json:"deck_over"`
+		}
 		if json.Unmarshal(ans.Value, &one) == nil {
 			formats = []string{one}
+		} else if json.Unmarshal(ans.Value, &choice) == nil {
+			// AM23 §1.5: what was picked on a refusal — the files to make instead, and the deck's threshold
+			formats, deckOver = choice.Formats, choice.DeckOver
 		}
 	}
-	_, err := a.renderJob(ctx, tx, run, formats, "format_card")
+	var have []string
+	_ = json.Unmarshal(run.Formats, &have)
+	var more []string
+	for _, f := range formats {
+		if !contains(have, f) || deckOver != "" {
+			more = append(more, f)
+		}
+	}
+	if len(more) == 0 {
+		return nil // (the workbook alone: the round has it already)
+	}
+	if deckOver != "" {
+		params, _ := json.Marshal(map[string]any{"formats": more, "why": "format_card", "deck_over": deckOver})
+		parent := run.ID
+		_, _, err := a.store.CreateRun(ctx, tx, Run{InstallID: run.InstallID, ParentRunID: &parent, TenantID: run.TenantID,
+			UserID: run.UserID, Kind: KindRender, Params: params, DefinitionVersion: run.DefinitionVersion,
+			Checksum: run.Checksum, EngineChecksum: run.EngineChecksum, BindingVersion: run.BindingVersion}, "")
+		return err
+	}
+	_, err := a.renderJob(ctx, tx, run, more, "format_card")
 	_ = c
 	return err
 }

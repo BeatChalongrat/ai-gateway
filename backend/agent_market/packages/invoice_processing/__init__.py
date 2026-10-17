@@ -178,6 +178,18 @@ def _asked_check(path: str, view: dict, applied: list[str]) -> dict:
     return asked.check(True, W("asked.ok", n=len(rows), said=said), len(rows))
 
 
+def plan(computed: dict, req: dict) -> list:
+    """AM23 §1.5: before any file is written, the documents asked for that this run's content cannot be — each with
+    why and what can be made instead (deliverables/document.py plan)."""
+    from ...deliverables import document as _document
+    from ...deliverables.formats import wanted_formats
+    from .scripts.document import spec as _doc_spec
+
+    view, applied = _as_asked(computed, req)
+    spec = _doc_spec(view, applied)
+    return [p for p in (_document.plan(f, view, req, spec) for f in wanted_formats(req, ["xlsx"])) if p]
+
+
 def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     import hashlib
 
