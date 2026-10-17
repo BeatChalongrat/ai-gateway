@@ -11,7 +11,7 @@ import (
 
 // ── What makes a commentary read machine-made (AM23 §3.3) ─────────────────
 //
-// Measured over AM22's 246 model commentaries (AM23_REPORT, scripts/probes/AM23/narr_measure.py): ten points each where
+// Measured over AM22's 246 model commentaries (AM23_REPORT, the card's measurement of the same rule): ten points each where
 // the rules write five; one point in eight only saying again what the round's facts, its figures' labels or the
 // commentary's own summary already say; hedges with nothing to do in them ("ควรพิจารณาตรวจสอบเพิ่มเติม"); and the same
 // headings on every document. The validator holds an answer to what a reader would:
