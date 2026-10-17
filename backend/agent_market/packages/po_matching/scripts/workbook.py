@@ -32,7 +32,7 @@ from ....deliverables.reread import Tally, sheets, table
 from ....engine import words
 from ....engine.e3 import cards as E3C
 from ..words import W
-from .match import CONFIRMED_TH, DEPTH_SHORT, DEPTH_TH, PASS, REASON_TH, STATUS_TH, THREE, TWO
+from .match import CONFIRMED_TH, DEPTH_SHORT, DEPTH_TH, PASS, REASON_TH, STATUS_TH, THREE, TWO, never_written
 
 # The wide tables' columns in the order the data is built and read back (the checks read by name, from the
 # sheets of the table together — ``table(parts(wb, sheet), H_*)``)
@@ -473,8 +473,8 @@ def check(path: str, computed: dict, run: dict | None = None) -> list:
     ok = len(lk) == len(links) and all(r[4] and r[5] and (m["state"] != "linked" or r[6]) for r, m in zip(lk, links))
     ok = ok and all(m["confirmed"] == "person" for m in links if m["state"] == "linked" and m["tier"] != "exact")
     out.append(ck("xlsx.links", ok, W("check.n_pairs", n=len(lk)), W("check.links")))
-    # the words the paper must not say of any invoice, in either language
-    forbidden = [v for k in ("doc.word.approved", "doc.word.paid") for v in W.both(k).values()]
+    # the words the paper must not say of any invoice, in either language (the same list the model is held to)
+    forbidden = never_written()
     approved = any(w in str(c) for ws in wb.worksheets for r in ws.iter_rows(values_only=True) for c in r if c for w in forbidden)
     out.append(ck("xlsx.no_approval", not approved and face.get(W(L_APPROVAL)) == W(APPROVAL), "", W("check.no_approval")))
     left = computed["not_included"]

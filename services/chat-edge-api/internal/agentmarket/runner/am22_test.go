@@ -430,3 +430,51 @@ func TestACommaAfterAFigureIsTheSentencesNotTheFigures(t *testing.T) {
 		t.Fatal("a figure the table does not have still has to be refused")
 	}
 }
+
+// AM22 — a word the agent's documents never contain is refused in the model's answer, in either language and case,
+// with the reason in the run's language; the PO matching's gate would refuse the file.
+func TestAWordTheAgentNeverWritesIsRefusedEvenInANegation(t *testing.T) {
+	cv := computedView{NarrativeNever: []string{"อนุมัติแล้ว", "จ่ายแล้ว", "approved", "paid"},
+		Figures: map[string]figureView{"n1": {Text: "3", Cite: "n1"}}, WritingLimits: map[string]int{}}
+	_, err := checkNarrative(am.English, `{"summary":"No line may be treated as Approved.","watch":[]}`, cv)
+	if err == nil || !strings.Contains(err.Error(), "never appears in this agent's documents") {
+		t.Fatalf("English: %v", err)
+	}
+	_, err = checkNarrative(am.Thai, `{"summary":"ไม่ได้หมายความว่าใบแจ้งหนี้อนุมัติแล้ว","watch":[]}`, cv)
+	if err == nil || !strings.Contains(err.Error(), "ห้ามมีในเอกสารของ agent นี้") {
+		t.Fatalf("Thai: %v", err)
+	}
+	if _, err := checkNarrative(am.English, `{"summary":"{n1} invoices are ready to be put forward; a person decides.","watch":[]}`, cv); err != nil {
+		t.Fatalf("an answer without the words: %v", err)
+	}
+}
+
+// AM22 — an agent with no figure table copies its numbers: a {name} is refused, with the reason, not left in the file.
+func TestAnAgentWithNoFigureTableHasItsFigureNamesRefused(t *testing.T) {
+	cv := computedView{Quotable: map[string]string{"items": "3"}, WritingLimits: map[string]int{}}
+	_, err := checkNarrative(am.English, `{"summary":"The brief produced {items} items.","watch":[]}`, cv)
+	if err == nil || !strings.Contains(err.Error(), "have no names") {
+		t.Fatalf("a figure name with no table: %v", err)
+	}
+	if _, err := checkNarrative(am.English, `{"summary":"The brief produced 3 items.","watch":[]}`, cv); err != nil {
+		t.Fatalf("the number copied: %v", err)
+	}
+}
+
+// AM22 — the PO matching declares the words its documents never contain, and the runner reads them from the manifest.
+func TestThePOMatchingDeclaresTheWordsItsPaperNeverSays(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "..", "backend", "agent_market", "packages", "po_matching", "agent.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := am.ParseManifest(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(m.NarrativeNever, " ")
+	for _, w := range []string{"อนุมัติแล้ว", "จ่ายแล้ว", "approved", "paid"} {
+		if !strings.Contains(got, w) {
+			t.Fatalf("narrative_never lacks %q: %v", w, m.NarrativeNever)
+		}
+	}
+}

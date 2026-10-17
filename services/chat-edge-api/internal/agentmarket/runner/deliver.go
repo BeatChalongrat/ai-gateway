@@ -46,6 +46,9 @@ type computedView struct {
 	// AM22 §1.1: what a package that is not the financial report shows the model of its round — facts under
 	// headings, figures named by key — in place of the P&L-shaped blocks
 	NarrativeFacts []narrativeFact `json:"narrative_facts"`
+	// AM22: the words the package's documents never contain (its manifest's narrative_never, set by the narrative
+	// step — never read from computed.json, whose result never holds them); an answer with one is asked again
+	NarrativeNever []string `json:"-"`
 }
 
 type narrativeFact struct {
@@ -108,6 +111,7 @@ func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey st
 			user := narrativePrompt(l, cv)
 			var parsed, long map[string]any
 			var longBy string
+			cv.NarrativeNever = rc.pkg.Manifest.NarrativeNever // AM22: the package's declaration
 			c, tried, err := rc.r.Model.CompleteWithInBy(ctx, l, models, rc.pkg.Instructions, user, func(model, s string) error {
 				v, err := checkNarrative(l, s, cv)
 				var tl *tooLongErr
@@ -222,11 +226,19 @@ func checkNarrative(l am.Lang, s string, cv computedView) (map[string]any, error
 		}
 		v[k] = lines
 	}
+	joined := strings.Join(all, "\n")
+	if w := neverWritten(joined, cv.NarrativeNever); w != "" {
+		return nil, errors.New(wordNeverWritten(l, w))
+	}
 	if len(cv.Figures) > 0 {
-		if err := guardFigures(l, strings.Join(all, "\n"), cv); err != nil {
+		if err := guardFigures(l, joined, cv); err != nil {
 			return nil, err
 		}
-	} else if err := GuardNumbersIn(l, strings.Join(all, "\n"), cv.Quotable, cv.QuotableIDs); err != nil {
+	} else if m := figureRe.FindString(joined); m != "" {
+		// AM22: an agent with no figure table (procurement: a price is cited by its page) copies its numbers; a
+		// {name} would reach the file as it was written
+		return nil, errors.New(noFigureNames(l, m))
+	} else if err := GuardNumbersIn(l, joined, cv.Quotable, cv.QuotableIDs); err != nil {
 		return nil, err
 	}
 	if len(long) > 0 {

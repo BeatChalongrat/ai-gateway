@@ -206,11 +206,15 @@ def _narrative_check(doc, model: dict, computed: dict) -> dict:
         if not text.strip():
             return
         possible: list[set] = []
+        optional: set = set()  # AM22: a small number that is a named figure's printed value ({rows_used} → 25)
         for tok in NUMBER.findall(_blank_ids(text, ids)):
             tok = _balanced(tok)
             digits = tok.strip(_STRIP).replace(",", "")
             if "." not in digits and digits.isdigit() and (int(digits) <= 31 or 1990 <= int(digits) <= 2100
                                                           or 2400 <= int(digits) <= 2700):
+                # a count or a year needs no citation; when it is a figure the sentence named, its citation under
+                # the block is that figure's own, not an extra one
+                optional |= forms.get(_squash(tok)) or set()
                 continue
             n += 1
             cites = forms.get(_squash(tok))
@@ -229,7 +233,7 @@ def _narrative_check(doc, model: dict, computed: dict) -> dict:
             return
         want = sorted({c for p in possible for c in p})
         each_cited = all(any(c in refs for c in p) for p in possible)
-        none_extra = all(any(r in p for p in possible) for r in refs)
+        none_extra = all(any(r in p for p in possible) or r in optional for r in refs)
         if not (each_cited and none_extra):
             bad.append(S("gate.narrative.refs_differ", text=text.strip()[:30], got=", ".join(refs) or "—", want=", ".join(want)))
 

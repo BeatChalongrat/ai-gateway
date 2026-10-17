@@ -334,6 +334,17 @@ class TheReport(unittest.TestCase):
         self.assertTrue(res["passed"], [(a["name"], c["name"], c["detail"][:160]) for a in res["artifacts"]
                                         for c in a["quality"]["checks"] if not c["ok"]])
 
+    def test_a_small_figure_named_by_key_is_cited_under_its_block_and_the_gate_accepts_it(self):
+        # {rows_used} prints a count (25): the gate skips it as a count, and its citation under the block is that
+        # figure's own, not an extra one (a model's next step "verify the {rows_used} entries" failed the run)
+        small = next(k for k, f in self.computed["figures"].items() if f.get("cite") and f["text"].isdigit() and int(f["text"]) <= 31)
+        fb = self.computed["fallback_narrative"]
+        nar = dict(fb, next_steps=list(fb.get("next_steps") or []) + ["ควรตรวจสอบความครบถ้วนของ {" + small + "} รายการ"],
+                   written_by="model", model="m")
+        res, _texts, _ = self.render(nar)
+        self.assertTrue(res["passed"], [(a["name"], c["name"], c["detail"][:160]) for a in res["artifacts"]
+                                        for c in a["quality"]["checks"] if not c["ok"]])
+
     def test_what_the_character_count_cannot_see_the_renderer_still_refuses(self):
         # 400 W's are within the summary's 480-character budget and far wider than the statement's frame
         wide = dict(self.computed["fallback_narrative"], summary="W" * 400, written_by="model", model="m")

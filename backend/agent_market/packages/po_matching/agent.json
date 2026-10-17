@@ -75,6 +75,7 @@
   },
   "narrative": "model",
   "narrative_when_away": "rules",
+  "narrative_never": ["อนุมัติแล้ว", "จ่ายแล้ว", "approved", "paid"],
   "document_index": {"retention_days": 1825},
   "record_who_answered": true,
   "guide": {

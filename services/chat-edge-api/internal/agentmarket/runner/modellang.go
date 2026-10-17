@@ -2,6 +2,7 @@ package runner
 
 import (
 	"fmt"
+	"strings"
 	"unicode"
 
 	am "github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/agentmarket"
@@ -69,6 +70,30 @@ func inLang(l am.Lang, thai, english string) string {
 		return english
 	}
 	return thai
+}
+
+// neverWritten is the first of a package's never-written words the text has, "" when none (English compared without
+// case: "Approved" is the word too).
+func neverWritten(text string, words []string) string {
+	low := strings.ToLower(text)
+	for _, w := range words {
+		if w != "" && strings.Contains(low, strings.ToLower(w)) {
+			return w
+		}
+	}
+	return ""
+}
+
+// wordNeverWritten is the reason an answer with a never-written word is sent back, in the run's language.
+func wordNeverWritten(l am.Lang, w string) string {
+	return inLang(l, fmt.Sprintf("คำว่า “%s” ห้ามมีในเอกสารของ agent นี้ แม้ในประโยคปฏิเสธ ให้เขียนว่าตรวจอะไรแล้ว และอะไรยังต้องให้คนตัดสิน", w),
+		fmt.Sprintf("the word “%s” never appears in this agent's documents, not even to say something is not; say what was checked and what is left for a person to decide", w))
+}
+
+// noFigureNames is the reason an answer that names a figure in braces is sent back by an agent with no figure table.
+func noFigureNames(l am.Lang, m string) string {
+	return inLang(l, fmt.Sprintf("agent นี้ไม่มีชื่อตัวเลข: %s ใช้ไม่ได้ ให้คัดลอกตัวเลขจากรายการตัวเลขที่อ้างได้ตรงตัวอักษร", m),
+		fmt.Sprintf("this agent's numbers have no names: %s cannot be used; copy each number exactly as the list prints it", m))
 }
 
 // retryLine is what is added to the prompt on the one retry: the reason the last answer could not be

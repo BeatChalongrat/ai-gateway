@@ -63,6 +63,13 @@ from ..checks import units as U
 from ..checks.review import COUNTED, Review, is_duplicate, review, unit_factor
 from ..words import W
 
+
+def never_written() -> list[str]:
+    """The words the paper never says of an invoice, in both languages: "approved", "paid" (AM22: a model wrote
+    "no line may be treated as approved", and the gate refused the file). The manifest declares the same words
+    (narrative_never), and the runner holds a model's answer to them; tests/test_am22_forms.py keeps the two equal."""
+    return [v for k in ("doc.word.approved", "doc.word.paid") for v in W.both(k).values()]
+
 SCHEMA = "ap.match.v1"
 SCRIPT = "packages/po_matching/scripts/match.py"
 ZERO = Decimal("0")

@@ -365,3 +365,15 @@ class TheCommittedFormsAreTheKits(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ThePOPapersNeverWrittenWords(unittest.TestCase):
+    def test_the_words_the_gate_refuses_are_the_words_the_manifest_declares(self):
+        import json as _json
+        from agent_market.packages.po_matching.scripts import match
+        never = match.never_written()
+        self.assertEqual(set(never), {"อนุมัติแล้ว", "จ่ายแล้ว", "approved", "paid"})
+        here = os.path.dirname(os.path.abspath(__file__))
+        manifest = _json.load(open(os.path.join(here, "..", "packages", "po_matching", "agent.json"), encoding="utf-8"))
+        self.assertEqual(sorted(manifest["narrative_never"]), sorted(never),
+                         "the runner holds a model's answer to the manifest's words; the gate refuses the file's")

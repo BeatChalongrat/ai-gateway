@@ -251,6 +251,8 @@ var notASentence = map[string]string{
 	"runner/modellang.go:tooMany":           "addressed to a model: the reason a heading with more points than the document takes is sent back with (AM22 §1.2)",
 	"runner/modellang.go:notAList":          "addressed to a model: the reason a list sent as something else is sent back with (AM22 §1.2)",
 	"runner/modellang.go:notASentence":      "addressed to a model: the reason a list member that is not a sentence is sent back with (AM22 §1.2)",
+	"runner/modellang.go:wordNeverWritten":  "addressed to a model: the reason an answer with a word the agent's documents never contain is sent back with (AM22)",
+	"runner/modellang.go:noFigureNames":     "addressed to a model: the reason an agent with no figure table has its {names} sent back with (AM22)",
 	"runner/model.go:Vision":                "addressed to a vision model: what is added to the prompt on its retry",
 	"runner/clarify.go:classify":            "addressed to a model: the prompt that reads a typed answer as one of a card's options (the language typed in: modellang.go)",
 	// AM11b: what a person asked of an agent's documents

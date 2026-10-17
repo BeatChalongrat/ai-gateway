@@ -88,7 +88,11 @@ type Manifest struct {
 	// an agent whose deliverable is its figures does not hold its working paper back for a commentary.
 	// Empty (the financial report, whose commentary is the report): the run waits for its model (AM15).
 	NarrativeWhenAway string `json:"narrative_when_away"`
-	DocumentIndex     *struct {
+	// AM22: the words the package's documents never contain, in either language — not even to say "not" (the PO
+	// matching's paper never says "approved" or "paid"). The runner refuses a model's answer that has one, with
+	// the reason, and asks again; the package's own gate would refuse the file.
+	NarrativeNever []string `json:"narrative_never,omitempty"`
+	DocumentIndex  *struct {
 		RetentionDays int `json:"retention_days"`
 	} `json:"document_index"`
 	PhotoNotice string `json:"photo_notice"`
