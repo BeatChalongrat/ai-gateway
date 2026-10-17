@@ -1,0 +1,11 @@
+# Checks removed on purpose (AM24 §3.7, scripts/gate/ledger.py).
+#
+# The gate and the smoke record how many checks each lane ran and compare it with the lane's last run: a count
+# that falls on its own is red. A check taken out on purpose is taken out together with a line here, in the same
+# commit, saying what replaced it — and that line is what lets the lane's count fall by its number:
+#
+#   <lane> | <how many checks it removes> | <what was removed> | <what replaced it>
+#
+# The lane is the ledger's name for it: a gate lane (backend_lane, web_vitest, …), a chunk of the integration lane
+# (it:<its first test>+<the others>), or the smoke (smoke_live, smoke_test). A line with nothing after the last bar
+# lets nothing fall: "removed, replaced by nothing" is said by writing "nothing, because …".

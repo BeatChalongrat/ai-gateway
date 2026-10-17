@@ -30,6 +30,9 @@
 #   bash scripts/gate.sh drill                tracks (nothing tracked that .gitignore excludes) + removal drill +
 #                                             gitleaks on the unpushed commits
 #   bash scripts/gate.sh backup               a live backup with its restore drill (never recreates a dependency)
+#   bash scripts/gate.sh verdict              the gate's one verdict, from its ledger: green only when every lane, every
+#                                             chunk of the integration lane, the build, the stack and the smoke have a
+#                                             green result at HEAD — else the lanes that do not, each with its commit
 #
 # A card says what is its own:  GATE_RESULTS (where the files go) · GATE_IT (its integration lane, run
 # after the AM10 and web chunks).
@@ -50,10 +53,27 @@
 #   host_tests       scripts/tests/test_*.py · smoke_units  scripts/smoke/*.test.js · alert_rules  promtool
 #   gateway_go · log_worker_go · portal · dlp_sidecar   the services' own tests, which no lane had
 # No list of files is left to fall off, and there is no setting that takes a file out.
+#
+# AM24 — a green that means green. Every lane, when it ends, writes the commit it ran at, its count of checks and its
+# result to the gate's ledger (scripts/gate/ledger.py → scripts/gate/results/ledger.jsonl): a lane whose output names
+# no check that ran is red (matched nothing), one whose checks were all skipped is a skip (ran over nothing), and one
+# that ran fewer checks than its last run is red unless scripts/gate/removed_checks.txt says what replaced them
+# (disappeared). The host cannot hold the whole gate at once, so it runs in pieces; `verdict` is then the gate's
+# verdict: green only when every piece is green at the same commit, with nothing uncommitted under it.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 RESULTS="${GATE_RESULTS:-scripts/gate/results}"
+LANES="tracks python_lane look_gallery go_units go_vet gofmt backend_lane backend_marked host_tests smoke_units alert_rules gateway_go log_worker_go portal dlp_sidecar web_tsc web_vitest web_lints admin desktop"
+# AM24: what the gate's verdict needs a green result of, at one commit — every lane, every chunk of the integration
+# lane (scripts/gate/it/chunk.sh ids), the build, the test stack and the smoke on it
+verdict_lanes() {
+  echo "$LANES $(bash scripts/gate/it/chunk.sh ids 2>/dev/null | tr -d '\r' | tr '\n' ' ') build_images build_runner build_fetcher stack_up stack_web clients_build clients_up smoke_test_on smoke_dead_primary_red smoke_dead_primary_green smoke_test_off"
+}
+at_commit() { # the commit a run is for, and whether anything tracked is changed under it (GATE_FOR_SHA: a built commit)
+  if [ -n "${GATE_FOR_SHA:-}" ]; then echo "${GATE_FOR_SHA:0:7} 0"; return; fi
+  echo "$(git rev-parse --short=7 HEAD) $([ -n "$(git status --porcelain --untracked-files=no)" ] && echo 1 || echo 0)"
+}
 MIN_FREE="${GATE_MIN_FREE_MB:-3000}"
 WAIT_S="${GATE_WAIT_S:-600}"
 LOCK="${GATE_LOCK:-${TMP:-/tmp}/sran-gate.lock}"
@@ -119,21 +139,28 @@ cache_back() { # hand the VM's free memory back to Windows
   sleep 20 # (the pages reach Windows a few seconds after)
 }
 backend_marked() { # AM15: the backend tests marked integration — run, and held to the list of the ones that still fail
-  local out="$RESULTS/backend_marked.txt" start=$SECONDS rc
+  local out="$RESULTS/backend_marked.txt" start=$SECONDS rc at
+  at=$(at_commit)
   timeout 900 bash scripts/backend-test-lane.sh -q -p no:cacheprovider -m integration -rfEs > "$out" 2>&1
   python scripts/gate/marked.py "$out" > "$RESULTS/backend_marked_verdict.txt" 2>&1; rc=$?
+  GATE_COMMIT="${at% *}" GATE_DIRTY="${at#* }" python scripts/gate/ledger.py record backend_marked "$out" "$rc" | sed 's/^/    /'
+  [ "${PIPESTATUS[0]}" = "0" ] || rc=1
   say "backend_marked: $([ "$rc" = "0" ] && echo 'nothing moved' || echo "RED (exit $rc)") in $((SECONDS - start)) s → $RESULTS/backend_marked_verdict.txt"
   # what still fails and what cannot run is said here, on every run — it is never a silent exclusion
   grep -a -E '^(pytest:|marked tests that fail|STILL FAILING|SKIPPED IN THIS LANE|RED|  [+-] )' "$RESULTS/backend_marked_verdict.txt" | cut -c1-600 | sed 's/^/    /'
   return "$rc"
 }
-one() { # one <name> <timeout s> <command…> → a file and a verdict line
+one() { # one <name> <timeout s> <command…> → a file, a verdict line, and the run in the gate's ledger
   local name="$1" t="$2"; shift 2
-  local out="$RESULTS/$name.txt" start=$SECONDS
+  local out="$RESULTS/$name.txt" start=$SECONDS at
+  at=$(at_commit) # (the commit at the start: a commit made while the lane runs is not what it ran)
   ( timeout "$t" "$@" > "$out" 2>&1; echo "exit=$?" >> "$out" )
   local rc; rc=$(grep -a '^exit=' "$out" | tail -1 | cut -d= -f2)
   say "$name: $([ "$rc" = "0" ] && echo ok || echo "FAILED (exit $rc)") in $((SECONDS - start)) s → $out"
-  [ "$rc" = "0" ]
+  # AM24: and not ok when it ran nothing, or fewer checks than its last run with no line saying what replaced them
+  GATE_COMMIT="${at% *}" GATE_DIRTY="${at#* }" python scripts/gate/ledger.py record "$name" "$out" "${rc:-1}" | sed 's/^/    /'
+  local lr=${PIPESTATUS[0]}
+  [ "$rc" = "0" ] && [ "$lr" = "0" ]
 }
 
 phase="${1:-}"; shift || true
@@ -146,7 +173,6 @@ case "$phase" in
     # lanes [name…] — the named lanes only: one piece, in the foreground (the whole run is over an hour,
     # and a long run in the background is stopped on this host when memory is short, with no verdict).
     # A run of pieces says PARTIAL and names what it did not run: it is never a gate's verdict.
-    LANES="tracks python_lane look_gallery go_units go_vet gofmt backend_lane backend_marked host_tests smoke_units alert_rules gateway_go log_worker_go portal dlp_sidecar web_tsc web_vitest web_lints admin desktop"
     only=" $* "; ran=(); left=()
     for name in "$@"; do # (a name that is no lane is refused before anything is touched)
       case " $LANES " in *" $name "*) ;; *) say "REFUSED: no such lane: $name (the lanes are: $LANES)"; exit 2 ;; esac
@@ -184,19 +210,21 @@ case "$phase" in
     lane admin 900 bash -c 'cd admin-ui && npx tsc --noEmit -p . && npx vitest run'
     lane desktop 900 bash -c 'cd apps/desktop && npm run -s typecheck && npx vitest run'
     if [ "${#left[@]}" -gt 0 ]; then
-      say "lanes: PARTIAL — ran ${ran[*]}: $([ $rc = 0 ] && echo ok || echo RED) · NOT run: ${left[*]} · a run of pieces is not a gate's verdict"
+      say "lanes: PARTIAL — ran ${ran[*]}: $([ $rc = 0 ] && echo ok || echo RED) · NOT run here: ${left[*]}"
+      say "$(python scripts/gate/ledger.py verdict $(verdict_lanes))" # (AM24: the pieces' verdict is the ledger's)
       exit $rc
     fi
     # (not "all green" while backend tests stand on the list of the ones that still fail)
     standing=$(grep -a -o -E 'on the list: [0-9]+' "$RESULTS/backend_marked_verdict.txt" 2>/dev/null | grep -o '[0-9]*$' || echo '?')
-    say "lanes: $([ $rc = 0 ] && { [ "$standing" = 0 ] && echo ALL GREEN || echo "GREEN, with $standing backend test(s) still failing by name (above) — not green until that list is empty"; } || echo RED)"; exit $rc
+    say "lanes: $([ $rc = 0 ] && { [ "$standing" = 0 ] && echo ALL GREEN || echo "GREEN, with $standing backend test(s) still failing by name (above) — not green until that list is empty"; } || echo RED)"
+    say "$(python scripts/gate/ledger.py verdict $(verdict_lanes))"; exit $rc
     ;;
   it)
     lock it; stack_stop; room; guard
     export AGENT_MARKET_IT=1
     # AM21: the converter the integration tests start is the one this commit built (AM_CONVERTER_TAG), not a stale :dev
     export AM_CONVERTER_IMAGE="${AM_CONVERTER_IMAGE:-ai-gateway-doc-converter:${AM_CONVERTER_TAG:-latest}}"
-    out="$RESULTS/it_lane.txt"; : > "$out"; rc=0
+    out="$RESULTS/it_lane.txt"; : > "$out"; rc=0; at=$(at_commit)
     {
       date -u +"started %H:%M:%SZ at $(git rev-parse --short=7 HEAD)"
       timeout 4200 bash scripts/gate/it/am10.sh | sed -u 's/^lane_exit=/am10_lane_exit=/'
@@ -207,11 +235,15 @@ case "$phase" in
     grep -a -q -E '^(--- FAIL|FAIL|panic)' "$out" && rc=1
     grep -a -E '_lane_exit=' "$out" | grep -v -q '=0$' && rc=1
     [ "$(grep -a -c -E '_lane_exit=0$' "$out")" -ge 3 ] || rc=1
+    # AM24: each chunk of the file in the gate's ledger — a file emptied partway, or a chunk short of a name, is red
+    GATE_COMMIT="${at% *}" GATE_DIRTY="${at#* }" python scripts/gate/ledger.py it-lane "$out" > "$RESULTS/it_ledger.txt" 2>&1 || rc=1
+    grep -a -v ' GREEN ' "$RESULTS/it_ledger.txt" | sed 's/^/    /' | head -20
     say "integration: $(grep -a -c '^--- PASS' "$out") passed, $(grep -a -c '^--- FAIL' "$out") failed · $(grep -a -E '_lane_exit=' "$out" | tr '\n' ' ')→ $out"
     exit $rc
     ;;
   build)
     sha="${1:?the commit to build (7 characters)}"
+    export GATE_FOR_SHA="$sha" # (AM24: the ledger records these lanes for the commit built, not the checkout's)
     lock build; stack_stop; room; guard; rc=0
     one build_images 2400 bash scripts/build-images.sh --rev "$sha" chat-edge-api web-chat admin-ui || rc=1
     room; one build_runner 1800 bash scripts/agent-market/build.sh "$sha" || rc=1
@@ -220,6 +252,7 @@ case "$phase" in
     ;;
   stack)
     sha="${1:?the commit whose images the test stack runs}"
+    export GATE_FOR_SHA="$sha"
     lock stack; room; guard; rc=0
     one stack_up 1200 env AM7_NO_NER=1 TS_BACKEND_TAG="${TS_BACKEND_TAG:-2fa9bb8}" AM_FETCHER_TAG="${AM_FETCHER_TAG:-$sha}" bash scripts/agent-market/test_stack.sh up "$sha" || rc=1
     # (the stand-in sites run on the fetcher's image: the card's own when it built one, else the one named)
@@ -230,6 +263,10 @@ case "$phase" in
     cache_back; say "stack: $([ $rc = 0 ] && echo ok || echo FAILED) · $(grep -a -E '^(stack check:|RED:)' "$RESULTS/stack_up.txt" | head -3 | tr '\n' ' ' | cut -c1-220)"; exit $rc
     ;;
   stack-stop) stack_stop ;;
+  verdict)
+    # AM24: no lock, nothing run — what the ledger holds for HEAD; the last line names what is not green, and where
+    python scripts/gate/ledger.py verdict $(verdict_lanes)
+    ;;
   walk)
     [ "${1:-}" = "--" ] && shift
     lock "walk $*"; room; guard
@@ -237,6 +274,7 @@ case "$phase" in
     ;;
   smoke)
     sha="${1:?the commit the test stack runs}"
+    export GATE_FOR_SHA="$sha"
     lock smoke; guard; rc=0
     one smoke_test_on 600 env SMOKE_TARGET=test SMOKE_DESKTOP=0 bash scripts/smoke.sh || rc=1
     # AM15: the proof that the smoke can fail. The model is taken away on the test stack and the suite

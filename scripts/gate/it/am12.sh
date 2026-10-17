@@ -9,6 +9,7 @@
 #   bash scripts/gate/it/am12.sh web > results/it_web.txt  # the AM11 + AM12 chunks only
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+. "$ROOT/scripts/gate/it/lib.sh"
 export AGENT_MARKET_IT=1
 rc=0
 if [ "${1:-all}" != "web" ]; then
@@ -21,10 +22,6 @@ CHUNKS=(
   '^(TestAPurchaseRequestIsDraftedIntoTheOrganisationsOwnForm)$'
 )
 for c in "${CHUNKS[@]}"; do
-  echo "== chunk $c"
-  out=$(timeout 1500 bash "$ROOT/scripts/gate/go_test.sh" ./internal/agentmarket/runner/ -run "$c" -count=1 -v -timeout 1400s 2>&1)
-  st=$?
-  printf '%s\n' "$out" | grep -E '^(--- (PASS|FAIL|SKIP)|PASS$|FAIL|ok |panic)|^\s+\S+_test\.go:[0-9]+: [^t]' || true
-  [ "$st" -eq 0 ] || rc=1
+  run_chunk "$c" || rc=1 # (lib.sh: red when it ran no test, or when a name it lists matched none)
 done
 echo "lane_exit=$rc"

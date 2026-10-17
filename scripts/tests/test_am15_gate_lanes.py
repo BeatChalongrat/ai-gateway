@@ -50,7 +50,8 @@ class TheBackendLaneIsTheSuite(unittest.TestCase):
 
     def test_every_lane_that_is_called_is_in_the_list_of_lanes_and_the_other_way(self):
         phase = lanes_phase()
-        declared = set(re.search(r'LANES="([^"]+)"', phase).group(1).split())
+        # (AM24: the list is declared once at the top of the script, where the gate's verdict reads it too)
+        declared = set(re.search(r'(?m)^LANES="([^"]+)"', GATE).group(1).split())
         called = set(re.findall(r"(?m)^\s+lane ([a-z_]+) \d+ ", phase)) | {"backend_marked"}
         self.assertEqual(declared, called)
         for name in ("backend_lane", "backend_marked", "host_tests", "smoke_units", "alert_rules", "gateway_go", "log_worker_go", "portal", "dlp_sidecar"):

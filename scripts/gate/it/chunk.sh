@@ -8,8 +8,13 @@
 # $GATE_RESULTS/it_clean.txt.
 #
 #   bash scripts/gate/it/chunk.sh list      the chunks
+#   bash scripts/gate/it/chunk.sh ids       their names in the gate's ledger (it:<first test>+<the others>)
 #   bash scripts/gate/it/chunk.sh <n>       run one
-#   bash scripts/gate/it/chunk.sh verdict   what the file holds: passed, failed, chunks run
+#   bash scripts/gate/it/chunk.sh verdict   what the file holds: passed, failed, chunks run — RED unless every chunk ran
+#
+# AM24: each chunk's run is written to the gate's ledger (scripts/gate/ledger.py record-chunk): red when it failed,
+# ran no test, or a name its selector lists ran as no test, and its count is held to its last run's. The gate is
+# green only when every chunk has a green result at the commit (bash scripts/gate.sh verdict).
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT"
@@ -21,8 +26,16 @@ mapfile -t CHUNKS < <(for f in scripts/gate/it/am10.sh scripts/gate/it/am12.sh s
 done)
 case "${1:-list}" in
   list) for i in "${!CHUNKS[@]}"; do echo "$i ${CHUNKS[$i]:0:110}"; done ;;
+  ids) for c in "${CHUNKS[@]}"; do python scripts/gate/ledger.py chunk-id "$c"; done ;;
   verdict)
-    echo "chunks run: $(grep -a -c '^== chunk ' "$OUT") of ${#CHUNKS[@]} · passed $(grep -a -c '^--- PASS' "$OUT") · failed $(grep -a -c '^--- FAIL' "$OUT") · skipped $(grep -a -c '^--- SKIP' "$OUT") · chunk exits not 0: $(grep -a -c '^chunk_exit=[^0]' "$OUT") · chunks that ran no test: $(grep -a -c '^chunk_ran_nothing' "$OUT")"
+    run=$(grep -a -c '^== chunk ' "$OUT" 2>/dev/null); run=${run:-0}
+    bad=$(grep -a -c -E '^(--- FAIL|chunk_exit=[^0]|chunk_ran_nothing)' "$OUT" 2>/dev/null); bad=${bad:-0}
+    echo "chunks run: $run of ${#CHUNKS[@]} · passed $(grep -a -c '^--- PASS' "$OUT") · failed $(grep -a -c '^--- FAIL' "$OUT") · skipped $(grep -a -c '^--- SKIP' "$OUT") · chunk exits not 0: $(grep -a -c '^chunk_exit=[^0]' "$OUT") · chunks that ran no test: $(grep -a -c '^chunk_ran_nothing' "$OUT")"
+    # AM24: a file that holds fewer chunks than the lists, or none, is not a pass — nor one with a failure in it
+    if [ "$run" -lt "${#CHUNKS[@]}" ] || [ "$bad" -gt 0 ]; then
+      echo "RED: $([ "$run" -lt "${#CHUNKS[@]}" ] && echo "$((${#CHUNKS[@]} - run)) of the ${#CHUNKS[@]} chunks have no run in $OUT")$([ "$run" -lt "${#CHUNKS[@]}" ] && [ "$bad" -gt 0 ] && echo " · ")$([ "$bad" -gt 0 ] && echo "$bad failure line(s)")"
+      exit 1
+    fi
     ;;
   *)
     n="$1"; c="${CHUNKS[$n]:?no such chunk}"
@@ -33,6 +46,8 @@ case "${1:-list}" in
     grep -a -E '^(--- (PASS|FAIL|SKIP)|ok |FAIL|panic)|^\s+\S+_test\.go:[0-9]+: [^t]|gate (STOPPED|REFUSED)' "$tmp" >> "$OUT"
     # a chunk that ran nothing is not a chunk that passed
     grep -a -q '^--- PASS' "$tmp" || { echo "chunk_ran_nothing $n" >> "$OUT"; rc=1; }
+    # AM24: nor one in which a name it lists ran as no test; and its run goes to the gate's ledger
+    python scripts/gate/ledger.py record-chunk "$c" "$tmp" "$rc" >> "$OUT" || rc=1
     echo "chunk_exit=$rc" >> "$OUT"
     echo "chunk $n exit=$rc · $(grep -a -c '^--- PASS' "$tmp") passed · $(grep -a -c '^--- FAIL' "$tmp") failed · $(grep -a -E '^ok |^FAIL\s' "$tmp" | tail -1 | awk '{print $NF}')"
     grep -a -E '^--- FAIL|gate (STOPPED|REFUSED)' "$tmp" | cut -c1-200 || true
