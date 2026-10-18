@@ -219,6 +219,16 @@ class TheGateWritesTheLedger(unittest.TestCase):
         self.assertIn("ledger.py record-chunk", self.chunk)
         self.assertIn("ledger.py selectors it_names", self.chunk)
 
+    def test_a_chunk_run_alone_starts_the_same_converter_as_the_whole_lane(self):
+        # (a chunk run on its own once fell back to a stale :dev converter: the report's PDF failed its gate there)
+        import re
+        want = 'AM_CONVERTER_IMAGE="${AM_CONVERTER_IMAGE:-ai-gateway-doc-converter:${AM_CONVERTER_TAG:-latest}}"'
+        self.assertIn(want, self.phase("it"))
+        code = "\n".join(l for l in self.chunk.splitlines() if not l.lstrip().startswith("#"))
+        self.assertIn("export " + want, code)
+        self.assertLess(code.index("export " + want), code.index("case "), "set before any chunk runs")
+        self.assertIsNone(re.search(r"doc-converter:dev", code))
+
     def test_every_lane_script_runs_its_chunks_through_run_chunk(self):
         for f in sorted((ROOT / "scripts" / "gate" / "it").glob("am*.sh")):
             src = f.read_text(encoding="utf-8")

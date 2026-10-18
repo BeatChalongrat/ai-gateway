@@ -19,6 +19,10 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT"
 export GATE_RESULTS="${GATE_RESULTS:-scripts/gate/results/it}" AGENT_MARKET_IT=1
+# AM24: the converter a chunk starts is the one gate.sh it starts — this commit's built image, never a stale :dev. Until
+# AM24 a chunk run on its own fell back to :dev, and the report's PDF failed its gate on a converter that does not
+# measure margins (pdf_it_test.go), unless whoever ran it remembered to set this.
+export AM_CONVERTER_IMAGE="${AM_CONVERTER_IMAGE:-ai-gateway-doc-converter:${AM_CONVERTER_TAG:-latest}}"
 mkdir -p "$GATE_RESULTS"
 OUT="$GATE_RESULTS/it_clean.txt"
 mapfile -t CHUNKS < <(for f in scripts/gate/it/am10.sh scripts/gate/it/am12.sh scripts/gate/it/am13.sh scripts/gate/it/am15.sh scripts/gate/it/am16.sh scripts/gate/it/am18.sh scripts/gate/it/am22.sh scripts/gate/it/am23.sh scripts/gate/it/am24.sh; do
