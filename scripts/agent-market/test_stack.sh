@@ -25,8 +25,10 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$ROOT/scripts/ops/rev.sh" # AM24b: the short revision, one rule (rev_tag / rev_image)
-# (AM24b: a backend tag given by hand, as any revision, is the tag its image carries)
+# (AM24b: a backend or fetcher tag given by hand, as any revision, is the tag its image carries — gate.sh stack
+# hands the fetcher's on as it was typed)
 [ -z "${TS_BACKEND_TAG:-}" ] || TS_BACKEND_TAG="$(rev_existing_tag ai-gateway-backend "$TS_BACKEND_TAG")"
+[ -z "${AM_FETCHER_TAG:-}" ] || AM_FETCHER_TAG="$(rev_existing_tag ai-gateway-web-fetcher "$AM_FETCHER_TAG")"
 cd "$ROOT"
 rev() { docker inspect "$1" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' 2>/dev/null || true; }
 export TS_GATEWAY_TAG="${TS_GATEWAY_TAG:-$(rev ai-gateway-gateway-1)}"

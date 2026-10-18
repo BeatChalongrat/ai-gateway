@@ -177,6 +177,20 @@ class TheShortRevision(unittest.TestCase):
                            encoding="utf-8", errors="replace", timeout=120)
         self.assertEqual(r.returncode, 0, "a backend tag given by hand at nine characters: " + r.stdout + r.stderr)
 
+    def test_the_test_stacks_up_takes_the_fetchers_tag_as_any_revision(self):
+        # gate-found at fe49e178: `gate.sh stack <8 characters>` hands AM_FETCHER_TAG on as typed, and the stack said
+        # "RED: not on this host: … ai-gateway-web-fetcher:fe49e178", exit 6, for a fetcher tagged fe49e17. Here every
+        # image is on the host but the backend's: the stack refuses naming that one only.
+        full = git("rev-parse", "HEAD")
+        t = full[:7]
+        self.images.write_text("".join(f"ai-gateway-{r}:{t}\n" for r in ("chat-edge-api", "agent-runner", "web-fetcher")),
+                               encoding="utf-8")
+        r = subprocess.run([BASH, "scripts/agent-market/test_stack.sh", "up", full[:8]], cwd=ROOT,
+                           env={**self.env, "AM_FETCHER_TAG": full[:8], "TS_BACKEND_TAG": "nothere"},
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+        self.assertEqual(r.returncode, 6, r.stdout + r.stderr)
+        self.assertIn("RED: not on this host: ai-gateway-backend:nothere —", r.stdout)
+
     def test_the_test_stacks_tag_given_as_any_revision_is_the_tag_its_images_carry(self):
         full = git("rev-parse", "HEAD")
         self.images.write_text(f"ai-gateway-chat-edge-api:{full[:7]}\nai-gateway-agent-runner:{full[:7]}\n", encoding="utf-8")
@@ -189,7 +203,8 @@ class TheShortRevision(unittest.TestCase):
                     'check "$(rev_existing_tag ai-gateway-chat-edge-api "${2:?tag}")"',
                     'edge "$(rev_existing_tag ai-gateway-chat-edge-api "${2:?tag}")"',
                     'runner "$(rev_existing_tag ai-gateway-agent-runner "${2:?tag}")"',
-                    'TS_BACKEND_TAG="$(rev_existing_tag ai-gateway-backend "$TS_BACKEND_TAG")"'):
+                    'TS_BACKEND_TAG="$(rev_existing_tag ai-gateway-backend "$TS_BACKEND_TAG")"',
+                    'AM_FETCHER_TAG="$(rev_existing_tag ai-gateway-web-fetcher "$AM_FETCHER_TAG")"'):
             self.assertIn(sub, src, "the test stack takes a revision as given in one of its commands")
         web = (ROOT / "scripts" / "agent-market" / "test_stack_web.sh").read_text(encoding="utf-8")
         self.assertIn('TAG="$(rev_existing_tag ai-gateway-web-fetcher "${2:?', web, "the web stand-ins take a tag as given")
