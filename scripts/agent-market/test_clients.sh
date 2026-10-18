@@ -16,7 +16,8 @@ export MSYS_NO_PATHCONV=1
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 native() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
-REV="$(git rev-parse --short=7 "${2:-HEAD}")"
+. "$ROOT/scripts/ops/rev.sh" # AM24b: the short revision, one rule
+REV="$(rev_tag "${2:-HEAD}")"
 WEB_IMG="am10-test-web-chat:$REV"
 ADMIN_IMG="am10-test-admin-ui:$REV"
 NET=sran-test_default

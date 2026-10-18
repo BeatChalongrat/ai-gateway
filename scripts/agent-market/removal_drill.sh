@@ -23,19 +23,19 @@ git worktree prune
 # Agent Market commits are the ones whose subject starts with AM<digit>.
 mapfile -t AM < <(git log --format='%h %s' "$BASE..$TIP" | awk '$2 ~ /^AM[0-9]/ {print $1}')
 mapfile -t CORE < <(git log --reverse --format='%h %s' "$BASE..$TIP" | awk '$2 !~ /^AM[0-9]/ {print $1}')
-echo "base $BASE  tip $(git rev-parse --short "$TIP")"
+echo "base $BASE  tip $(git rev-parse --short=7 "$TIP")"
 echo "Agent Market commits: ${#AM[@]} (reverted newest first)"
 echo "other commits since base: ${#CORE[@]} (${CORE[*]:-none})"
 
 git worktree add --detach "$A" "$TIP" >/dev/null 2>&1
 git -C "$A" -c user.name="drill" -c user.email="drill@localhost" revert --no-edit "${AM[@]}" >/dev/null
-echo "reverted tree: $(git -C "$A" rev-parse --short HEAD)"
+echo "reverted tree: $(git -C "$A" rev-parse --short=7 HEAD)"
 
 git worktree add --detach "$B" "$BASE" >/dev/null 2>&1
 if [ "${#CORE[@]}" -gt 0 ]; then
   git -C "$B" -c user.name="drill" -c user.email="drill@localhost" cherry-pick "${CORE[@]}" >/dev/null
 fi
-echo "core-only tree: $(git -C "$B" rev-parse --short HEAD)"
+echo "core-only tree: $(git -C "$B" rev-parse --short=7 HEAD)"
 
 DIFF_LINES=$(git diff "$(git -C "$A" rev-parse HEAD)" "$(git -C "$B" rev-parse HEAD)" | wc -l | tr -d ' ')
 echo "diff reverted..core-only: $DIFF_LINES lines"

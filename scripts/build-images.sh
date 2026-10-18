@@ -82,8 +82,9 @@ done
 [ -n "$PY" ] || { echo "python3 (or python) is required to read the compose build block" >&2; exit 1; }
 
 ROOT=$(git rev-parse --show-toplevel)
-FULL=$(git -C "$ROOT" rev-parse --verify "${REV_IN}^{commit}")
-REVISION=$(git -C "$ROOT" rev-parse --short=7 "$FULL")
+. "$ROOT/scripts/ops/rev.sh" # AM24b: the short revision, one rule (rev_tag / rev_image)
+FULL=$(rev_full "$REV_IN") || exit 2
+REVISION=$(rev_tag "$FULL")
 CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 # web-chat's version stamp is always the revision being built — never a value
 # left in the shell or .env from another build (the web-chat Dockerfile also

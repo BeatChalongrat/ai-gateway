@@ -53,7 +53,7 @@ class WebChatBuildIdTest(unittest.TestCase):
 
     def test_build_images_stamps_the_revision_it_builds(self):
         text = BUILD_IMAGES.read_text(encoding="utf-8")
-        rev = text.index("REVISION=$(git")
+        rev = text.index("REVISION=$(rev_tag")  # (AM24b: the one rule, scripts/ops/rev.sh)
         stamp = re.search(r"^NEXT_PUBLIC_BUILD_ID=\$REVISION$", text, re.M)
         self.assertIsNotNone(stamp, "build-images.sh sets the stamp to the revision, whatever the shell held")
         self.assertGreater(stamp.start(), rev)

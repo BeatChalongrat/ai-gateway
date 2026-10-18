@@ -26,6 +26,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
+. "$ROOT/scripts/ops/rev.sh" # AM24b: the short revision, one rule (rev_tag / rev_image)
 NET=sran-test-web
 SUBNET=93.184.215.0/24
 ADDR=93.184.215.14
@@ -49,7 +50,8 @@ guard() {
 
 case "${1:-check}" in
   web)
-    TAG="${2:?the web-fetcher image tag (the stand-in sites run on its node)}"
+    # (AM24b: any revision git accepts — the tag the built image carries, found by prefix: scripts/ops/rev.sh)
+    TAG="$(rev_existing_tag ai-gateway-web-fetcher "${2:?the web-fetcher image tag (the stand-in sites run on its node)}")"
     guard
     docker network inspect "$NET" >/dev/null 2>&1 || docker network create --internal --subnet "$SUBNET" --label sran.test-stack=true "$NET" >/dev/null
     docker rm -f "$SITES" >/dev/null 2>&1 || true

@@ -71,8 +71,9 @@ verdict_lanes() {
   echo "$LANES it_names $(bash scripts/gate/it/chunk.sh ids 2>/dev/null | tr -d '\r' | tr '\n' ' ') build_images build_runner build_fetcher stack_up stack_web clients_build clients_up smoke_test_on smoke_dead_primary_red smoke_dead_primary_green smoke_test_off"
 }
 at_commit() { # the commit a run is for, and whether anything tracked is changed under it (GATE_FOR_SHA: a built commit)
-  if [ -n "${GATE_FOR_SHA:-}" ]; then echo "${GATE_FOR_SHA:0:7} 0"; return; fi
-  echo "$(git rev-parse --short=7 HEAD) $([ -n "$(git status --porcelain --untracked-files=no)" ] && echo 1 || echo 0)"
+  # (AM24b: the first seven characters of the full commit — the ledger's key, whatever revision was given)
+  if [ -n "${GATE_FOR_SHA:-}" ]; then echo "$(git rev-parse --verify "${GATE_FOR_SHA}^{commit}" | cut -c1-7) 0"; return; fi
+  echo "$(git rev-parse HEAD | cut -c1-7) $([ -n "$(git status --porcelain --untracked-files=no)" ] && echo 1 || echo 0)"
 }
 MIN_FREE="${GATE_MIN_FREE_MB:-3000}"
 WAIT_S="${GATE_WAIT_S:-600}"

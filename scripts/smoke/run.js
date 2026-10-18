@@ -22,7 +22,7 @@ async function main() {
   const only = (process.env.SMOKE_ONLY || [...AREAS, "due"].join(",")).split(",").map((s) => s.trim()).filter(Boolean);
   const desktopOn = (process.env.SMOKE_DESKTOP ?? (L.TARGET === "live" ? "1" : "0")) === "1";
   let head = null;
-  try { head = execFileSync("git", ["-C", L.ROOT, "rev-parse", "--short", "HEAD"], { encoding: "utf8" }).trim(); } catch { /* not a checkout */ }
+  try { head = execFileSync("git", ["-C", L.ROOT, "rev-parse", "--short=7", "HEAD"], { encoding: "utf8" }).trim(); } catch { /* not a checkout */ }
   process.stdout.write(`smoke ${L.TARGET} (${L.T.project}) at ${new Date().toISOString()} checkout ${head || "?"} desktop=${desktopOn ? "on" : "off"}\n`);
 
   let setupError = null;

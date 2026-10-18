@@ -83,6 +83,7 @@ done
 export MSYS_NO_PATHCONV=1
 ROOT=$(git rev-parse --show-toplevel)
 cd "$ROOT"
+. "$ROOT/scripts/ops/rev.sh" # AM24b: the short revision, one rule (rev_tag / rev_image)
 # Nothing heavy starts on battery (scripts/ops/power.sh): a deploy the battery cuts short leaves live
 # between two images. Refused here, before an image is built or a container is touched.
 [ "$DRY" = 1 ] || bash scripts/ops/power.sh need "the backend deploy" || exit 3
@@ -119,13 +120,15 @@ if [ -n "$IMAGE_IN" ]; then
   NEW="$IMAGE_IN"
   docker image inspect "$NEW" >/dev/null
 else
-  SHA=$(git rev-parse --short "${REV_IN}^{commit}")
-  NEW="$REPO:$SHA"
+  # AM24b: any revision git accepts; the image is found by prefix, whatever length its tag (scripts/ops/rev.sh).
+  # Until AM24b this asked for `git rev-parse --short` — eight characters here — and missed the image tagged seven.
+  FULL=$(rev_full "$REV_IN") || exit 2
   if [ "$REPO" = ai-gateway-backend ]; then
-    log "building $NEW from git archive $SHA"
-    run bash scripts/build-images.sh --rev "$SHA" backend
-  else
-    docker image inspect "$NEW" >/dev/null || { echo "build $NEW first (repo $REPO is not what build-images.sh names)" >&2; exit 1; }
+    log "building $REPO:$(rev_tag "$FULL") from git archive $FULL"
+    run bash scripts/build-images.sh --rev "$FULL" backend
+  fi
+  if ! NEW=$(rev_image "$REPO" "$FULL"); then
+    if [ "$DRY" = 1 ]; then NEW="$REPO:$(rev_tag "$FULL")"; else exit 1; fi
   fi
 fi
 NEW_ID=$(docker image inspect -f '{{.Id}}' "$NEW" 2>/dev/null || echo "?")

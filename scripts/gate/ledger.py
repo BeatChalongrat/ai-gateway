@@ -110,7 +110,8 @@ def _git(*args: str) -> str:
 
 def head() -> dict:
     """The commit a run is at (7 characters), and whether anything tracked is changed under it."""
-    sha = os.environ.get("GATE_COMMIT") or _git("rev-parse", "--short=7", "HEAD")
+    # (AM24b: the first seven characters of the full commit, whatever length git would abbreviate it to)
+    sha = os.environ.get("GATE_COMMIT") or _git("rev-parse", "HEAD")
     dirty = os.environ.get("GATE_DIRTY")
     if dirty is None:
         dirty = "1" if _git("status", "--porcelain", "--untracked-files=no") else "0"

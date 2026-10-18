@@ -11,6 +11,7 @@
 # restarted.
 set -euo pipefail
 ROOT=$(git rev-parse --show-toplevel)
+. "$ROOT/scripts/ops/rev.sh" # AM24b: the short revision, one rule (rev_tag / rev_image)
 REV_IN=HEAD
 FROM_TREE=0
 LATEST=0
@@ -31,15 +32,15 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 if [ "$FROM_TREE" = 1 ]; then
-  REVISION="dev-$(git -C "$ROOT" rev-parse --short=7 HEAD)"
+  REVISION="dev-$(rev_tag HEAD)"
   TAG=dev
   mkdir -p "$TMP/services/chat-edge-api/scripts/fonts"
   cp -r "$ROOT/services/web-fetcher" "$TMP/services/"
   for f in $FONTS; do cp "$ROOT/$f" "$TMP/$f"; done
   rm -rf "$TMP/services/web-fetcher/node_modules"
 else
-  FULL=$(git -C "$ROOT" rev-parse --verify "${REV_IN}^{commit}")
-  REVISION=$(git -C "$ROOT" rev-parse --short=7 "$FULL")
+  FULL=$(rev_full "$REV_IN") || exit 2
+  REVISION=$(rev_tag "$FULL")
   TAG=$REVISION
   # shellcheck disable=SC2086
   git -C "$ROOT" archive --format=tar "$FULL" services/web-fetcher $FONTS | tar -x -C "$TMP"

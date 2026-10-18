@@ -24,6 +24,9 @@
 #   bash scripts/agent-market/test_stack.sh status | down
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/scripts/ops/rev.sh" # AM24b: the short revision, one rule (rev_tag / rev_image)
+# (AM24b: a backend tag given by hand, as any revision, is the tag its image carries)
+[ -z "${TS_BACKEND_TAG:-}" ] || TS_BACKEND_TAG="$(rev_existing_tag ai-gateway-backend "$TS_BACKEND_TAG")"
 cd "$ROOT"
 rev() { docker inspect "$1" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' 2>/dev/null || true; }
 export TS_GATEWAY_TAG="${TS_GATEWAY_TAG:-$(rev ai-gateway-gateway-1)}"
@@ -96,7 +99,8 @@ edge() { # <tag> <on|off>
 
 case "${1:-status}" in
   up)
-    TAG="${2:?tag}"
+    # AM24b: any revision git accepts — the tag the built images carry, found by prefix (scripts/ops/rev.sh)
+    TAG="$(rev_existing_tag ai-gateway-chat-edge-api "${2:?tag}")"
     # on battery the stack is not brought up (scripts/ops/power.sh); RUN_ON_BATTERY=yes on the command does it anyway
     bash "$ROOT/scripts/ops/power.sh" need "bringing the test stack up" || exit 3
     export TS_BACKEND_TAG="${TS_BACKEND_TAG:-$TAG}" TS_CHAT_EDGE_TAG="$TAG"
@@ -116,11 +120,11 @@ case "${1:-status}" in
     echo "backend $(docker inspect -f '{{.Config.Image}}' sran-test-backend-1) · mail-sink $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18025/api/v1/messages)"
     check "$TAG"; exit $?  # (AM19b: up is not ok because it ran — it is ok because the stack is what was asked)
     ;;
-  check) check "${2:?tag}"; exit $? ;;
-  edge) edge "${2:?tag}" "${3:-on}" ;;
+  check) check "$(rev_existing_tag ai-gateway-chat-edge-api "${2:?tag}")"; exit $? ;;
+  edge) edge "$(rev_existing_tag ai-gateway-chat-edge-api "${2:?tag}")" "${3:-on}" ;;
   runner)
     docker tag "$SANDBOX_FROM" "$SANDBOX_TAG"
-    runner "${2:?tag}" up -d --force-recreate agent-runner | tail -3
+    runner "$(rev_existing_tag ai-gateway-agent-runner "${2:?tag}")" up -d --force-recreate agent-runner | tail -3
     sleep 5
     docker logs sran-test-agent-runner --since 2m 2>&1 | grep -E "schema migrated|package registered|agent-runner started|ERROR" | cut -c1-200 | tail -12
     ;;
@@ -131,7 +135,7 @@ case "${1:-status}" in
   web)
     cd apps/web-chat
     NEXT_PUBLIC_API_URL=http://localhost:14000/api/v1 NEXT_PUBLIC_GATEWAY_URL=http://localhost:18080 AGENT_MARKET_ENABLED=true \
-      NEXT_PUBLIC_BUILD_ID="$(git rev-parse --short=7 HEAD)" npx next dev -p 13002
+      NEXT_PUBLIC_BUILD_ID="$(rev_tag HEAD)" npx next dev -p 13002
     ;;
   admin)
     KEY="$(dotenv CHAT_EDGE_ADMIN_API_KEY)"
