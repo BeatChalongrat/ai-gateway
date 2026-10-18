@@ -9,26 +9,9 @@ const os = require("node:os");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const L = require("./lib");
+const { countCheck } = require("./count");
 
 const AREAS = ["tls", "apps", "api", "jobs", "alert", "desktop", "agent_market"];
-
-function countCheck(R, only) {
-  const lane = `smoke_${L.TARGET}${process.env.SMOKE_ONLY ? `:${[...only].sort().join("+")}` : ""}`;
-  const names = path.join(os.tmpdir(), `smoke_names_${process.pid}.json`);
-  try {
-    fs.writeFileSync(names, JSON.stringify(R.checks.map((c) => c.name)));
-    let out = "";
-    try {
-      out = execFileSync(process.env.SMOKE_PYTHON || "python", [path.join(L.ROOT, "scripts", "gate", "ledger.py"), "names", lane, names],
-        { encoding: "utf8", env: { ...process.env, PYTHONIOENCODING: "utf-8" }, timeout: 60000 });
-    } catch (e) { out = (e.stdout || "").toString(); if (!out.trim()) throw e; }
-    const r = JSON.parse(out.trim().split("\n").pop());
-    return [r.ok ? "PASS" : "FAIL", "smoke.count", `${lane}: ${r.detail}`];
-  } catch (e) {
-    // a count that could not be compared is not one that held
-    return ["FAIL", "smoke.count", `${lane}: the checks were not compared with the last run — ${L.errText(e)}`];
-  } finally { try { fs.unlinkSync(names); } catch { /* gone */ } }
-}
 
 async function main() {
   const t0 = Date.now();

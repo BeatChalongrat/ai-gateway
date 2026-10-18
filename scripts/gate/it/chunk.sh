@@ -21,7 +21,7 @@ cd "$ROOT"
 export GATE_RESULTS="${GATE_RESULTS:-scripts/gate/results/it}" AGENT_MARKET_IT=1
 mkdir -p "$GATE_RESULTS"
 OUT="$GATE_RESULTS/it_clean.txt"
-mapfile -t CHUNKS < <(for f in scripts/gate/it/am10.sh scripts/gate/it/am12.sh scripts/gate/it/am13.sh scripts/gate/it/am15.sh scripts/gate/it/am16.sh scripts/gate/it/am18.sh scripts/gate/it/am22.sh scripts/gate/it/am23.sh; do
+mapfile -t CHUNKS < <(for f in scripts/gate/it/am10.sh scripts/gate/it/am12.sh scripts/gate/it/am13.sh scripts/gate/it/am15.sh scripts/gate/it/am16.sh scripts/gate/it/am18.sh scripts/gate/it/am22.sh scripts/gate/it/am23.sh scripts/gate/it/am24.sh; do
   grep -o "^ *'\^(.*)\$'" "$f" | sed "s/^ *'//; s/'\$//"
 done)
 case "${1:-list}" in

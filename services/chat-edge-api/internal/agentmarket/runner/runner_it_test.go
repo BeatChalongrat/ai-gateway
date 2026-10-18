@@ -43,16 +43,19 @@ func repoRoot(t *testing.T) string {
 }
 
 type itEnv struct {
-	t       *testing.T
-	store   *am.Store
-	files   storage.Backend
-	engine  *Engine
-	sb      *sandbox.Runner
-	model   *httptest.Server
-	calls   atomic.Int32
-	lying   atomic.Bool
-	root    string
-	install am.Install
+	t      *testing.T
+	store  *am.Store
+	files  storage.Backend
+	engine *Engine
+	sb     *sandbox.Runner
+	model  *httptest.Server
+	calls  atomic.Int32
+	lying  atomic.Bool
+	// AM24: the stand-in model's Thai slips — 1: a mark written twice ("เพิ่่ม", one reading); 2: two tone marks on
+	// one letter ("ก่้", none) — in every commentary it writes (am24_it_test.go)
+	slipping atomic.Int32
+	root     string
+	install  am.Install
 	// AM11: when set, the stand-in model maps a form by its labels (am11_form_it_test.go)
 	formLabels map[string]string
 	// AM13b: how many of the next readings of a person's words come back as no answer at all, and how
@@ -201,6 +204,12 @@ func (e *itEnv) fakeModel(w http.ResponseWriter, r *http.Request) {
 	content := `{"summary":"ภาพรวมของงวดนี้ รายได้และค่าใช้จ่ายเปลี่ยนไปตามตาราง","movements":["ค่าที่ปรึกษาเพิ่มขึ้นมาก"],"watch":["ตรวจค่าที่ปรึกษา"],"next_steps":["ทบทวนสัญญาที่ปรึกษา"]}`
 	if e.lying.Load() {
 		content = `{"summary":"รายได้ 99,999,999 บาท","movements":["x"],"watch":["x"],"next_steps":["x"]}`
+	}
+	switch e.slipping.Load() {
+	case 1:
+		content = strings.Replace(content, "เพิ่มขึ้นมาก", "เพิ่"+"่มขึ้นมาก", 1)
+	case 2:
+		content = strings.Replace(content, "เพิ่มขึ้นมาก", "เพิ่มขึ้นมาก ก่"+"้", 1)
 	}
 	if strings.Contains(string(body), "choice") {
 		content = `{"choice": null}`

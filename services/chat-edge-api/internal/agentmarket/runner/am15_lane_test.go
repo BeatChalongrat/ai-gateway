@@ -32,6 +32,7 @@ var gateLanes = []string{
 	"scripts/gate/it/am18.sh",
 	"scripts/gate/it/am22.sh",
 	"scripts/gate/it/am23.sh",
+	"scripts/gate/it/am24.sh",
 }
 
 // startsIT is the call that starts the integration environment (written in two parts, so that this
@@ -49,10 +50,13 @@ func TestEveryIntegrationTestIsInALaneOfTheGate(t *testing.T) {
 	}
 	// the gate runs these lanes: its own words
 	gate := read("scripts/gate.sh")
-	for _, want := range []string{"scripts/gate/it/am10.sh", "scripts/gate/it/am12.sh web", "GATE_IT:-scripts/gate/it/am23.sh"} {
+	for _, want := range []string{"scripts/gate/it/am10.sh", "scripts/gate/it/am12.sh web", "GATE_IT:-scripts/gate/it/am24.sh"} {
 		if !strings.Contains(gate, want) {
 			t.Fatalf("scripts/gate.sh it no longer runs %q — this test reads the lanes it runs; bring the two together", want)
 		}
+	}
+	if !strings.Contains(read("scripts/gate/it/am24.sh"), "scripts/gate/it/am23.sh\" |") {
+		t.Fatal("scripts/gate/it/am24.sh no longer runs AM23's lane first")
 	}
 	if !strings.Contains(read("scripts/gate/it/am23.sh"), "scripts/gate/it/am22.sh\" |") {
 		t.Fatal("scripts/gate/it/am23.sh no longer runs AM22's lane first")

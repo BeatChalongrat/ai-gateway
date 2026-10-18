@@ -38,6 +38,17 @@ function webTurnVerdict(tries, asked) {
 }
 
 /** The smoke session: {session, how} — how = login | mint | none. */
+/** AM24 §3.5: a check over an empty list asserts nothing. The door answering is checked; the packs are checked when
+ *  there are some (each with its id, its tokens and its price) — and with none, the check says it had nothing to check. */
+function billingVerdict(url, r) {
+  const list = Array.isArray(r.json) ? r.json : Array.isArray(r.json?.packs) ? r.json.packs : null;
+  const detail = `${url} → ${r.status || r.error}${list ? ` ${list.length} packs` : ""}`;
+  if (r.status !== 200 || !list) return { ok: false, detail: `${detail}${r.status === 200 ? " — not a list of packs" : ""}` };
+  if (!list.length) return { skip: true, detail: `${detail}: no pack to check — the organisation sells none (the door answered 200)` };
+  const bad = list.filter((p) => !p || p.id == null || !(Number(p.tokens) > 0) || !(Number(p.price_usd) >= 0));
+  return { ok: bad.length === 0, detail: `${detail}${bad.length ? `; ${bad.length} without an id, tokens or a price` : ", each with an id, its tokens and its price"}` };
+}
+
 async function signIn(R) {
   const base = L.API_BASE;
   if (L.TARGET === "test") {
@@ -100,14 +111,7 @@ module.exports = async function apps(R) {
   await R.run("portal.billing_api", async () => {
     if (!session) return noSession;
     const r = await L.tryHttp(`${base.gw}/portal/billing/packs`, { headers: session.headers });
-    const list = Array.isArray(r.json) ? r.json : Array.isArray(r.json?.packs) ? r.json.packs : null;
-    const detail = `${base.gw}/portal/billing/packs → ${r.status || r.error}${list ? ` ${list.length} packs` : ""}`;
-    // AM24 §3.5: a check over an empty list asserts nothing. The door answering is checked; the packs are checked
-    // when there are some (each with its id, its tokens and its price) — and with none, the check says it had nothing to check
-    if (r.status !== 200 || !list) return { ok: false, detail: `${detail}${r.status === 200 ? " — not a list of packs" : ""}` };
-    if (!list.length) return { skip: true, detail: `${detail}: no pack to check — the organisation sells none (the door answered 200)` };
-    const bad = list.filter((p) => !p || p.id == null || !(Number(p.tokens) > 0) || !(Number(p.price_usd) >= 0));
-    return { ok: bad.length === 0, detail: `${detail}${bad.length ? `; ${bad.length} without an id, tokens or a price` : ", each with an id, its tokens and its price"}` };
+    return billingVerdict(`${base.gw}/portal/billing/packs`, r);
   });
 
   if (!L.T.hasWebApps) {
@@ -226,4 +230,5 @@ module.exports = async function apps(R) {
   return session;
 };
 module.exports.signIn = signIn;
+module.exports.billingVerdict = billingVerdict;
 module.exports.webTurnVerdict = webTurnVerdict;

@@ -190,5 +190,73 @@ class Ledger(unittest.TestCase):
             self.assertEqual((c["how"], c["ran"]), (how, ran), text)
 
 
+class TheGateWritesTheLedger(unittest.TestCase):
+    """The rules are only as good as their wiring (CARD-RULES §6d): a ledger nobody writes to is a dead rule with a
+    green unit test. Each place that runs a check hands its result to the ledger, and the gate's verdict reads it."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.gate = (ROOT / "scripts" / "gate.sh").read_text(encoding="utf-8")
+        cls.chunk = (ROOT / "scripts" / "gate" / "it" / "chunk.sh").read_text(encoding="utf-8")
+
+    def phase(self, name):
+        import re
+        m = re.search(r"(?ms)^  " + re.escape(name) + r"\)\n(.*?)^    ;;\n", self.gate)
+        self.assertIsNotNone(m, name)
+        return m.group(1)
+
+    def function(self, name):
+        import re
+        m = re.search(r"(?ms)^" + re.escape(name) + r"\(\) \{.*?^\}", self.gate)
+        self.assertIsNotNone(m, name)
+        return m.group(0)
+
+    def test_every_lane_run_and_every_chunk_is_recorded(self):
+        self.assertIn("ledger.py record", self.function("one"), "a lane run through one() is recorded")
+        self.assertIn("ledger.py record backend_marked", self.function("backend_marked"))
+        self.assertIn("ledger.py it-lane", self.phase("it"))
+        self.assertIn("ledger.py selectors it_names", self.phase("it"))
+        self.assertIn("ledger.py record-chunk", self.chunk)
+        self.assertIn("ledger.py selectors it_names", self.chunk)
+
+    def test_every_lane_script_runs_its_chunks_through_run_chunk(self):
+        for f in sorted((ROOT / "scripts" / "gate" / "it").glob("am*.sh")):
+            src = f.read_text(encoding="utf-8")
+            self.assertIn('. "$ROOT/scripts/gate/it/lib.sh"', src, f.name)
+            self.assertIn('run_chunk "$c"', src, f.name)
+            code = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
+            self.assertNotIn("go_test.sh", code, f"{f.name} runs a chunk of its own, outside run_chunk")
+        self.assertIn('ledger.py" chunk', (ROOT / "scripts" / "gate" / "it" / "lib.sh").read_text(encoding="utf-8"))
+
+    def test_the_verdict_needs_every_lane_every_chunk_and_every_step_the_gate_records(self):
+        import re
+        verdict = self.function("verdict_lanes")
+        for phase in ("build", "stack", "smoke"):
+            for name in re.findall(r"(?m)^\s+one ([a-z_]+) \d+ ", self.phase(phase)):
+                self.assertIn(name, verdict, f"{phase} records {name}, which the verdict does not require")
+        for must in ("$LANES", "it_names", "chunk.sh ids"):
+            self.assertIn(must, verdict)
+        self.assertIn("ledger.py verdict", self.phase("lanes"))
+        self.assertIn("ledger.py verdict", self.phase("verdict"))
+
+    def test_the_gates_verdict_phase_answers_from_the_ledger(self):
+        bash = shutil.which("bash")
+        if bash is None or "system32" in bash.lower():
+            self.skipTest("no POSIX bash on PATH")
+        tmp = Path(tempfile.mkdtemp(prefix="am24-verdict-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        (tmp / "ledger.jsonl").write_text(json.dumps({"lane": "tracks", "commit": "abc1234", "dirty": False, "at": "x",
+                                                      "result": "green", "ran": 2, "skipped": 0, "how": "", "why": ""}) + "\n",
+                                          encoding="utf-8")
+        r = subprocess.run([bash, "scripts/gate.sh", "verdict"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
+                           env={**os.environ, "GATE_LEDGER": (tmp / "ledger.jsonl").as_posix(), "GATE_COMMIT": "abc1234",
+                                "GATE_DIRTY": "0", "PYTHONIOENCODING": "utf-8"}, timeout=300)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("NOT GREEN at abc1234", r.stdout)
+        self.assertIn("python_lane (no result at abc1234; never run)", r.stdout)
+        self.assertIn("it_names (", r.stdout)
+        self.assertIn("it:TestCleanRunEndToEnd+3 (", r.stdout)
+        self.assertNotIn("tracks (", r.stdout)
+
 if __name__ == "__main__":
     unittest.main()

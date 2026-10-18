@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -188,4 +189,28 @@ func TestAnAnswerWithNoThaiIsNotCheckedAndAnEnglishRunsReasonIsEnglish(t *testin
 	if len(tried) != 1 || !strings.Contains(tried[0], "as Thai never writes it") {
 		t.Fatalf("an English run is told in English: %q", tried)
 	}
+}
+
+// The wiring (CARD-RULES §6d): the narrative step hands askNarrative the runner's engine to read the Thai with. The
+// rule above is only as good as this call — given nil, every answer passes unread (am24_it_test.go shows it red).
+func TestTheNarrativeStepHasItsThaiReadByTheEngine(t *testing.T) {
+	src, err := os.ReadFile("deliver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "askNarrative(ctx, rc.r.Model, l, models, rc.pkg.Instructions, user, cv, rc.engineMarks)") {
+		t.Fatal("the narrative step no longer asks the engine to read its commentary's Thai")
+	}
+	if !strings.Contains(mustRead(t, "marks_am24.go"), `"op": "thai_marks"`) {
+		t.Fatal("the engine is not asked for thai_marks")
+	}
+}
+
+func mustRead(t *testing.T, f string) string {
+	t.Helper()
+	b, err := os.ReadFile(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }

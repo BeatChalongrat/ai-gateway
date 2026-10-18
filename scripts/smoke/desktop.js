@@ -108,6 +108,9 @@ function installedConfig() {
 // run with the desktop off recorded desktop.startup as a skip and the other three not at all, so the live smoke
 // counted 49 checks with the desktop and 46 without, and the three read as gone.
 const CHECKS = ["desktop.startup", "desktop.session", "desktop.turn", "desktop.closed"];
+// The app's own first line of a run (shell.log). AM24: written with a backspace where \b was meant since FIX134, it
+// matched no line, and an app already running was read from "now" — desktop.test.js reads a real line with it.
+const BOOT_LINE = /\bINFO  SRAN Desktop \S+ pid=\d+/;
 function skipAll(R, why) { for (const name of CHECKS) R.skip(name, why); }
 
 module.exports = async function desktop(R) {
@@ -135,7 +138,7 @@ module.exports = async function desktop(R) {
     // Attached to an app that is already running with the debugging port: its boot
     // happened before this check, so read the log from that run's first line
     // ("SRAN Desktop <version> pid=…"), not from now.
-    const bootLines = logSince("0000").filter((l) => /\bINFO  SRAN Desktop \S+ pid=\d+/.test(l));
+    const bootLines = logSince("0000").filter((l) => BOOT_LINE.test(l));
     if (bootLines.length) since = bootLines[bootLines.length - 1].slice(0, 24);
   }
   if (!hadPort) launch([`--remote-debugging-port=${PORT}`]);
@@ -236,4 +239,5 @@ module.exports = async function desktop(R) {
 module.exports.isStopButton = isStopButton;
 module.exports.CHECKS = CHECKS;
 module.exports.skipAll = skipAll;
+module.exports.BOOT_LINE = BOOT_LINE;
 module.exports.turnVerdict = turnVerdict;
