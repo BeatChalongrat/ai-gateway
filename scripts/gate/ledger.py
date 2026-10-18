@@ -66,6 +66,9 @@ def count(lane: str, text: str, rc: int) -> dict:
     m = re.findall(r"^compared (\d+) pictures", text, re.M)
     if m:
         return {"ran": int(m[-1]), "skipped": 0, "how": "pictures compared"}
+    if re.search(r"^rollback: ", text, re.M):  # (AM24b: scripts/ops/rollback_book.py check — a skip is a check not made)
+        seen = re.findall(r"^rollback: (\S+)", text, re.M)
+        return {"ran": len(seen), "skipped": seen.count("skip"), "how": "rollback runbook checks"}
     if re.search(r"^tracks: ", text, re.M):
         return {"ran": len(re.findall(r"^tracks: ", text, re.M)), "skipped": 0, "how": "tracks checks"}
     m = re.findall(r"^Ran (\d+) tests?\b", text, re.M)

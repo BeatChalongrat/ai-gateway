@@ -114,6 +114,29 @@ case "$REPO" in
   *backend*) ;;
   *) echo "REFUSED: backend image repository resolved to '$REPO' — not a backend image" >&2; exit 1 ;;
 esac
+# AM24b: the tag the compose files run (live: ai-gateway-backend:latest) — the one the deploy points at the new
+# image. Until AM24b the deploy moved $REPO:latest whatever the compose files ran: a deploy to the test stack moved
+# the tag live's backend and ops-watch start from. Refused before anything is touched: a tag that names one image for
+# good (a revision's own, a rollback tag — moving it would make it lie); for a project that is not live
+# (LIVE_PROJECTS), a tag another compose project also runs. A live deploy is never held up by a test container.
+IMG_REF=$(printf '%s' "$CONFIG_JSON" | "$PY" -c "import json,sys; print(json.load(sys.stdin)['services']['backend'].get('image') or '')" | tr -d '\r')
+IMG_REF=${IMG_REF:-$REPO}
+case "${IMG_REF##*/}" in *:*) ;; *) IMG_REF="$IMG_REF:latest" ;; esac
+if printf '%s' "${IMG_REF##*:}" | grep -Eq '^[0-9a-f]{7,40}$|^rollback-'; then
+  echo "REFUSED: the compose files run $IMG_REF, a tag that names one image for good — moving it would make it lie." >&2
+  echo "Run the project under a tag of its own (the test stack: TS_BACKEND_TAG=drill — docs/ops/ROLLBACK.md)." >&2
+  exit 1
+fi
+OTHERS=$(docker ps -a --format '{{.Names}} {{.Image}} {{.Label "com.docker.compose.project"}}' 2>/dev/null | tr -d '\r' \
+  | awk -v a="$IMG_REF" -v b="${IMG_REF%:latest}" -v p="$PROJECT" '($2 == a || $2 == b) && $3 != p { printf "%s ", $1 }')
+if [ -n "$OTHERS" ]; then
+  case " ${LIVE_PROJECTS:-ai-gateway sran-agent-market} " in
+    *" $PROJECT "*) log "note: $IMG_REF is also what ${OTHERS% } of another compose project run — recreated, they start the new image" ;;
+    *) echo "REFUSED: $IMG_REF is also what another compose project runs (${OTHERS% }) — moving it would change what that" >&2
+       echo "project starts next. Run project $PROJECT under a tag of its own (the test stack: TS_BACKEND_TAG=drill)." >&2
+       exit 1 ;;
+  esac
+fi
 
 # --- the image to deploy -------------------------------------------------------
 if [ -n "$IMAGE_IN" ]; then
@@ -122,13 +145,23 @@ if [ -n "$IMAGE_IN" ]; then
 else
   # AM24b: any revision git accepts; the image is found by prefix, whatever length its tag (scripts/ops/rev.sh).
   # Until AM24b this asked for `git rev-parse --short` — eight characters here — and missed the image tagged seven.
+  # The image already built from that revision is used as it is (the image the gate tested, or the one that ran);
+  # one is built only when there is none.
   FULL=$(rev_full "$REV_IN") || exit 2
-  if [ "$REPO" = ai-gateway-backend ]; then
+  if NEW=$(rev_image "$REPO" "$FULL" 2>/dev/null); then
+    log "using $NEW, built from $FULL"
+  elif [ "$REPO" = ai-gateway-backend ]; then
     log "building $REPO:$(rev_tag "$FULL") from git archive $FULL"
     run bash scripts/build-images.sh --rev "$FULL" backend
+    if ! NEW=$(rev_image "$REPO" "$FULL"); then
+      if [ "$DRY" = 1 ]; then NEW="$REPO:$(rev_tag "$FULL")"; else exit 1; fi
+    fi
+  else
+    rev_image "$REPO" "$FULL" > /dev/null; exit 1
   fi
-  if ! NEW=$(rev_image "$REPO" "$FULL"); then
-    if [ "$DRY" = 1 ]; then NEW="$REPO:$(rev_tag "$FULL")"; else exit 1; fi
+  BUILT_FROM=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$NEW" 2>/dev/null | tr -d '\r')
+  if [ -n "$BUILT_FROM" ] && [ "$BUILT_FROM" != "<no value>" ] && [ "${FULL#"$BUILT_FROM"}" = "$FULL" ]; then
+    echo "REFUSED: $NEW says it was built from $BUILT_FROM, not $FULL — a tag that lies" >&2; exit 1
   fi
 fi
 NEW_ID=$(docker image inspect -f '{{.Id}}' "$NEW" 2>/dev/null || echo "?")
@@ -227,7 +260,7 @@ wait_healthy() {  # <container> <timeout s>
 log "deploying $NEW (revision $NEW_REV) to project $PROJECT, $MODE"
 maint begin "backend deploy $NEW_REV" 10
 start_probe
-run docker tag "$NEW" "$REPO:latest"
+run docker tag "$NEW" "$IMG_REF"
 
 if [ "$MODE" = start-first ] && [ -n "$OLD_CID" ]; then
   run docker rm -f "$BRIDGE" >/dev/null 2>&1 || true
@@ -237,7 +270,7 @@ if [ "$MODE" = start-first ] && [ -n "$OLD_CID" ]; then
     log "bridge never became healthy — aborting; the old container keeps serving"
     docker logs --tail 40 "$BRIDGE" 2>&1 | sed 's/^/  bridge| /' || true
     docker rm -f "$BRIDGE" >/dev/null 2>&1 || true
-    [ -n "$ROLLBACK" ] && docker tag "$ROLLBACK" "$REPO:latest"
+    [ -n "$ROLLBACK" ] && docker tag "$ROLLBACK" "$IMG_REF"
     maint end "backend deploy $NEW_REV"
     stop_probe
     exit 1
@@ -264,4 +297,18 @@ maint end "backend deploy $NEW_REV"
 NOW_CID=$("${DC[@]}" ps -q backend | head -1)
 log "done: backend $(docker inspect -f '{{.Name}} {{.State.Health.Status}}' "$NOW_CID" 2>/dev/null) revision $(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$NOW_CID" 2>/dev/null)"
 [ -n "$ROLLBACK" ] && log "roll back with: scripts/deploy-backend.sh --image $ROLLBACK${FILES:+ ${FILES[*]}} -p $PROJECT"
+# AM24b: what runs now, for the rollback runbook (scripts/ops/rollback_book.py) — the same record swap.sh writes:
+# time, tool, project, service, image asked, image id, revision, the rollback image kept, verdict
+if [ "$DRY" = 0 ]; then
+  RECORD="${DEPLOY_RECORD:-$ROOT/scripts/ops/results/deploys.tsv}"
+  mkdir -p "$(dirname "$RECORD")" 2>/dev/null
+  NOW_ID=$(docker inspect -f '{{.Image}}' "$NOW_CID" 2>/dev/null | tr -d '\r')
+  NOW_REV=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "${NOW_ID:-none}" 2>/dev/null | tr -d '\r')
+  [ "$NOW_REV" = "<no value>" ] && NOW_REV=""
+  for svc in backend $([ "$OPS_WATCH" = 1 ] && echo ops-watch); do
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" deploy-backend "$PROJECT" "$svc" "$NEW" \
+      "${NOW_ID:--}" "${NOW_REV:--}" "${ROLLBACK:--}" ok >> "$RECORD" 2>/dev/null || log "(the deploy could not be recorded in $RECORD)"
+  done
+  case "$PROJECT" in ai-gateway) log "the rollback runbook now names what ran before: python scripts/ops/rollback_book.py write, then commit docs/ops/ROLLBACK.md" ;; esac
+fi
 exit 0

@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # AM10 — swap one live service to its new image while a poll measures what a person would have seen.
 #
-#   bash scripts/ops/swap.sh <service> <probe url> <compose args…>
-#   e.g. swap.sh chat-edge-api https://localhost:4000/health -p ai-gateway -f docker-compose.webchat.yml
+#   bash scripts/ops/swap.sh <service> <probe url> [--image <repository:tag>] <compose args…>
+#   e.g. swap.sh chat-edge-api https://localhost:4000/health --image ai-gateway-chat-edge-api:134b023 -p ai-gateway -f docker-compose.webchat.yml
 #
-# The image must already be tagged :latest (the tag the compose file runs) and the old one
-# :rollback-<its revision>. The probe is asked every half second from 3 s before the swap until the
+# With --image (AM24b) the tool keeps the image the service runs now as <repository>:rollback-<its revision> and
+# points the tag the compose files run at the image given; without it, that tag must already name the new image
+# and the old one be kept by hand, as before AM24b. The probe is asked every half second from 3 s before the swap until the
 # service has answered 200 ten times in a row after it; the result is the count of requests, how many
 # did not answer 200, and the longest stretch without a 200.
 #
 # A service with no door on the host (the runner) is asked through its container's own health check:
 #   swap.sh agent-runner health:sran-agent-runner -p sran-agent-market -f docker-compose.agent-market.yml --profile agent-market
+# and one with neither a door nor a health check (the backup) by whether its container runs: running:<container>.
 #
 # On battery the swap is refused and nothing is touched (scripts/ops/power.sh): a swap the battery cuts
 # short leaves live between two images. RUN_ON_BATTERY=yes on the command runs it anyway.
@@ -33,6 +35,8 @@
 # results/swap_series.tsv, so a gap that grows is seen at 2×, not at 23×.
 set -uo pipefail
 SERVICE="${1:?service}"; URL="${2:?probe url}"; shift 2
+IMAGE=""
+if [ "${1:-}" = --image ]; then IMAGE="${2:?--image <repository:tag>}"; shift 2; fi
 bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/power.sh" need "the swap of $SERVICE" || exit 3
 OUT="${SWAP_OUT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/results/swap_${SERVICE}.txt}" # (SWAP_OUT: the script's own test)
 mkdir -p "$(dirname "$OUT")" 2>/dev/null
@@ -48,12 +52,66 @@ if ! printf '%s\n' "$held" | grep -qx -- "$SERVICE"; then
   echo "RED: the swap of $SERVICE was not started: the compose files given ($*) hold no service named $SERVICE (they hold: $(printf '%s' "$held" | tr '\n' ' '))"
   exit 6
 fi
-CEILING="${SWAP_CEILING_S:-$(case "$URL" in health:*) echo 20 ;; *) echo 5 ;; esac)}"
+CEILING="${SWAP_CEILING_S:-$(case "$URL" in health:*|running:*) echo 20 ;; *) echo 5 ;; esac)}"
 SERIES="${SWAP_SERIES:-$(dirname "$OUT")/swap_series.tsv}"
 before=$(docker compose "$@" ps -q "$SERVICE" 2>/dev/null | tr -d '\r' | head -1)
+# AM24b — --image: the way back kept by the same command that leaves it. Until AM24b the old image was tagged
+# rollback-<revision> by hand before a swap, and a tag forgotten is a way back lost. Refused before anything is
+# touched (exit 11): an image not on this host; a compose tag that is a revision's own or a rollback tag (moving it
+# would make it lie); for a project that is not live (LIVE_PROJECTS), a compose tag another project also runs —
+# the test stack and live share repositories, and a swap on the test stack must never move what live starts next.
+# (A live swap is never held up by a test container: it is told, not refused.) Every swap is written to
+# results/deploys.tsv, which the rollback runbook (docs/ops/ROLLBACK.md, scripts/ops/rollback_book.py) is checked
+# against.
+PROJECT=""; prev=""
+for a in "$@"; do [ "$prev" = -p ] && PROJECT="$a"; prev="$a"; done
+# (the service's own image: `config --images <service>` lists its dependencies' too, in no fixed order; the
+# resolved file is read here and only the one name kept)
+REF=""
+for py in python3 python; do
+  command -v "$py" > /dev/null 2>&1 && "$py" -c 'import json' > /dev/null 2>&1 || continue
+  REF=$(docker compose "$@" config --format json 2>/dev/null | "$py" -c 'import json, sys
+s = json.load(sys.stdin).get("services", {}).get(sys.argv[1]) or {}
+print(s.get("image") or "")' "$SERVICE" 2>/dev/null | tr -d '\r')
+  break
+done
+# (no image key: Compose names a built service <project>-<service>, as the running containers show)
+[ -n "$REF" ] || [ -z "$PROJECT" ] || REF="$PROJECT-$SERVICE"
+case "${REF##*/}" in *:*) ;; ?*) REF="$REF:latest" ;; esac
+label_rev() { local r; r=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$1" 2>/dev/null | tr -d '\r'); [ "$r" = "<no value>" ] && r=""; printf '%s' "$r"; }
+ROLLBACK=""
+if [ -n "$IMAGE" ]; then
+  refuse() { echo "RED: the swap of $SERVICE was not started: $*"; exit 11; }
+  docker image inspect "$IMAGE" > /dev/null 2>&1 || refuse "there is no image $IMAGE on this host"
+  [ -n "$REF" ] || refuse "Compose does not say which image $SERVICE runs ($*)"
+  if printf '%s' "${REF##*:}" | grep -Eq '^[0-9a-f]{7,40}$|^rollback-'; then
+    refuse "the compose files run $REF, a tag that names one image for good — moving it would make it lie"
+  fi
+  others=$(docker ps -a --format '{{.Names}} {{.Image}} {{.Label "com.docker.compose.project"}}' 2>/dev/null | tr -d '\r' \
+    | awk -v a="$REF" -v b="${REF%:latest}" -v p="$PROJECT" '($2 == a || $2 == b) && $3 != p { printf "%s ", $1 }')
+  if [ -n "$others" ]; then
+    case " ${LIVE_PROJECTS:-ai-gateway sran-agent-market} " in
+      *" $PROJECT "*) echo "note: $REF is also what ${others% } of another compose project run — recreated, they start the image given" ;;
+      *) refuse "$REF is also what another compose project runs (${others% }) — moving it would change what that project starts next" ;;
+    esac
+  fi
+  new_id=$(docker image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null | tr -d '\r')
+  old_id=""
+  [ -z "$before" ] || old_id=$(docker inspect -f '{{.Image}}' "$before" 2>/dev/null | tr -d '\r')
+  [ -z "$old_id" ] || [ "$old_id" != "$new_id" ] || refuse "$SERVICE already runs $IMAGE"
+  if [ -n "$old_id" ]; then
+    old_rev=$(label_rev "$old_id")
+    ROLLBACK="${REF%:*}:rollback-${old_rev:-$(date -u +%Y%m%d%H%M%S)}"
+    docker tag "$old_id" "$ROLLBACK" || refuse "the image it runs now could not be kept as $ROLLBACK"
+    echo "rollback image: $ROLLBACK (what $SERVICE runs now)"
+  fi
+  docker tag "$IMAGE" "$REF" || refuse "$REF could not be pointed at $IMAGE"
+  echo "$REF now names $IMAGE"
+fi
 ask() { # 200 when the service answers: its door, or (health:<container>) what Docker's health check says of it
   case "$URL" in
     health:*) [ "$(docker inspect -f '{{.State.Health.Status}}' "${URL#health:}" 2>/dev/null)" = healthy ] && echo 200 || echo 000 ;;
+    running:*) [ "$(docker inspect -f '{{.State.Status}}' "${URL#running:}" 2>/dev/null)" = running ] && echo 200 || echo 000 ;;
     *) curl -sk -o /dev/null -m 3 -w '%{http_code}' "$URL" ;;
   esac
 }
@@ -122,5 +180,16 @@ verdict=$([ -n "$slow" ] && echo slow || echo ok)
 printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SERVICE" "${before:0:12}" "${after:0:12}" \
   "$n" "$bad" "$worst" "$CEILING" "${stop_s:--}" "${start_s:--}" "${healthy_s:--}" "$verdict" >> "$SERIES" 2>/dev/null \
   || echo "(the swap's line could not be added to $SERIES)"
+# AM24b: what runs now, for the rollback runbook — time, tool, project, service, image asked, image id, revision,
+# the rollback image kept, verdict
+RECORD="${DEPLOY_RECORD:-$(dirname "$OUT")/deploys.tsv}"
+now_id=$(docker inspect -f '{{.Image}}' "$after" 2>/dev/null | tr -d '\r')
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" swap "${PROJECT:--}" "$SERVICE" "${IMAGE:-${REF:--}}" \
+  "${now_id:--}" "$(label_rev "${now_id:-none}")" "${ROLLBACK:--}" "$verdict" >> "$RECORD" 2>/dev/null \
+  || echo "(the swap could not be recorded in $RECORD)"
+[ -z "$ROLLBACK" ] || echo "back with: bash scripts/ops/swap.sh $SERVICE $URL --image $ROLLBACK $*"
+case "$PROJECT" in ai-gateway|sran-agent-market)
+  echo "the rollback runbook now names what ran before: python scripts/ops/rollback_book.py write, then commit docs/ops/ROLLBACK.md" ;;
+esac
 echo "swap $SERVICE done $(date -u +%H:%M:%SZ)$([ $rc = 0 ] || echo " — RED (exit $rc)")$slow"
 exit $rc

@@ -64,7 +64,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 RESULTS="${GATE_RESULTS:-scripts/gate/results}"
-LANES="tracks python_lane look_gallery go_units go_vet gofmt backend_lane backend_marked host_tests smoke_units alert_rules gateway_go log_worker_go portal dlp_sidecar web_tsc web_vitest web_lints admin desktop"
+LANES="tracks rollback_book python_lane look_gallery go_units go_vet gofmt backend_lane backend_marked host_tests smoke_units alert_rules gateway_go log_worker_go portal dlp_sidecar web_tsc web_vitest web_lints admin desktop"
 # AM24: what the gate's verdict needs a green result of, at one commit — every lane, every chunk of the integration
 # lane (scripts/gate/it/chunk.sh ids), the build, the test stack and the smoke on it
 verdict_lanes() {
@@ -186,6 +186,9 @@ case "$phase" in
     lock lanes; stack_stop; room; guard; rc=0
     # AM19: only what the code needs is tracked — a tracked file that .gitignore excludes fails, by name
     lane tracks 60 python scripts/gate/tracks.py
+    # AM24b: the rollback runbook says what live runs — every compose service has a line, every tag it names exists,
+    # and what it calls current is what runs (docs/ops/ROLLBACK.md, written by scripts/ops/rollback_book.py write)
+    lane rollback_book 300 python scripts/ops/rollback_book.py check
     lane python_lane 3000 bash scripts/agent-market/python-lane.sh
     # AM21: every layout at every content length, rendered and compared with the approved pictures
     lane look_gallery 1500 bash scripts/agent-market/look-gallery.sh

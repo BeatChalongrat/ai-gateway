@@ -50,9 +50,10 @@ case "$1" in
         repo="$3"; grep "^$repo:" "$FAKE_IMAGES" 2>/dev/null | sed "s#^$repo:##"; exit 0 ;;
       inspect)
         shift 2
-        [ "$1" = "-f" ] && shift 2
+        fmt=""; [ "$1" = "-f" ] && { fmt="$2"; shift 2; }
         for ref; do has "$ref" || { echo "Error: No such image: $ref" >&2; exit 1; }; done
-        echo "sha256:fake"; exit 0 ;;
+        case "$fmt" in *revision*) echo "${FAKE_REV:-}" ;; *) echo "sha256:fake" ;; esac
+        exit 0 ;;
     esac ;;
   ps) cut -d' ' -f1 "$FAKE_CONTAINERS" 2>/dev/null; exit 0 ;;
   inspect)
@@ -148,7 +149,8 @@ class TheShortRevision(unittest.TestCase):
         full = git("rev-parse", "HEAD")
         self.images.write_text(f"ai-gateway-backend:latest\nai-gateway-backend:{full[:7]}\n", encoding="utf-8")
         for rev in (full, full[:7], full[:8], "HEAD"):
-            r = subprocess.run([BASH, "scripts/deploy-backend.sh", "--rev", rev, "--dry-run"], cwd=ROOT, env=self.env,
+            r = subprocess.run([BASH, "scripts/deploy-backend.sh", "--rev", rev, "--dry-run"], cwd=ROOT,
+                               env={**self.env, "FAKE_REV": full[:7]},
                                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180)
             self.assertEqual(r.returncode, 0, f"--rev {rev}: exit {r.returncode}\n{r.stdout}\n{r.stderr}")
             self.assertIn(f"deploying ai-gateway-backend:{full[:7]} ", r.stdout, rev)

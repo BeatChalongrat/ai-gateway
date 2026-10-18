@@ -134,8 +134,11 @@ From the main checkout, after the change is merged and the gates are green:
 
 ```bash
 scripts/deploy-backend.sh                 # build HEAD from git archive, deploy start-first
-scripts/deploy-backend.sh --rev 1a2b3c4   # a specific commit
+scripts/deploy-backend.sh --rev 1a2b3c4   # a specific commit: anything git accepts (a full SHA, 7 or 8 characters, a tag)
 ```
+
+`--rev` finds the image built from that commit by prefix, whatever length its tag (`scripts/ops/rev.sh`), and
+deploys it as it is — the image the gate tested; it builds one only when there is none.
 
 On battery the script says `REFUSED` and exits 3 before it builds an image or
 touches a container (`scripts/ops/power.sh`; `docs/ops/monitoring.md`, "The
@@ -144,8 +147,9 @@ host's power"). `RUN_ON_BATTERY=yes` on the command runs it anyway.
 What it does:
 
 1. refuses a compose shape that runs `--reload` (the dev file);
-2. builds `ai-gateway-backend:<sha>` from a clean `git archive`
-   (`scripts/build-images.sh`), stamped with the revision label;
+2. with `--rev`, uses `ai-gateway-backend:<sha>` or, when there is none, builds it from a clean `git archive`
+   (`scripts/build-images.sh`), stamped with the revision label — and refuses an image whose label names another
+   commit;
 3. tags the image the running container uses as
    `ai-gateway-backend:rollback-<its revision>`;
 4. refuses start-first when the new image would migrate the schema under the
@@ -156,7 +160,10 @@ What it does:
    start 10 "backend deploy <rev>"` inside ops-watch; `DEPLOY_MAINTENANCE_CMD` overrides
    the command, `""` skips it) and closes it (`stop`) at the end, so the planned
    restart never pages at top priority;
-6. tags the new image `ai-gateway-backend:latest` (what compose runs);
+6. tags the new image with the tag the compose files run (`ai-gateway-backend:latest` on live). It refuses,
+   before anything is touched, a compose tag that names one image for good (a revision's own, a rollback tag), and —
+   for a project that is not live — a tag another project runs: a deploy to the test stack must never move the tag
+   live's backend and ops-watch start from (until AM-24b it moved `latest` whatever the compose files ran);
 7. **start-first**: `docker compose run -d --no-deps --use-aliases --name
    ai-gateway-backend-bridge backend` — the new image on the compose network
    under the alias `backend`, no host ports — and waits until it is healthy;
@@ -166,7 +173,9 @@ What it does:
    starts and turns healthy;
 9. drains and removes the bridge (`docker stop -t 200`, `docker rm`);
 10. `docker compose up -d --no-deps ops-watch` (same image);
-11. prints the probe summary and the rollback command.
+11. prints the probe summary and the rollback command, and adds a line for backend and ops-watch to
+    `scripts/ops/results/deploys.tsv` — after a live deploy, `python scripts/ops/rollback_book.py write` and commit
+    `docs/ops/ROLLBACK.md` (the gate's `rollback_book` lane is red until it says what runs).
 
 Rehearsed on a scratch compose project (postgres, redis, backend, the Go
 gateway in front): start-first — 0 of 39 probes through the gateway failed;
@@ -205,6 +214,9 @@ logs `SIGTERM: draining in-flight requests for up to 180s`, workers log
 ```bash
 scripts/deploy-backend.sh --image ai-gateway-backend:rollback-<rev>
 ```
+
+`docs/ops/ROLLBACK.md` has this command with today's tag filled in, for every service, with the order to go back in
+and what a rollback does not undo.
 
 An image built before FIX131 has the old CMD (`sh -c "alembic && gunicorn"`,
 gunicorn not PID 1): it ignores SIGTERM, so its stop waits the full grace
