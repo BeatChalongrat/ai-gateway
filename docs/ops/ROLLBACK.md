@@ -1,6 +1,6 @@
 # Rolling back a service
 
-Written by `python scripts/ops/rollback_book.py write` from what live ran at 2026-10-18T16:49:00Z — never edited by hand: the gate's `rollback_book` lane is red when this page no longer says what runs, when a tag it names is gone, or when a service has no line. Run every command from the root of this repository, on the host live runs on (Git Bash on Windows). A rollback is a deploy: it refuses on battery like one (`scripts/ops/power.sh`).
+Written by `python scripts/ops/rollback_book.py write` from what live ran at 2026-10-19T15:12:23Z — never edited by hand: the gate's `rollback_book` lane is red when this page no longer says what runs, when a tag it names is gone, or when a service has no line. Run every command from the root of this repository, on the host live runs on (Git Bash on Windows). A rollback is a deploy: it refuses on battery like one (`scripts/ops/power.sh`).
 
 Each block: the command that goes back, what runs now, how to see it worked, the command forward again, and what going back does **not** undo. The image it goes back to is the one that ran before — kept by the deploy that replaced it.
 
@@ -28,15 +28,15 @@ bash scripts/ops/swap.sh admin-ui http://127.0.0.1:23000/login --image ai-gatewa
 - **Forward again:** `bash scripts/ops/swap.sh admin-ui http://127.0.0.1:23000/login --image ai-gateway-admin-ui:134b023 -p ai-gateway -f docker-compose.yml -f docker-compose.override.yml`
 - **Not undone:** settings saved and audit entries written through it.
 
-### web-chat — now 134b023, back to f01f1ee
+### web-chat — now f011b8e, back to 134b023
 
 ```bash
-bash scripts/ops/swap.sh web-chat http://127.0.0.1:23002/ --image ai-gateway-web-chat:rollback-f01f1ee -p ai-gateway -f docker-compose.webchat.yml
+bash scripts/ops/swap.sh web-chat http://127.0.0.1:23002/ --image ai-gateway-web-chat:rollback-134b023 -p ai-gateway -f docker-compose.webchat.yml
 ```
 
-- **Now:** `ai-gateway-web-chat:134b023`, revision 134b023 — deployed before the deploy record began. Back to `ai-gateway-web-chat:rollback-f01f1ee` (the newest rollback image kept on this host).
-- **It worked when** the swap's last line has no `RED`; this prints `f01f1ee`: `docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' ai-gateway-web-chat`; and `bash scripts/smoke.sh` ends `GREEN` (right after a deploy, give the gateway 90 s quiet first — its limit answers 429).
-- **Forward again:** `bash scripts/ops/swap.sh web-chat http://127.0.0.1:23002/ --image ai-gateway-web-chat:134b023 -p ai-gateway -f docker-compose.webchat.yml`
+- **Now:** `ai-gateway-web-chat:f011b8e`, revision f011b8e — swap, 2026-10-19T15:08:35Z. Back to `ai-gateway-web-chat:rollback-134b023` (the deploy record).
+- **It worked when** the swap's last line has no `RED`; this prints `134b023`: `docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' ai-gateway-web-chat`; and `bash scripts/smoke.sh` ends `GREEN` (right after a deploy, give the gateway 90 s quiet first — its limit answers 429).
+- **Forward again:** `bash scripts/ops/swap.sh web-chat http://127.0.0.1:23002/ --image ai-gateway-web-chat:f011b8e -p ai-gateway -f docker-compose.webchat.yml`
 - **Not undone:** nothing it stored — it stores nothing; a page open in a browser keeps the code it loaded until it reloads.
 
 ### agent-runner — now 134b023, back to f01f1ee
@@ -191,7 +191,7 @@ Go back in the reverse of the order a deploy goes in — backend, admin-ui, web-
 - **backend and ops-watch** are one image: `deploy-backend.sh` moves both. Never swap ops-watch alone.
 - **agent-runner and chat-edge-api** move together, the runner back first: the edge drives the runner's engines and speaks its words.
 - **web-chat goes back with chat-edge-api:** the page calls the edge's routes; a page newer than its edge can call one that is not there.
-- **Deployed together at 134b023:** backend + ops-watch, admin-ui, web-chat, agent-runner, chat-edge-api — a fault in that deploy takes all of them back, each to its own image above.
+- **Deployed together at 134b023:** backend + ops-watch, admin-ui, agent-runner, chat-edge-api — a fault in that deploy takes all of them back, each to its own image above.
 - **Deployed together at e7513f0:** kb-models, log-worker — a fault in that deploy takes all of them back, each to its own image above.
 
 ## Where the tags come from
@@ -242,7 +242,7 @@ It worked when each deploy ends `done: backend … healthy revision …` — 67d
 | ops-watch | docker-compose.yml | moves with backend (above): one image. |
 
 <!-- rollback-book-state
-{"written": "2026-10-18T16:49:00Z", "services": {
+{"written": "2026-10-19T15:12:23Z", "services": {
  "docker-compose.agent-market.yml:agent-market-init": {"extra": ["--profile", "agent-market"], "files": ["docker-compose.agent-market.yml"], "kind": "oneshot", "name": "agent-market-init", "project": "sran-agent-market"},
  "docker-compose.agent-market.yml:agent-runner": {"container": "sran-agent-runner", "current_id": "91e3ad53dd63", "current_rev": "134b023", "current_tag": "ai-gateway-agent-runner:134b023", "deployed": "", "extra": ["--profile", "agent-market"], "files": ["docker-compose.agent-market.yml"], "kind": "swap", "name": "agent-runner", "probe": "health:sran-agent-runner", "project": "sran-agent-market", "ref": "ai-gateway-agent-runner:latest", "repo": "ai-gateway-agent-runner", "rollback_from": "the newest rollback image kept on this host", "rollback_id": "c6e0348d7da7", "rollback_label": "f01f1ee", "rollback_rev": "f01f1ee", "rollback_tag": "ai-gateway-agent-runner:rollback-f01f1ee"},
  "docker-compose.agent-market.yml:doc-converter": {"container": "sran-agent-market-doc-converter-1", "current_id": "527e9177ce08", "current_rev": "2230a75", "current_tag": "ai-gateway-doc-converter:2230a75", "deployed": "", "extra": ["--profile", "agent-market"], "files": ["docker-compose.agent-market.yml"], "kind": "swap", "name": "doc-converter", "probe": "health:sran-agent-market-doc-converter-1", "project": "sran-agent-market", "ref": "ai-gateway-doc-converter:latest", "repo": "ai-gateway-doc-converter", "rollback_from": "the newest rollback image kept on this host", "rollback_id": "59dc40116cfc", "rollback_label": "b11d4a6", "rollback_rev": "b11d4a6", "rollback_tag": "ai-gateway-doc-converter:rollback-b11d4a6"},
@@ -254,7 +254,7 @@ It worked when each deploy ends `done: backend … healthy revision …` — 67d
  "docker-compose.webchat.yml:minio-init": {"extra": [], "files": ["docker-compose.webchat.yml"], "kind": "off", "name": "minio-init", "profiles": ["minio"], "project": "ai-gateway"},
  "docker-compose.webchat.yml:postgres-webchat": {"container": "ai-gateway-postgres-webchat", "extra": [], "files": ["docker-compose.webchat.yml"], "kind": "pinned", "name": "postgres-webchat", "pinned": "pgvector/pgvector:pg16", "project": "ai-gateway", "ref": "pgvector/pgvector:pg16", "repo": "pgvector/pgvector"},
  "docker-compose.webchat.yml:redis-webchat": {"container": "ai-gateway-redis-webchat", "extra": [], "files": ["docker-compose.webchat.yml"], "kind": "pinned", "name": "redis-webchat", "pinned": "redis:7-alpine", "project": "ai-gateway", "ref": "redis:7-alpine", "repo": "redis"},
- "docker-compose.webchat.yml:web-chat": {"container": "ai-gateway-web-chat", "current_id": "55c3f84af9ed", "current_rev": "134b023", "current_tag": "ai-gateway-web-chat:134b023", "deployed": "", "extra": [], "files": ["docker-compose.webchat.yml"], "kind": "swap", "name": "web-chat", "probe": "http://127.0.0.1:23002/", "project": "ai-gateway", "ref": "ai-gateway-web-chat", "repo": "ai-gateway-web-chat", "rollback_from": "the newest rollback image kept on this host", "rollback_id": "6f7d8a277d05", "rollback_label": "f01f1ee", "rollback_rev": "f01f1ee", "rollback_tag": "ai-gateway-web-chat:rollback-f01f1ee"},
+ "docker-compose.webchat.yml:web-chat": {"container": "ai-gateway-web-chat", "current_id": "912d07d7b0f5", "current_rev": "f011b8e", "current_tag": "ai-gateway-web-chat:f011b8e", "deployed": "swap, 2026-10-19T15:08:35Z", "extra": [], "files": ["docker-compose.webchat.yml"], "kind": "swap", "name": "web-chat", "probe": "http://127.0.0.1:23002/", "project": "ai-gateway", "ref": "ai-gateway-web-chat", "repo": "ai-gateway-web-chat", "rollback_from": "the deploy record", "rollback_id": "55c3f84af9ed", "rollback_label": "134b023", "rollback_rev": "134b023", "rollback_tag": "ai-gateway-web-chat:rollback-134b023"},
  "docker-compose.yml:admin-ui": {"container": "ai-gateway-admin-ui-1", "current_id": "683c0322682a", "current_rev": "134b023", "current_tag": "ai-gateway-admin-ui:134b023", "deployed": "", "extra": [], "files": ["docker-compose.yml", "docker-compose.override.yml"], "kind": "swap", "name": "admin-ui", "probe": "http://127.0.0.1:23000/login", "project": "ai-gateway", "ref": "ai-gateway-admin-ui", "repo": "ai-gateway-admin-ui", "rollback_from": "the newest rollback image kept on this host", "rollback_id": "901a02cb509c", "rollback_label": "f01f1ee", "rollback_rev": "f01f1ee", "rollback_tag": "ai-gateway-admin-ui:rollback-f01f1ee"},
  "docker-compose.yml:autoheal": {"container": "ai-gateway-autoheal-1", "extra": [], "files": ["docker-compose.yml", "docker-compose.override.yml"], "kind": "pinned", "name": "autoheal", "pinned": "willfarrell/autoheal:1.2.0", "project": "ai-gateway", "ref": "willfarrell/autoheal:1.2.0", "repo": "willfarrell/autoheal"},
  "docker-compose.yml:backend": {"container": "ai-gateway-backend-1", "current_id": "ba45f640a3e1", "current_rev": "134b023", "current_tag": "ai-gateway-backend:134b023", "deployed": "", "extra": [], "files": ["docker-compose.yml", "docker-compose.override.yml"], "kind": "backend", "name": "backend", "probe": "health:ai-gateway-backend-1", "project": "ai-gateway", "ref": "ai-gateway-backend", "repo": "ai-gateway-backend", "rollback_from": "the newest rollback image kept on this host", "rollback_id": "7d3fa5af6e6e", "rollback_label": "67d9fc0", "rollback_rev": "67d9fc0", "rollback_tag": "ai-gateway-backend:rollback-67d9fc0"},
