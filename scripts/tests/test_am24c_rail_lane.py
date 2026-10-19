@@ -35,18 +35,18 @@ NO_TESTS = "Error: No tests found.\nMake sure that arguments are regular express
 
 class TheLedgerReadsPlaywright(unittest.TestCase):
     def test_a_passing_run_is_its_checks(self):
-        c = ledger.count("web_rail_e2e", PASSED, 0)
+        c = ledger.count("web_rail_browser", PASSED, 0)
         self.assertEqual((c["how"], c["ran"], c["skipped"]), ("playwright", 1, 0))
 
     def test_a_failing_run_is_counted_as_a_check_that_ran(self):
-        c = ledger.count("web_rail_e2e", FAILED, 1)
+        c = ledger.count("web_rail_browser", FAILED, 1)
         self.assertEqual((c["how"], c["ran"]), ("playwright", 1))
 
     def test_a_run_that_found_no_test_ran_nothing(self):
-        self.assertIsNone(ledger.count("web_rail_e2e", NO_TESTS, 1)["ran"])
+        self.assertIsNone(ledger.count("web_rail_browser", NO_TESTS, 1)["ran"])
 
     def test_skipped_and_flaky_are_read(self):
-        c = ledger.count("web_rail_e2e", "Running 4 tests using 1 worker\n\n  1 skipped\n  1 flaky\n  2 passed (1.1m)\n", 0)
+        c = ledger.count("web_rail_browser", "Running 4 tests using 1 worker\n\n  1 skipped\n  1 flaky\n  2 passed (1.1m)\n", 0)
         self.assertEqual((c["ran"], c["skipped"]), (4, 1))
 
 
@@ -57,8 +57,8 @@ class TheGateRunsTheSpec(unittest.TestCase):
         cls.spec = (ROOT / "apps" / "web-chat" / SPEC).read_text(encoding="utf-8")
 
     def test_the_lane_is_in_the_list_and_runs_the_spec(self):
-        self.assertIn(" web_rail_e2e ", self.gate.split("LANES=", 1)[1].split("\n", 1)[0])
-        self.assertIn(f"lane web_rail_e2e 900 bash -c 'cd apps/web-chat && npx playwright test {SPEC} --reporter=list'", self.gate)
+        self.assertIn(" web_rail_browser ", self.gate.split("LANES=", 1)[1].split("\n", 1)[0])
+        self.assertIn(f"lane web_rail_browser 900 bash -c 'cd apps/web-chat && npx playwright test {SPEC} --reporter=list'", self.gate)
 
     def test_the_spec_measures_the_rows_above_the_pointer(self):
         self.assertIn("boundingBox()", self.spec)

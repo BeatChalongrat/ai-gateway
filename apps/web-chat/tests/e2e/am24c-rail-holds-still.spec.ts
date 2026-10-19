@@ -9,7 +9,7 @@
 //     at opens below — after the workspace's own re-read of the rail has come and gone;
 //   * the window regains focus with new recency and a waiting badge in the answer: every row is where it was, and
 //     the badges are fresh (the section header's count and a row's badge change no height).
-// The gate runs it (lane web_rail_e2e). Like the other specs here, every backend call is mocked: no services.
+// The gate runs it (lane web_rail_browser). Like the other specs here, every backend call is mocked: no services.
 
 import { expect, test, type Page, type Route } from "@playwright/test";
 
