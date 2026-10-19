@@ -16,7 +16,12 @@ Held here with stand-ins for Docker, curl and sleep (nothing real is started):
 * the test clients' ``up`` is red when a client's door does not answer;
 * the swap is not started when its measurement cannot be written (nothing live is touched); it is red,
   saying NOT MEASURED, when the poll recorded nothing; red when the service never answered 200 ten times
-  in a row; green with the probe's figures otherwise.
+  in a row; green with the probe's figures otherwise;
+* AM24c: a swap killed the hard way (no EXIT trap runs) leaves no poll behind asking the service. Until then the
+  two cases that never answer waited the swap's whole 120 s window — with the stand-in sleep, 240 tries of process
+  spawns, about two minutes on the laptop, at this file's own 120 s limit; over it Python killed the swap, its poll
+  lived on holding the output pipe, and the host tests' lane waited on it until its 600 s ceiling. Those two now ask
+  for a 5 s window (SWAP_WAIT_S), and the poll stops itself when the swap is gone.
 
     python -m unittest discover -s scripts/tests -p "test_am19b_steps_assert.py" -v
 """
@@ -26,6 +31,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -75,7 +81,8 @@ if [ -n "${FAKE_DOWN:-}" ]; then
 fi
 printf '%s' "${FAKE_CODE:-200}"
 '''
-SLEEP = "#!/bin/sh\nexit 0\n"
+# (AM24c: a test that may leave a loop behind ends it with FAKE_STOP — the next sleep the loop takes ends the loop)
+SLEEP = '#!/bin/sh\nif [ -n "${FAKE_STOP:-}" ] && [ -f "$FAKE_STOP" ]; then kill "$PPID" 2>/dev/null; fi\nexit 0\n'
 POWERSHELL = "#!/bin/sh\necho 'Online 1 100'\n"
 
 # the stack as it stands when all is well: name status exit-code health image
@@ -186,18 +193,46 @@ class StepsAssert(unittest.TestCase):
 
     def test_a_swap_the_poll_did_not_record_says_not_measured_and_is_red(self):
         # (/dev/null takes every line and keeps none: the swap ends with nothing on record)
-        r = self.run_it("scripts/ops/swap.sh", "chat-edge-api", "https://localhost:4000/health", "-p", "nothing", SWAP_OUT="/dev/null")
+        r = self.run_it("scripts/ops/swap.sh", "chat-edge-api", "https://localhost:4000/health", "-p", "nothing", SWAP_OUT="/dev/null",
+                        SWAP_WAIT_S="5")
         self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("NOT MEASURED", r.stdout)
         self.assertNotIn("probe: 0 requests", r.stdout)
 
     def test_a_swap_after_which_the_service_never_answers_is_red(self):
         r = self.run_it("scripts/ops/swap.sh", "chat-edge-api", "https://localhost:4000/health", "-p", "nothing",
-                        SWAP_OUT=(self.tmp / "swap.txt").as_posix(), FAKE_CODE="503")
+                        SWAP_OUT=(self.tmp / "swap.txt").as_posix(), FAKE_CODE="503", SWAP_WAIT_S="5")
         self.assertEqual(r.returncode, 9, r.stdout + r.stderr)
         self.assertIn("RED", r.stdout)
-        self.assertIn("did not answer 200 ten times in a row", r.stdout)
+        self.assertIn("did not answer 200 ten times in a row within 5 s of the swap", r.stdout)
         self.assertIn("compose -p nothing up -d --no-deps chat-edge-api", self.calls_made())
+
+    def test_a_swap_killed_without_its_trap_leaves_no_poll_asking_the_service(self):
+        out = self.tmp / "swap.txt"
+        stop = self.tmp / "stop"
+        lines = lambda: len(out.read_text(encoding="utf-8").splitlines()) if out.exists() else 0
+
+        def stop_a_loop_left_behind():  # (red: the loop ends at its next sleep — waited for before the folder goes)
+            stop.write_text("stop\n", encoding="utf-8")
+            for _ in range(40):
+                n = lines()
+                time.sleep(0.5)
+                if lines() == n:
+                    return
+        self.addCleanup(stop_a_loop_left_behind)
+        p = subprocess.Popen([BASH, "scripts/ops/swap.sh", "chat-edge-api", "https://localhost:4000/health", "-p", "nothing"], cwd=ROOT,
+                             env={**self.env, "SWAP_OUT": out.as_posix(), "FAKE_CODE": "503", "FAKE_STOP": stop.as_posix()},
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        deadline = time.time() + 90
+        while lines() < 5 and time.time() < deadline:
+            time.sleep(0.2)
+        self.assertGreaterEqual(lines(), 5, "the swap's poll never started")
+        p.kill()  # the hard way: no EXIT trap runs
+        p.wait(timeout=30)
+        time.sleep(5)  # a poll still on its way round finishes this turn and looks again
+        n = lines()
+        time.sleep(5)
+        self.assertEqual(lines(), n, "the swap was killed and its poll went on asking the service")
 
     def test_a_measured_swap_after_which_the_service_answers_is_green_with_its_figures(self):
         r = self.run_it("scripts/ops/swap.sh", "chat-edge-api", "https://localhost:4000/health", "-p", "nothing",

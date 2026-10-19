@@ -53,6 +53,10 @@ if ! printf '%s\n' "$held" | grep -qx -- "$SERVICE"; then
   exit 6
 fi
 CEILING="${SWAP_CEILING_S:-$(case "$URL" in health:*|running:*) echo 20 ;; *) echo 5 ;; esac)}"
+# AM24c: how long the swap waits, after Compose, for ten 200s in a row (SWAP_WAIT_S, 120 s). The script's own tests
+# that never answer ask for less: their stand-in sleep returns at once, so the 240 tries were process spawns only —
+# about two minutes on this laptop, at the test's own limit, and over it the test hung (see poll below).
+WAIT_S="${SWAP_WAIT_S:-120}"
 SERIES="${SWAP_SERIES:-$(dirname "$OUT")/swap_series.tsv}"
 before=$(docker compose "$@" ps -q "$SERVICE" 2>/dev/null | tr -d '\r' | head -1)
 # AM24b — --image: the way back kept by the same command that leaves it. Until AM24b the old image was tagged
@@ -120,7 +124,10 @@ EVENTS="$OUT.events"
 docker events --filter type=container --filter "label=com.docker.compose.service=$SERVICE" \
   --format '{{.TimeNano}} {{.Action}} {{.Actor.ID}}' >> "$EVENTS" 2>/dev/null &
 EV=$!
-poll() { while :; do printf '%s %s\n' "$(date +%s.%N)" "$(ask)" >> "$OUT"; sleep 0.5; done; }
+# (AM24c: the poll stops by itself once the swap is gone. A swap killed the hard way runs no EXIT trap; until AM24c
+# its poll lived on — asking the service every half second, for good, and holding the caller's output open: the host
+# tests' lane waited on such a pipe until its ceiling, and the loop went on spinning after it.)
+poll() { while kill -0 $$ 2>/dev/null; do printf '%s %s\n' "$(date +%s.%N)" "$(ask)" >> "$OUT"; sleep 0.5; done; }
 poll & POLL=$!
 trap 'kill $POLL $EV 2>/dev/null' EXIT
 sleep 3
@@ -137,7 +144,7 @@ if [ -n "$before" ] && [ "$before" = "$after" ]; then
   exit 10
 fi
 ok=0
-for _ in $(seq 1 240); do
+for _ in $(seq 1 $((WAIT_S * 2))); do
   if [ "$(tail -1 "$OUT" | awk '{print $2}')" = 200 ]; then ok=$((ok + 1)); else ok=0; fi
   [ "$ok" -ge 10 ] && break
   sleep 0.5
@@ -145,7 +152,7 @@ done
 sleep 1 # (the new container's last events)
 kill $POLL $EV 2>/dev/null
 rc=0
-[ "$ok" -ge 10 ] || { echo "RED: $SERVICE did not answer 200 ten times in a row within 120 s of the swap"; rc=9; }
+[ "$ok" -ge 10 ] || { echo "RED: $SERVICE did not answer 200 ten times in a row within $WAIT_S s of the swap"; rc=9; }
 # (the figures, from what the poll recorded — and NOT MEASURED when it recorded nothing: that is not a pass)
 figures=$(awk '{ n++; if ($2 != 200) { bad++; if (!start) start = $1; last = $1 } else if (start) { w = last - start + 0.5; if (w > worst) worst = w; start = 0 } }
      END { if (start) { w = last - start + 0.5; if (w > worst) worst = w }
