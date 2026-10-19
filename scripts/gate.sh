@@ -64,7 +64,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 RESULTS="${GATE_RESULTS:-scripts/gate/results}"
-LANES="tracks rollback_book python_lane look_gallery go_units go_vet gofmt backend_lane backend_marked host_tests smoke_units alert_rules gateway_go log_worker_go portal dlp_sidecar web_tsc web_vitest web_lints admin desktop"
+LANES="tracks rollback_book python_lane look_gallery go_units go_vet gofmt backend_lane backend_marked host_tests smoke_units alert_rules gateway_go log_worker_go portal dlp_sidecar web_tsc web_vitest web_lints web_rail_e2e admin desktop"
 # AM24: what the gate's verdict needs a green result of, at one commit — every lane, every chunk of the integration
 # lane (scripts/gate/it/chunk.sh ids), the build, the test stack and the smoke on it
 verdict_lanes() {
@@ -211,6 +211,9 @@ case "$phase" in
     lane web_tsc 900 bash -c 'cd apps/web-chat && npx tsc --noEmit -p .'
     lane web_vitest 1500 bash -c 'cd apps/web-chat && npx vitest run'
     lane web_lints 600 bash -c 'cd apps/web-chat && npm run -s lint:i18n && npm run -s check:classes && npm run -s lint:theme'
+    # AM24c: where the sidebar's rows are, measured in a browser (jsdom has no layout) — a click and a return to the
+    # window move no row above the pointer. The app's own dev server on :3102, every backend call mocked.
+    lane web_rail_e2e 900 bash -c 'cd apps/web-chat && npx playwright test tests/e2e/am24c-rail-holds-still.spec.ts --reporter=list'
     lane admin 900 bash -c 'cd admin-ui && npx tsc --noEmit -p . && npx vitest run'
     lane desktop 900 bash -c 'cd apps/desktop && npm run -s typecheck && npx vitest run'
     if [ "${#left[@]}" -gt 0 ]; then

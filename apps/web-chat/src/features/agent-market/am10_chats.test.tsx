@@ -81,10 +81,10 @@ describe("the sidebar lists each agent's chats", () => {
     expect(within(rows[1]!).getByTestId("agent-chat-link").getAttribute("href")).toBe("/chat/agents/i/i-1");
     expect(within(rows[1]!).getByTestId("agent-chat-link").textContent).toContain("2 รอบ");
     expect(within(rows[2]!).getByTestId("agent-chat-link").textContent).toContain("รอคำตอบ");
-    // closing it hides them; the choice survives in this browser
+    // closing it hides them; the choice survives in this browser — as "closed" (AM24c: one meaning for every row)
     fireEvent.click(screen.getByTestId("agent-rail-chats-toggle"));
     expect(screen.queryByTestId("agent-chat-rows")).toBeNull();
-    expect(JSON.parse(window.localStorage.getItem("am.rail.opened") ?? "[]")).toEqual(["i-1"]);
+    expect(JSON.parse(window.localStorage.getItem("am.rail.chats") ?? "{}")).toEqual({ "i-1": false });
   });
 
   it("a new chat is made on the server and opened", async () => {

@@ -79,6 +79,10 @@ def count(lane: str, text: str, rc: int) -> dict:
     if m:
         return {"ran": sum(int(a) + int(b) + int(c) for a, b, c in m), "skipped": sum(int(c) for _, _, c in m),
                 "how": "cargo test"}
+    if re.search(r"^Running \d+ tests? using \d+ workers?", text, re.M):  # (AM24c: playwright test, its own summary)
+        pw = lambda w: total(r"^ +(\d+) " + w + r"\b", re.M)
+        return {"ran": pw("passed") + pw("failed") + pw("flaky") + pw("skipped") + pw("interrupted") + pw("did not run"),
+                "skipped": pw("skipped") + pw("did not run"), "how": "playwright"}
     summary = [l for l in text.splitlines() if re.search(r"\b\d+ (passed|failed)\b", l) and re.search(r"\bin [\d.]+s\b", l)]
     if summary:
         l = summary[-1]

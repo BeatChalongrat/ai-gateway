@@ -11,8 +11,13 @@
 //   * With text in the sidebar's search box (Ctrl+K), matching agents —
 //     installed first, then catalog agents not installed yet.
 //   * AM10: each installed agent opens to its own chats (ChatRows.tsx) —
-//     the agent on screen opens by itself; what a person opened or closed is
-//     remembered in this browser.
+//     the agent on screen opens by itself the first time; what a person opened
+//     or closed is remembered in this browser, and going to another agent
+//     changes neither (AM24c).
+//   * AM24c: nothing moves under the pointer. The order is settled once and
+//     held (useHeldOrder): a click moves only the highlight, and a poll, the
+//     window's focus or a reload refreshes what the rows say, not where they
+//     are. Pin, unpin, install and uninstall move rows — the person asked.
 //
 // Flag off = absent: renders null until the availability check says the
 // feature is available, and never throws — the sidebar mounts this on every
@@ -27,11 +32,11 @@ import { amApi } from "./api";
 import { ChatRows, currentChatKey } from "./ChatRows";
 import { agentShortName } from "./format";
 import { useAmLocale, useAmT } from "./i18n";
-import { railOrder, searchAgents, waitingOnly } from "./rail";
+import { railOrder, searchAgents } from "./rail";
 import type { CatalogAgent, RailInstall } from "./types";
 import { AgentTile, cls } from "./ui";
 import { useAgentMarket } from "./useAgentMarket";
-import { togglePin, useRail } from "./useRail";
+import { togglePin, useHeldOrder, useRail } from "./useRail";
 
 export function AgentRailSection({ onNavigate, search = "" }: { onNavigate?: () => void; search?: string }) {
   const { state } = useAgentMarket();
@@ -58,7 +63,14 @@ export function AgentRailSection({ onNavigate, search = "" }: { onNavigate?: () 
 
   const hits = useMemo(() => searchAgents(query, rail.installs, catalog ?? []), [query, rail.installs, catalog]);
   const urlQuery = useSearchString();
-  const [opened, toggleOpened] = useOpenedAgents();
+  const activeId = activeInstallId(pathname);
+  const held = useHeldOrder(rail.installs, rail.loaded, activeId);
+  const [chatsOpen, setChatsOpen] = useChatsOpen();
+  // an agent with no recorded state opens the first time the person goes into it, and is recorded so
+  const activeInstalled = !!activeId && rail.installs.some((r) => r.id === activeId);
+  useEffect(() => {
+    if (activeInstalled && activeId && chatsOpen[activeId] === undefined) setChatsOpen(activeId, true);
+  }, [activeInstalled, activeId, chatsOpen, setChatsOpen]);
 
   if (!available) return null;
 
@@ -72,16 +84,26 @@ export function AgentRailSection({ onNavigate, search = "" }: { onNavigate?: () 
       !pathname.startsWith("/chat/agents/mine"));
 
   const collapsed = rail.prefs.rail_collapsed === true;
-  const { shown, rest } = railOrder(rail.installs);
-  const visible = collapsed ? waitingOnly(rail.installs) : shown;
+  const byId = new Map(rail.installs.map((r) => [r.id, r]));
+  const shown = held.hold
+    ? held.hold.order.slice(0, held.hold.listed).flatMap((id) => byId.get(id) ?? [])
+    : railOrder(rail.installs).shown;
+  const rest = Math.max(0, rail.installs.length - shown.length);
+  const visible = collapsed ? shown.filter((r) => r.waiting > 0) : shown;
   const waiting = rail.waitingTotal;
+  const isOpen = (id: string) => chatsOpen[id] ?? id === activeId;
 
   const pin = (row: RailInstall) => {
     const was = !!row.pinned_at;
-    rail.patch(row.id, { pinned_at: was ? null : new Date().toISOString() });
+    const now = was ? null : new Date().toISOString();
+    rail.patch(row.id, { pinned_at: now });
+    held.pinned(row.id, now);
     togglePin(row.id, was).then(
       (at) => rail.patch(row.id, { pinned_at: at }),
-      () => rail.patch(row.id, { pinned_at: row.pinned_at }),
+      () => {
+        rail.patch(row.id, { pinned_at: row.pinned_at });
+        held.pinned(row.id, row.pinned_at);
+      },
     );
   };
 
@@ -138,8 +160,8 @@ export function AgentRailSection({ onNavigate, search = "" }: { onNavigate?: () 
                 row={i}
                 pathname={pathname}
                 search={urlQuery}
-                opened={opened.has(i.id)}
-                onToggle={() => toggleOpened(i.id)}
+                opened={isOpen(i.id)}
+                onToggle={() => setChatsOpen(i.id, !isOpen(i.id))}
                 onNavigate={onNavigate}
                 onPin={() => pin(i)}
               />
@@ -174,33 +196,46 @@ function useSearchString(): string | null {
   return params ? params.toString() : null;
 }
 
-const OPENED_KEY = "am.rail.opened";
+const AGENT_PATH = "/chat/agents/i/";
 
-/** Which agents a person opened in the sidebar — this browser's, like a folder left open. */
-function useOpenedAgents(): [Set<string>, (id: string) => void] {
-  const [opened, setOpened] = useState<Set<string>>(() => {
+/** The installed agent on screen: its workspace, a chat of it, or a page under it. */
+function activeInstallId(pathname: string): string | null {
+  return pathname.startsWith(AGENT_PATH) ? pathname.slice(AGENT_PATH.length).split("/")[0] || null : null;
+}
+
+const CHATS_KEY = "am.rail.chats";
+
+/**
+ * Which agents show their chats in the sidebar — this browser's, like a folder left open. One stored value, one
+ * meaning, for every row: true open, false closed; nothing recorded is closed, except on the agent on screen.
+ * (Until AM24c the stored set meant "open" for every row but the one on screen, where it meant "closed", so going
+ * to another agent flipped two rows at once. That set, am.rail.opened, is not read: what it held cannot be told
+ * apart.)
+ */
+function useChatsOpen(): [Record<string, boolean>, (id: string, open: boolean) => void] {
+  const [state, setState] = useState<Record<string, boolean>>(() => {
     try {
-      const raw = typeof window !== "undefined" ? window.localStorage.getItem(OPENED_KEY) : null;
-      const ids = raw ? (JSON.parse(raw) as unknown) : [];
-      return new Set(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : []);
+      const raw = typeof window !== "undefined" ? window.localStorage.getItem(CHATS_KEY) : null;
+      const kept = raw ? (JSON.parse(raw) as unknown) : null;
+      if (!kept || typeof kept !== "object" || Array.isArray(kept)) return {};
+      return Object.fromEntries(Object.entries(kept).filter((e): e is [string, boolean] => typeof e[1] === "boolean"));
     } catch {
-      return new Set();
+      return {};
     }
   });
-  const toggle = useCallback((id: string) => {
-    setOpened((cur) => {
-      const next = new Set(cur);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+  const set = useCallback((id: string, open: boolean) => {
+    setState((cur) => {
+      if (cur[id] === open) return cur;
+      const next = { ...cur, [id]: open };
       try {
-        window.localStorage.setItem(OPENED_KEY, JSON.stringify([...next]));
+        window.localStorage.setItem(CHATS_KEY, JSON.stringify(next));
       } catch {
         /* a browser without storage forgets on reload */
       }
       return next;
     });
   }, []);
-  return [opened, toggle];
+  return [state, set];
 }
 
 function RailRow({
@@ -215,6 +250,7 @@ function RailRow({
   row: RailInstall;
   pathname: string;
   search: string | null;
+  /** this row shows its chats — the same meaning for every row, the one on screen too */
   opened: boolean;
   onToggle: () => void;
   onNavigate?: () => void;
@@ -224,8 +260,7 @@ function RailRow({
   const href = `/chat/agents/i/${row.id}`;
   const active = pathname === href || pathname.startsWith(`${href}/`);
   const pinned = !!row.pinned_at;
-  // the agent on screen shows its chats unless the person closed it
-  const showChats = active ? !opened : opened;
+  const showChats = opened;
   const chatsId = useId();
   return (
     <>
