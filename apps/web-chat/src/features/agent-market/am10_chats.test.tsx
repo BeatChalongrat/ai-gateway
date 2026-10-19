@@ -28,6 +28,7 @@ import { AgentRailSection } from "./AgentRailSection";
 import { besideHref, currentChatKey } from "./ChatRows";
 import type { AgentThread, Manifest, RailInstall, ThreadItem } from "./types";
 import { resetAgentMarketForTest } from "./useAgentMarket";
+import { forgetHeldOrderForTest } from "./useRail";
 import { WorkspacePage } from "./workspace/WorkspacePage";
 
 const json = (body: unknown, status = 200) => ({ ok: status < 400, status, text: async () => JSON.stringify(body) });
@@ -43,6 +44,7 @@ const chat = (id: string | null, title: string, extra: Partial<AgentThread> = {}
 
 beforeEach(() => {
   resetAgentMarketForTest();
+  forgetHeldOrderForTest(); // (AM24c: each case a new page)
   raw.mockReset();
   push.mockReset();
   replace.mockReset();

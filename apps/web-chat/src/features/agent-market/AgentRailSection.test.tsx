@@ -30,6 +30,7 @@ import { AgentRailSection } from "./AgentRailSection";
 import { amDictionaries } from "./i18n";
 import type { RailInstall } from "./types";
 import { resetAgentMarketForTest } from "./useAgentMarket";
+import { forgetHeldOrderForTest } from "./useRail";
 
 const json = (body: unknown, status = 200) => ({ ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(body) });
 
@@ -64,6 +65,7 @@ function routeWith(path: string, init?: RequestInit) {
 
 beforeEach(() => {
   resetAgentMarketForTest();
+  forgetHeldOrderForTest(); // (AM24c: each case a new page)
   raw.mockReset();
   useI18nStore.setState({ locale: "th" });
   rail = { installs: [], waiting_total: 0, prefs: {} };

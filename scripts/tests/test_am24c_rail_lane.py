@@ -65,6 +65,9 @@ class TheGateRunsTheSpec(unittest.TestCase):
         self.assertIn('href="/chat/agents/i/c"]\').click()', self.spec)
         self.assertIn("expect({ a: afterClick.a, b: afterClick.b }).toEqual({ a: before.a, b: before.b });", self.spec)
         self.assertIn("expect(afterFocus).toEqual(afterClick);", self.spec)
+        # the order lives as long as the page: a real reload is a new order, by recency
+        self.assertIn("await page.reload();", self.spec)
+        self.assertIn('.toEqual(["/chat/agents/i/c", "/chat/agents/i/a", "/chat/agents/i/b", "/chat/agents/i/d"]);', self.spec)
 
     def test_it_runs_in_a_browser_not_in_the_jsdom_lane(self):
         vitest = (ROOT / "apps" / "web-chat" / "vitest.config.ts").read_text(encoding="utf-8")

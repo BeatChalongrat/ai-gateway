@@ -59,12 +59,12 @@ export function searchAgents(
 // ── AM24c: the order is settled once, and held ─────────────────────────────
 // Recency is a good rule for arriving at the sidebar and a bad one for reacting to a click. Opening an agent writes
 // its last_opened_at; the next read — the 30-second poll, or the window regaining focus — then moved that row to the
-// top, under the person's pointer, while nobody touched anything. So railOrder decides once, at the session's first
+// top, under the person's pointer, while nobody touched anything. So railOrder decides once, at the page's first
 // read, and later reads keep that order: titles, counts and badges stay fresh, positions do not change. Only what
 // the person asks for moves a row — a pin or unpin moves that row, an install is listed after the others, an
 // uninstall takes its row away.
 
-/** The rail's order for the session: every install, in the order kept; the first `listed` are in the sidebar. */
+/** The rail's order for the page: every install, in the order kept; the first `listed` are in the sidebar. */
 export interface RailHold {
   order: string[];
   listed: number;
@@ -80,8 +80,8 @@ function listAfter(h: RailHold, id: string): RailHold {
 }
 
 /**
- * The order after a read. The session's first read (no hold, or none of its agents installed any more) takes
- * railOrder's. Every later read keeps the hold, less what was uninstalled; an install the session has not seen,
+ * The order after a read. The page's first read (no hold, or none of its agents installed any more) takes
+ * railOrder's. Every later read keeps the hold, less what was uninstalled; an install the page has not seen,
  * an agent with a run waiting for an answer and the agent on screen are listed if they are not yet — after the
  * others.
  */

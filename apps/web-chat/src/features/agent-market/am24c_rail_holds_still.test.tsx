@@ -1,6 +1,7 @@
 // AM24c — nothing moves under the pointer. The owner clicked between his agents and the list went "ไปๆ มาๆ":
-//   * the rail's order is settled at the session's first read and held — a click, two polls that bring new
-//     recency, a return to the window and a reload move no row, while titles, counts and badges stay fresh;
+//   * the rail's order is settled at the page's first read and held for the page's life — a click, the workspace's
+//     own read, two polls that bring new recency and a return to the window move no row, while titles, counts and
+//     badges stay fresh; a new page (a reload) arranges them by recency again;
 //   * pin and unpin, install and uninstall move rows, because the person asked — and only the row asked about;
 //   * "opened" means opened for every row: what a person opened stays open behind them, what they closed stays
 //     closed, and an agent with no recorded state opens once, the first time they go into it.
@@ -29,7 +30,7 @@ import { useI18nStore } from "@/lib/i18n";
 import { AgentRailSection } from "./AgentRailSection";
 import type { RailInstall } from "./types";
 import { notifyInstallsChanged, resetAgentMarketForTest } from "./useAgentMarket";
-import { togglePin } from "./useRail";
+import { forgetHeldOrderForTest, togglePin } from "./useRail";
 
 const json = (body: unknown, status = 200) => ({ ok: status < 400, status, text: async () => JSON.stringify(body) });
 const at = (m: number) => `2026-10-19T08:${String(m).padStart(2, "0")}:00Z`;
@@ -52,6 +53,7 @@ const railReads = () => raw.mock.calls.filter((c) => c[0] === "/agent-market/rai
 
 beforeEach(() => {
   resetAgentMarketForTest();
+  forgetHeldOrderForTest();
   raw.mockReset();
   useI18nStore.setState({ locale: "en" });
   nav.pathname = "/chat/agents/i/a";
@@ -140,20 +142,26 @@ describe("AM24c: the order is settled once and held", () => {
     expect(order()).toEqual(["a", "b", "c", "d"]);
   });
 
-  it("a reload keeps the order; a new window takes the recency (the session is the window's)", async () => {
+  it("the order lives as long as the page: the rail mounted again keeps it, a new page takes the recency, nothing is stored", async () => {
     const first = render(<AgentRailSection />);
     await waitFor(() => expect(order()).toEqual(["a", "b", "c", "d"]));
     set("d", { last_used_at: at(59) });
     first.unmount();
 
+    // the sidebar mounted again in the same page
     render(<AgentRailSection />);
     await waitFor(() => expect(railReads()).toBe(2));
     await waitFor(() => expect(order()).toEqual(["a", "b", "c", "d"]));
 
+    // a reload: a new page
     cleanup();
-    window.sessionStorage.clear();
+    forgetHeldOrderForTest();
     render(<AgentRailSection />);
     await waitFor(() => expect(order()).toEqual(["d", "a", "b", "c"]));
+    // the order is not kept anywhere a reload would find it (the open/closed state is, on purpose)
+    const kept = (st: Storage) => Array.from({ length: st.length }, (_, i) => st.key(i));
+    expect(kept(window.sessionStorage)).toEqual([]);
+    expect(kept(window.localStorage).filter((k) => k !== "am.rail.chats")).toEqual([]);
   });
 
   it("a new install arrives in a poll: it appears, at the end, and no existing row moves", async () => {
@@ -279,6 +287,7 @@ describe("AM24c: opened means opened, for every row", () => {
     fireEvent.click(within(rowOf("a")).getByTestId("agent-rail-chats-toggle"));
     fireEvent.click(within(rowOf("c")).getByTestId("agent-rail-chats-toggle"));
     first.unmount();
+    forgetHeldOrderForTest(); // a reload
     nav.pathname = "/chat";
     render(<AgentRailSection />);
     await waitFor(() => expect(order()).toEqual(["a", "b", "c", "d"]));

@@ -14,10 +14,11 @@
 //     the agent on screen opens by itself the first time; what a person opened
 //     or closed is remembered in this browser, and going to another agent
 //     changes neither (AM24c).
-//   * AM24c: nothing moves under the pointer. The order is settled once and
-//     held (useHeldOrder): a click moves only the highlight, and a poll, the
-//     window's focus or a reload refreshes what the rows say, not where they
-//     are. Pin, unpin, install and uninstall move rows — the person asked.
+//   * AM24c: nothing moves under the pointer. The order is settled once a
+//     page and held (useHeldOrder): a click moves only the highlight, and a
+//     poll or the window's focus refreshes what the rows say, not where they
+//     are; a reload arranges them by recency again. Pin, unpin, install and
+//     uninstall move rows — the person asked.
 //
 // Flag off = absent: renders null until the availability check says the
 // feature is available, and never throws — the sidebar mounts this on every

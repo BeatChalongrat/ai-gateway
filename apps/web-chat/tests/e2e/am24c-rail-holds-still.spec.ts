@@ -8,7 +8,8 @@
 //   * click row 3: rows 1 and 2 are at the same vertical offset — the agent left behind stays open, the one arrived
 //     at opens below — after the workspace's own re-read of the rail has come and gone;
 //   * the window regains focus with new recency and a waiting badge in the answer: every row is where it was, and
-//     the badges are fresh (the section header's count and a row's badge change no height).
+//     the badges are fresh (the section header's count and a row's badge change no height);
+//   * the order lives as long as the page: a reload arranges the agents by recency again.
 // The gate runs it (lane web_rail_browser). Like the other specs here, every backend call is mocked: no services.
 
 import { expect, test, type Page, type Route } from "@playwright/test";
@@ -115,7 +116,7 @@ async function tops(page: Page): Promise<Record<string, number>> {
   return out;
 }
 
-test("AM24c: a click and a return to the window move no row above the pointer", async ({ page }) => {
+test("AM24c: a click and a return to the window move no row above the pointer; a reload is a new order", async ({ page }) => {
   installs = [row("a", "Alpha", 40), row("b", "Bravo", 30), row("c", "Charlie", 20), row("d", "Delta", 10)];
   railReads = 0;
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -153,4 +154,11 @@ test("AM24c: a click and a return to the window move no row above the pointer", 
   expect(afterFocus).toEqual(afterClick);
   const order = await page.getByTestId("agent-rail-install").evaluateAll((els) => els.map((e) => e.getAttribute("href")));
   expect(order).toEqual(["/chat/agents/i/a", "/chat/agents/i/b", "/chat/agents/i/c", "/chat/agents/i/d"]);
+
+  // a reload is a new page: recency again — Charlie, opened last, comes first
+  await page.reload();
+  await expect(page.getByTestId("agent-rail-install")).toHaveCount(4);
+  await expect
+    .poll(() => page.getByTestId("agent-rail-install").evaluateAll((els) => els.map((e) => e.getAttribute("href"))))
+    .toEqual(["/chat/agents/i/c", "/chat/agents/i/a", "/chat/agents/i/b", "/chat/agents/i/d"]);
 });
