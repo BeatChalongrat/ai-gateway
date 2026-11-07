@@ -1,0 +1,70 @@
+{
+  "detector": "vehicle_plate",
+  "entity_type": "vehicle_plate",
+  "category": "identity",
+  "severity": 2,
+  "cases": [
+    {
+      "id": "thai_keyword_plate",
+      "input": "ทะเบียน กข 1234 ของผม",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 8,
+          "end": 15
+        }
+      ]
+    },
+    {
+      "id": "english_keyword_plate",
+      "input": "license plate AB 1234 lost",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 14,
+          "end": 21
+        }
+      ]
+    },
+    {
+      "id": "plate_then_province",
+      "input": "AB 1234 Bangkok seen",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 7
+        }
+      ]
+    },
+    {
+      "id": "plate_thai_province",
+      "input": "กข 1234 ภูเก็ต พบ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 7
+        }
+      ]
+    },
+    {
+      "id": "no_keyword_no_province",
+      "input": "AB 1234 unrelated",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "plain_prose",
+      "input": "we drove around for hours",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

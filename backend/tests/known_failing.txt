@@ -1,0 +1,83 @@
+# Known-failing backend tests — the gate compares NAMES, never a count.
+#
+# Why this file exists: the release gate used to be "the lane must show
+# exactly N failures". A suite this size does not produce a stable N —
+# three consecutive runs of the same tree gave 21, 22 and 23 failures
+# with a different extra member each time, and every drifting member
+# passed when run on its own. A count cannot tell "the same old
+# breakage" apart from "something new broke", so the gate reads the list
+# below: a name that is not here turns the gate red, and a different
+# total with the same names is green.
+#
+# ── FIX57: regenerated, and the ordering it is valid for is now fixed ──
+#
+# The list above was built against a RANDOM order. pytest-randomly seeds
+# itself from the clock, so every lane reshuffled the suite and a
+# different set of order-dependent tests fell over — two lanes on one
+# unchanged tree disagreed about which failures were "new" (8 names one
+# way, 15 the other, every one of them passing in isolation). A ledger of
+# names cannot survive that: it is a statement about one ordering.
+#
+# The seed is pinned in pyproject.toml (`--randomly-seed=0`). The shuffle
+# stays — it is the only reason this suite's shared-state bugs ever
+# surface — but it is the SAME shuffle every run, so this list means
+# something. Changing that seed reshuffles the suite and invalidates this
+# file; regenerate it in the same commit.
+#
+# Four drifters were fixed rather than recorded here, because each had an
+# actual cause: two cookie tests whose "tampering" decoded to the same
+# base64 bytes about one run in sixteen; a routing-settings cache read
+# before its session check; a model-registry reload emptying the seeded
+# catalogue for every later test; and Redis health markers surviving into
+# the SSE tests. See the FIX57 commits.
+#
+# THE ONE COMMAND:
+#   docker exec -e APP_ENV=test ai-gateway-backend-1 \
+#     sh -c "cd /app && python -m pytest -m 'not integration' -q"
+#   python backend/scripts/check_known_failing.py <that output>
+#
+# Rules for this file:
+#   * every entry carries a reason and the date it was added;
+#   * it must shrink over time — it is a ledger of known breakage, not
+#     a place to hide new failures;
+#   * NEVER add a name to make the gate pass. If a change breaks a
+#     test, fix the change.
+#
+# Format: <test id>  # <YYYY-MM-DD> <reason>
+# Blank lines and lines starting with # are ignored.
+#
+# Verified 2026-09-05: three consecutive lanes on one tree produced these
+# 24 names and no others, byte-identical.
+
+# ── FIX126 O8 (2026-09-22): the 21 names that stood here are gone from
+#    the ledger. Each one was classified (backend/tests/QUARANTINE.md):
+#    the obsolete assertions and broken test setups were fixed (body limit
+#    x3, tenant columns x2, routing auto-coding, sranai wording, async key
+#    fixture, streaming DLP x2, streaming session factory x2); the rest are
+#    quarantined with @pytest.mark.quarantine(reason, ticket) — they still
+#    run and read "xfailed", not FAILED — so they no longer belong here.
+#    A quarantined test that fails is not a new failure; a quarantined test
+#    that passes reads XPASS and should be released.
+
+# ── FIX133 (2026-09-24): the shared rate-limit window (FIX55) family is
+#    gone. Those tests spent requests against one per-key media window
+#    (rl:media:<bucket>:<key_id>, one Redis ZSET per key for the whole
+#    pytest process) under one shared key_id="test-key-id", so whichever
+#    of them ran after the window was spent got 429 instead of its
+#    expected status. Every `_auth` block in tests/unit/test_public_audio.py
+#    and test_public_videos.py is now its own key, and
+#    test_rate_limit_window_belongs_to_the_auth_block_not_the_process pins
+#    it. The three names that stood here:
+#      tests/unit/test_public_audio.py::test_music_mode_on_tts_only_model_400
+#      tests/unit/test_public_audio.py::test_valid_music_submit_200
+#      tests/unit/test_public_videos.py::test_valid_submit_200
+
+# ── Removed 2026-09-05, no longer failing under the pinned order. Left
+#    here as a note rather than deleted silently, so the next reader can
+#    see the ledger shrank by six and grew by two:
+#      test_routing_e2e.py::TestRoutingE2EAuto::test_auto_default_returns_openai
+#      test_chat.py::test_chat_completion_stub
+#      test_provider_integration.py::TestProviderIntegrationSuccess::test_response_has_provider_field
+#      unit/test_public_videos.py::test_chat_only_model_400
+#      unit/test_public_audio.py::test_invalid_mode_400
+#      unit/test_public_audio.py::test_non_tts_model_400

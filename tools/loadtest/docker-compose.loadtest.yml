@@ -1,0 +1,49 @@
+# OPT-IN load-test activation overlay (NOT applied by default).
+#
+# This file changes NOTHING unless you explicitly include it with -f. It
+# overlays ONLY the backend service to put the stack into a load-test-ready
+# state so a capacity baseline measures the SYSTEM, not the rate limiter or
+# the real provider's bill:
+#
+#   1. PROVIDER_BASE_URL_OVERRIDES -> the in-cluster mock provider (no $ cost,
+#      stable latency). Value is the canonical one from .env.example.
+#   2. INTERNAL_SERVICE_SECRET -> activates trusted per-end-user rate-limit
+#      keying so each VU's distinct X-User-ID gets its own 60/min bucket
+#      (matches what chat-edge does in production once configured).
+#   3. RATE_LIMIT_{PROJECT,TENANT}_PER_MINUTE raised very high so the shared
+#      project/tenant ceilings don't mask system capacity at 250 VUs. The
+#      per-KEY (per-user) limit stays at the production 60/min so per-user
+#      keying is still exercised honestly.
+#
+# Apply (recreates ONLY the backend container):
+#   INTERNAL_SERVICE_SECRET=<your-secret> \
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f docker-compose.override.yml \
+#     -f tools/loadtest/docker-compose.loadtest.yml \
+#     up -d backend
+#
+# Revert to normal (drops this overlay; restores .env / default behaviour):
+#   docker compose -f docker-compose.yml -f docker-compose.override.yml up -d backend
+#
+# NOTE: pass the SAME INTERNAL_SERVICE_SECRET to the load-test script via
+# --internal-service-secret so the harness is trusted.
+#
+# For a REAL-provider run (steps 2 & 3 only, NO mock), include this file but
+# also export PROVIDER_BASE_URL_OVERRIDES= (empty) to drop the mock line, or
+# copy this file and remove the PROVIDER_BASE_URL_OVERRIDES key.
+
+services:
+  backend:
+    environment:
+      # 1. Route OpenAI/Anthropic/OpenRouter adapters at the mock provider.
+      PROVIDER_BASE_URL_OVERRIDES: >-
+        {"openai":"http://mock-provider:9090/v1","anthropic":"http://mock-provider:9090","openrouter":"http://mock-provider:9090/v1"}
+      # 2. Trust X-User-ID from callers presenting this secret. Set it from the
+      #    shell env so the value isn't committed; falls back to a dev default.
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-loadtest-internal-secret-dev}
+      # 3. Per-user stays at prod 60/min; project/tenant raised so the
+      #    aggregate ceilings don't bottleneck a 250-VU capacity probe.
+      RATE_LIMIT_KEY_PER_MINUTE: ${RATE_LIMIT_KEY_PER_MINUTE:-60}
+      RATE_LIMIT_PROJECT_PER_MINUTE: ${RATE_LIMIT_PROJECT_PER_MINUTE:-1000000}
+      RATE_LIMIT_TENANT_PER_MINUTE: ${RATE_LIMIT_TENANT_PER_MINUTE:-1000000}

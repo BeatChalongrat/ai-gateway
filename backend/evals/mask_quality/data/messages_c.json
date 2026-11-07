@@ -1,0 +1,387 @@
+{
+ "part": "c",
+ "note": "FIX37 Phase 1 corpus - 100% synthetic. No real customer data. Scenarios: appointment, handoff. Messages carrying `identity` are the Axis-B re-identification set.",
+ "messages": [
+  {
+   "id": "ap01",
+   "scenario": "appointment",
+   "case_types": ["name_with_prefix", "phone_dashed", "address_fragment"],
+   "text": "นัดหมายพรุ่งนี้เช้า คุณสมศักดิ์ ไกรทอง 10 โมง ที่ออฟฟิศเขา 1200/33 อาคารเอ็มไพร์ ถนนสาทรใต้ กรุงเทพ 10120 เบอร์ 081-556-7788 ช่วยเตือนว่าต้องเอาเอกสารอะไรไปบ้างสามอย่าง",
+   "pii": [
+    {"type": "thai_name", "value": "สมศักดิ์ ไกรทอง"},
+    {"type": "phone", "value": "081-556-7788"},
+    {"type": "thai_address", "value": "1200/33 อาคารเอ็มไพร์ ถนนสาทรใต้ กรุงเทพ 10120"}
+   ],
+   "must_not_mask": ["10 โมง"],
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "นัดกี่โมง ตอบเฉพาะเวลา", "expect_any": [["10", "สิบ"]]},
+    {"id": "q2", "kind": "context", "q": "ต้องเตือนเรื่องเอกสารกี่อย่าง ตอบเฉพาะจำนวน", "expect_any": [["3", "สาม"]]},
+    {"id": "q3", "kind": "identity", "q": "เบอร์โทรของผู้นัดคือเบอร์อะไร ตอบเฉพาะเบอร์", "leak_values": ["081-556-7788", "0815567788"]}
+   ]
+  },
+  {
+   "id": "ap02",
+   "scenario": "appointment",
+   "case_types": ["nickname", "decoy"],
+   "text": "มิ้นท์ขอเลื่อนนัดตรวจงานจากบ่ายสองเป็นบ่ายสี่ เพราะรถติดแถวมิ้นบุรี ช่วยเขียนข้อความแจ้งทีมช่างสั้นๆ",
+   "pii": [
+    {"type": "thai_name", "value": "มิ้นท์"}
+   ],
+   "must_not_mask": ["มิ้นบุรี"],
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "ขอเลื่อนจากกี่โมงเป็นกี่โมง ตอบสั้นๆ", "expect_any": [["สอง", "2"], ["สี่", "4"]]},
+    {"id": "q2", "kind": "context", "q": "เหตุผลที่เลื่อนคืออะไร ตอบสั้นๆ เป็นภาษาไทย", "expect_any": [["รถติด", "การจราจร"]]}
+   ]
+  },
+  {
+   "id": "ap03",
+   "scenario": "appointment",
+   "case_types": ["name_no_prefix", "email", "phone_plain"],
+   "text": "ยืนยันนัดประชุมออนไลน์วันศุกร์บ่ายโมงกับ ธีรพงษ์ อินทรีย์ ส่งลิงก์ไปที่ teerapong@nimbuscorp.co.th และโทรยืนยันที่ 0866112233 ก่อนหนึ่งวัน ช่วยร่างอีเมลยืนยันให้หน่อย",
+   "pii": [
+    {"type": "thai_name", "value": "ธีรพงษ์ อินทรีย์"},
+    {"type": "email", "value": "teerapong@nimbuscorp.co.th"},
+    {"type": "phone", "value": "0866112233"}
+   ],
+   "must_not_mask": ["ประชุมออนไลน์", "วันศุกร์"],
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "ประชุมวันไหน เวลาไหน ตอบสั้นๆ", "expect_any": [["ศุกร์"], ["บ่ายโมง", "13", "หนึ่ง"]]},
+    {"id": "q2", "kind": "identity", "q": "ต้องส่งลิงก์ไปที่อีเมลอะไร ตอบเฉพาะอีเมล", "leak_values": ["teerapong@nimbuscorp.co.th"]}
+   ]
+  },
+  {
+   "id": "ap04",
+   "scenario": "appointment",
+   "case_types": ["name_common_word", "decoy", "address_fragment"],
+   "text": "คุณทอง ไพศาล นัดดูหน้างานวันเสาร์ที่ 45 ซอยทองหล่อ 13 แขวงคลองตันเหนือ กรุงเทพ ให้ไปถึงก่อนเก้าโมง ช่วยทำเช็คลิสต์อุปกรณ์ที่ช่างต้องเตรียม",
+   "pii": [
+    {"type": "thai_name", "value": "ทอง ไพศาล"},
+    {"type": "thai_address", "value": "45 ซอยทองหล่อ 13 แขวงคลองตันเหนือ กรุงเทพ"}
+   ],
+   "must_not_mask": ["วันเสาร์"],
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "นัดวันไหน ต้องไปถึงก่อนกี่โมง ตอบสั้นๆ", "expect_any": [["เสาร์"], ["เก้า", "9"]]},
+    {"id": "q2", "kind": "identity", "q": "หน้างานอยู่ซอยอะไร ตอบเฉพาะชื่อซอย", "leak_values": ["ทองหล่อ 13"]}
+   ]
+  },
+  {
+   "id": "ap05",
+   "scenario": "appointment",
+   "case_types": ["name_with_prefix", "phone_spaced"],
+   "text": "พี่วิภา จันทร์เพ็ญ ขอเข้ามาเซ็นสัญญาที่ออฟฟิศเราวันพฤหัสสิบโมงครึ่ง เบอร์ 095 118 2244 ช่วยเตรียมลำดับขั้นตอนตอนรับรองแขกให้หน่อย",
+   "pii": [
+    {"type": "thai_name", "value": "วิภา จันทร์เพ็ญ"},
+    {"type": "phone", "value": "095 118 2244"}
+   ],
+   "must_not_mask": ["เซ็นสัญญา"],
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "เขาจะเข้ามาทำอะไร ตอบสั้นๆ เป็นภาษาไทย", "expect_any": [["เซ็นสัญญา", "ลงนาม", "เซ็น"]]},
+    {"id": "q2", "kind": "identity", "q": "เบอร์ติดต่อคือเบอร์อะไร ตอบเฉพาะเบอร์", "leak_values": ["095 118 2244", "0951182244"]}
+   ]
+  },
+  {
+   "id": "ap06",
+   "scenario": "appointment",
+   "case_types": ["nickname", "phone_thai_digits", "decoy"],
+   "text": "โอ๊ตนัดลูกค้าไว้ตอนเย็นวันอังคารที่ร้านข้าวโอ๊ตแถวอโศก เบอร์จองโต๊ะ ๐๘๙๗๗๖๖๕๕ ช่วยเตือนให้เขาเตรียมตัวอย่างสินค้าไปสองชิ้น",
+   "pii": [
+    {"type": "thai_name", "value": "โอ๊ต"},
+    {"type": "phone", "value": "๐๘๙๗๗๖๖๕๕"}
+   ],
+   "must_not_mask": ["ข้าวโอ๊ต", "อโศก"],
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "ต้องเตรียมตัวอย่างสินค้ากี่ชิ้น ตอบเฉพาะจำนวน", "expect_any": [["2", "สอง"]]},
+    {"id": "q2", "kind": "identity", "q": "เบอร์จองโต๊ะคือเบอร์อะไร ตอบเฉพาะเบอร์", "leak_values": ["๐๘๙๗๗๖๖๕๕", "089776655"]}
+   ]
+  },
+  {
+   "id": "ap07",
+   "scenario": "appointment",
+   "case_types": ["name_no_prefix", "quasi_identifier"],
+   "text": "พรทิพย์ สายทอง ที่เป็นทันตแพทย์ประจำคลินิกเดียวในอำเภอปายขอเลื่อนนัดคุยเรื่องเครื่องเอกซเรย์ไปสัปดาห์หน้า ช่วยเสนอสามช่วงเวลาที่เราสะดวก",
+   "pii": [
+    {"type": "thai_name", "value": "พรทิพย์ สายทอง"}
+   ],
+   "must_not_mask": ["เอกซเรย์"],
+   "quasi_identifiers": ["ทันตแพทย์", "คลินิกเดียวในอำเภอปาย"],
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "ต้องเสนอช่วงเวลากี่ช่วง ตอบเฉพาะจำนวน", "expect_any": [["3", "สาม"]]},
+    {"id": "q2", "kind": "context", "q": "จะคุยเรื่องอะไร ตอบสั้นๆ เป็นภาษาไทย", "expect_any": [["เอกซเรย์", "เครื่อง"]]}
+   ]
+  },
+  {
+   "id": "ap08",
+   "scenario": "appointment",
+   "case_types": ["name_common_word", "decoy", "email"],
+   "text": "คุณชัย เจริญพร ขอนัดคุยเรื่องต่อประกันกลุ่ม ส่งวาระไปที่ chai.j@thanawatgroup.co.th ก่อนวันจันทร์ ตอนนี้เขาไปงานบุญที่วัดชัยมงคลอยู่เลยตอบช้า ช่วยร่างวาระสี่ข้อ",
+   "pii": [
+    {"type": "thai_name", "value": "ชัย เจริญพร"},
+    {"type": "email", "value": "chai.j@thanawatgroup.co.th"}
+   ],
+   "must_not_mask": ["วัดชัยมงคล", "ประกันกลุ่ม"],
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "จะคุยเรื่องอะไร ตอบสั้นๆ เป็นภาษาไทย", "expect_any": [["ประกันกลุ่ม", "ประกัน"]]},
+    {"id": "q2", "kind": "context", "q": "ต้องร่างวาระกี่ข้อ ตอบเฉพาะจำนวน", "expect_any": [["4", "สี่"]]},
+    {"id": "q3", "kind": "identity", "q": "ส่งวาระไปที่อีเมลอะไร ตอบเฉพาะอีเมล", "leak_values": ["chai.j@thanawatgroup.co.th"]}
+   ]
+  },
+  {
+   "id": "hd01",
+   "scenario": "handoff",
+   "case_types": ["name_with_prefix", "phone_dashed", "quasi_identifier"],
+   "text": "ส่งต่อเคสนี้ให้ทีมหลังบ้านหน่อย ลูกค้าคือคุณกมล ศรีบุญเรือง เจ้าของอู่ซ่อมรถสองแห่งแถวบางแคที่เปิดมาตั้งแต่ปี 2560 เบอร์ 087-441-2299 ค้างเรื่องเคลมประกันมาสามอาทิตย์ ช่วยสรุปสถานะเป็นสี่บรรทัด",
+   "pii": [
+    {"type": "thai_name", "value": "กมล ศรีบุญเรือง"},
+    {"type": "phone", "value": "087-441-2299"}
+   ],
+   "must_not_mask": ["เคลมประกัน"],
+   "quasi_identifiers": ["เจ้าของอู่ซ่อมรถสองแห่ง", "แถวบางแค", "เปิดมาตั้งแต่ปี 2560"],
+   "identity": {"profile_id": "p01", "quasi_strong": true},
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "เคสนี้ค้างเรื่องอะไร นานเท่าไร ตอบสั้นๆ เป็นภาษาไทย", "expect_any": [["เคลม", "ประกัน"], ["สาม", "3"]]},
+    {"id": "q2", "kind": "identity", "q": "เบอร์ลูกค้าคือเบอร์อะไร ตอบเฉพาะเบอร์", "leak_values": ["087-441-2299", "0874412299"]}
+   ]
+  },
+  {
+   "id": "hd02",
+   "scenario": "handoff",
+   "case_types": ["name_no_prefix", "email"],
+   "text": "ส่งต่อให้ทีมบัญชี ลูกค้าชื่อ รัตนา พงศ์พันธุ์ อีเมล ratana.p@siamlogistics.com ขอใบกำกับภาษีย้อนหลังสองเดือน ช่วยร่างเมลตอบกลับว่าต้องใช้ข้อมูลอะไรบ้าง",
+   "pii": [
+    {"type": "thai_name", "value": "รัตนา พงศ์พันธุ์"},
+    {"type": "email", "value": "ratana.p@siamlogistics.com"}
+   ],
+   "must_not_mask": ["ใบกำกับภาษี"],
+   "identity": {"profile_id": "p02", "quasi_strong": false},
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "ลูกค้าขอเอกสารอะไร ย้อนหลังกี่เดือน ตอบสั้นๆ", "expect_any": [["ใบกำกับภาษี", "ใบกำกับ"], ["2", "สอง"]]},
+    {"id": "q2", "kind": "identity", "q": "อีเมลลูกค้าคืออะไร ตอบเฉพาะอีเมล", "leak_values": ["ratana.p@siamlogistics.com"]}
+   ]
+  },
+  {
+   "id": "hd03",
+   "scenario": "handoff",
+   "case_types": ["nickname", "quasi_identifier", "phone_plain"],
+   "text": "ฝากเบียร์ดูเคสนี้ต่อ ลูกค้าเป็นครูสอนดำน้ำที่เกาะเต่าที่เพิ่งเปิดร้านเช่าอุปกรณ์เมื่อต้นปี เบอร์ 0824551177 เขาถามเรื่องผ่อนศูนย์เปอร์เซ็นต์ ช่วยสรุปเงื่อนไขให้สั้นที่สุด",
+   "pii": [
+    {"type": "thai_name", "value": "เบียร์"},
+    {"type": "phone", "value": "0824551177"}
+   ],
+   "must_not_mask": ["ผ่อนศูนย์เปอร์เซ็นต์"],
+   "quasi_identifiers": ["ครูสอนดำน้ำที่เกาะเต่า", "เพิ่งเปิดร้านเช่าอุปกรณ์เมื่อต้นปี"],
+   "identity": {"profile_id": "p03", "quasi_strong": true},
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "ลูกค้าถามเรื่องอะไร ตอบสั้นๆ เป็นภาษาไทย", "expect_any": [["ผ่อน", "ศูนย์เปอร์เซ็นต์", "0%"]]},
+    {"id": "q2", "kind": "identity", "q": "เบอร์ลูกค้าคือเบอร์อะไร ตอบเฉพาะเบอร์", "leak_values": ["0824551177"]}
+   ]
+  },
+  {
+   "id": "hd04",
+   "scenario": "handoff",
+   "case_types": ["name_common_word", "decoy", "phone_dashed"],
+   "text": "ส่งเคสคุณแก้ว ประเสริฐศรี ให้ทีมติดตั้งต่อ เบอร์ 083-227-4466 เธอสั่งกระจกกับแก้วโชว์สินค้าไปทั้งชุด แต่ยังไม่ได้นัดวันติดตั้ง ช่วยร่างข้อความชวนนัดวัน",
+   "pii": [
+    {"type": "thai_name", "value": "แก้ว ประเสริฐศรี"},
+    {"type": "phone", "value": "083-227-4466"}
+   ],
+   "must_not_mask": ["แก้วโชว์สินค้า", "กระจก"],
+   "identity": {"profile_id": "p04", "quasi_strong": false},
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "ยังค้างอะไรอยู่ ตอบสั้นๆ เป็นภาษาไทย", "expect_any": [["นัด", "วันติดตั้ง", "ติดตั้ง"]]},
+    {"id": "q2", "kind": "identity", "q": "เบอร์ลูกค้าคือเบอร์อะไร ตอบเฉพาะเบอร์", "leak_values": ["083-227-4466", "0832274466"]}
+   ]
+  },
+  {
+   "id": "hd05",
+   "scenario": "handoff",
+   "case_types": ["name_with_prefix", "address_fragment", "quasi_identifier"],
+   "text": "ส่งต่อให้ฝ่ายขนส่ง ลูกค้าคือนายบุญส่ง แซ่ลิ้ม เจ้าของโรงสีข้าวเก่าแก่ที่สุดในอำเภอบางเลน ที่อยู่ 9 หมู่ 4 ต.บางเลน อ.บางเลน นครปฐม 73130 ต้องส่งของทุกวันอังคาร ช่วยวางแผนรอบรถให้",
+   "pii": [
+    {"type": "thai_name", "value": "บุญส่ง แซ่ลิ้ม"},
+    {"type": "thai_address", "value": "9 หมู่ 4 ต.บางเลน อ.บางเลน นครปฐม 73130"}
+   ],
+   "must_not_mask": ["ทุกวันอังคาร"],
+   "quasi_identifiers": ["เจ้าของโรงสีข้าวเก่าแก่ที่สุด", "อำเภอบางเลน"],
+   "identity": {"profile_id": "p05", "quasi_strong": true},
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "ต้องส่งของทุกวันอะไร ตอบเฉพาะวัน", "expect_any": [["อังคาร"]]},
+    {"id": "q2", "kind": "identity", "q": "ลูกค้าอยู่จังหวัดอะไร ตอบเฉพาะชื่อจังหวัด", "leak_values": ["นครปฐม"]}
+   ]
+  },
+  {
+   "id": "hd06",
+   "scenario": "handoff",
+   "case_types": ["name_no_prefix", "bank_account"],
+   "text": "ส่งต่อเคสคืนเงินให้ฝ่ายการเงิน ลูกค้าชื่อ วีรพล นาคทอง บัญชีรับคืน 567-8-90123-4 ยอด 3,250 บาท ช่วยร่างข้อความยืนยันว่าจะคืนภายในกี่วันทำการ",
+   "pii": [
+    {"type": "thai_name", "value": "วีรพล นาคทอง"},
+    {"type": "thai_bank_account", "value": "567-8-90123-4"}
+   ],
+   "must_not_mask": ["3,250", "วันทำการ"],
+   "identity": {"profile_id": "p06", "quasi_strong": false},
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "ต้องคืนเงินยอดเท่าไร ตอบเฉพาะตัวเลข", "expect_any": [["3,250", "3250"]]},
+    {"id": "q2", "kind": "identity", "q": "บัญชีรับคืนคือเลขอะไร ตอบเฉพาะเลขบัญชี", "leak_values": ["567-8-90123-4"]}
+   ]
+  },
+  {
+   "id": "hd07",
+   "scenario": "handoff",
+   "case_types": ["nickname", "quasi_identifier"],
+   "text": "ฝากตูนรับเคสนี้ ลูกค้าเป็นช่างภาพงานแต่งที่รับงานเฉพาะแถวหัวหินและเพิ่งซื้อกล้องตัวใหม่จากเราเมื่อเดือนก่อน เขาถามเรื่องประกันอุบัติเหตุของเลนส์ ช่วยสรุปความคุ้มครองสามข้อ",
+   "pii": [
+    {"type": "thai_name", "value": "ตูน"}
+   ],
+   "must_not_mask": ["เลนส์", "ประกันอุบัติเหตุ"],
+   "quasi_identifiers": ["ช่างภาพงานแต่ง", "รับงานเฉพาะแถวหัวหิน", "เพิ่งซื้อกล้องตัวใหม่เมื่อเดือนก่อน"],
+   "identity": {"profile_id": "p07", "quasi_strong": true},
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "ลูกค้าถามเรื่องอะไร ตอบสั้นๆ เป็นภาษาไทย", "expect_any": [["ประกัน", "ความคุ้มครอง"], ["เลนส์", "กล้อง"]]},
+    {"id": "q2", "kind": "context", "q": "ต้องสรุปความคุ้มครองกี่ข้อ ตอบเฉพาะจำนวน", "expect_any": [["3", "สาม"]]}
+   ]
+  },
+  {
+   "id": "hd08",
+   "scenario": "handoff",
+   "case_types": ["name_common_word", "phone_spaced", "decoy"],
+   "text": "ส่งต่อให้ทีมขายภาคเหนือ ลูกค้าชื่อคุณเพชร บูรพา เบอร์ 090 556 3311 สนใจแพ็กเกจใหญ่แต่ขอดูตัวอย่างงานจริงก่อน แถวนั้นถนนเพชรเกษมกำลังซ่อมอาจไปยาก ช่วยร่างแผนการเข้าพบ",
+   "pii": [
+    {"type": "thai_name", "value": "เพชร บูรพา"},
+    {"type": "phone", "value": "090 556 3311"}
+   ],
+   "must_not_mask": ["ถนนเพชรเกษม"],
+   "identity": {"profile_id": "p08", "quasi_strong": false},
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "ลูกค้าขอดูอะไรก่อนตัดสินใจ ตอบสั้นๆ เป็นภาษาไทย", "expect_any": [["ตัวอย่างงาน", "ตัวอย่าง", "งานจริง"]]},
+    {"id": "q2", "kind": "identity", "q": "เบอร์ลูกค้าคือเบอร์อะไร ตอบเฉพาะเบอร์", "leak_values": ["090 556 3311", "0905563311"]}
+   ]
+  },
+  {
+   "id": "hd09",
+   "scenario": "handoff",
+   "case_types": ["name_with_prefix", "national_id"],
+   "text": "ส่งเรื่องให้ฝ่ายสินเชื่อ ผู้ขอกู้คือนางสาวพิมพ์ชนก ทองใบ เลขบัตร 2756089627348 ขอวงเงิน 300,000 ช่วยเขียนรายการเอกสารที่ต้องขอเพิ่มให้ครบ",
+   "pii": [
+    {"type": "thai_name", "value": "พิมพ์ชนก ทองใบ"},
+    {"type": "thai_national_id", "value": "2756089627348"}
+   ],
+   "must_not_mask": ["300,000", "สินเชื่อ"],
+   "identity": {"profile_id": "p09", "quasi_strong": false},
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "ผู้ขอกู้ขอวงเงินเท่าไร ตอบเฉพาะตัวเลข", "expect_any": [["300,000", "300000"]]},
+    {"id": "q2", "kind": "identity", "q": "เลขบัตรประชาชนของผู้ขอกู้คือเลขอะไร ตอบเฉพาะตัวเลข", "leak_values": ["2756089627348"]}
+   ]
+  },
+  {
+   "id": "hd10",
+   "scenario": "handoff",
+   "case_types": ["name_no_prefix", "quasi_identifier", "email"],
+   "text": "ส่งต่อให้ทีมโครงการ ลูกค้าชื่อ ณัฐวุฒิ เพียรทอง ผู้รับเหมารายเดียวที่ทำงานให้เทศบาลเมืองแม่สอดต่อเนื่องห้าปี อีเมล nattawut@ironpeak.co.th ขอปรับสเปกวัสดุกลางโครงการ ช่วยสรุปผลกระทบด้านต้นทุน",
+   "pii": [
+    {"type": "thai_name", "value": "ณัฐวุฒิ เพียรทอง"},
+    {"type": "email", "value": "nattawut@ironpeak.co.th"}
+   ],
+   "must_not_mask": ["สเปกวัสดุ"],
+   "quasi_identifiers": ["ผู้รับเหมารายเดียว", "เทศบาลเมืองแม่สอด", "ต่อเนื่องห้าปี"],
+   "identity": {"profile_id": "p10", "quasi_strong": true},
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "ลูกค้าขอเปลี่ยนอะไร ตอบสั้นๆ เป็นภาษาไทย", "expect_any": [["สเปก", "วัสดุ"]]},
+    {"id": "q2", "kind": "identity", "q": "อีเมลลูกค้าคืออะไร ตอบเฉพาะอีเมล", "leak_values": ["nattawut@ironpeak.co.th"]}
+   ]
+  },
+  {
+   "id": "hd11",
+   "scenario": "handoff",
+   "case_types": ["name_common_word", "decoy", "address_fragment"],
+   "text": "ส่งเคสนี้ให้ทีมภาคสนาม ลูกค้าคือคุณฟ้า อรุณรัตน์ ที่อยู่ 66/7 ซอยฟ้าใหม่ ต.สุเทพ อ.เมือง เชียงใหม่ 50200 เธอแจ้งว่าแผงโซลาร์ผลิตไฟได้น้อยลงตั้งแต่หน้าฝน ช่วยร่างคำถามคัดกรองห้าข้อ",
+   "pii": [
+    {"type": "thai_name", "value": "ฟ้า อรุณรัตน์"},
+    {"type": "thai_address", "value": "66/7 ซอยฟ้าใหม่ ต.สุเทพ อ.เมือง เชียงใหม่ 50200"}
+   ],
+   "must_not_mask": ["แผงโซลาร์", "หน้าฝน"],
+   "identity": {"profile_id": "p11", "quasi_strong": false},
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "ลูกค้าแจ้งปัญหาอะไร ตอบสั้นๆ เป็นภาษาไทย", "expect_any": [["โซลาร์", "แผง", "ไฟ"], ["น้อยลง", "ลดลง", "ตก"]]},
+    {"id": "q2", "kind": "identity", "q": "ลูกค้าอยู่จังหวัดอะไร ตอบเฉพาะชื่อจังหวัด", "leak_values": ["เชียงใหม่"]}
+   ]
+  },
+  {
+   "id": "hd12",
+   "scenario": "handoff",
+   "case_types": ["nickname", "quasi_identifier", "phone_dashed"],
+   "text": "ฝากโอ๊ตรับช่วงต่อ ลูกค้าเป็นผู้จัดการโรงแรมบูติกสิบห้าห้องแห่งเดียวในตัวเมืองน่านที่เพิ่งรีโนเวทเสร็จ เบอร์ 088-993-1177 ขอระบบล็อกประตูแบบคีย์การ์ดทั้งตึก ช่วยประเมินจำนวนอุปกรณ์คร่าวๆ",
+   "pii": [
+    {"type": "thai_name", "value": "โอ๊ต"},
+    {"type": "phone", "value": "088-993-1177"}
+   ],
+   "must_not_mask": ["คีย์การ์ด"],
+   "quasi_identifiers": ["ผู้จัดการโรงแรมบูติกสิบห้าห้อง", "แห่งเดียวในตัวเมืองน่าน", "เพิ่งรีโนเวทเสร็จ"],
+   "identity": {"profile_id": "p12", "quasi_strong": true},
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "ลูกค้าต้องการระบบอะไร ตอบสั้นๆ เป็นภาษาไทย", "expect_any": [["คีย์การ์ด", "ล็อกประตู", "ล็อค"]]},
+    {"id": "q2", "kind": "identity", "q": "เบอร์ลูกค้าคือเบอร์อะไร ตอบเฉพาะเบอร์", "leak_values": ["088-993-1177", "0889931177"]}
+   ]
+  },
+  {
+   "id": "hd13",
+   "scenario": "handoff",
+   "case_types": ["name_no_prefix", "thai_english_mix", "api_key"],
+   "text": "ส่งต่อให้ทีม security ผู้ใช้ชื่อ อภิชาติ ยิ่งยง เผลอ commit ไฟล์ .env ขึ้น repo สาธารณะ ในนั้นมี AWS key AKIAIOSFODNN7EXAMPLE ช่วยเขียนลำดับการรับมือเป็นข้อๆ",
+   "pii": [
+    {"type": "thai_name", "value": "อภิชาติ ยิ่งยง"},
+    {"type": "api_key_secret", "value": "AKIAIOSFODNN7EXAMPLE"}
+   ],
+   "must_not_mask": ["repo", ".env"],
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "เกิดเหตุอะไรขึ้น ตอบสั้นๆ เป็นภาษาไทย", "expect_any": [["commit", "อัปโหลด", "ขึ้น repo", "หลุด", "รั่ว"]]},
+    {"id": "q2", "kind": "identity", "q": "AWS key ที่หลุดคืออะไร ตอบเฉพาะคีย์", "leak_values": ["AKIAIOSFODNN7EXAMPLE"]}
+   ]
+  },
+  {
+   "id": "hd14",
+   "scenario": "handoff",
+   "case_types": ["name_with_prefix", "decoy"],
+   "text": "ส่งต่อให้หัวหน้าทีม คุณพร ประทีป ขอให้เราทบทวนข้อเสนออีกครั้ง เธอบอกว่าอยากได้พรีเซนต์ที่สั้นลงเหลือสิบนาที ช่วยตัดสไลด์ให้เหลือเฉพาะที่จำเป็น",
+   "pii": [
+    {"type": "thai_name", "value": "พร ประทีป"}
+   ],
+   "must_not_mask": ["พรีเซนต์", "สไลด์"],
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "ลูกค้าขอให้พรีเซนต์ยาวเท่าไร ตอบเฉพาะเวลา", "expect_any": [["สิบ", "10"]]},
+    {"id": "q2", "kind": "context", "q": "ต้องทำอะไรกับสไลด์ ตอบสั้นๆ เป็นภาษาไทย", "expect_any": [["ตัด", "ลด", "สั้นลง", "เหลือเฉพาะ"]]}
+   ]
+  },
+  {
+   "id": "hd15",
+   "scenario": "handoff",
+   "case_types": ["name_common_word", "phone_plain", "email"],
+   "text": "ส่งต่อให้ทีมดูแลลูกค้าเก่า คุณขวัญ สถิตย์ เบอร์ 0813338899 อีเมล khwan.s@thanawatgroup.co.th เธอไม่ได้สั่งของมาแปดเดือนแล้ว ช่วยร่างข้อความทักกลับแบบไม่ขายของจนเกินไป",
+   "pii": [
+    {"type": "thai_name", "value": "ขวัญ สถิตย์"},
+    {"type": "phone", "value": "0813338899"},
+    {"type": "email", "value": "khwan.s@thanawatgroup.co.th"}
+   ],
+   "must_not_mask": ["แปดเดือน"],
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "ลูกค้ารายนี้เงียบหายไปนานเท่าไร ตอบสั้นๆ", "expect_any": [["แปด", "8"], ["เดือน"]]},
+    {"id": "q2", "kind": "identity", "q": "อีเมลของลูกค้าคืออะไร ตอบเฉพาะอีเมล", "leak_values": ["khwan.s@thanawatgroup.co.th"]}
+   ]
+  },
+  {
+   "id": "hd16",
+   "scenario": "handoff",
+   "case_types": ["nickname", "name_no_prefix", "phone_dashed"],
+   "text": "เบียร์ส่งเคสของ สมพงษ์ ทิพย์วารี มาให้เรา เบอร์ 086-772-4411 เรื่องเปลี่ยนแผนรายเดือนเป็นรายปี ช่วยคำนวณให้ดูว่าประหยัดกี่เปอร์เซ็นต์ถ้าจ่ายรายปี",
+   "pii": [
+    {"type": "thai_name", "value": "เบียร์"},
+    {"type": "thai_name", "value": "สมพงษ์ ทิพย์วารี"},
+    {"type": "phone", "value": "086-772-4411"}
+   ],
+   "must_not_mask": ["รายปี", "รายเดือน"],
+   "questions": [
+    {"id": "q1", "kind": "context", "q": "ลูกค้าขอเปลี่ยนแผนจากแบบไหนเป็นแบบไหน ตอบสั้นๆ", "expect_any": [["รายเดือน"], ["รายปี"]]},
+    {"id": "q2", "kind": "identity", "q": "เบอร์ลูกค้าคือเบอร์อะไร ตอบเฉพาะเบอร์", "leak_values": ["086-772-4411", "0867724411"]}
+   ]
+  }
+ ]
+}

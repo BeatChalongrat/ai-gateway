@@ -1,0 +1,18 @@
+---OPEN---
+<context_note>
+This conversation is longer than what you can see: {missing} earlier {missing_messages} {missing_are} not included here.
+---HEAD_KEPT---
+You can see its first exchange and the most recent {kept} {kept_messages}.
+---HEAD_DROPPED---
+You can see only the most recent {kept} {kept_messages}, so the earliest message you can see is not where the conversation began.
+---SUMMARY_COMPLETE---
+A summary of the part you cannot see is in <conversation_state> above; it is a summary, not the messages themselves.
+---SUMMARY_PARTIAL---
+A summary of part of it is in <conversation_state> above, but it does not cover the most recent of the messages left out: they could not be summarized this turn.
+---SUMMARY_FAILED---
+No summary of that part is available: it could not be written this turn.
+---SUMMARY_OFF---
+No summary of that part is available.
+---CLOSE---
+If the user asks about that earlier part — what they wrote first, what was said at the start, or anything from before the messages you can see — answer from the summary and say that it comes from a summary. If the summary does not have it, say plainly that you can no longer see that part of the conversation and ask them to paste it. Never present a message you can see as the first one, or as part of that earlier conversation, unless it is. For anything else, answer normally and do not mention this note.
+</context_note>

@@ -1,0 +1,640 @@
+# Web Chat dev stack — runs alongside the existing gateway-api
+# compose without colliding on ports or volumes.
+#
+# Port plan:
+#   chat-edge-api  → host 4000 → container 4000
+#   postgres       → host 5433 → container 5432   (gateway pg owns 5432)
+#   redis          → host 6380 → container 6379   (gateway redis owns 6379)
+#
+# The existing ``docker-compose.yml`` provides ``gateway-api`` on
+# host port 8080 (in-network DNS: ``backend:8080``). When the two
+# stacks need to talk, run them on the same network OR set
+# ``GATEWAY_API_URL=http://host.docker.internal:8080/api/v1`` for
+# cross-stack calls during dev. Production uses a shared network.
+#
+# ── DO NOT MERGE THIS FILE WITH docker-compose.yml ──────────────────
+# This is a SELF-CONTAINED SHAPE, not an overlay. The base file defines
+# its own chat-edge-api behind ``profiles: ["desktop"]``; merging the two
+# collapses both definitions into one profile-gated service, compose
+# drops it (no active profile), and validation fails with
+#   service "web-chat" depends on undefined service "chat-edge-api"
+# Run this stack via ``make webchat-up`` (or
+# ``docker compose -p ai-gateway -f docker-compose.webchat.yml …``).
+# ``make compose-check`` validates every supported combination; the full
+# list lives in README.md → "Deployment shapes".
+
+services:
+  chat-edge-api:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 1g
+    mem_reservation: 128m
+    oom_score_adj: -700
+    build:
+      context: ./services/chat-edge-api
+      dockerfile: Dockerfile
+      # FIX126 O6: stamped as org.opencontainers.image.revision/.created.
+      # `REVISION=$(git rev-parse --short HEAD) docker compose ... build`,
+      # or scripts/build-images.sh (clean git-archive build) for releases.
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    container_name: ai-gateway-chat-edge-api
+    restart: unless-stopped
+    # FIX131 E2 — a stop (every deploy, every autoheal restart) drains: new
+    # turns get 503 SERVER_DRAINING (the page re-sends by itself), the turns
+    # in flight get CHAT_EDGE_DRAIN_TIMEOUT to finish, the rest end as
+    # interrupted (text kept) within CHAT_EDGE_DRAIN_GRACE, then the process
+    # exits. Docker's default 10 s would SIGKILL in the middle of that; this
+    # must stay above drain + grace + ~15 s (HTTP close, ledger flush).
+    stop_grace_period: 120s
+    ports:
+      - "127.0.0.1:24000:4000" # FIX133 A4 — 4000 is Caddy's (https, base file service `edge`)
+    environment:
+      # FIX131 E2 — see stop_grace_period above.
+      - CHAT_EDGE_DRAIN_TIMEOUT=${CHAT_EDGE_DRAIN_TIMEOUT:-90s}
+      - CHAT_EDGE_DRAIN_GRACE=${CHAT_EDGE_DRAIN_GRACE:-10s}
+      # FIX131 E1 — streaming rows no process owns (a crash, a kill) are
+      # settled as interrupted by a sweep at boot and every interval; a row
+      # is only touched when no run lease (redis-webchat) exists for it.
+      - INTERRUPTED_TURN_SWEEP_INTERVAL=${INTERRUPTED_TURN_SWEEP_INTERVAL:-60s}
+      - INTERRUPTED_TURN_MIN_AGE=${INTERRUPTED_TURN_MIN_AGE:-2m}
+      # The three WEBCHAT_* secrets come from .env (gitignored). The defaults
+      # are the published dev values: fine for a fresh clone whose ports are
+      # loopback-only, never for a machine that holds real conversations.
+      # They go into URLs unescaped, so generate them as hex
+      # (`openssl rand -hex 24`). POSTGRES_PASSWORD below only applies when
+      # the volume is first created — on an existing volume rotate with
+      # ALTER ROLE first, then change .env, then recreate.
+      - DATABASE_URL=postgres://chatedge:${WEBCHAT_POSTGRES_PASSWORD:-chatedge_pass}@postgres-webchat:5432/sran_ai?sslmode=disable
+      - REDIS_URL=redis://:${WEBCHAT_REDIS_PASSWORD:-}@redis-webchat:6379/1
+      # FIX134 D1 — the retired /auth endpoints' 410 reply names the portal (https since FIX133).
+      - PORTAL_PUBLIC_URL=${PORTAL_PUBLIC_URL:-https://localhost:3001}
+      # Existing gateway-api runs on host port 8080; route via
+      # host.docker.internal so chat-edge can reach it across the
+      # two compose stacks. ``extra_hosts`` below makes the alias
+      # work on Linux too.
+      # FIX133 B — the gateway by its compose-network name: host port 8080 is
+      # Caddy's https listener now (found live: every chat-edge call through
+      # host.docker.internal:8080 got "HTTP request to an HTTPS server").
+      - GATEWAY_API_URL=${GATEWAY_API_URL:-http://gateway:8080/v1}
+      - GATEWAY_API_KEY=${GATEWAY_API_KEY:-}
+      # FIX41 — the run ledger (docs/STREAM_CONTRACT.md §8).
+      #
+      # TTL: how long a FINISHED generation stays resumable. Ten minutes,
+      # the same window OpenAI keeps for a background run — long enough
+      # for a refresh, a tunnel or a laptop lid, short enough that this
+      # stays a window and not a store.
+      #
+      # MAX_EVENTS: the cap on ONE run's frames. ~177 bytes each
+      # (measured by FIX41's E1 ledger-backends probe),
+      # so 8000 is about 1.4 MB for a single runaway generation. Past the
+      # cap the OLDEST frames are dropped and a client whose cursor points
+      # into the dropped region is told 409 RESUME_TOO_OLD — never handed
+      # a truncated answer as if it were whole.
+      #
+      # The durable half lives in redis-webchat (a background pipeline, not
+      # a write per frame: that was measured at 325 ms per turn against a
+      # 15 ms budget). Redis being unreachable is not fatal — the ledger
+      # degrades to in-memory only, which means no resume across a restart.
+      - STREAM_LEDGER_TTL_SECONDS=${STREAM_LEDGER_TTL_SECONDS:-600}
+      - STREAM_LEDGER_MAX_EVENTS=${STREAM_LEDGER_MAX_EVENTS:-8000}
+      # Proves X-User-ID to the gateway so rate limits AND credit
+      # billing apply to the actual end user. MUST match the backend's
+      # INTERNAL_SERVICE_SECRET. Empty -> header not sent (shared-key
+      # semantics).
+      - INTERNAL_SERVICE_SECRET=${INTERNAL_SERVICE_SECRET:-}
+      # FIX16 — cloud scheduled tasks (the always-on unattended firing loop).
+      # FIX51 Part 2.1 (W5-7): ON by default — the revocation+balance gate
+      # this loop refuses to start without (/internal/scheduled-run/authorize)
+      # is verified live, and main.go still fails CLOSED if the authorize URL
+      # is ever emptied. Set CLOUD_SCHEDULER_ENABLED=false to turn it off. The
+      # authorize URL is the BACKEND's /internal/scheduled-run/authorize
+      # (revocation + balance gate); host.docker.internal:8081 is the backend's
+      # host port from this stack. The 1-hour per-task floor is enforced in the
+      # store; CLOUD_SCHEDULER_INTERVAL only bounds how often it scans.
+      - CLOUD_SCHEDULER_ENABLED=${CLOUD_SCHEDULER_ENABLED:-true}
+      - CLOUD_TASK_AUTHORIZE_URL=${CLOUD_TASK_AUTHORIZE_URL:-http://host.docker.internal:8081}
+      - CLOUD_SCHEDULER_INTERVAL=${CLOUD_SCHEDULER_INTERVAL:-60s}
+      # Bug 3: read the ONE .env value (same var + dev default as the backend
+      # and base chat-edge) so signer and verifier never diverge. Hardcoding
+      # the literal here re-introduced FIX 1's dormancy the moment
+      # SERVICE_JWT_SECRET is set/rotated in .env (backend takes the new value,
+      # this stayed pinned -> mismatch -> silent fallback).
+      - SERVICE_JWT_SECRET=${SERVICE_JWT_SECRET:-dev-service-jwt-secret-change-in-prod}
+      - USER_JWT_SECRET=${USER_JWT_SECRET:-dev-user-jwt-secret-change-in-prod}
+      - CSRF_SECRET=${CSRF_SECRET:-dev-csrf-secret-change-in-prod}
+      # Portal-JWT secret — MUST match the FastAPI backend's
+      # ``portal_jwt_secret``. Tokens minted by the Portal verify here.
+      - PORTAL_JWT_SECRET=${PORTAL_JWT_SECRET:-dev-stable-portal-key-change-in-prod}
+      - PORT=4000
+      # FIX133 B — production mode: APP_ENV=production + COOKIE_SECURE=true in
+      # .env turn Validate() on (real secrets or no boot); CHAT_EDGE_DEV empty
+      # = JSON logs.
+      - CHAT_EDGE_DEV=${CHAT_EDGE_DEV-1}
+      # FIX133 E6a — knowledge-base passages stay with self-hosted models.
+      - KB_EXTERNAL_MODELS=${KB_EXTERNAL_MODELS:-deny}
+      - KB_ALLOWED_PROVIDERS=${KB_ALLOWED_PROVIDERS:-sranai}
+      - APP_ENV=${APP_ENV:-development}
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
+      - CHAT_EDGE_ADMIN_API_KEY=${CHAT_EDGE_ADMIN_API_KEY:-dev-chat-edge-admin-key-change-in-prod}
+      - CORS_ALLOW_ORIGINS=${CHAT_CORS_ORIGINS:-https://localhost:3002}
+      - MAX_CONTEXT_MESSAGES=1000
+      # FIX33 A-W2 — auto-compact at a threshold (default ON: 0.85 of the
+      # messages budget triggers a state refresh + a head-preserving trim
+      # down to 0.60). The repo load ceiling is 2000 rows; anything beyond
+      # is counted + marked, never dropped silently (A-W1).
+      - CONTEXT_COMPACT_TRIGGER_RATIO=${CONTEXT_COMPACT_TRIGGER_RATIO:-0.85}
+      - CONTEXT_COMPACT_TARGET_RATIO=${CONTEXT_COMPACT_TARGET_RATIO:-0.60}
+      # FIX102 — the model that writes compaction summaries. Empty = the
+      # conversation's own chat model; when set, the chat model is the
+      # fallback whenever the summariser produces no summary.
+      - CONTEXT_SUMMARY_MODEL=${CONTEXT_SUMMARY_MODEL:-}
+      # (FIX130: TEMPORARY_CHAT_READS_MEMORY is retired — memory-off and
+      # temporary chats never read memory. Not passed any more.)
+      # Blob storage — default ``local`` writes under ./data/uploads
+      # inside the container. Set STORAGE_BACKEND=s3 to route uploads
+      # through the bundled MinIO service below (env vars wire in
+      # automatically from .env or shell exports).
+      - STORAGE_BACKEND=${STORAGE_BACKEND:-local}
+      # FIX127/128 A — uploads never attached to a sent message expire after
+      # UNATTACHED_FILE_TTL. The mode defaults to dry_run (count + one audit
+      # summary when the numbers change, delete nothing); a deployment that
+      # has read its dry-run report sets UNATTACHED_FILE_SWEEP_MODE=delete in .env.
+      - UNATTACHED_FILE_SWEEP_MODE=${UNATTACHED_FILE_SWEEP_MODE:-dry_run}
+      - UNATTACHED_FILE_TTL=${UNATTACHED_FILE_TTL:-48h}
+      - S3_BUCKET=${S3_BUCKET:-sran-chat-files}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT=${S3_ENDPOINT:-}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-}
+      - S3_FORCE_PATH_STYLE=${S3_FORCE_PATH_STYLE:-true}
+      # FIX132 B — the knowledge base (docs/ops/knowledge-base.md). Its models
+      # run in kb-models below, on this machine: no document or question
+      # text leaves the host (the URL must be a compose service / loopback /
+      # RFC 1918 address; anything else is refused). chat-edge does NOT
+      # depend on kb-models: without it chat works and the knowledge base
+      # reports models_unavailable. Defaults measured on the FIX132 eval set.
+      - KB_MODELS_URL=${KB_MODELS_URL:-http://kb-models:8090}
+      - KB_INDEX_WORKERS=${KB_INDEX_WORKERS:-2}
+      - KB_CHUNK_SIZE=${KB_CHUNK_SIZE:-1000}
+      - KB_CHUNK_OVERLAP=${KB_CHUNK_OVERLAP:-150}
+      - KB_SPARSE_WEIGHT=${KB_SPARSE_WEIGHT:-0.3}
+      - KB_CANDIDATES=${KB_CANDIDATES:-50}
+      - KB_MIN_SCORE=${KB_MIN_SCORE:-0.40}
+      - KB_TOP_K=${KB_TOP_K:-20}
+      - KB_CONTEXT_MAX_CHARS=${KB_CONTEXT_MAX_CHARS:-24000}
+      - KB_RERANK_ENABLED=${KB_RERANK_ENABLED:-false}
+      - KB_RERANK_CANDIDATES=${KB_RERANK_CANDIDATES:-40}
+      - KB_RERANK_BUDGET_MS=${KB_RERANK_BUDGET_MS:-4000}
+      - KB_RERANK_FLOOR=${KB_RERANK_FLOOR:-0.01}
+      # Phase B — image-generation tool. The gateway image model the
+      # generate_image tool calls (gpt-image-1 is OpenAI's current image model).
+      - IMAGE_GEN_MODEL=${IMAGE_GEN_MODEL:-gpt-image-1}
+      - CHAT_EDGE_IMAGE_TIMEOUT_SECONDS=${CHAT_EDGE_IMAGE_TIMEOUT_SECONDS:-180}
+      # ── Code-interpreter sandbox — ON BY DEFAULT on this stack ──────────
+      # Every python path chat-edge shells out to (text extraction from
+      # PDF/DOCX/XLSX, the Excel/Doc/Pptx plan executors, the inspectors and
+      # validators, version compare, vision image resize, run_python) is
+      # fail-closed: with no sandbox the services return Err*SandboxUnavailable
+      # rather than running model-influenced python inside this
+      # secret-bearing process. Leaving SANDBOX_ENABLED off therefore does
+      # not "degrade gracefully" — it turns document reading and every
+      # Office plan card into an error. So the stack ships it ON.
+      #
+      # Values below are IDENTICAL to docker-compose.sandbox.yml (which stays
+      # for the base/desktop stack + `make sandbox-up`); this file just makes
+      # them the default for the webchat stack instead of an opt-in overlay.
+      #
+      # Opt out with SANDBOX_ENABLED=0 in the environment — but read the
+      # paragraph above first; the document features go with it.
+      #
+      # PREREQUISITE: the per-run image must exist on the daemon, else
+      # chat-edge refuses to start (fail-loud, cmd/server/main.go). Use
+      # `make webchat-up`, which builds it before bringing the stack up:
+      #   docker build -f services/chat-edge-api/sandbox/Dockerfile.sandbox \
+      #     -t ai-gateway-sandbox:latest services/chat-edge-api
+      - SANDBOX_ENABLED=${SANDBOX_ENABLED:-1}
+      - SANDBOX_IMAGE=${SANDBOX_IMAGE:-ai-gateway-sandbox:latest}
+      # Path INSIDE the chat-edge container where the docker CLI reads the
+      # seccomp profile (the CLI reads it and ships JSON to the daemon).
+      - SANDBOX_SECCOMP_PATH=/sandbox/seccomp.json
+      # ── HOST-vs-CONTAINER PATH — READ THIS (subtle, easy to invert) ──────
+      # chat-edge is ITSELF a container, but the per-run sandbox is launched
+      # by the HOST docker daemon. So there are TWO distinct paths:
+      #   SANDBOX_WORKDIR      = the IN-CONTAINER staging root (the bind mount
+      #                          target below) where chat-edge writes per-run
+      #                          in/out dirs.
+      #   SANDBOX_HOST_WORKDIR = the SAME dir AS THE DAEMON SEES IT — the HOST
+      #                          side of that bind, used to build the
+      #                          `docker run -v <host>:/job/out` source.
+      # Setting HOST_WORKDIR to the in-container path makes the daemon -v a
+      # path that exists only inside chat-edge → root-owned empty dir on the
+      # host → uid-65534 can't write __meta.json → every run 503s.
+      - SANDBOX_WORKDIR=/sandbox-runs
+      - SANDBOX_HOST_WORKDIR=${SANDBOX_HOST_DIR:-${PWD}/data/sandbox-runs}
+      # FIX17 §4 — DEVELOPMENT MODE of the sandbox (deliberate, not an
+      # exception): SANDBOX_RUNTIME is unset, so per-run containers use the
+      # daemon's default runtime (runc) with the STANDARD container boundary
+      # — still no network, non-root (65534), all capabilities dropped,
+      # seccomp, read-only rootfs, resource caps. What it is NOT is a
+      # user-space kernel: a kernel bug is a host escape. Production sets
+      # SANDBOX_RUNTIME=runsc (docker-compose.prod.yml) and chat-edge refuses
+      # to boot if gVisor is not actually in effect. The boot log says which
+      # mode you are in: `requested_runtime=runc boundary_in_effect=standard`
+      # (dev) vs `requested_runtime=runsc boundary_in_effect=gvisor` (prod).
+      # See docs/DEPLOY_SANDBOX.md.
+      - SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-}
+      # Agent Market (docs/agent-market/) — off means absent: no route, no pool.
+      - AGENT_MARKET_ENABLED=${AGENT_MARKET_ENABLED:-false}
+      - AGENT_MARKET_ALLOWED_EMAILS=${AGENT_MARKET_ALLOWED_EMAILS:-}
+      # AM3: break-glass admins, the organisation's domains, the first per-person
+      # budget, and the baht rate the catalog shows costs in (seeds only; the
+      # admins keep the access list and budgets in the database afterwards).
+      - AGENT_MARKET_ADMIN_EMAILS=${AGENT_MARKET_ADMIN_EMAILS:-}
+      - AGENT_MARKET_ORG_DOMAINS=${AGENT_MARKET_ORG_DOMAINS:-}
+      - AGENT_MARKET_USER_BUDGET_CREDITS=${AGENT_MARKET_USER_BUDGET_CREDITS:-3000000}
+      - AGENT_MARKET_THB_PER_USD=${AGENT_MARKET_THB_PER_USD:-35}
+      # AM7: the organisation's mail relay — host, port, TLS mode, username and
+      # sender are set on admin-ui › Agent Market › อีเมล; the password only here.
+      - AGENT_MARKET_SMTP_PASSWORD=${AGENT_MARKET_SMTP_PASSWORD:-}
+      # AM9: "send as me" — an approved message from the person's own mailbox,
+      # sent by chat-edge through the MCP gateway's mail server (never a model,
+      # never the runner). Offered only once the backend has a Google client
+      # (CONNECTOR_OAUTH_GOOGLE_*) and the person connected their mailbox.
+      - AGENT_MARKET_MAIL_GATEWAY_URL=${AGENT_MARKET_MAIL_GATEWAY_URL:-http://mcp-gateway:3200}
+      - AGENT_MARKET_MAIL_GATEWAY_TOKEN=${MCP_INTERNAL_TOKEN:-}
+    # Persist uploaded + AI-generated files across container restarts.
+    # FILE_STORAGE_ROOT defaults to ./data/uploads → /app/data/uploads
+    # (WORKDIR /app); generated images land under conversation-files/.
+    volumes:
+      - chat_edge_uploads:/app/data/uploads
+      # ─────────────────────────────────────────────────────────────────────
+      # DOCKER-SOCKET PRIVILEGE — READ THIS.
+      # Mounting /var/run/docker.sock gives chat-edge the ability to control
+      # the Docker daemon = effectively host root. That is a real privilege
+      # increase. It is acceptable ONLY because the docker `run` argv is built
+      # entirely by trusted Go (internal/sandbox) from server constants — NO
+      # model input ever reaches it; the model only supplies a plan/code FILE
+      # that runs INSIDE the no-privilege sandbox (--network none, seccomp
+      # default-deny, --cap-drop ALL, uid 65534, read-only rootfs).
+      # For a hardened prod posture, replace this socket mount with a minimal
+      # BROKER service that owns the socket and exposes only execute(job);
+      # then a chat-edge RCE still cannot issue arbitrary docker commands.
+      # This is the pragmatic single-host form.
+      # ─────────────────────────────────────────────────────────────────────
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Shared staging dir. MUST be a bind to a real, ABSOLUTE host path so
+      # the per-run in/out dirs chat-edge writes are the SAME inodes the
+      # daemon bind-mounts into the sandbox container. A named volume would
+      # NOT work (the daemon can't -v a path that exists only inside another
+      # container's volume); a RELATIVE path would not resolve for
+      # `docker run -v`. ${PWD} makes the default absolute.
+      - ${SANDBOX_HOST_DIR:-${PWD}/data/sandbox-runs}:/sandbox-runs
+      # Seccomp profile available to the CLI inside chat-edge.
+      - ./services/chat-edge-api/sandbox/seccomp.json:/sandbox/seccomp.json:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres-webchat:
+        condition: service_healthy
+      redis-webchat:
+        condition: service_healthy
+    # FIX126 O2. GET /health at the router root (NOT /api/v1/health) answers
+    # 200 {"status":"ok"}. BusyBox wget ships in the alpine runtime image;
+    # 127.0.0.1 rather than localhost so a ::1-first resolver cannot turn a
+    # healthy IPv4-only listener into "unhealthy". Same cadence as the
+    # base file's chat-edge-api healthcheck.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    # FIX129 A3: the base file's `autoheal` service restarts this container
+    # when the healthcheck above reports "unhealthy" (same daemon, same
+    # label; the two files share the compose project `ai-gateway`).
+    labels:
+      autoheal: "true"
+      # FIX133 A5 — an autoheal restart gets the same drain as a deploy
+      # (CHAT_EDGE_DRAIN_TIMEOUT 90 s + grace 10 s + close).
+      autoheal.stop.timeout: "120"
+
+  # FIX132 B — the knowledge base's models (services/kb-models): bge-m3
+  # (dense 1024-d + sparse keyword weights in one pass), bge-reranker-v2-m3
+  # (loaded only when KB_RERANK_ENABLED) and PyThaiNLP word segmentation, on
+  # CPU. Internal only: NO host port; chat-edge reaches it as
+  # http://kb-models:8090 on the compose network. The weights (pinned
+  # revisions) live in the kb_models volume (= ai-gateway_kb_models), filled
+  # once; HF_HUB_OFFLINE keeps it from ever reaching out again. First start
+  # loads for ~1–2 minutes (/health "loading"; chat-edge reports
+  # models_loading). Measured on this PC: bf16 is ~2x faster than fp32
+  # (AVX512-BF16), 6 threads; a batch of 16 passages embeds in 13–22 s, a
+  # question in ~0.2 s. docs/ops/knowledge-base.md.
+  kb-models:
+    # memory guard (scripts/ops/live_memory.py): its turn when the Docker VM runs out
+    oom_score_adj: -500
+    build:
+      context: ./services/kb-models
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    image: ai-gateway-kb-models:latest
+    container_name: ai-gateway-kb-models
+    restart: unless-stopped
+    environment:
+      - KB_THREADS=${KB_THREADS:-} # FIX133 A1 — empty = min(6, CPUs / 2) in the image
+      - KB_DTYPE=${KB_DTYPE:-bf16}
+      - KB_RERANK_ENABLED=${KB_RERANK_ENABLED:-false}
+      - HF_HUB_OFFLINE=${KB_MODELS_OFFLINE:-1}
+    volumes:
+      - kb_models:/models
+    deploy:
+      resources:
+        limits:
+          cpus: "6.0"
+          memory: "6g"
+    # Healthcheck: the image's own (GET /health status "ready"; 10 min start
+    # period for a first load).
+
+  postgres-webchat:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 1g
+    mem_reservation: 384m
+    oom_score_adj: -900
+    # pgvector/pgvector:pg16 ships Postgres 16 with the pgvector
+    # extension preinstalled — required by migration 010. Drop-in
+    # replacement for postgres:16-alpine; the existing data volume
+    # works unchanged (same Postgres 16 binary underneath).
+    image: pgvector/pgvector:pg16
+    container_name: ai-gateway-postgres-webchat
+    restart: unless-stopped
+    # FIX129 A1 — same server-level safety nets as the base `postgres`
+    # (docker-compose.yml): the 2026-09-22 incident (NIGHT2) was one
+    # abandoned FOR UPDATE transaction holding a row lock for 34 minutes
+    # with every timeout at 0. A session idle in an open transaction for
+    # 60 s is terminated; a statement waiting more than 30 s for a lock
+    # fails (55P03) instead of queueing forever. No statement_timeout here
+    # on purpose (pg_dump / maintenance); chat-edge sets its own per
+    # connection.
+    command: ["postgres", "-c", "idle_in_transaction_session_timeout=120000", "-c", "lock_timeout=30000"]
+    ports:
+      - "127.0.0.1:5433:5432"
+    environment:
+      POSTGRES_DB: sran_ai
+      POSTGRES_USER: chatedge
+      POSTGRES_PASSWORD: ${WEBCHAT_POSTGRES_PASSWORD:-chatedge_pass}
+    volumes:
+      - pgdata-webchat:/var/lib/postgresql/data
+      # Mount migrations into the postgres initdb hook directory so
+      # they run automatically the first time the volume is created.
+      # Re-creating the schema requires ``docker compose -f
+      # docker-compose.webchat.yml down -v`` to wipe the volume.
+      - ./services/chat-edge-api/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatedge -d sran_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis-webchat:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 384m
+    mem_reservation: 64m
+    oom_score_adj: -900
+    image: redis:7-alpine
+    container_name: ai-gateway-redis-webchat
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6380:6379"
+    # Empty password = no auth (the fresh-clone default). redis-cli reads
+    # REDISCLI_AUTH; the grep matters because `redis-cli ping` exits 0 on a
+    # NOAUTH reply, so a bare ping reports a locked-out server as healthy.
+    command: ["redis-server", "--requirepass", "${WEBCHAT_REDIS_PASSWORD:-}"]
+    environment:
+      REDISCLI_AUTH: ${WEBCHAT_REDIS_PASSWORD:-}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # MinIO — S3-compatible object storage for local dev. Optional, and
+  # behind the ``minio`` profile so a plain ``up`` does not start it:
+  # chat-edge defaults to STORAGE_BACKEND=local and never talks to it.
+  # To use it: set STORAGE_BACKEND=s3 (+ the S3_* values) and run
+  #   docker compose -p ai-gateway -f docker-compose.webchat.yml --profile minio up -d
+  #
+  # The default credentials below are intentionally weak (``minioadmin
+  # / minioadmin123``) — set WEBCHAT_MINIO_ROOT_USER / _PASSWORD in .env
+  # on any machine that keeps real files. The init container that
+  # creates the bucket reads the same two values.
+  minio:
+    profiles: ["minio"]
+    image: minio/minio:latest
+    container_name: ai-gateway-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "127.0.0.1:9000:9000"   # S3 API
+      - "127.0.0.1:9001:9001"   # Web console (login at http://localhost:9001)
+    environment:
+      MINIO_ROOT_USER: ${WEBCHAT_MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${WEBCHAT_MINIO_ROOT_PASSWORD:-minioadmin123}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot init container that creates the bucket + sets a download
+  # anonymous policy so presigned URLs aren't strictly required for
+  # development. Exits after running so it's safe to leave in the
+  # compose graph; subsequent ``up`` invocations just re-run it
+  # quickly and the bucket-create command is a no-op once it exists.
+  minio-init:
+    profiles: ["minio"]
+    image: minio/mc:latest
+    container_name: ai-gateway-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        mc alias set local http://minio:9000 ${WEBCHAT_MINIO_ROOT_USER:-minioadmin} ${WEBCHAT_MINIO_ROOT_PASSWORD:-minioadmin123}
+        mc mb --ignore-existing local/${S3_BUCKET:-sran-chat-files}
+        mc anonymous set download local/${S3_BUCKET:-sran-chat-files}
+        echo "MinIO bucket ready: ${S3_BUCKET:-sran-chat-files}"
+
+  # Web Chat front-end — Next.js standalone build. The browser talks
+  # to chat-edge-api on the host (port 4000) so CORS + cookies work
+  # the same dev vs prod; build-time env var bakes in the API base.
+  #
+  # NEXT_PUBLIC_* is INLINED BY THE BUNDLER AT BUILD TIME. Setting it only
+  # under `environment:` had no effect on the browser bundle — the build ran
+  # without it and baked in lib/api.ts's localhost fallback, so any
+  # non-localhost deploy silently talked to the wrong host. It is now passed
+  # as a build arg (authoritative) AND kept as runtime env (server-side
+  # rendering + parity). Changing WEB_CHAT_API_URL requires a REBUILD of this
+  # image, not just a restart.
+  web-chat:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 768m
+    mem_reservation: 128m
+    oom_score_adj: -600
+    build:
+      context: ./apps/web-chat
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${WEB_CHAT_API_URL:-https://localhost:4000/api/v1}
+        # SSO Phase 1 (D1): the auth endpoints web-chat's browser bundle
+        # talks to. Same build-time inlining rule as NEXT_PUBLIC_API_URL
+        # — without these, non-localhost images bake in the localhost
+        # fallbacks from lib/auth.ts and session lookup / silent refresh
+        # / login redirect all break. Changing them requires a REBUILD.
+        NEXT_PUBLIC_GATEWAY_URL: ${WEB_CHAT_GATEWAY_URL:-https://localhost:8080}
+        NEXT_PUBLIC_PORTAL_URL: ${WEB_CHAT_PORTAL_URL:-https://localhost:3001}
+        # (FIX20 §6.5: the desktop shell's hosted mode is detected at RUNTIME
+        # from window.sranHost — no NEXT_PUBLIC_HOSTED build arg; one image
+        # serves the browser and the Electron app.)
+        # FIX126 O6: build stamp for the update prompt (/api/version). Empty
+        # = the Dockerfile's default, the epoch second of the build.
+        NEXT_PUBLIC_BUILD_ID: ${NEXT_PUBLIC_BUILD_ID:-}
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    container_name: ai-gateway-web-chat
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:23002:3002" # FIX133 A4 — 3002 is Caddy's (https, base file service `edge`)
+    environment:
+      - NEXT_PUBLIC_API_URL=${WEB_CHAT_API_URL:-https://localhost:4000/api/v1}
+      - NEXT_PUBLIC_GATEWAY_URL=${WEB_CHAT_GATEWAY_URL:-https://localhost:8080}
+      - NEXT_PUBLIC_PORTAL_URL=${WEB_CHAT_PORTAL_URL:-https://localhost:3001}
+      - PORT=3002
+      - AGENT_MARKET_ENABLED=${AGENT_MARKET_ENABLED:-false}
+    depends_on:
+      - chat-edge-api
+    # FIX126 O2. /api/version is a static route handler (no upstream calls),
+    # so this says "the Next server answers", not "chat-edge is up".
+    # BusyBox wget is in node:20-alpine. 127.0.0.1, NOT localhost: the
+    # server binds HOSTNAME=0.0.0.0 (IPv4 only) and in this image localhost
+    # resolves to ::1 first, so `wget http://localhost:3002/…` is refused
+    # (measured on the live container).
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3002/api/version || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    # FIX129 A3: restarted by the base file's `autoheal` when unhealthy.
+    labels:
+      autoheal: "true"
+
+  # FIX129 A5 — real backups (docs/ops/backups.md). Before this there was
+  # no scheduled backup at all and scripts/backup-db.sh covered only the
+  # gateway DB. This service lives in THIS file because this file owns
+  # postgres-webchat and the uploads volume; it reaches the base project's
+  # `postgres` by service name over the shared ai-gateway_default network.
+  #
+  # Default (no command): a loop that checks the wall clock every minute
+  # (FIX131: catches up after the PC slept or the container was down; one
+  # run per slot, retries with backoff, last_success.json / last_failure.json
+  # for ops-watch's "no fresh backup" alert) and at BACKUP_AT (in TZ)
+  # dumps both databases (pg_dump -Fc) + tars the uploads volume into
+  # /backups/<YYYYMMDD_HHMMSS>/, writes manifest.json (sizes, sha256, row
+  # counts of the key tables), restores every dump into a scratch database
+  # on the same server and compares the counts (the DRILL: a backup that
+  # was never restored is a hope, not a backup), prunes directories older
+  # than BACKUP_KEEP_DAYS and notifies (ntfy and/or Resend e-mail — both
+  # optional, failure = high priority, success only if
+  # BACKUP_NOTIFY_SUCCESS=1). Run one now:
+  #   docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm --no-deps backup now
+  # /backups defaults to ../ai-gateway-backups/daily — OUTSIDE the repo
+  # checkout, so a `git clean`, a re-clone or a worktree removal never eats
+  # the backups. Point BACKUP_DIR at another disk on a real deployment.
+  backup:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 2g
+    mem_reservation: 64m
+    oom_score_adj: -300
+    build:
+      context: ./infra/backup
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    image: ai-gateway-backup:latest
+    container_name: ai-gateway-backup
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Bangkok}
+      BACKUP_AT: ${BACKUP_AT:-03:15}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      BACKUP_NOTIFY_SUCCESS: ${BACKUP_NOTIFY_SUCCESS:-0}
+      # Gateway DB (base project's `postgres`).
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-ai_gateway}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      # Chat DB (this file's `postgres-webchat`; db/user are fixed above).
+      WEBCHAT_POSTGRES_HOST: postgres-webchat
+      WEBCHAT_POSTGRES_DB: sran_ai
+      WEBCHAT_POSTGRES_USER: chatedge
+      WEBCHAT_POSTGRES_PASSWORD: ${WEBCHAT_POSTGRES_PASSWORD:-chatedge_pass}
+      # Alerts — all optional. ALERT_NTFY_URL is a full topic URL
+      # (https://ntfy.sh/<topic> or a self-hosted one); the e-mail path needs
+      # RESEND_API_KEY + ALERT_EMAIL_TO (ALERT_EMAIL_FROM defaults to
+      # no-reply@sran.ai). Nothing secret is ever put in a message.
+      ALERT_NTFY_URL: ${ALERT_NTFY_URL:-}
+      # FIX130 — optional ntfy access token (reserved / ACL'd / self-hosted topic).
+      ALERT_NTFY_TOKEN: ${ALERT_NTFY_TOKEN:-}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
+      ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM:-no-reply@sran.ai}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      # FIX131 D4 — empty = the real system; "test" labels [TEST] and sends
+      # only to ALERT_TEST_NTFY_URL. `backup notify …` is always a test fire.
+      ALERT_ENVIRONMENT: ${ALERT_ENVIRONMENT:-}
+      ALERT_TEST_NTFY_URL: ${ALERT_TEST_NTFY_URL:-}
+      # FIX131 B — a backup older than this is "not fresh" (ops-watch pages;
+      # this container then leaves the paging to it). Same value as ops-watch.
+      BACKUP_MAX_AGE_H: ${BACKUP_MAX_AGE_H:-26}
+      # FIX130 E1 — the off-site copy (restic → an S3-compatible bucket; see
+      # docs/ops/backups.md "Off-site copy"). All optional: an empty
+      # repository = "offsite copy: not configured", the local backup runs as
+      # before. The password is the encryption key of the copy — keep it off
+      # this machine as well (password manager), or the copy dies with it.
+      # FIX133 C — a repository can also be a FOLDER this PC syncs elsewhere
+      # (OneDrive / Google Drive / a NAS share): BACKUP_OFFSITE_DIR names the
+      # host folder (mounted at /offsite) and BACKUP_OFFSITE_REPOSITORY=/offsite
+      # points restic at it. Encrypted before it lands there, like a bucket.
+      BACKUP_OFFSITE_REPOSITORY: ${BACKUP_OFFSITE_REPOSITORY:-}
+      BACKUP_OFFSITE_PASSWORD: ${BACKUP_OFFSITE_PASSWORD:-}
+      BACKUP_OFFSITE_ACCESS_KEY_ID: ${BACKUP_OFFSITE_ACCESS_KEY_ID:-}
+      BACKUP_OFFSITE_SECRET_ACCESS_KEY: ${BACKUP_OFFSITE_SECRET_ACCESS_KEY:-}
+      BACKUP_OFFSITE_REGION: ${BACKUP_OFFSITE_REGION:-}
+      BACKUP_OFFSITE_KEEP_DAILY: ${BACKUP_OFFSITE_KEEP_DAILY:-14}
+      BACKUP_OFFSITE_KEEP_WEEKLY: ${BACKUP_OFFSITE_KEEP_WEEKLY:-8}
+      BACKUP_OFFSITE_KEEP_MONTHLY: ${BACKUP_OFFSITE_KEEP_MONTHLY:-12}
+      BACKUP_OFFSITE_CHECK_WEEKDAY: ${BACKUP_OFFSITE_CHECK_WEEKDAY:-7}
+      BACKUP_OFFSITE_CHECK_SUBSET: ${BACKUP_OFFSITE_CHECK_SUBSET:-5%}
+    volumes:
+      - chat_edge_uploads:/uploads:ro
+      - ${BACKUP_DIR:-../ai-gateway-backups/daily}:/backups
+      - ${BACKUP_OFFSITE_DIR:-../ai-gateway-backups/offsite}:/offsite
+    depends_on:
+      postgres-webchat:
+        condition: service_healthy
+
+volumes:
+  pgdata-webchat:
+  minio-data:
+  chat_edge_uploads:
+  # FIX132 B — kb-models' pinned weights (~4.6 GB), filled once.
+  kb_models:

@@ -1,0 +1,2 @@
+Current date and time:
+Treat this as the present moment when answering anything time-relative (today, this year, recent, latest, etc.).

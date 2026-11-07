@@ -1,0 +1,87 @@
+# gitleaks configuration (FIX134 D2). Read together with .gitleaksignore:
+# that file lists fingerprints (commit:file:rule:line) for the commit-range
+# scan the push gate runs; this file allow-lists by PATH and by PATTERN so the
+# directory scan of a checkout (`gitleaks dir .`) is clean too, where those
+# commit-bound fingerprints do not apply. Path regexes start with (?:^|/)
+# because `dir` mode matches the path as given (/repo/backend/…) while `git`
+# mode matches it repo-relative. Every entry says what the "secret"
+# really is. A real secret is never allow-listed here: it is rotated.
+#
+# Verify:  gitleaks dir . --config .gitleaks.toml            → no leaks
+#          gitleaks git . --log-opts="<base>..HEAD" --config .gitleaks.toml
+title = "ai-gateway"
+
+[extend]
+useDefault = true
+
+# ── 1. fixture corpora: synthetic secrets the DLP MUST catch ──────────────────
+[[allowlists]]
+description = "DLP evaluation corpus and the Rust/Python parity fixtures: made-up API keys, tokens, JWTs and PEM blocks that exist so the detectors are measured against them (backend/evals/dlp, dlp-sidecar/tests/parity — the parity builder generates the same values)"
+paths = [
+  '''(?:^|/)backend/evals/dlp/data/''',
+  '''(?:^|/)dlp-sidecar/tests/parity/''',
+]
+
+# ── 2. test files whose fake credentials the tests are about ─────────────────
+[[allowlists]]
+description = "backend unit/integration tests: every flagged value is a made-up sample (sk-test…, abc…1234, svc-test…, a PEM header with a short dummy body, fake reset passwords, request ids, made-up key names) that the test feeds to a detector, a redactor or a key-shape check"
+paths = [
+  '''(?:^|/)backend/tests/test_detectors\.py$''',                 # detector samples (sk-…, xoxb-…, PEM headers)
+  '''(?:^|/)backend/tests/test_new_detectors\.py$''',
+  '''(?:^|/)backend/tests/test_dlp_all_detectors\.py$''',
+  '''(?:^|/)backend/tests/test_dlp_accuracy\.py$''',
+  '''(?:^|/)backend/tests/test_dlp_integration\.py$''',           # incl. a dummy RSA block the pipeline must mask
+  '''(?:^|/)backend/tests/test_dlp_p0_live\.py$''',               # base64 of a fake sk- key (encoding-evasion cases)
+  '''(?:^|/)backend/tests/test_dlp_policy_runtime_privacy\.py$''',
+  '''(?:^|/)backend/tests/test_dlp_detectors/''',                 # per-detector tests (bearer token, private key)
+  '''(?:^|/)backend/tests/test_streaming_dlp\.py$''',             # _PEM_KEY: a dummy block split across stream chunks
+  '''(?:^|/)backend/tests/dlp_parity_runner\.py$''',              # "A"*20 / "a"*36 / a truncated JWT sample
+  '''(?:^|/)backend/tests/test_admin_secure_trace\.py$''',        # "sk-test…" in a trace the admin view must redact
+  '''(?:^|/)backend/tests/test_password_reset\.py$''',            # the new passwords a reset test sets (fake)
+  '''(?:^|/)backend/tests/test_service_jwt_auth\.py$''',          # svc-test… shared secret of the test app
+  '''(?:^|/)backend/tests/test_provider_key_fix85_endpoint_belongs_to_key\.py$''',      # KEY_INHERIT = sk-fix85…
+  '''(?:^|/)backend/tests/test_provider_key_fix85_null_endpoint_is_today\.py$''',       # KEY_1/KEY_2 = sk-fix85…
+  '''(?:^|/)backend/tests/integration/test_internal_media_jobs\.py$''',                 # "secret" = sk-proj…abc: must not reach a job row
+  '''(?:^|/)backend/tests/test_fix129_credit_deduction_instrumentation\.py$''',         # request id "req-fix129-…" (also in .gitleaksignore)
+  '''(?:^|/)backend/tests/test_fix130_alert_redaction\.py$''',                          # deliberately fake JWT + sk-live… (also in .gitleaksignore)
+  '''(?:^|/)backend/tests/test_fix133_idempotency\.py$''',                              # key_a/key_b/"turn-12345678" key shapes (also in .gitleaksignore)
+  '''(?:^|/)backend/test_live_gateway_dlp\.py$''',                # MSG3_CREDS: a fake DATABASE_URL, key and PEM header the live DLP run must mask
+  '''(?:^|/)infra/backup/tests/test_notify\.sh$''',               # fake JWT, sk-live… and re_… keys that must never reach an alert (also in .gitleaksignore)
+  '''(?:^|/)services/chat-edge-api/internal/service/gateway_client_bearer_test\.go$''', # testSvcSecret = "svc-test-…"
+  '''(?:^|/)SranDesktop/src/SranDesktop\.Tests/''',               # the retired WPF shell's test project: [InlineData] samples for the computer-tool credential guard (ghp_…, sk-proj…), a 15-char portal_refresh_token=eyJh… stub cookie, plus untracked TestResults residue on the live box
+]
+
+# ── 3. production source with no key in it ───────────────────────────────────
+[[allowlists]]
+description = "the private-key detector's own docstring enumerates the PEM header lines it matches (-----BEGIN … PRIVATE KEY-----); there is no key body"
+paths = [
+  '''(?:^|/)backend/app/services/dlp/detectors/private_key\.py$''',
+]
+
+# ── 4. patterns that are not secrets, by the captured value ──────────────────
+[[allowlists]]
+description = "non-secret captures: (a) an empty `VAR=` in an example env file — gitleaks then reads the NEXT line's variable name (ANTHROPIC_API_KEY=) as the value; (b) a model id such as qwen3.8-27b-fp8 quoted in an error message; (c) the gVisor release-signing key FINGERPRINT (public) pinned by scripts/install-runsc.sh"
+regexTarget = "secret"
+regexes = [
+  '''^[A-Z][A-Z0-9_]{5,}=?$''',
+  '''^qwen[0-9A-Za-z.\-]+$''',
+  '''^[0-9A-F]{40}$''',
+]
+
+# ── 5. untracked residue of a LIVE checkout (dir mode only; all gitignored) ──
+# A `gitleaks dir` run on the working box also sees files git never tracks.
+# Each is allow-listed by path with its reason; none of them can reach a
+# commit (gitignored), and the commit-range gate scans without this section
+# ever mattering. Only infra/nginx/certs/ holds a tracked file (a placeholder).
+[[allowlists]]
+description = "gitignored files of a live checkout that hold or look like secrets by design"
+paths = [
+  '''(?:^|/)\.env$''',                                   # the secrets file itself (gitignored; every real secret of the stack lives here)
+  '''(?:^|/)\.claude/''',                                # a local editor/assistant settings folder (gitignored, as in .gitignore)
+  '''(?:^|/)perf/''',                                    # perf fixtures: fake provider keys generated by perf/seed_keys.py (gitignored; none exist in the live DB)
+  '''(?:^|/)\.next[^/]*/''',                             # Next.js build artefacts: server-reference-manifest encryption keys (build output, regenerated)
+  '''(?:^|/)infra/(?:caddy|nginx)/certs/''',             # the TLS private keys and certs Caddy/nginx serve (must exist on disk; *.pem gitignored)
+  '''(?:^|/)(?:reports|scripts/probes/[^/]+/results)/''', # probe results, reports and screenshots (gitignored; low-entropy generic hits only)
+  '''_REPORT\.md$''',                                    # report prose ("API key (printed once)" style false positives; *_REPORT.md gitignored)
+  '''(?:^|/)RUNBOOK\.md$''',                             # the same kind of prose in the runbook
+]

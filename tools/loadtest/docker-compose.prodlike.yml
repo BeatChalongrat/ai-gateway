@@ -1,0 +1,51 @@
+# OPT-IN prod-like backend overlay (NOT applied by default).
+#
+# Runs the Python backend with the SAME entrypoint as the production
+# Dockerfile CMD — gunicorn managing 4 UvicornWorker processes, no
+# --reload — instead of the dev override's single hot-reload uvicorn. This
+# is the worker model production uses (4 event loops, 4 independent async
+# DB pools), so a capacity retest reflects prod rather than the single
+# dev worker that saturated its lone async pool at 150 concurrent.
+#
+# It does NOT change application code. The ./backend mount is kept ONLY so
+# the running container reflects the current working tree (incl. the safe
+# async-pool observability metrics added for this retest); production bakes
+# the same code into the image instead.
+#
+# Apply WITH the load-test env overlay (mock provider + trusted secret +
+# raised project/tenant limits, per-user stays 60/min):
+#
+#   INTERNAL_SERVICE_SECRET=<secret> docker compose \
+#     -f docker-compose.yml \
+#     -f tools/loadtest/docker-compose.loadtest.yml \
+#     -f tools/loadtest/docker-compose.prodlike.yml \
+#     up -d backend
+#
+# (NOTE: docker-compose.override.yml is intentionally NOT in the -f chain,
+# so the dev uvicorn --reload command does not apply.)
+#
+# Revert to the normal dev backend:
+#   docker compose -f docker-compose.yml -f docker-compose.override.yml up -d backend
+
+services:
+  backend:
+    # Exact production Dockerfile CMD (migrations then gunicorn 4 workers),
+    # PLUS env-configurable worker recycling (--max-requests / -jitter) as an
+    # INTERIM memory-growth mitigation (NOT a root-cause fix): a worker that
+    # has served GUNICORN_MAX_REQUESTS (+ jitter) is gracefully replaced,
+    # returning its accumulated RSS to the OS. Defaults: 500 / 100. Set
+    # GUNICORN_MAX_REQUESTS=0 to disable (e.g. to observe raw growth).
+    # MUST stay a single line: a folded/indented scalar injects literal
+    # newlines that `sh -c` reads as command separators, dropping the flags.
+    command: ["sh", "-c", "python -m alembic upgrade head && gunicorn app.main:app -w ${GUNICORN_WORKERS:-4} -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8080 --timeout 60 --graceful-timeout 30 --worker-connections 100 --max-requests ${GUNICORN_MAX_REQUESTS:-500} --max-requests-jitter ${GUNICORN_MAX_REQUESTS_JITTER:-100}"]
+    environment:
+      # Per-worker async DB pool tuning for the 250-concurrent target.
+      # 4 workers x (15 + 20) = up to 140 async conns; + sync 4x(5+5)=40
+      # = 180, under Postgres max_connections=250 (see docs budget table).
+      DB_ASYNC_POOL_SIZE: ${DB_ASYNC_POOL_SIZE:-15}
+      DB_ASYNC_MAX_OVERFLOW: ${DB_ASYNC_MAX_OVERFLOW:-20}
+    volumes:
+      # Current working tree (so the async-pool metrics added for this
+      # retest are present). Production bakes code into the image instead.
+      - ./backend:/app
+      - ./docs:/docs:ro

@@ -1,0 +1,81 @@
+{
+ "schema": "web.capture.v1",
+ "fetcher_version": "1.0.0",
+ "requested_url": "http://www.netcore-supply.test/switches/ns-4800p",
+ "started_at": "2026-10-06T11:42:31.012Z",
+ "clock": "UTC",
+ "outcome": "captured",
+ "final_url": "http://www.netcore-supply.test/switches/ns-4800p",
+ "http": {
+  "status": 200,
+  "content_type": "text/html; charset=utf-8",
+  "content_length": 1530,
+  "headers": {
+   "connection": "close",
+   "content-type": "text/html; charset=utf-8",
+   "date": "Tue, 06 Oct 2026 11:42:31 GMT",
+   "transfer-encoding": "chunked"
+  }
+ },
+ "body_sha256": "575cd46d3a3c10e2c1da42e9b690680eb8aa47b9cdcde47eadb534e859dbc61f",
+ "snapshot_sha256": "91d647b583db15327e9fdaee9947243264b37e0d5921416938ccdd288a52065b",
+ "robots": {
+  "url": "http://www.netcore-supply.test/robots.txt",
+  "status": 200,
+  "allowed": true,
+  "rule": "",
+  "group": "*",
+  "sha256": "34f61f3e3fedb0174b3a1ea8da425f6a350747318c9f08d92dde2599d979d06d"
+ },
+ "page_rules": [],
+ "hosts": {
+  "named": "www.netcore-supply.test",
+  "address": "93.184.215.14",
+  "reached": [
+   "www.netcore-supply.test"
+  ],
+  "not_opened": []
+ },
+ "bytes": {
+  "document": 1530,
+  "transfer": 1530,
+  "transfer_capped": false
+ },
+ "page": {
+  "width": 1280,
+  "height": 900,
+  "screenshot_height": 900,
+  "lang": "en",
+  "markup_truncated": false,
+  "text_truncated": false
+ },
+ "counts": {
+  "shown_blocks": 21,
+  "shown_characters": 409,
+  "struck_blocks": 0,
+  "hidden_pieces": 0,
+  "attributes": 0,
+  "comments": 0,
+  "structured": 0,
+  "meta": 1
+ },
+ "files": {
+  "hidden.json": {
+   "sha256": "309cd474c6f1bafca41058183777cd0f5c3faaec720e5038f273b93b8ce7c4cf",
+   "bytes": 200
+  },
+  "page.html": {
+   "sha256": "376c3051998a9cab0c08bfec752d70564d6aa17290ef02db7251c0d20b9003ff",
+   "bytes": 1544
+  },
+  "screenshot.jpg": {
+   "sha256": "4aa0e2e6aea35eccbb1bc6df6ddbd3af7078fb18e3268c9767233fd8e833046c",
+   "bytes": 52034
+  },
+  "text.json": {
+   "sha256": "968ee0150c7eb8824986f9161655138aa89a1610b47c00e177c6fa654cd2b9e1",
+   "bytes": 2617
+  }
+ },
+ "finished_at": "2026-10-06T11:42:31.775Z"
+}

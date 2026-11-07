@@ -1,0 +1,924 @@
+/* CSS imports must come first per spec; PostCSS hoists @tailwind
+   internally so this ordering is the Tailwind-recommended one. */
+@import 'highlight.js/styles/github-dark.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Theme tokens ─────────────────────────────────────────────
+   All visual color decisions live here. Tailwind tokens
+   (bg-base, text-primary, …) point at these via tailwind.config.js,
+   so the same className resolves to dark or light depending on the
+   data-theme attribute on <html>. */
+:root {
+  color-scheme: dark;
+  /* iOS safe-area exposures. */
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+
+  /* === Background layers (default = dark) === */
+  --bg-primary: #212121;
+  --bg-primary-rgb: 33 33 33; /* L1: channel form for <alpha-value> */
+  --bg-sidebar: #171717;
+  --bg-sidebar-rgb: 23 23 23; /* L1: channel form for <alpha-value> */
+  --bg-surface: #2F2F2F;
+  --bg-surface-rgb: 47 47 47; /* L1: channel form for <alpha-value> */
+  --bg-surface-hover: #3A3A3A;
+  --bg-surface-hover-rgb: 58 58 58; /* L1: channel form for <alpha-value> */
+  --bg-overlay: rgba(0, 0, 0, 0.55);
+
+  /* === Text === */
+  --text-primary: #ECECEC;
+  --text-primary-rgb: 236 236 236; /* L1: channel form for <alpha-value> */
+  --text-secondary: #A0A0A0;
+  --text-secondary-rgb: 160 160 160; /* L1: channel form for <alpha-value> */
+  /* WCAG AA — was #6B6B6B (3.0:1 on bg-primary, the app's default
+     small-text colour). #8F8F8F = 4.98:1 on bg-primary while keeping
+     clear separation from --text-secondary (#A0A0A0). */
+  --text-tertiary: #8F8F8F;
+  --text-tertiary-rgb: 143 143 143; /* L1: channel form for <alpha-value> */
+  --text-placeholder: #8E8E8E;
+
+  /* === Borders === */
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-default: rgba(255, 255, 255, 0.12);
+  --border-hover: rgba(255, 255, 255, 0.20);
+
+  /* === Accent — neutralised to text-primary so any straggler usage
+     (anchor links inside .prose-chat, focus outlines, blockquote
+     borders, etc.) reads as the neutral foreground. The only
+     remaining intentionally-coloured element in the app is the
+     OpenAI provider mark on assistant-message avatars, which uses
+     hard-coded emerald hex values, not these tokens. === */
+  --accent: #ECECEC;
+  --accent-rgb: 236 236 236; /* L1: channel form for <alpha-value> */
+  --accent-hover: #FFFFFF;
+  --accent-hover-rgb: 255 255 255; /* L1: channel form for <alpha-value> */
+  --accent-subtle: rgba(236, 236, 236, 0.12);
+
+  /* === User messages === */
+  --user-bubble-bg: #2F2F2F;
+  --user-bubble-bg-rgb: 47 47 47; /* L1: channel form for <alpha-value> */
+  --user-bubble-text: #ECECEC;
+
+  /* === Sidebar === */
+  --sidebar-item-hover: #1F1F1F;
+  --sidebar-item-active: #2A2A2A;
+  --sidebar-section-text: #8F8F8F; /* AA fix, tracks --text-tertiary */
+
+  /* === Code blocks === */
+  --code-bg: #1E1E1E;
+  --code-header-bg: #2D2D2D;
+  --code-text: #D4D4D4;
+
+  /* === Status ===
+     FIX45 Part B — two axes, because one value cannot do both jobs:
+       role   `--error` / `--warning` / `--success`        = text, border,
+              icon, tint, dot: must read ON the theme's surfaces, so it is
+              LIGHTER in the dark theme and DARKER in the light one;
+              `--error-solid` / `--warning-solid` / `--success-solid` = a
+              filled control with white text (Stop, Delete, the Switch's
+              on-track): must read UNDER white, so it is the same in both
+              themes.
+       theme  every one of them is overridden in [data-theme="light"].
+     The old single #EF4444 was 3.76:1 under white, 4.28:1 on the dark
+     canvas, 3.56:1 on the dark surface — below AA in every role.
+     src/lib/contrast.test.ts holds the numbers; change these and it
+     answers. The -rgb twins are the channel form Tailwind needs for
+     opacity modifiers (FIX45 Part A). */
+  --success: #34D399;
+  --success-rgb: 52 211 153;
+  --success-solid: #047857;
+  --success-solid-rgb: 4 120 87;
+  --error:   #F87171;
+  --error-rgb: 248 113 113;
+  --error-solid: #DC2626;
+  --error-solid-rgb: 220 38 38;
+  --warning: #F59E0B;
+  --warning-rgb: 245 158 11;
+  --warning-solid: #B45309;
+  --warning-solid-rgb: 180 83 9;
+
+  /* === Scrollbar === */
+  --scrollbar-thumb: rgba(255, 255, 255, 0.12);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.20);
+
+  /* Font stacks — system font for body, Outfit reserved for the
+     SRAN Chat brand wordmark, JetBrains Mono for code. */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans',
+               Helvetica, Arial, sans-serif, 'Apple Color Emoji',
+               'Segoe UI Emoji';
+  --font-mono: var(--font-jetbrains), 'JetBrains Mono', 'Fira Code',
+               'SF Mono', 'Cascadia Code', Consolas, monospace;
+  --font-brand: var(--font-outfit), var(--font-sans);
+}
+
+/* Light theme overrides. Applied when <html data-theme="light"> is
+   set by the theme store. Same token names so no className churn. */
+[data-theme="light"] {
+  color-scheme: light;
+  --bg-primary: #FFFFFF;
+  --bg-primary-rgb: 255 255 255; /* L1: channel form for <alpha-value> */
+  --bg-sidebar: #F9F9F9;
+  --bg-sidebar-rgb: 249 249 249; /* L1: channel form for <alpha-value> */
+  --bg-surface: #F0F0F0;
+  --bg-surface-rgb: 240 240 240; /* L1: channel form for <alpha-value> */
+  --bg-surface-hover: #E5E5E5;
+  --bg-surface-hover-rgb: 229 229 229; /* L1: channel form for <alpha-value> */
+  --bg-overlay: rgba(0, 0, 0, 0.30);
+
+  --text-primary: #0D0D0D;
+  --text-primary-rgb: 13 13 13; /* L1: channel form for <alpha-value> */
+  --text-secondary: #5B5B5B;
+  --text-secondary-rgb: 91 91 91; /* L1: channel form for <alpha-value> */
+  /* WCAG AA — was #8A8A8A (3.45:1 on white). #6D6D6D = 5.17:1 on
+     white / 4.54:1 on bg-surface, still lighter than secondary #5B5B5B. */
+  --text-tertiary: #6D6D6D;
+  --text-tertiary-rgb: 109 109 109; /* L1: channel form for <alpha-value> */
+  --text-placeholder: #9B9B9B;
+
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-default: rgba(0, 0, 0, 0.10);
+  --border-hover:  rgba(0, 0, 0, 0.20);
+
+  /* Match the dark-theme neutralisation — accent maps to the
+     foreground so straggler usages look neutral, not teal. */
+  --accent: #0D0D0D;
+  --accent-rgb: 13 13 13; /* L1: channel form for <alpha-value> */
+  --accent-hover: #000000;
+  --accent-hover-rgb: 0 0 0; /* L1: channel form for <alpha-value> */
+  --accent-subtle: rgba(13, 13, 13, 0.08);
+
+  --user-bubble-bg: #F0F0F0;
+  --user-bubble-bg-rgb: 240 240 240; /* L1: channel form for <alpha-value> */
+  --user-bubble-text: #0D0D0D;
+
+  --sidebar-item-hover: #EEEEEE;
+  --sidebar-item-active: #E5E5E5;
+  --sidebar-section-text: #6D6D6D; /* AA fix, tracks --text-tertiary */
+
+  --code-bg: #F7F7F8;
+  --code-header-bg: #EEEEEE;
+  --code-text: #1F1F1F;
+
+  --scrollbar-thumb: rgba(0, 0, 0, 0.12);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.20);
+  /* === Status (light) — FIX45 Part B: darker for text on light surfaces;
+     the -solid values are theme-independent (white text on top). === */
+  --success: #065F46;
+  --success-rgb: 6 95 70;
+  --success-solid: #047857;
+  --success-solid-rgb: 4 120 87;
+  --error:   #B91C1C;
+  --error-rgb: 185 28 28;
+  --error-solid: #DC2626;
+  --error-solid-rgb: 220 38 38;
+  --warning: #92400E;
+  --warning-rgb: 146 64 14;
+  --warning-solid: #B45309;
+  --warning-solid-rgb: 180 83 9;
+}
+
+/* Smooth theme transition. Limited to background + color so layout
+   animations don't get a 200ms delay tacked on. */
+*, *::before, *::after {
+  transition: background-color 180ms ease, color 180ms ease,
+              border-color 180ms ease;
+}
+
+/* ─── Safe-area helpers (unchanged from session 7) ─────────── */
+.safe-top    { padding-top: var(--sat); }
+.safe-bottom { padding-bottom: var(--sab); }
+.safe-left   { padding-left: var(--sal); }
+.safe-right  { padding-right: var(--sar); }
+.safe-px     { padding-left: var(--sal); padding-right: var(--sar); }
+.safe-py     { padding-top: var(--sat); padding-bottom: var(--sab); }
+
+/* ─── Mobile / touch globals ───────────────────────────────── */
+html, body {
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+  height: 100%;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+button, a, [role="button"], .sran-sidebar-link {
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.selectable,
+.prose-chat,
+.prose-chat p,
+.prose-chat li,
+.prose-chat pre,
+.prose-chat code,
+.prose-chat table,
+.streaming-body,
+.streaming-body pre,
+.streaming-body code,
+.bubble-user-text,
+textarea,
+input {
+  -webkit-user-select: text;
+  user-select: text;
+}
+.scrollbar-thin,
+.h-full.overflow-y-auto,
+.overflow-y-auto {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Brand wordmark — only used on the sidebar header so the
+   product keeps a recognisable identity even with system fonts
+   everywhere else. */
+.font-brand {
+  font-family: var(--font-brand);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* SRAN brand logo. The PNG ships as black-on-transparent (which
+   suits the white admin-ui background). On the chat surface's dark
+   theme we invert to render the artwork white; the light-theme
+   override removes the filter so the original black returns. */
+.sran-logo {
+  filter: invert(1);
+  transition: filter 180ms ease;
+}
+[data-theme="light"] .sran-logo {
+  filter: none;
+}
+
+/* ─── Scrollbars ───────────────────────────────────────────── */
+*::-webkit-scrollbar         { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track   { background: transparent; }
+*::-webkit-scrollbar-thumb   { background: var(--scrollbar-thumb); border-radius: 8px; }
+*::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+.scrollbar-thin::-webkit-scrollbar       { width: 6px; height: 6px; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 6px; }
+.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* ─── Code-highlight token colors — recoloured to match the new
+   near-black palette + warm white text. ─────────────────── */
+.hljs {
+  background: transparent !important;
+  color: var(--code-text) !important;
+  padding: 0 !important;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-section,
+.hljs-link            { color: #C586C0 !important; }
+.hljs-string,
+.hljs-attr,
+.hljs-symbol,
+.hljs-template-tag,
+.hljs-template-variable,
+.hljs-addition        { color: #B5CEA8 !important; }
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-type            { color: #DCDCAA !important; }
+.hljs-comment,
+.hljs-quote           { color: var(--text-tertiary) !important; font-style: italic; }
+.hljs-title,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class  { color: #4EC9B0 !important; }
+.hljs-variable,
+.hljs-attribute,
+.hljs-tag,
+.hljs-meta            { color: #9CDCFE !important; }
+.hljs-deletion        { color: #F48771 !important; }
+[data-theme="light"] .hljs-keyword,
+[data-theme="light"] .hljs-selector-tag,
+[data-theme="light"] .hljs-literal,
+[data-theme="light"] .hljs-section,
+[data-theme="light"] .hljs-link            { color: #af00db !important; }
+[data-theme="light"] .hljs-string          { color: #a31515 !important; }
+[data-theme="light"] .hljs-number,
+[data-theme="light"] .hljs-built_in        { color: #098658 !important; }
+[data-theme="light"] .hljs-title,
+[data-theme="light"] .hljs-name            { color: #267f99 !important; }
+[data-theme="light"] .hljs-variable,
+[data-theme="light"] .hljs-attribute,
+[data-theme="light"] .hljs-tag,
+[data-theme="light"] .hljs-meta            { color: #001080 !important; }
+
+/* ─── Markdown body (assistant messages) ───────────────────── */
+.prose-chat {
+  line-height: 1.75;
+  word-wrap: break-word;
+  font-size: 1rem;
+}
+.prose-chat p             { margin: 0 0 1.1em; }
+.prose-chat p:last-child  { margin-bottom: 0; }
+.prose-chat h1, .prose-chat h2, .prose-chat h3, .prose-chat h4 {
+  font-weight: 600;
+  margin: 1.2em 0 0.5em;
+  color: var(--text-primary);
+}
+.prose-chat h1 { font-size: 1.5rem; }
+.prose-chat h2 { font-size: 1.25rem; }
+.prose-chat h3 { font-size: 1.1rem; }
+.prose-chat ul, .prose-chat ol {
+  padding-left: 1.4rem;
+  margin: 0.5rem 0 1rem;
+}
+/* Tailwind's preflight resets every ul/ol to `list-style: none`, so
+   markdown lists rendered with no marker at all — the indent was the
+   only cue that they were lists. Restore the markers explicitly, with
+   a depth ladder so nested levels stay distinguishable. The task-list
+   rule below re-hides them for checkbox lists (higher specificity). */
+.prose-chat ul { list-style: disc; }
+.prose-chat ul ul { list-style: circle; }
+.prose-chat ul ul ul { list-style: square; }
+.prose-chat ol { list-style: decimal; }
+.prose-chat ol ol { list-style: lower-alpha; }
+/* Muted markers keep the eye on the text, not the bullets. */
+.prose-chat li::marker { color: var(--text-tertiary); }
+.prose-chat li             { margin: 0.25rem 0; }
+.prose-chat li > p         { margin: 0.15rem 0; }
+.prose-chat li input[type="checkbox"] {
+  margin-right: 0.5rem;
+  accent-color: var(--accent);
+  transform: translateY(1px);
+}
+.prose-chat ul.contains-task-list {
+  list-style: none;
+  padding-left: 0.25rem;
+}
+.prose-chat strong { color: var(--text-primary); font-weight: 600; }
+.prose-chat em     { color: var(--text-secondary); }
+.prose-chat del    { color: var(--text-tertiary); text-decoration: line-through; }
+.prose-chat hr {
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  margin: 1.25rem 0;
+}
+.prose-chat a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prose-chat a:hover { color: var(--accent-hover); }
+.prose-chat blockquote {
+  border-left: 3px solid var(--accent);
+  padding: 0.4rem 0.9rem;
+  margin: 0.8rem 0;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border-radius: 0 8px 8px 0;
+}
+.prose-chat blockquote p { margin: 0.25rem 0; }
+.prose-chat code:not(pre code) {
+  background: var(--bg-surface);
+  /* Hairline keeps inline code legible where the surface tint is close
+     to the message background (notably the light theme). */
+  border: 1px solid var(--border-subtle);
+  padding: 0.1rem 0.38rem;
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  color: var(--text-primary);
+  /* A long identifier must break rather than widen the column. */
+  overflow-wrap: break-word;
+}
+/* Direct-child only — the elevated .code-block panel renders its
+   own pre wrapped two levels deep, so the descendant selector used
+   to bleed border + padding + margin into the inner pre and fight
+   the panel layout. Scoping to `> pre` keeps a sane fallback for
+   any orphan <pre> that bypasses the CodeBlock override without
+   double-styling the panel's inner code. */
+.prose-chat > pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 0.9rem 1.1rem;
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  font-size: 0.875rem;
+}
+.prose-chat > pre code {
+  background: transparent;
+  padding: 0;
+  font-family: var(--font-mono);
+}
+/* ─── Tables ────────────────────────────────────────────────
+   The frame lives on the WRAPPER (.md-table-wrap, emitted by the
+   `table` override in Markdown.tsx), not on the table. That split is
+   what makes all three of these possible at once:
+     • real column sizing — the table stays `display: table` instead of
+       the old `display:block` scroll hack, which turned it into a
+       block box and stopped columns tracking their content;
+     • rounded corners — `border-collapse: collapse` cannot be rounded,
+       so cells use `separate` + zero spacing and the wrapper clips;
+     • horizontal scroll that does NOT widen the chat column, so a wide
+       table scrolls inside the message on mobile instead of pushing
+       the page sideways.
+   Colors are theme tokens only, so light/dark follow automatically. */
+.prose-chat .md-table-wrap {
+  margin: 1rem 0;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  /* Own background so the rounded corners clip cleanly over whatever
+     the message sits on. */
+  background: var(--bg-primary);
+  -webkit-overflow-scrolling: touch;
+}
+/* Only the horizontal scroll is meaningful; a focus ring on the
+   region would otherwise fire on every table when tabbing through a
+   long answer. Keep it visible for keyboard users, quiet for mouse. */
+.prose-chat .md-table-wrap:focus-visible {
+  outline: 2px solid var(--border-hover);
+  outline-offset: -2px;
+}
+.prose-chat table {
+  display: table;
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  /* Wrap long prose inside cells, but never squash a column below the
+     widest unbreakable word — past that the wrapper scrolls instead. */
+  min-width: min-content;
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+.prose-chat th,
+.prose-chat td {
+  padding: 0.6rem 0.85rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-subtle);
+}
+/* Column rules, minus the trailing edge (the wrapper border is there). */
+.prose-chat th:not(:last-child),
+.prose-chat td:not(:last-child) {
+  border-right: 1px solid var(--border-subtle);
+}
+.prose-chat thead th {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-weight: 600;
+  /* Stronger rule under the header so it reads as a header even when
+     the first body row is a zebra row. */
+  border-bottom: 1px solid var(--border-default);
+}
+/* Zebra: a softened form of the surface token so the header (full
+   --bg-surface) still stands out against striped rows. The plain
+   declaration is the fallback for engines without color-mix() — it is
+   exactly the previous behaviour, so degradation is a no-op. */
+.prose-chat tbody tr:nth-child(even) td {
+  background: var(--bg-surface);
+  background: color-mix(in srgb, var(--bg-surface) 55%, transparent);
+}
+.prose-chat tbody tr:hover td {
+  background: var(--bg-surface);
+}
+/* The wrapper draws the bottom edge. */
+.prose-chat tbody tr:last-child td {
+  border-bottom: 0;
+}
+.prose-chat td > p:only-child,
+.prose-chat th > p:only-child {
+  margin: 0;
+}
+
+/* ─── Remaining block rhythm ────────────────────────────────
+   A message must never open with a leading gap — a reply that starts
+   with a heading, list or table would otherwise inherit that block's
+   top margin and float away from the avatar. */
+.prose-chat > *:first-child { margin-top: 0; }
+.prose-chat > *:last-child  { margin-bottom: 0; }
+/* Nested lists sit tighter than top-level ones so the hierarchy reads
+   as one group instead of three stacked paragraphs. */
+.prose-chat li > ul,
+.prose-chat li > ol {
+  margin: 0.25rem 0 0.35rem;
+}
+/* Markdown images (![alt](url)) — raw <img> HTML stays inert, so this
+   only ever styles author-intended images. Bounded so a large asset
+   cannot widen the chat column. */
+.prose-chat img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  margin: 0.6rem 0;
+}
+
+/* ─── CodeBlock panel (rendered by CodeBlock.tsx) ────────────
+   Elevated card that visually breaks out of the message prose.
+   Inspired by Claude artefacts: separate header strip + code surface
+   on its own background; subtle shadow + hover border for "elevated"
+   feel without competing with the message text. */
+.code-block {
+  position: relative;
+  margin: 12px 0;
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle);
+  background: var(--code-bg);
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: border-color 150ms ease;
+}
+.code-block:hover {
+  border-color: var(--border-default);
+}
+.code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 40px;
+  padding: 0 12px 0 16px;
+  background: var(--code-header-bg);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.code-block-lang {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  /* When the label is a filename it may be long; keep it on one
+     line so the header height stays predictable. */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 60%;
+}
+.code-block-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 0.75rem;
+  line-height: 1;
+  transition: background-color 120ms ease, color 120ms ease;
+  flex-shrink: 0;
+}
+.code-block-copy:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-secondary);
+}
+.code-block-copy.is-copied {
+  color: var(--success);
+}
+.code-block-body {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 500px;
+  font-size: 0.875rem;
+}
+/* Collapsed view: cap the body to 20 lines × 1.6 line-height + the
+   16px padding pair, then let the Show-more toggle handle expansion.
+   line-height 1.6 × 0.875rem ≈ 1.4rem per line, so 20 lines ≈ 28rem.
+   The 32px term covers the two 16px paddings. */
+.code-block.is-collapsed .code-block-body {
+  max-height: calc(20 * 1.6 * 0.875rem + 32px);
+}
+.code-block-content {
+  padding: 16px;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1.6;
+  white-space: pre;
+  color: var(--code-text);
+}
+.code-block-content code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+  font-family: inherit;
+  color: inherit;
+}
+/* FIX132 F32 — highlight.js makes `pre code.hljs` its own horizontal
+   scroller; the block body is the one scroller instead (thin visible
+   scrollbar, and the right-edge hint below reads its geometry). */
+.code-block-content code.hljs {
+  overflow-x: visible;
+}
+.code-scroll-hint {
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 32px;
+  background: linear-gradient(to left, var(--code-bg), transparent);
+}
+.code-block-toggle {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--code-header-bg);
+  border-top: 1px solid var(--border-subtle);
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  text-align: center;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+.code-block-toggle:hover {
+  color: var(--text-secondary);
+  background: var(--bg-surface-hover);
+}
+
+/* P2 — long USER message collapse. Whether a message collapses is
+   decided in MessageBubble from its RENDERED height (Thai text wraps,
+   so "\n" counting under-collapses); this only caps the collapsed view
+   to 8 line-boxes. The bubble uses leading-relaxed (line-height 1.625),
+   so 8 lines = 8 × 1.625em — em-based so a font-size change scales the
+   cap with the text. Assistant replies never get this class. */
+.user-msg-text {
+  display: block;
+}
+.user-msg-text.is-collapsed {
+  max-height: calc(8 * 1.625em);
+  overflow: hidden;
+}
+/* FIX107 A1 — lines a terminal drew with box characters (lib/terminalText):
+   monospaced so the columns line up, never wrapped, scrolling sideways inside
+   the bubble. Only these lines: the rest of the message, Thai included, keeps
+   the bubble's own wrapping. */
+.user-msg-terminal {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  margin: 0.25rem 0;
+}
+.user-msg-toggle {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  transition: color 120ms ease;
+}
+.user-msg-toggle:hover {
+  color: var(--text-secondary);
+}
+
+/* Streaming cursor + indicators. */
+.streaming-cursor-block {
+  display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--text-secondary);
+  border-radius: 2px;
+  animation: cursor-blink 530ms steps(2, end) infinite;
+}
+@keyframes cursor-blink  { 0%,49% { opacity: 0.85; } 50%,100% { opacity: 0; } }
+
+.streaming-body { line-height: 1.75; word-wrap: break-word; }
+.streaming-body .code-block-inline {
+  background: var(--code-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 0.9rem 1.1rem;
+  margin: 0.6rem 0;
+  overflow-x: auto;
+  font-size: 0.875rem;
+  font-family: var(--font-mono);
+  white-space: pre;
+  position: relative;
+  color: var(--code-text);
+}
+.streaming-body .code-block-inline::before {
+  content: attr(data-lang);
+  position: absolute;
+  top: 0.45rem;
+  right: 0.75rem;
+  font-size: 0.7rem;
+  color: var(--text-tertiary);
+  text-transform: lowercase;
+}
+.streaming-body .code-block-inline code {
+  background: transparent;
+  padding: 0;
+  font-family: inherit;
+  color: inherit;
+}
+
+/* Entrance + polish animations. */
+.fade-in-up      { animation: fadeInUp 240ms ease-out; }
+/* FIX127 D4 — the row a deep link (#msg-<id>) landed on, for two seconds. */
+.deep-link-target { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 0.75rem; transition: outline-color 600ms ease-out; }
+.message-enter   { animation: messageSlideIn 200ms ease-out; }
+.popover-appear  { animation: popoverIn 150ms ease-out; transform-origin: top right; }
+/* Toast-specific entrance: opacity only. The toast centers itself with
+   ``-translate-x-1/2`` (a transform), so it must NOT borrow .popover-appear —
+   that keyframe animates ``transform: scale()`` which overrides the centering
+   translate for the animation's duration, making the toast appear shifted
+   right then snap to center. Animating opacity alone leaves transform free. */
+.toast-appear    { animation: toastFadeIn 150ms ease-out; }
+@keyframes fadeInUp        { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes messageSlideIn  { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes popoverIn       { from { opacity: 0; transform: scale(0.96); }      to { opacity: 1; transform: scale(1); } }
+@keyframes toastFadeIn     { from { opacity: 0; } to { opacity: 1; } }
+
+/* Hover-reveal action row for AI messages. */
+.message-actions {
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.group:hover .message-actions,
+.message-actions:focus-within {
+  opacity: 1;
+}
+
+/* Skeleton shimmer uses the live border colour so it tracks the
+   active theme without a separate light-mode override. */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--border-subtle) 0%,
+    var(--border-default) 50%,
+    var(--border-subtle) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.4s ease-in-out infinite;
+  border-radius: 6px;
+}
+@keyframes skeletonShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* Attachment images fade in once their blob arrives, so the swap from
+   the loading placeholder (skeleton / ImageGeneratingPlaceholder) to
+   the real pixels doesn't pop. */
+.img-fade-in { animation: imgFadeIn 300ms ease-out; }
+@keyframes imgFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* Usage panel — slides up from the floating toggle pill with a fade.
+   Mount-only animation (same convention as popoverIn). */
+.usage-panel-enter {
+  transform-origin: bottom right;
+  animation: usagePanelIn 200ms ease-out;
+}
+@keyframes usagePanelIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Shimmer status text — the ChatGPT-style wave. Used by TWO distinct
+   states that must not be conflated: the ThinkingBlock header while
+   REAL reasoning streams ("Thinking…", reasoning.thinking), and the
+   CatIndicator's transient wait/progress labels ("Working…" /
+   "Searching…", gen.*), which say nothing about reasoning because they
+   fire for every model. ``background-clip: text`` paints the moving
+   gradient onto the glyphs only (pure CSS, no JS / repaint cost).
+   Colours come from the theme text vars so it reads in both dark and
+   light mode (dim tertiary base, bright primary highlight). */
+.shimmer-text {
+  background: linear-gradient(
+    90deg,
+    var(--text-tertiary) 0%,
+    var(--text-primary) 50%,
+    var(--text-tertiary) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: shimmerText 1.6s linear infinite;
+}
+@keyframes shimmerText { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* Breathing cat status mark (CatIndicator). scale() from a low origin so
+   the cat "inhales" upward from its paws instead of ballooning from the
+   center; currentColor fill keeps it theme-correct for free. */
+@keyframes catBreathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+.cat-indicator svg {
+  transform-origin: 50% 86%;
+  animation: catBreathe 2.2s ease-in-out infinite;
+}
+
+/* FIX75 — the composer's send/stop button, ONE fill for both states.
+   The circle inverts to the foreground colour (ChatGPT's send state):
+   11.33:1 against the composer surface in dark, 17.05:1 in light, icon
+   on fill 13.63:1 / 19.44:1. Both the send-ready and the streaming
+   (stop) state take this class, so the two cannot drift apart — the
+   stop state used to reach for --error-solid on its own and sat at
+   2.77:1 on the dark composer (WCAG 1.4.11 wants 3:1 for a control
+   against what it sits on), and spent the failure red on a safe,
+   reversible action. */
+.composer-send-fill {
+  background: var(--text-primary);
+  color: var(--bg-primary);
+}
+.composer-send-fill:hover {
+  background: var(--accent-hover);
+}
+
+/* FIX75 — the breathing halo while a stream is running. box-shadow
+   only: no transform, no size, no margin, so the hit target never moves
+   away from the cursor (touch, unsteady hands). The colour comes from
+   the --text-primary-rgb channel token, so the ring is light-on-dark in
+   the dark theme and dark-on-light in the light theme by itself — a
+   hardcoded white would vanish on a light composer. Nothing between the
+   button and the composer pill clips (no overflow on that path), so the
+   5 px spread is drawn in full. */
+@keyframes stop-halo {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(var(--text-primary-rgb) / 0.32); }
+  50%      { box-shadow: 0 0 0 5px rgb(var(--text-primary-rgb) / 0); }
+}
+.stop-halo {
+  animation: stop-halo 2.4s ease-in-out infinite;
+}
+
+/* Respect reduced-motion. Infinite loops stop at a legible rest state;
+   one-shot entrances are dropped (content just appears). Tailwind's
+   animate-spin spinners are included — a frozen spinner still reads as
+   "busy" from its surrounding text/label. */
+@media (prefers-reduced-motion: reduce) {
+  /* FIX75 — no pulsing; a static ring at the halo's mid-strength keeps
+     "streaming" visibly different from idle without animating. */
+  .stop-halo {
+    animation: none;
+    box-shadow: 0 0 0 3px rgb(var(--text-primary-rgb) / 0.16);
+  }
+  .shimmer-text {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: var(--text-secondary);
+    color: var(--text-secondary);
+  }
+  .cat-indicator svg,
+  .streaming-cursor-block,
+  .skeleton,
+  .rec-dot,
+  .audio-bar-css,
+  .animate-spin,
+  .fade-in-up,
+  .message-enter,
+  .popover-appear,
+  .toast-appear,
+  .img-fade-in,
+  .usage-panel-enter,
+  .sheet-up {
+    animation: none;
+  }
+}
+
+/* Accessible focus ring. */
+.focus-ring:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Mobile tap-target helper. */
+@media (pointer: coarse) {
+  .tap-44 { min-width: 44px; min-height: 44px; }
+}
+
+/* Bottom-sheet animation (modal + model selector). */
+@keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.sheet-up { animation: sheetUp 220ms cubic-bezier(0.32, 0.72, 0, 1); }
+
+/* Recording indicator — red dot pulse. */
+@keyframes recDotPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.45; transform: scale(0.92); }
+}
+.rec-dot {
+  animation: recDotPulse 1s ease-in-out infinite;
+}
+
+/* Audio waveform fallback (CSS-only bars). Each bar gets a staggered
+   delay via inline style so the row reads as one rolling wave. */
+@keyframes audioBar {
+  0%, 100% { transform: scaleY(0.35); }
+  50%      { transform: scaleY(1); }
+}
+.audio-bar-css {
+  transform-origin: 50% 100%;
+  animation: audioBar 800ms ease-in-out infinite;
+}
+

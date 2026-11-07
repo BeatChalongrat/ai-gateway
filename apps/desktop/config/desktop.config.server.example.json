@@ -1,0 +1,23 @@
+{
+  "_comment": "EXAMPLE for a build aimed at a shared server — copy it OUTSIDE the repo, replace every sran.example.internal host with the real one, then: npm run dist -- --config <your copy>. The build refuses a file still named *.example.json. Rules (enforced by the app's validator at build time): pageUrl inside allowedOrigins; gatewayUrl, chatEdgeUrl and portalOrigin NOT in allowedOrigins; the CSP must list the same hosts. sidecarPath is ignored when packaged (the bundled sidecar is used) but the key is required. connectorPrivateNetwork (FIX69) is whether a user-typed remote MCP connector URL may point inside the network (loopback / RFC 1918 / link-local); default false = public https targets only; cloud metadata addresses are refused regardless. Set true only for a build meant for a company network.",
+  "pageUrl": "https://chat.sran.example.internal/chat",
+  "allowedOrigins": [
+    "https://chat.sran.example.internal"
+  ],
+  "portalOrigin": "https://portal.sran.example.internal",
+  "gatewayUrl": "https://gateway.sran.example.internal",
+  "chatEdgeUrl": "https://chat-edge.sran.example.internal",
+  "defaultModel": "auto",
+  "sidecarPath": "..\\..\\SranDesktop\\publish\\sidecar-fix26\\SranDesktop.ToolsSidecar.exe",
+  "approvalMode": "auto",
+  "webSearchEnabled": false,
+  "connectorPrivateNetwork": false,
+  "protocolScheme": "sran",
+  "oauthClient": "desktop",
+  "oauthProvider": "google",
+  "sessionRefreshMinutes": 45,
+  "signInTimeoutSeconds": 300,
+  "hotkey": "CommandOrControl+Shift+Space",
+  "openAtLogin": false,
+  "contentSecurityPolicy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://chat-edge.sran.example.internal https://gateway.sran.example.internal; font-src 'self' data:; connect-src 'self' https://chat-edge.sran.example.internal https://gateway.sran.example.internal https://portal.sran.example.internal; media-src 'self' blob: https://chat-edge.sran.example.internal; frame-src 'self' blob: data:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+}

@@ -1,0 +1,104 @@
+{
+ "schema": "e2.expected.v1",
+ "id": "d05_wht_service_invoice",
+ "files": [
+  "docs/d05_wht_service_invoice.pdf"
+ ],
+ "class": "digital",
+ "purpose": "service invoice with withholding tax 3 % and net payable; หจก.; tax IDs with spaces",
+ "source_fixture": null,
+ "duplicate_of": null,
+ "scope": "full",
+ "scope_fields": null,
+ "truth": {
+  "document_type": "full_tax_invoice",
+  "seller_name": {
+   "value": "หจก. ช่างเหล็กการโยธา",
+   "normalized": {
+    "legal_form": "limited_partnership",
+    "core": "ช่างเหล็กการโยธา"
+   }
+  },
+  "seller_tax_id": {
+   "value": "0343561004528",
+   "valid": true
+  },
+  "seller_branch": "00000",
+  "buyer_name": {
+   "value": "บริษัท สรานเทค โซลูชั่นส์ จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "สรานเทค โซลูชั่นส์"
+   }
+  },
+  "buyer_tax_id": {
+   "value": "0105563012343",
+   "valid": true
+  },
+  "buyer_branch": "00000",
+  "document_number": "CS-2569-0187",
+  "document_date": "2026-09-18",
+  "due_date": "2026-10-18",
+  "currency": "THB",
+  "vat_mode": "exclusive",
+  "sum_lines": "50000.00",
+  "discount": "0.00",
+  "subtotal": "50000.00",
+  "vat_rate": "7",
+  "vat_amount": "3500.00",
+  "total": "53500.00",
+  "wht_rate": "3",
+  "wht_amount": "1500.00",
+  "net_payable": "52000.00",
+  "line_items": [
+   {
+    "description": "ค่าบริการซ่อมแซมโครงหลังคาเหล็ก อาคาร B",
+    "quantity": "1",
+    "unit_price": "45000.00",
+    "amount": "45000.00"
+   },
+   {
+    "description": "ค่าบริการตรวจสอบโครงสร้างหลังซ่อม",
+    "quantity": "1",
+    "unit_price": "5000.00",
+    "amount": "5000.00"
+   }
+  ]
+ },
+ "checks": {
+  "document_type": "pass",
+  "seller_tax_id_format": "pass",
+  "buyer_tax_id_format": "pass",
+  "document_date": "pass",
+  "line_arithmetic": "pass",
+  "subtotal_sum": "pass",
+  "vat_7_percent": "pass",
+  "grand_total": "pass",
+  "wht": "pass",
+  "currency": "pass",
+  "required_fields": "pass",
+  "buyer_match": "pass",
+  "duplicate": "pass",
+  "original_copy": "pass"
+ },
+ "history": [],
+ "questions": {
+  "must": [],
+  "may": false,
+  "allowed_extra": [],
+  "max": 0
+ },
+ "rules": [
+  "no_silent_errors",
+  "zero_questions"
+ ],
+ "provenance": {
+  "method": "pdf_text",
+  "pages": 1,
+  "totals_page": 1
+ },
+ "confidence": {
+  "money_min": 0.95
+ },
+ "ui": null
+}

@@ -1,0 +1,98 @@
+# FIX19/FIX20 — Windows installer for SRAN Desktop, the Electron desktop
+# client of SRAN AI Gateway. (FIX20 renamed it: the product is the platform;
+# the desktop app is one client of it, so the client carries its own name.)
+#
+# Nothing to collide with any more: the WPF "SRAN Desktop" app is retired,
+# uninstalled and its installer deleted (FIX15/FIX19), so this is simply the
+# correct identity — appId under the company domain, product name = what the
+# user sees everywhere (shortcut, Start Menu, Apps list, window title,
+# installer filename "SRAN Desktop Setup <version>.exe").
+appId: co.th.gbtech.sran.desktop
+productName: SRAN Desktop
+copyright: SRAN
+
+# Reproducible output location (a BUILD ARTEFACT — gitignored, never
+# committed). scripts/dist.js prints the finished installer's full path as
+# the LAST line of the build.
+directories:
+  output: release
+  buildResources: build
+
+# What ships INSIDE the app (asar). The sidecar and the runtime config are NOT
+# here — both are carried via extraResources below. assets/** is unpacked so
+# session.html and app.ico are real files on disk (loadFile / Tray icon /
+# file:// origin). config/ is deliberately NOT packed: the packaged app reads
+# <resources>\desktop.config.json (FIX20 §5), never a copy inside the asar.
+files:
+  - dist/**
+  - assets/**
+  - package.json
+asarUnpack:
+  - assets/**
+
+extraResources:
+  # The tools sidecar (+ BrowserHost.exe relay + Chrome extension bundle) is
+  # copied verbatim into <install>\resources\sidecar\. The packaged app
+  # resolves it as process.resourcesPath\sidecar\SranDesktop.ToolsSidecar.exe
+  # (index.ts, FIX19 two-mode resolution).
+  - from: ../../SranDesktop/publish/sidecar-fix70
+    to: sidecar
+    filter:
+      - "**/*"
+  # FIX20 §5 — the runtime config shipped BESIDE the exe, at
+  # <install>\resources\desktop.config.json. scripts/dist.js stages it into
+  # build/desktop.config.json from SRAN_DESKTOP_BUILD_CONFIG / --config (a
+  # build aimed at a shared server) or from config/desktop.config.json (the
+  # repo default, localhost) — after running it through the app's own
+  # validator. Producing a server build therefore never edits source.
+  - from: build/desktop.config.json
+    to: desktop.config.json
+  # FIX133 B — the deployment's CA the app pins (empty when the config has
+  # no trustedCaFile; scripts/dist.js stages it).
+  - from: build/trusted-ca.pem
+    to: trusted-ca.pem
+
+# FIX34 Part B — the app's URL scheme. electron-builder writes
+# HKCU\Software\Classes\sran (URL Protocol + shell\open\command → this exe) at
+# install and deletes it at uninstall; app.setAsDefaultProtocolClient at runtime
+# keeps it pointing at the current exe. App links: sran://<web host>/new[?q=…],
+# /chat/{id}, /project/{id}; the OAuth callback stays sran://oauth/callback.
+protocols:
+  - name: SRAN Desktop
+    schemes:
+      - sran
+
+win:
+  target:
+    - nsis
+  icon: assets/app.ico
+  # Unsigned this round (no certificate — a purchase decision, not this
+  # round's). electron-builder leaves the binaries unsigned when no CSC
+  # certificate is provided, but it still runs rcedit to embed app.ico and
+  # the version block into the app exe — which is what the desktop shortcut
+  # shows (Windows takes a shortcut's icon from the exe it points to). FIX19
+  # had signAndEditExecutable:false here, which skipped that step and shipped
+  # Electron's atom logo; FIX20 removed it. Build-host note: rcedit comes from
+  # electron-builder's winCodeSign package, whose archive carries macOS
+  # symlinks that 7-Zip refuses to create on Windows without symlink
+  # privilege; FIX20's record says what the host needs.
+
+nsis:
+  # One click: double-click installs (per-user, no admin prompt, no wizard,
+  # no directory chooser) and launches. Installs under
+  # %LOCALAPPDATA%\Programs\SRAN Desktop. The native-messaging host the
+  # sidecar registers is HKCU anyway.
+  oneClick: true
+  perMachine: false
+  runAfterFinish: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: SRAN Desktop
+  # build/installer.nsh: (1) preInit — the fresh-install crash fix (FIX20 §4);
+  # (2) customUnInstall — remove the native-messaging registry key on
+  # uninstall. The user data folder is KEPT on uninstall (deliberate).
+  include: build/installer.nsh
+
+# No auto-update channel: generate NO latest.yml / update metadata, publish
+# nowhere. The standing rule (never publish releases/latest.json) holds.
+publish: null

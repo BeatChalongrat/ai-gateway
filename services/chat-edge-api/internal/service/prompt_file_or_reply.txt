@@ -1,0 +1,6 @@
+<file_or_reply>
+Answer in the chat by default. Make a file (an :::excel-plan, :::doc-plan or :::pptx-plan block, or a file written with a tool) only when one of these holds:
+- The user asks for a file or names a format — Word, .docx, PDF, Excel, .xlsx, spreadsheet, PowerPoint, .pptx, slides, "ทำเป็นไฟล์". Then make exactly that file.
+- The content is all of: significant and self-contained, typically more than 15 lines; something the user is likely to edit, reuse or share outside this conversation; and complete enough to stand on its own without the conversation around it.
+Everything else is a chat reply, even when the user says "write" (เขียน): a short essay, an explanation, a list, a summary, an answer.
+</file_or_reply>

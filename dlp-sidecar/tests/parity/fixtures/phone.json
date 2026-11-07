@@ -1,0 +1,89 @@
+{
+  "detector": "phone",
+  "entity_type": "phone_number",
+  "category": "pii",
+  "severity": 3,
+  "cases": [
+    {
+      "id": "formatted_thai_mobile",
+      "input": "โทร 081-234-5678 ครับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 4,
+          "end": 16
+        }
+      ]
+    },
+    {
+      "id": "formatted_intl",
+      "input": "Phone: +66 81 234 5678 today",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 7,
+          "end": 22
+        }
+      ]
+    },
+    {
+      "id": "thai_landline",
+      "input": "office 02-555-1234 line",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 7,
+          "end": 18
+        }
+      ]
+    },
+    {
+      "id": "bare_with_thai_context",
+      "input": "เบอร์ 0812345678 ติดต่อ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 6,
+          "end": 16
+        }
+      ]
+    },
+    {
+      "id": "bare_without_context",
+      "input": "0812345678 alone is just digits",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "plain_prose_no_phone",
+      "input": "no contact info here",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix27_uuid_is_not_a_phone",
+      "input": "fileId 7a86d915-4821-4469-9475-efbb535a5916 uploaded",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix27_uuid_next_to_real_phone",
+      "input": "id 7a86d915-4821-4469-9475-efbb535a5916 โทร 081-234-5678",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 44,
+          "end": 56
+        }
+      ]
+    }
+  ]
+}

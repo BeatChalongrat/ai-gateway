@@ -1,0 +1,49 @@
+{
+ "schema": "am2.expense_policy.v1",
+ "currency": "THB",
+ "receipt_required_above": "500.00",
+ "approval_threshold": "3000.00",
+ "categories": {
+  "meals": {
+   "label": "ค่าอาหาร",
+   "per_claim": "1500.00",
+   "per_person_month": "5000.00"
+  },
+  "taxi": {
+   "label": "ค่าแท็กซี่/เดินทางในเมือง",
+   "per_claim": "800.00"
+  },
+  "hotel": {
+   "label": "ค่าที่พัก",
+   "per_claim": "2500.00"
+  },
+  "office_supplies": {
+   "label": "วัสดุสำนักงาน",
+   "per_claim": "3000.00"
+  },
+  "entertainment": {
+   "label": "ค่ารับรองลูกค้า",
+   "per_claim": "5000.00",
+   "needs_purpose": true
+  },
+  "phone": {
+   "label": "ค่าโทรศัพท์มือถือ",
+   "per_person_month": "1000.00"
+  },
+  "contractor": {
+   "label": "ค่าจ้างบุคคลภายนอก",
+   "per_claim": "20000.00",
+   "wht_rate": "3",
+   "wht_from": "1000.00"
+  }
+ },
+ "prohibited_merchants": [
+  "คาราโอเกะ",
+  "ผับ",
+  "บาร์",
+  "คาสิโน",
+  "ร้านทอง"
+ ],
+ "weekend_holiday": "flag",
+ "vat_claim_requires": "full_tax_invoice"
+}

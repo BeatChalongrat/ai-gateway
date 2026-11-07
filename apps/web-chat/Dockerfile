@@ -1,0 +1,68 @@
+# --- builder -------------------------------------------------
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+# Install deps separately so the layer caches.
+COPY package.json package-lock.json* ./
+RUN npm ci || npm install
+
+COPY . .
+
+# NEXT_PUBLIC_* is inlined into the browser bundle by the bundler AT BUILD
+# TIME — a value supplied only as a container `environment:` entry never
+# reaches client code. It must be present HERE, before `npm run build`, or
+# lib/api.ts falls back to its hardcoded http://localhost:4000/api/v1 and
+# every non-localhost deploy talks to the wrong host.
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+# Same build-time rule for the auth endpoints (SSO Phase 1, D1):
+# lib/auth.ts reads NEXT_PUBLIC_GATEWAY_URL (session lookup /portal/me,
+# silent refresh, logout) and NEXT_PUBLIC_PORTAL_URL (login/signup
+# redirect). Neither was ever passed, so every non-localhost image baked
+# in http://localhost:8080 / :3001 and auth broke off-box.
+ARG NEXT_PUBLIC_GATEWAY_URL
+ENV NEXT_PUBLIC_GATEWAY_URL=$NEXT_PUBLIC_GATEWAY_URL
+ARG NEXT_PUBLIC_PORTAL_URL
+ENV NEXT_PUBLIC_PORTAL_URL=$NEXT_PUBLIC_PORTAL_URL
+# (FIX130: NEXT_PUBLIC_TEMPORARY_CHAT_READS_MEMORY is gone — a memory-off or
+# temporary chat reads no memory on any deployment, so the strip has no
+# setting to mirror. A build arg still passed by an old compose file is
+# simply unused.)
+# (FIX20 §6.5: hosted mode — the desktop shell — is no longer a build arg.
+# lib/auth.ts detects the shell at runtime from window.sranHost, so ONE image
+# serves the browser and the Electron app.)
+# Build stamp for the update-available prompt and /api/version. `next build`
+# loads next.config.js more than once, so the stamp is handed to the build
+# via env — the client bundle and the /api/version route inline the SAME id.
+# It is REQUIRED: an image built without it said an epoch second on
+# /api/version, and the live smoke failed after the swap — twice (AM1, AM2).
+# scripts/build-images.sh passes the revision it builds; by hand:
+#   --build-arg NEXT_PUBLIC_BUILD_ID=$(git rev-parse --short=7 HEAD)
+ARG NEXT_PUBLIC_BUILD_ID
+RUN test -n "$NEXT_PUBLIC_BUILD_ID" || { echo "NEXT_PUBLIC_BUILD_ID is required: build with scripts/build-images.sh web-chat, or pass --build-arg NEXT_PUBLIC_BUILD_ID=<git short sha>" >&2; exit 1; }
+RUN npm run build
+
+# --- runner --------------------------------------------------
+FROM node:20-alpine
+WORKDIR /app
+
+# Next.js standalone bundle ships its own minimal node_modules.
+COPY --from=builder /app/.next-fresh/standalone ./
+COPY --from=builder /app/.next-fresh/static ./.next-fresh/static
+COPY --from=builder /app/public ./public
+
+EXPOSE 3002
+ENV PORT=3002
+ENV HOSTNAME=0.0.0.0
+ENV NODE_ENV=production
+# FIX126 O6 - provenance: every build carries the commit it was built from.
+# compose passes REVISION/CREATED as build args (`REVISION=$(git rev-parse
+# --short HEAD) docker compose ... build`); scripts/build-images.sh sets both
+# and builds from a clean `git archive` of that commit. Declared at the END
+# of the final stage so a new revision never busts the cached layers above.
+ARG REVISION=unknown
+ARG CREATED=unknown
+LABEL org.opencontainers.image.revision=$REVISION \
+      org.opencontainers.image.created=$CREATED
+
+CMD ["node", "server.js"]

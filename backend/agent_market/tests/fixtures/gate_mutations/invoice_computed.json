@@ -1,0 +1,2080 @@
+{
+  "checks": [
+    {
+      "actual": "full_tax_invoice",
+      "code": "document_type",
+      "doc_key": "dad9d6316fe",
+      "expected": "a known document type",
+      "fields": [
+        "document_type"
+      ],
+      "message": "",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "0105545009875",
+      "code": "seller_tax_id_format",
+      "doc_key": "dad9d6316fe",
+      "expected": "13 digits with a valid check digit",
+      "fields": [
+        "seller_tax_id"
+      ],
+      "message": "",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "0105556000017",
+      "code": "buyer_tax_id_format",
+      "doc_key": "dad9d6316fe",
+      "expected": "13 digits with a valid check digit",
+      "fields": [
+        "buyer_tax_id"
+      ],
+      "message": "",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "2026-09-15",
+      "code": "document_date",
+      "doc_key": "dad9d6316fe",
+      "expected": "not after 2026-10-03",
+      "fields": [
+        "document_date"
+      ],
+      "message": "",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": null,
+      "code": "line_arithmetic",
+      "doc_key": "dad9d6316fe",
+      "expected": "quantity × unit price = amount",
+      "fields": [
+        "line_items"
+      ],
+      "message": "",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "12010.00",
+      "code": "subtotal_sum",
+      "doc_key": "dad9d6316fe",
+      "expected": "12010.00",
+      "fields": [
+        "line_items",
+        "sum_lines"
+      ],
+      "message": "",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "12010.00",
+      "code": "discount_arithmetic",
+      "doc_key": "dad9d6316fe",
+      "expected": "12010.00",
+      "fields": [
+        "sum_lines",
+        "discount",
+        "subtotal"
+      ],
+      "message": "",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "840.70",
+      "code": "vat_7_percent",
+      "doc_key": "dad9d6316fe",
+      "expected": "840.70",
+      "fields": [
+        "vat_amount",
+        "subtotal",
+        "sum_lines",
+        "discount"
+      ],
+      "message": "",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "12850.70",
+      "code": "grand_total",
+      "doc_key": "dad9d6316fe",
+      "expected": "12850.70",
+      "fields": [
+        "subtotal",
+        "vat_amount",
+        "total",
+        "sum_lines",
+        "discount"
+      ],
+      "message": "",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": null,
+      "code": "wht",
+      "doc_key": "dad9d6316fe",
+      "expected": null,
+      "fields": [
+        "wht_amount"
+      ],
+      "message": "no withholding tax on this document",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "status": "skip"
+    },
+    {
+      "actual": "THB",
+      "code": "currency",
+      "doc_key": "dad9d6316fe",
+      "expected": "THB",
+      "fields": [
+        "currency"
+      ],
+      "message": "",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": null,
+      "code": "required_fields",
+      "doc_key": "dad9d6316fe",
+      "expected": [
+        "seller_name",
+        "seller_tax_id",
+        "seller_branch",
+        "document_number",
+        "document_date",
+        "buyer_name",
+        "total"
+      ],
+      "fields": [],
+      "message": "",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "0105556000017",
+      "code": "buyer_match",
+      "doc_key": "dad9d6316fe",
+      "expected": "0105556000017",
+      "fields": [
+        "buyer_tax_id"
+      ],
+      "message": "",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": null,
+      "code": "duplicate",
+      "doc_key": "dad9d6316fe",
+      "expected": "not seen before",
+      "fields": [
+        "document_number"
+      ],
+      "message": "",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "original",
+      "code": "original_copy",
+      "doc_key": "dad9d6316fe",
+      "expected": "original",
+      "fields": [
+        "document_type"
+      ],
+      "message": "",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "12850.70",
+      "code": "amount_in_words",
+      "doc_key": "dad9d6316fe",
+      "expected": "12850.70",
+      "fields": [
+        "amount_in_words",
+        "total"
+      ],
+      "message": "",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "full_tax_invoice",
+      "code": "document_type",
+      "doc_key": "d9997af6905",
+      "expected": "a known document type",
+      "fields": [
+        "document_type"
+      ],
+      "message": "",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "0343561004528",
+      "code": "seller_tax_id_format",
+      "doc_key": "d9997af6905",
+      "expected": "13 digits with a valid check digit",
+      "fields": [
+        "seller_tax_id"
+      ],
+      "message": "",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "0105556000017",
+      "code": "buyer_tax_id_format",
+      "doc_key": "d9997af6905",
+      "expected": "13 digits with a valid check digit",
+      "fields": [
+        "buyer_tax_id"
+      ],
+      "message": "",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "2026-09-18",
+      "code": "document_date",
+      "doc_key": "d9997af6905",
+      "expected": "not after 2026-10-03",
+      "fields": [
+        "document_date"
+      ],
+      "message": "",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": null,
+      "code": "line_arithmetic",
+      "doc_key": "d9997af6905",
+      "expected": "quantity × unit price = amount",
+      "fields": [
+        "line_items"
+      ],
+      "message": "",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "50000.00",
+      "code": "subtotal_sum",
+      "doc_key": "d9997af6905",
+      "expected": "50000.00",
+      "fields": [
+        "line_items",
+        "sum_lines"
+      ],
+      "message": "",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "50000.00",
+      "code": "discount_arithmetic",
+      "doc_key": "d9997af6905",
+      "expected": "50000.00",
+      "fields": [
+        "sum_lines",
+        "discount",
+        "subtotal"
+      ],
+      "message": "",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "3500.00",
+      "code": "vat_7_percent",
+      "doc_key": "d9997af6905",
+      "expected": "3500.00",
+      "fields": [
+        "vat_amount",
+        "subtotal",
+        "sum_lines",
+        "discount"
+      ],
+      "message": "",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "53500.00",
+      "code": "grand_total",
+      "doc_key": "d9997af6905",
+      "expected": "53500.00",
+      "fields": [
+        "subtotal",
+        "vat_amount",
+        "total",
+        "sum_lines",
+        "discount"
+      ],
+      "message": "",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": {
+        "net": "52000.00",
+        "rate": "3",
+        "wht": "1500.00"
+      },
+      "code": "wht",
+      "doc_key": "d9997af6905",
+      "expected": "rate × base = WHT; total − WHT = net",
+      "fields": [
+        "wht_amount",
+        "net_payable",
+        "wht_rate"
+      ],
+      "message": "",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "THB",
+      "code": "currency",
+      "doc_key": "d9997af6905",
+      "expected": "THB",
+      "fields": [
+        "currency"
+      ],
+      "message": "",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": null,
+      "code": "required_fields",
+      "doc_key": "d9997af6905",
+      "expected": [
+        "seller_name",
+        "seller_tax_id",
+        "seller_branch",
+        "document_number",
+        "document_date",
+        "buyer_name",
+        "total"
+      ],
+      "fields": [],
+      "message": "",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "0105556000017",
+      "code": "buyer_match",
+      "doc_key": "d9997af6905",
+      "expected": "0105556000017",
+      "fields": [
+        "buyer_tax_id"
+      ],
+      "message": "",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": null,
+      "code": "duplicate",
+      "doc_key": "d9997af6905",
+      "expected": "not seen before",
+      "fields": [
+        "document_number"
+      ],
+      "message": "",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "unmarked",
+      "code": "original_copy",
+      "doc_key": "d9997af6905",
+      "expected": "original",
+      "fields": [
+        "document_type"
+      ],
+      "message": "",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "53500.00",
+      "code": "amount_in_words",
+      "doc_key": "d9997af6905",
+      "expected": "52000.00",
+      "fields": [
+        "amount_in_words",
+        "total"
+      ],
+      "message": "",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "status": "pass"
+    },
+    {
+      "actual": "full_tax_invoice",
+      "code": "document_type",
+      "doc_key": "d17895664a1",
+      "expected": "a known document type",
+      "fields": [
+        "document_type"
+      ],
+      "message": "",
+      "name": "eTax_ใบเสร็จ.xml",
+      "status": "pass"
+    },
+    {
+      "actual": "0107537002141",
+      "code": "seller_tax_id_format",
+      "doc_key": "d17895664a1",
+      "expected": "13 digits with a valid check digit",
+      "fields": [
+        "seller_tax_id"
+      ],
+      "message": "",
+      "name": "eTax_ใบเสร็จ.xml",
+      "status": "pass"
+    },
+    {
+      "actual": "0105556000017",
+      "code": "buyer_tax_id_format",
+      "doc_key": "d17895664a1",
+      "expected": "13 digits with a valid check digit",
+      "fields": [
+        "buyer_tax_id"
+      ],
+      "message": "",
+      "name": "eTax_ใบเสร็จ.xml",
+      "status": "pass"
+    },
+    {
+      "actual": "2026-09-21",
+      "code": "document_date",
+      "doc_key": "d17895664a1",
+      "expected": "not after 2026-10-03",
+      "fields": [
+        "document_date"
+      ],
+      "message": "",
+      "name": "eTax_ใบเสร็จ.xml",
+      "status": "pass"
+    },
+    {
+      "actual": null,
+      "code": "line_arithmetic",
+      "doc_key": "d17895664a1",
+      "expected": "quantity × unit price = amount",
+      "fields": [
+        "line_items"
+      ],
+      "message": "",
+      "name": "eTax_ใบเสร็จ.xml",
+      "status": "pass"
+    },
+    {
+      "actual": "10400.00",
+      "code": "subtotal_sum",
+      "doc_key": "d17895664a1",
+      "expected": "10400.00",
+      "fields": [
+        "line_items",
+        "sum_lines"
+      ],
+      "message": "",
+      "name": "eTax_ใบเสร็จ.xml",
+      "status": "pass"
+    },
+    {
+      "actual": "10400.00",
+      "code": "discount_arithmetic",
+      "doc_key": "d17895664a1",
+      "expected": "10400.00",
+      "fields": [
+        "sum_lines",
+        "discount",
+        "subtotal"
+      ],
+      "message": "",
+      "name": "eTax_ใบเสร็จ.xml",
+      "status": "pass"
+    },
+    {
+      "actual": "728.00",
+      "code": "vat_7_percent",
+      "doc_key": "d17895664a1",
+      "expected": "728.00",
+      "fields": [
+        "vat_amount",
+        "subtotal",
+        "sum_lines",
+        "discount"
+      ],
+      "message": "",
+      "name": "eTax_ใบเสร็จ.xml",
+      "status": "pass"
+    },
+    {
+      "actual": "11128.00",
+      "code": "grand_total",
+      "doc_key": "d17895664a1",
+      "expected": "11128.00",
+      "fields": [
+        "subtotal",
+        "vat_amount",
+        "total",
+        "sum_lines",
+        "discount"
+      ],
+      "message": "",
+      "name": "eTax_ใบเสร็จ.xml",
+      "status": "pass"
+    },
+    {
+      "actual": null,
+      "code": "wht",
+      "doc_key": "d17895664a1",
+      "expected": null,
+      "fields": [
+        "wht_amount"
+      ],
+      "message": "no withholding tax on this document",
+      "name": "eTax_ใบเสร็จ.xml",
+      "status": "skip"
+    },
+    {
+      "actual": "THB",
+      "code": "currency",
+      "doc_key": "d17895664a1",
+      "expected": "THB",
+      "fields": [
+        "currency"
+      ],
+      "message": "",
+      "name": "eTax_ใบเสร็จ.xml",
+      "status": "pass"
+    },
+    {
+      "actual": null,
+      "code": "required_fields",
+      "doc_key": "d17895664a1",
+      "expected": [
+        "seller_name",
+        "seller_tax_id",
+        "seller_branch",
+        "document_number",
+        "document_date",
+        "buyer_name",
+        "total"
+      ],
+      "fields": [],
+      "message": "",
+      "name": "eTax_ใบเสร็จ.xml",
+      "status": "pass"
+    },
+    {
+      "actual": "0105556000017",
+      "code": "buyer_match",
+      "doc_key": "d17895664a1",
+      "expected": "0105556000017",
+      "fields": [
+        "buyer_tax_id"
+      ],
+      "message": "",
+      "name": "eTax_ใบเสร็จ.xml",
+      "status": "pass"
+    },
+    {
+      "actual": null,
+      "code": "duplicate",
+      "doc_key": "d17895664a1",
+      "expected": "not seen before",
+      "fields": [
+        "document_number"
+      ],
+      "message": "",
+      "name": "eTax_ใบเสร็จ.xml",
+      "status": "pass"
+    },
+    {
+      "actual": "unmarked",
+      "code": "original_copy",
+      "doc_key": "d17895664a1",
+      "expected": "original",
+      "fields": [
+        "document_type"
+      ],
+      "message": "",
+      "name": "eTax_ใบเสร็จ.xml",
+      "status": "pass"
+    },
+    {
+      "actual": null,
+      "code": "amount_in_words",
+      "doc_key": "d17895664a1",
+      "expected": null,
+      "fields": [
+        "amount_in_words"
+      ],
+      "message": "",
+      "name": "eTax_ใบเสร็จ.xml",
+      "status": "skip"
+    }
+  ],
+  "citations": [
+    {
+      "aliases": [
+        "ยอดก่อน vat",
+        "ยอดก่อนภาษี",
+        "มูลค่าก่อนภาษี"
+      ],
+      "formula": "ผลรวมยอดก่อนภาษีมูลค่าเพิ่มของเอกสารที่บันทึกเข้าทะเบียน เป็นเงินบาท",
+      "id": "i1",
+      "label": "ยอดก่อน VAT (บาท)",
+      "left_out": [],
+      "script": "packages/invoice_processing/scripts/register.py",
+      "sources": [
+        {
+          "file": "ใบกำกับภาษี_IV6909-0015.pdf",
+          "note": "ตามที่เอกสารพิมพ์",
+          "value": "12010.00"
+        },
+        {
+          "file": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+          "note": "ตามที่เอกสารพิมพ์",
+          "value": "50000.00"
+        },
+        {
+          "file": "eTax_ใบเสร็จ.xml",
+          "note": "ตามที่เอกสารพิมพ์",
+          "value": "10400.00"
+        }
+      ],
+      "value": "72410.00"
+    },
+    {
+      "aliases": [
+        "ภาษีมูลค่าเพิ่ม",
+        "vat",
+        "ภาษีซื้อ"
+      ],
+      "formula": "ผลรวมภาษีมูลค่าเพิ่มที่เอกสารที่บันทึกเข้าทะเบียนพิมพ์ไว้ เป็นเงินบาท",
+      "id": "i2",
+      "label": "ภาษีมูลค่าเพิ่ม (บาท)",
+      "left_out": [],
+      "script": "packages/invoice_processing/scripts/register.py",
+      "sources": [
+        {
+          "file": "ใบกำกับภาษี_IV6909-0015.pdf",
+          "note": "ตามที่เอกสารพิมพ์",
+          "value": "840.70"
+        },
+        {
+          "file": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+          "note": "ตามที่เอกสารพิมพ์",
+          "value": "3500.00"
+        },
+        {
+          "file": "eTax_ใบเสร็จ.xml",
+          "note": "ตามที่เอกสารพิมพ์",
+          "value": "728.00"
+        }
+      ],
+      "value": "5068.70"
+    },
+    {
+      "aliases": [
+        "ยอดรวม",
+        "รวมทั้งสิ้น"
+      ],
+      "formula": "ผลรวมยอดรวม (รวมภาษีมูลค่าเพิ่ม) ของเอกสารที่บันทึกเข้าทะเบียน เป็นเงินบาท",
+      "id": "i3",
+      "label": "ยอดรวม (บาท)",
+      "left_out": [],
+      "script": "packages/invoice_processing/scripts/register.py",
+      "sources": [
+        {
+          "file": "ใบกำกับภาษี_IV6909-0015.pdf",
+          "note": "ตามที่เอกสารพิมพ์",
+          "value": "12850.70"
+        },
+        {
+          "file": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+          "note": "ตามที่เอกสารพิมพ์",
+          "value": "53500.00"
+        },
+        {
+          "file": "eTax_ใบเสร็จ.xml",
+          "note": "ตามที่เอกสารพิมพ์",
+          "value": "11128.00"
+        }
+      ],
+      "value": "77478.70"
+    },
+    {
+      "aliases": [
+        "หัก ณ ที่จ่าย",
+        "ภาษีหัก ณ ที่จ่าย",
+        "wht"
+      ],
+      "formula": "ผลรวมภาษีหัก ณ ที่จ่ายที่เอกสารที่บันทึกเข้าทะเบียนพิมพ์ไว้ เป็นเงินบาท",
+      "id": "i4",
+      "label": "หัก ณ ที่จ่าย (บาท)",
+      "left_out": [],
+      "script": "packages/invoice_processing/scripts/register.py",
+      "sources": [
+        {
+          "file": "ใบกำกับภาษี_IV6909-0015.pdf",
+          "note": "เอกสารไม่ได้พิมพ์ค่านี้ จึงไม่ได้นับ",
+          "value": null
+        },
+        {
+          "file": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+          "note": "ตามที่เอกสารพิมพ์",
+          "value": "1500.00"
+        },
+        {
+          "file": "eTax_ใบเสร็จ.xml",
+          "note": "เอกสารไม่ได้พิมพ์ค่านี้ จึงไม่ได้นับ",
+          "value": null
+        }
+      ],
+      "value": "1500.00"
+    },
+    {
+      "aliases": [
+        "ยอดชำระสุทธิ",
+        "ชำระสุทธิ",
+        "net payable"
+      ],
+      "formula": "ผลรวมยอดชำระสุทธิเฉพาะที่เอกสารพิมพ์ไว้ เอกสารที่ไม่ได้พิมพ์ยอดนี้ไม่ถูกนับ (ยอดที่ต้องจ่ายจริงดูที่ “ยอดที่ต้องชำระ”)",
+      "id": "i5",
+      "label": "ยอดชำระสุทธิตามเอกสาร (บาท)",
+      "left_out": [],
+      "script": "packages/invoice_processing/scripts/register.py",
+      "sources": [
+        {
+          "file": "ใบกำกับภาษี_IV6909-0015.pdf",
+          "note": "เอกสารไม่ได้พิมพ์ค่านี้ จึงไม่ได้นับ",
+          "value": null
+        },
+        {
+          "file": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+          "note": "ตามที่เอกสารพิมพ์",
+          "value": "52000.00"
+        },
+        {
+          "file": "eTax_ใบเสร็จ.xml",
+          "note": "เอกสารไม่ได้พิมพ์ค่านี้ จึงไม่ได้นับ",
+          "value": null
+        }
+      ],
+      "value": "52000.00"
+    },
+    {
+      "aliases": [
+        "ยอดที่ต้องชำระ",
+        "ต้องชำระ",
+        "ต้องจ่าย",
+        "ยอดจ่าย"
+      ],
+      "formula": "ของแต่ละฉบับ: ยอดชำระสุทธิที่เอกสารพิมพ์ไว้ ถ้าไม่ได้พิมพ์ ใช้ยอดรวมหักภาษีหัก ณ ที่จ่าย แล้วรวมทุกฉบับที่บันทึกเข้าทะเบียน",
+      "id": "i6",
+      "label": "ยอดที่ต้องชำระ (บาท)",
+      "left_out": [],
+      "script": "packages/invoice_processing/scripts/register.py",
+      "sources": [
+        {
+          "file": "ใบกำกับภาษี_IV6909-0015.pdf",
+          "note": "ยอดรวมหักภาษีหัก ณ ที่จ่าย (เอกสารไม่ได้พิมพ์ยอดชำระสุทธิ)",
+          "value": "12850.70"
+        },
+        {
+          "file": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+          "note": "ยอดชำระสุทธิตามที่เอกสารพิมพ์",
+          "value": "52000.00"
+        },
+        {
+          "file": "eTax_ใบเสร็จ.xml",
+          "note": "ยอดรวมหักภาษีหัก ณ ที่จ่าย (เอกสารไม่ได้พิมพ์ยอดชำระสุทธิ)",
+          "value": "11128.00"
+        }
+      ],
+      "value": "75978.70"
+    },
+    {
+      "aliases": [
+        "บันทึก",
+        "จำนวนเอกสาร",
+        "กี่ฉบับ",
+        "ไม่ได้บันทึก",
+        "ตัดออก"
+      ],
+      "formula": "เอกสารที่ผ่านการตรวจและไม่มีคำถามค้าง ส่วนเอกสารที่ถูกตัดออกอยู่ในชีตข้อยกเว้นพร้อมเหตุผล",
+      "id": "i7",
+      "label": "จำนวนเอกสารที่บันทึกเข้าทะเบียน",
+      "left_out": [],
+      "script": "packages/invoice_processing/scripts/register.py",
+      "sources": [
+        {
+          "file": "ใบกำกับภาษี_IV6909-0015.pdf",
+          "note": "บันทึก",
+          "value": null
+        },
+        {
+          "file": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+          "note": "บันทึก",
+          "value": null
+        },
+        {
+          "file": "eTax_ใบเสร็จ.xml",
+          "note": "บันทึก",
+          "value": null
+        }
+      ],
+      "unit": "count",
+      "value": "3"
+    }
+  ],
+  "company": "บริษัท สยามตัวอย่างการค้า จำกัด",
+  "company_tax_id": "0105556000017",
+  "documents": [
+    {
+      "answered": 0,
+      "buyer_branch": "00000",
+      "buyer_name": "บริษัท สยามตัวอย่างการค้า จำกัด",
+      "buyer_tax_id": "0105556000017",
+      "copy_mark": "original",
+      "currency": "THB",
+      "discount": null,
+      "doc_key": "dad9d6316fe",
+      "document_date": "2026-09-15",
+      "document_number": "IV6909-0015",
+      "document_type": "full_tax_invoice",
+      "document_type_label": "ใบกำกับภาษีเต็มรูป",
+      "due_date": "2026-10-15",
+      "exclusion": null,
+      "fx_rate": null,
+      "method": "pdf_text",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "net_payable": null,
+      "payable": "12850.70",
+      "payable_computed": true,
+      "seller_branch": "00000",
+      "seller_name": "บริษัท ไทยออฟฟิศ ซัพพลาย จำกัด",
+      "seller_tax_id": "0105545009875",
+      "sha256": "ad9d6316fec5e95ff4eec8a622f7b286fd815989d60c0814255aae67925e79b2",
+      "status": "included",
+      "subtotal": "12010.00",
+      "sum_lines": "12010.00",
+      "thb_net_payable": null,
+      "thb_payable": "12850.70",
+      "thb_subtotal": "12010.00",
+      "thb_total": "12850.70",
+      "thb_vat_amount": "840.70",
+      "thb_wht_amount": null,
+      "tier": "digital",
+      "tier_label": "PDF ดิจิทัล",
+      "total": "12850.70",
+      "triage_only": false,
+      "vat_amount": "840.70",
+      "vat_mode": "exclusive",
+      "wht_amount": null
+    },
+    {
+      "answered": 0,
+      "buyer_branch": "00000",
+      "buyer_name": "บริษัท สยามตัวอย่างการค้า จำกัด",
+      "buyer_tax_id": "0105556000017",
+      "copy_mark": "unmarked",
+      "currency": "THB",
+      "discount": null,
+      "doc_key": "d9997af6905",
+      "document_date": "2026-09-18",
+      "document_number": "CS-2569-0187",
+      "document_type": "full_tax_invoice",
+      "document_type_label": "ใบกำกับภาษีเต็มรูป",
+      "due_date": "2026-10-18",
+      "exclusion": null,
+      "fx_rate": null,
+      "method": "pdf_text",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "net_payable": "52000.00",
+      "payable": "52000.00",
+      "payable_computed": false,
+      "seller_branch": "00000",
+      "seller_name": "หจก. ช่างเหล็กการโยธา",
+      "seller_tax_id": "0343561004528",
+      "sha256": "9997af69057bb2ef23cf05be4eadbeacd0054144cd3238bc4342dd575b03c30e",
+      "status": "included",
+      "subtotal": "50000.00",
+      "sum_lines": "50000.00",
+      "thb_net_payable": "52000.00",
+      "thb_payable": "52000.00",
+      "thb_subtotal": "50000.00",
+      "thb_total": "53500.00",
+      "thb_vat_amount": "3500.00",
+      "thb_wht_amount": "1500.00",
+      "tier": "digital",
+      "tier_label": "PDF ดิจิทัล",
+      "total": "53500.00",
+      "triage_only": false,
+      "vat_amount": "3500.00",
+      "vat_mode": "exclusive",
+      "wht_amount": "1500.00"
+    },
+    {
+      "answered": 0,
+      "buyer_branch": "00000",
+      "buyer_name": "บริษัท สยามตัวอย่างการค้า จำกัด",
+      "buyer_tax_id": "0105556000017",
+      "copy_mark": "unmarked",
+      "currency": "THB",
+      "discount": "0.00",
+      "doc_key": "d17895664a1",
+      "document_date": "2026-09-21",
+      "document_number": "ER2569-000871",
+      "document_type": "full_tax_invoice",
+      "document_type_label": "ใบกำกับภาษีเต็มรูป",
+      "due_date": null,
+      "exclusion": null,
+      "fx_rate": null,
+      "method": "etax_xml",
+      "name": "eTax_ใบเสร็จ.xml",
+      "net_payable": null,
+      "payable": "11128.00",
+      "payable_computed": true,
+      "seller_branch": "00000",
+      "seller_name": "บริษัท ไทยพาณิชย์ขนส่ง จำกัด (มหาชน)",
+      "seller_tax_id": "0107537002141",
+      "sha256": "17895664a18a303e57ce1bee59e90c3e76f043981442ef21feba6b4aa8c26042",
+      "status": "included",
+      "subtotal": "10400.00",
+      "sum_lines": "10400.00",
+      "thb_net_payable": null,
+      "thb_payable": "11128.00",
+      "thb_subtotal": "10400.00",
+      "thb_total": "11128.00",
+      "thb_vat_amount": "728.00",
+      "thb_wht_amount": null,
+      "tier": "etax",
+      "tier_label": "e-Tax (XML)",
+      "total": "11128.00",
+      "triage_only": false,
+      "vat_amount": "728.00",
+      "vat_mode": "exclusive",
+      "wht_amount": null
+    }
+  ],
+  "exceptions": [],
+  "excluded": [],
+  "fallback_narrative": {
+    "movements": [],
+    "next_steps": [],
+    "summary": "รอบนี้ได้รับเอกสาร 3 ฉบับ บันทึกเข้าทะเบียน 3 ฉบับ ยอดรวม 77,478.70 บาท ภาษีมูลค่าเพิ่ม 5,068.70 บาท",
+    "watch": []
+  },
+  "index_entries": [
+    {
+      "doc_key": "dad9d6316fe",
+      "document_date": "2026-09-15",
+      "document_number": "IV6909-0015",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "seller_tax_id": "0105545009875",
+      "sha256": "ad9d6316fec5e95ff4eec8a622f7b286fd815989d60c0814255aae67925e79b2",
+      "total": "12850.70"
+    },
+    {
+      "doc_key": "d9997af6905",
+      "document_date": "2026-09-18",
+      "document_number": "CS-2569-0187",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "seller_tax_id": "0343561004528",
+      "sha256": "9997af69057bb2ef23cf05be4eadbeacd0054144cd3238bc4342dd575b03c30e",
+      "total": "53500.00"
+    },
+    {
+      "doc_key": "d17895664a1",
+      "document_date": "2026-09-21",
+      "document_number": "ER2569-000871",
+      "name": "eTax_ใบเสร็จ.xml",
+      "seller_tax_id": "0107537002141",
+      "sha256": "17895664a18a303e57ce1bee59e90c3e76f043981442ef21feba6b4aa8c26042",
+      "total": "11128.00"
+    }
+  ],
+  "line_items": [
+    {
+      "amount": "2500.00",
+      "confidence": 1.0,
+      "description": "กระดาษถ่ายเอกสาร A4 80 แกรม",
+      "doc_key": "dad9d6316fe",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": 1,
+      "quantity": "20.00",
+      "row": 1,
+      "unit_price": "125.00",
+      "verified": true
+    },
+    {
+      "amount": "7560.00",
+      "confidence": 1.0,
+      "description": "หมึกพิมพ์เลเซอร์ HP 107A",
+      "doc_key": "dad9d6316fe",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": 1,
+      "quantity": "4.00",
+      "row": 2,
+      "unit_price": "1890.00",
+      "verified": true
+    },
+    {
+      "amount": "1950.00",
+      "confidence": 1.0,
+      "description": "3 นิ้ว สีน้ำเงิน",
+      "doc_key": "dad9d6316fe",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": 1,
+      "quantity": "30.00",
+      "row": 3,
+      "unit_price": "65.00",
+      "verified": true
+    },
+    {
+      "amount": "45000.00",
+      "confidence": 1.0,
+      "description": "ค่าบริการซ่อมแซมโครงหลังคาเหล็ก อาคาร B",
+      "doc_key": "d9997af6905",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "quantity": "1.00",
+      "row": 1,
+      "unit_price": "45000.00",
+      "verified": true
+    },
+    {
+      "amount": "5000.00",
+      "confidence": 1.0,
+      "description": "ค่าบริการตรวจสอบโครงสร้างหลังซ่อม",
+      "doc_key": "d9997af6905",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "quantity": "1.00",
+      "row": 2,
+      "unit_price": "5000.00",
+      "verified": true
+    },
+    {
+      "amount": "10400.00",
+      "confidence": 0.995,
+      "description": "ค่าขนส่งสินค้า กรุงเทพฯ-ระยอง",
+      "doc_key": "d17895664a1",
+      "name": "eTax_ใบเสร็จ.xml",
+      "page": null,
+      "quantity": "2.00",
+      "row": 1,
+      "unit_price": "5200.00",
+      "verified": true
+    }
+  ],
+  "lines": [],
+  "models": [],
+  "not_included": [],
+  "period": "2026-09",
+  "period_label": "กันยายน 2569",
+  "prepared_on": "2026-09-30",
+  "provenance": [
+    {
+      "bbox": "77.3,38.0,264.4,51.0",
+      "candidates": [],
+      "checks": [
+        "thai_marks_restored"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "dad9d6316fe",
+      "field": "seller_name",
+      "label": "ชื่อผู้ขาย",
+      "method": "pdf_text",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": 1,
+      "raw_text": "บริษัท ไทยออฟฟิศ ซัพพลาย จำกัด ใบกำกับภาษี / ใบเสร็จรับเงิน",
+      "value": "บริษัท ไทยออฟฟิศ ซัพพลาย จำกัด"
+    },
+    {
+      "bbox": "198.6,94.7,273.7,105.2",
+      "candidates": [],
+      "checks": [
+        "check_digit_ok",
+        "seller_tax_id_format"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "dad9d6316fe",
+      "field": "seller_tax_id",
+      "label": "เลขผู้เสียภาษีผู้ขาย",
+      "method": "pdf_text",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": 1,
+      "raw_text": "เลขประจำตัวผู้เสียภาษีอากร 0105545009875 สำนักงาน",
+      "value": "0105545009875"
+    },
+    {
+      "bbox": "281.4,94.7,321.8,105.2",
+      "candidates": [],
+      "checks": [],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "dad9d6316fe",
+      "field": "seller_branch",
+      "label": "สาขาผู้ขาย",
+      "method": "pdf_text",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": 1,
+      "raw_text": "เลขประจำตัวผู้เสียภาษีอากร 0105545009875 สำนักงาน",
+      "value": "00000"
+    },
+    {
+      "bbox": "42.0,182.4,181.2,192.9",
+      "candidates": [],
+      "checks": [],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "dad9d6316fe",
+      "field": "buyer_name",
+      "label": "ชื่อผู้ซื้อ",
+      "method": "pdf_text",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": 1,
+      "raw_text": "บริษัท สยามตัวอย่างการค้า จำกัด",
+      "value": "บริษัท สยามตัวอย่างการค้า จำกัด"
+    },
+    {
+      "bbox": "163.3,209.4,238.4,219.9",
+      "candidates": [],
+      "checks": [
+        "check_digit_ok",
+        "buyer_tax_id_format",
+        "buyer_match"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "dad9d6316fe",
+      "field": "buyer_tax_id",
+      "label": "เลขผู้เสียภาษีผู้ซื้อ",
+      "method": "pdf_text",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": 1,
+      "raw_text": "เลขประจำตัวผู้เสียภาษีอากร 0105556000017 สำนักงานใหญ่",
+      "value": "0105556000017"
+    },
+    {
+      "bbox": "246.0,209.4,305.9,219.9",
+      "candidates": [],
+      "checks": [],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "dad9d6316fe",
+      "field": "buyer_branch",
+      "label": "สาขาผู้ซื้อ",
+      "method": "pdf_text",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": 1,
+      "raw_text": "เลขประจำตัวผู้เสียภาษีอากร 0105556000017 สำนักงานใหญ่",
+      "value": "00000"
+    },
+    {
+      "bbox": "443.5,100.7,502.7,111.2",
+      "candidates": [],
+      "checks": [
+        "duplicate"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "dad9d6316fe",
+      "field": "document_number",
+      "label": "เลขที่เอกสาร",
+      "method": "pdf_text",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": 1,
+      "raw_text": "เลขที่ IV6909-0015",
+      "value": "IV6909-0015"
+    },
+    {
+      "bbox": "443.5,117.2,519.8,127.7",
+      "candidates": [],
+      "checks": [
+        "document_date"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "dad9d6316fe",
+      "field": "document_date",
+      "label": "วันที่เอกสาร",
+      "method": "pdf_text",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": 1,
+      "raw_text": "วันที่ 15 กันยายน 2569",
+      "value": "2026-09-15"
+    },
+    {
+      "bbox": "443.5,133.7,513.6,144.2",
+      "candidates": [],
+      "checks": [],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "dad9d6316fe",
+      "field": "due_date",
+      "label": "วันครบกำหนด",
+      "method": "pdf_text",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": 1,
+      "raw_text": "ครบกำหนด 15 ตุลาคม 2569",
+      "value": "2026-10-15"
+    },
+    {
+      "bbox": null,
+      "candidates": [],
+      "checks": [
+        "currency"
+      ],
+      "confidence": 1.0,
+      "decided_by": "computed",
+      "doc_key": "dad9d6316fe",
+      "field": "currency",
+      "label": "สกุลเงิน",
+      "method": "document_scan",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": null,
+      "raw_text": null,
+      "value": "THB"
+    },
+    {
+      "bbox": "417.5,347.4,432.8,357.9",
+      "candidates": [],
+      "checks": [
+        "vat_and_total_agree"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "dad9d6316fe",
+      "field": "vat_rate",
+      "label": "อัตรา VAT",
+      "method": "pdf_text",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": 1,
+      "raw_text": "ภาษีมูลค่าเพิ่ม 7% 840.70",
+      "value": "7"
+    },
+    {
+      "bbox": "41.2,329.4,557.2,342.2",
+      "candidates": [],
+      "checks": [
+        "amount_in_words"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "dad9d6316fe",
+      "field": "amount_in_words",
+      "label": "จำนวนเงินตัวอักษร",
+      "method": "pdf_text",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": 1,
+      "raw_text": "(หนึ่งหมื่นสองพันแปดร้อยห้าสิบบาทเจ็ดสิบสตางค์) รวมเป็นเงิน 12,010.00",
+      "value": "12850.70"
+    },
+    {
+      "bbox": "204.3,394.0,266.2,403.5",
+      "candidates": [],
+      "checks": [],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "dad9d6316fe",
+      "field": "bank_account",
+      "label": "เลขบัญชีธนาคาร",
+      "method": "pdf_text",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": 1,
+      "raw_text": "ชำระโดยโอนเข้าบัญชี ธนาคารกรุงไทย เลขที่ 012-3-45678-9",
+      "value": "0123456789"
+    },
+    {
+      "bbox": "511.5,329.4,557.2,339.9",
+      "candidates": [],
+      "checks": [
+        "lines_sum_to_base",
+        "discount_consistent",
+        "subtotal_sum",
+        "discount_arithmetic",
+        "vat_7_percent",
+        "grand_total"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "dad9d6316fe",
+      "field": "sum_lines",
+      "label": "รวมเป็นเงิน",
+      "method": "pdf_text",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": 1,
+      "raw_text": "(หนึ่งหมื่นสองพันแปดร้อยห้าสิบบาทเจ็ดสิบสตางค์) รวมเป็นเงิน 12,010.00",
+      "value": "12010.00"
+    },
+    {
+      "bbox": "511.5,329.4,557.2,339.9",
+      "candidates": [],
+      "checks": [
+        "derived_from_sum_lines",
+        "vat_and_total_agree",
+        "lines_sum_to_base",
+        "discount_arithmetic",
+        "vat_7_percent",
+        "grand_total"
+      ],
+      "confidence": 1.0,
+      "decided_by": "computed",
+      "doc_key": "dad9d6316fe",
+      "field": "subtotal",
+      "label": "ยอดก่อน VAT",
+      "method": "pdf_text",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": 1,
+      "raw_text": "(หนึ่งหมื่นสองพันแปดร้อยห้าสิบบาทเจ็ดสิบสตางค์) รวมเป็นเงิน 12,010.00",
+      "value": "12010.00"
+    },
+    {
+      "bbox": "525.7,347.4,557.2,357.9",
+      "candidates": [],
+      "checks": [
+        "vat_and_total_agree",
+        "vat_7_percent",
+        "grand_total"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "dad9d6316fe",
+      "field": "vat_amount",
+      "label": "VAT",
+      "method": "pdf_text",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": 1,
+      "raw_text": "ภาษีมูลค่าเพิ่ม 7% 840.70",
+      "value": "840.70"
+    },
+    {
+      "bbox": "502.8,367.3,557.2,379.3",
+      "candidates": [],
+      "checks": [
+        "vat_and_total_agree",
+        "amount_in_words_agrees",
+        "grand_total",
+        "amount_in_words"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "dad9d6316fe",
+      "field": "total",
+      "label": "ยอดรวมทั้งสิ้น",
+      "method": "pdf_text",
+      "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+      "page": 1,
+      "raw_text": "จำนวนเงินรวมทั้งสิ้น 12,850.70",
+      "value": "12850.70"
+    },
+    {
+      "bbox": "33.7,37.2,134.1,53.2",
+      "candidates": [],
+      "checks": [],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "d9997af6905",
+      "field": "seller_name",
+      "label": "ชื่อผู้ขาย",
+      "method": "pdf_text",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "raw_text": "หจก. ช่างเหล็กการโยธา ใบแจ้งหนี / ใบกำกับภาษี",
+      "value": "หจก. ช่างเหล็กการโยธา"
+    },
+    {
+      "bbox": "132.2,70.8,211.4,86.8",
+      "candidates": [],
+      "checks": [
+        "check_digit_ok",
+        "seller_tax_id_format"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "d9997af6905",
+      "field": "seller_tax_id",
+      "label": "เลขผู้เสียภาษีผู้ขาย",
+      "method": "pdf_text",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "raw_text": "เลขประจำตัวผู้เสียภาษี 0 3435 61004 52 8 สำนักงานใหญ่ INVOICE / TAX INVOICE",
+      "value": "0343561004528"
+    },
+    {
+      "bbox": "214.0,66.1,561.7,86.8",
+      "candidates": [],
+      "checks": [],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "d9997af6905",
+      "field": "seller_branch",
+      "label": "สาขาผู้ขาย",
+      "method": "pdf_text",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "raw_text": "เลขประจำตัวผู้เสียภาษี 0 3435 61004 52 8 สำนักงานใหญ่ INVOICE / TAX INVOICE",
+      "value": "00000"
+    },
+    {
+      "bbox": "71.1,103.7,210.8,119.8",
+      "candidates": [],
+      "checks": [],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "d9997af6905",
+      "field": "buyer_name",
+      "label": "ชื่อผู้ซื้อ",
+      "method": "pdf_text",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "raw_text": "ผู้ว่าจ้าง: บริษัท สยามตัวอย่างการค้า จำกัด",
+      "value": "บริษัท สยามตัวอย่างการค้า จำกัด"
+    },
+    {
+      "bbox": "132.2,136.8,211.4,152.8",
+      "candidates": [],
+      "checks": [
+        "check_digit_ok",
+        "buyer_tax_id_format",
+        "buyer_match"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "d9997af6905",
+      "field": "buyer_tax_id",
+      "label": "เลขผู้เสียภาษีผู้ซื้อ",
+      "method": "pdf_text",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "raw_text": "เลขประจำตัวผู้เสียภาษี 0 1055 56000 01 7 สำนักงานใหญ่",
+      "value": "0105556000017"
+    },
+    {
+      "bbox": "214.0,136.7,277.0,152.8",
+      "candidates": [],
+      "checks": [],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "d9997af6905",
+      "field": "buyer_branch",
+      "label": "สาขาผู้ซื้อ",
+      "method": "pdf_text",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "raw_text": "เลขประจำตัวผู้เสียภาษี 0 1055 56000 01 7 สำนักงานใหญ่",
+      "value": "00000"
+    },
+    {
+      "bbox": "59.0,154.1,121.2,170.1",
+      "candidates": [],
+      "checks": [
+        "duplicate"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "d9997af6905",
+      "field": "document_number",
+      "label": "เลขที่เอกสาร",
+      "method": "pdf_text",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "raw_text": "เลขที่ CS-2569-0187 วันที่ 18 ก.ย. 2569 กำหนดชำระ 18 ต.ค. 2569",
+      "value": "CS-2569-0187"
+    },
+    {
+      "bbox": "154.6,154.1,208.6,170.1",
+      "candidates": [],
+      "checks": [
+        "document_date"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "d9997af6905",
+      "field": "document_date",
+      "label": "วันที่เอกสาร",
+      "method": "pdf_text",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "raw_text": "เลขที่ CS-2569-0187 วันที่ 18 ก.ย. 2569 กำหนดชำระ 18 ต.ค. 2569",
+      "value": "2026-09-18"
+    },
+    {
+      "bbox": "276.2,154.1,331.2,170.1",
+      "candidates": [],
+      "checks": [],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "d9997af6905",
+      "field": "due_date",
+      "label": "วันครบกำหนด",
+      "method": "pdf_text",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "raw_text": "เลขที่ CS-2569-0187 วันที่ 18 ก.ย. 2569 กำหนดชำระ 18 ต.ค. 2569",
+      "value": "2026-10-18"
+    },
+    {
+      "bbox": null,
+      "candidates": [],
+      "checks": [
+        "currency"
+      ],
+      "confidence": 1.0,
+      "decided_by": "computed",
+      "doc_key": "d9997af6905",
+      "field": "currency",
+      "label": "สกุลเงิน",
+      "method": "document_scan",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": null,
+      "raw_text": null,
+      "value": "THB"
+    },
+    {
+      "bbox": "416.7,263.6,430.8,279.6",
+      "candidates": [],
+      "checks": [
+        "vat_and_total_agree"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "d9997af6905",
+      "field": "vat_rate",
+      "label": "อัตรา VAT",
+      "method": "pdf_text",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "raw_text": "ภาษีมูลค่าเพิ่ม 7% 3,500.00",
+      "value": "7"
+    },
+    {
+      "bbox": "111.9,308.6,126.0,324.6",
+      "candidates": [],
+      "checks": [
+        "wht_consistent",
+        "wht"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "d9997af6905",
+      "field": "wht_rate",
+      "label": "อัตราหัก ณ ที่จ่าย",
+      "method": "pdf_text",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "raw_text": "หักภาษี ณ ที่จ่าย 3% ของค่าบริการ 50,000.00 บาท = 1,500.00 บาท",
+      "value": "3"
+    },
+    {
+      "bbox": "38.2,245.6,557.2,261.6",
+      "candidates": [],
+      "checks": [
+        "amount_in_words"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "d9997af6905",
+      "field": "amount_in_words",
+      "label": "จำนวนเงินตัวอักษร",
+      "method": "pdf_text",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "raw_text": "(ห้าหมื่นสามพันห้าร้อยบาทถ้วน) รวมเป็นเงิน 50,000.00",
+      "value": "53500.00"
+    },
+    {
+      "bbox": "515.0,245.6,557.2,261.6",
+      "candidates": [],
+      "checks": [
+        "lines_sum_to_base",
+        "discount_consistent",
+        "subtotal_sum",
+        "discount_arithmetic",
+        "vat_7_percent",
+        "grand_total"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "d9997af6905",
+      "field": "sum_lines",
+      "label": "รวมเป็นเงิน",
+      "method": "pdf_text",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "raw_text": "(ห้าหมื่นสามพันห้าร้อยบาทถ้วน) รวมเป็นเงิน 50,000.00",
+      "value": "50000.00"
+    },
+    {
+      "bbox": "515.0,245.6,557.2,261.6",
+      "candidates": [],
+      "checks": [
+        "derived_from_sum_lines",
+        "vat_and_total_agree",
+        "lines_sum_to_base",
+        "discount_arithmetic",
+        "vat_7_percent",
+        "grand_total"
+      ],
+      "confidence": 1.0,
+      "decided_by": "computed",
+      "doc_key": "d9997af6905",
+      "field": "subtotal",
+      "label": "ยอดก่อน VAT",
+      "method": "pdf_text",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "raw_text": "(ห้าหมื่นสามพันห้าร้อยบาทถ้วน) รวมเป็นเงิน 50,000.00",
+      "value": "50000.00"
+    },
+    {
+      "bbox": "520.3,263.6,557.2,279.6",
+      "candidates": [],
+      "checks": [
+        "vat_and_total_agree",
+        "vat_7_percent",
+        "grand_total"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "d9997af6905",
+      "field": "vat_amount",
+      "label": "VAT",
+      "method": "pdf_text",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "raw_text": "ภาษีมูลค่าเพิ่ม 7% 3,500.00",
+      "value": "3500.00"
+    },
+    {
+      "bbox": "515.0,282.5,557.2,298.5",
+      "candidates": [],
+      "checks": [
+        "vat_and_total_agree",
+        "amount_in_words_agrees",
+        "grand_total",
+        "amount_in_words"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "d9997af6905",
+      "field": "total",
+      "label": "ยอดรวมทั้งสิ้น",
+      "method": "pdf_text",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "raw_text": "รวมทังสิน 53,500.00",
+      "value": "53500.00"
+    },
+    {
+      "bbox": "264.0,308.6,301.0,324.6",
+      "candidates": [],
+      "checks": [
+        "wht_consistent",
+        "wht"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "d9997af6905",
+      "field": "wht_amount",
+      "label": "หัก ณ ที่จ่าย",
+      "method": "pdf_text",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "raw_text": "หักภาษี ณ ที่จ่าย 3% ของค่าบริการ 50,000.00 บาท = 1,500.00 บาท",
+      "value": "1500.00"
+    },
+    {
+      "bbox": "103.9,326.0,146.2,342.0",
+      "candidates": [],
+      "checks": [
+        "wht_consistent",
+        "amount_in_words_agrees",
+        "wht"
+      ],
+      "confidence": 1.0,
+      "decided_by": "document",
+      "doc_key": "d9997af6905",
+      "field": "net_payable",
+      "label": "ยอดชำระสุทธิ",
+      "method": "pdf_text",
+      "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+      "page": 1,
+      "raw_text": "ยอดชำระสุทธิ 52,000.00 บาท (ห้าหมื่นสองพันบาทถ้วน)",
+      "value": "52000.00"
+    },
+    {
+      "bbox": null,
+      "candidates": [],
+      "checks": [],
+      "confidence": 0.995,
+      "decided_by": "document",
+      "doc_key": "d17895664a1",
+      "field": "seller_name",
+      "label": "ชื่อผู้ขาย",
+      "method": "etax_xml",
+      "name": "eTax_ใบเสร็จ.xml",
+      "page": null,
+      "raw_text": "eTax_ใบเสร็จ.xml: SellerTradeParty/Name",
+      "value": "บริษัท ไทยพาณิชย์ขนส่ง จำกัด (มหาชน)"
+    },
+    {
+      "bbox": null,
+      "candidates": [],
+      "checks": [
+        "check_digit_ok",
+        "seller_tax_id_format"
+      ],
+      "confidence": 0.995,
+      "decided_by": "document",
+      "doc_key": "d17895664a1",
+      "field": "seller_tax_id",
+      "label": "เลขผู้เสียภาษีผู้ขาย",
+      "method": "etax_xml",
+      "name": "eTax_ใบเสร็จ.xml",
+      "page": null,
+      "raw_text": "eTax_ใบเสร็จ.xml: SellerTradeParty/SpecifiedTaxRegistration/ID",
+      "value": "0107537002141"
+    },
+    {
+      "bbox": null,
+      "candidates": [],
+      "checks": [],
+      "confidence": 0.995,
+      "decided_by": "document",
+      "doc_key": "d17895664a1",
+      "field": "seller_branch",
+      "label": "สาขาผู้ขาย",
+      "method": "etax_xml",
+      "name": "eTax_ใบเสร็จ.xml",
+      "page": null,
+      "raw_text": "eTax_ใบเสร็จ.xml: SellerTradeParty/SpecifiedTaxRegistration/ID",
+      "value": "00000"
+    },
+    {
+      "bbox": null,
+      "candidates": [],
+      "checks": [],
+      "confidence": 0.995,
+      "decided_by": "document",
+      "doc_key": "d17895664a1",
+      "field": "seller_address",
+      "label": "ที่อยู่ผู้ขาย",
+      "method": "etax_xml",
+      "name": "eTax_ใบเสร็จ.xml",
+      "page": null,
+      "raw_text": "eTax_ใบเสร็จ.xml: SellerTradeParty/PostalTradeAddress",
+      "value": "200 ถนนบางนา-ตราด แขวงบางนา เขตบางนา กรุงเทพมหานคร 10260"
+    },
+    {
+      "bbox": null,
+      "candidates": [],
+      "checks": [],
+      "confidence": 0.995,
+      "decided_by": "document",
+      "doc_key": "d17895664a1",
+      "field": "buyer_name",
+      "label": "ชื่อผู้ซื้อ",
+      "method": "etax_xml",
+      "name": "eTax_ใบเสร็จ.xml",
+      "page": null,
+      "raw_text": "eTax_ใบเสร็จ.xml: BuyerTradeParty/Name",
+      "value": "บริษัท สยามตัวอย่างการค้า จำกัด"
+    },
+    {
+      "bbox": null,
+      "candidates": [],
+      "checks": [
+        "check_digit_ok",
+        "buyer_tax_id_format",
+        "buyer_match"
+      ],
+      "confidence": 0.995,
+      "decided_by": "document",
+      "doc_key": "d17895664a1",
+      "field": "buyer_tax_id",
+      "label": "เลขผู้เสียภาษีผู้ซื้อ",
+      "method": "etax_xml",
+      "name": "eTax_ใบเสร็จ.xml",
+      "page": null,
+      "raw_text": "eTax_ใบเสร็จ.xml: BuyerTradeParty/SpecifiedTaxRegistration/ID",
+      "value": "0105556000017"
+    },
+    {
+      "bbox": null,
+      "candidates": [],
+      "checks": [],
+      "confidence": 0.995,
+      "decided_by": "document",
+      "doc_key": "d17895664a1",
+      "field": "buyer_branch",
+      "label": "สาขาผู้ซื้อ",
+      "method": "etax_xml",
+      "name": "eTax_ใบเสร็จ.xml",
+      "page": null,
+      "raw_text": "eTax_ใบเสร็จ.xml: BuyerTradeParty/SpecifiedTaxRegistration/ID",
+      "value": "00000"
+    },
+    {
+      "bbox": null,
+      "candidates": [],
+      "checks": [],
+      "confidence": 0.995,
+      "decided_by": "document",
+      "doc_key": "d17895664a1",
+      "field": "buyer_address",
+      "label": "ที่อยู่ผู้ซื้อ",
+      "method": "etax_xml",
+      "name": "eTax_ใบเสร็จ.xml",
+      "page": null,
+      "raw_text": "eTax_ใบเสร็จ.xml: BuyerTradeParty/PostalTradeAddress",
+      "value": "88 ถนนสีลม แขวงสุริยวงศ์ เขตบางรัก กรุงเทพมหานคร 10500"
+    },
+    {
+      "bbox": null,
+      "candidates": [],
+      "checks": [
+        "duplicate"
+      ],
+      "confidence": 0.995,
+      "decided_by": "document",
+      "doc_key": "d17895664a1",
+      "field": "document_number",
+      "label": "เลขที่เอกสาร",
+      "method": "etax_xml",
+      "name": "eTax_ใบเสร็จ.xml",
+      "page": null,
+      "raw_text": "eTax_ใบเสร็จ.xml: ExchangedDocument/ID",
+      "value": "ER2569-000871"
+    },
+    {
+      "bbox": null,
+      "candidates": [],
+      "checks": [
+        "document_date"
+      ],
+      "confidence": 0.995,
+      "decided_by": "document",
+      "doc_key": "d17895664a1",
+      "field": "document_date",
+      "label": "วันที่เอกสาร",
+      "method": "etax_xml",
+      "name": "eTax_ใบเสร็จ.xml",
+      "page": null,
+      "raw_text": "eTax_ใบเสร็จ.xml: ExchangedDocument/IssueDateTime",
+      "value": "2026-09-21"
+    },
+    {
+      "bbox": null,
+      "candidates": [],
+      "checks": [
+        "currency"
+      ],
+      "confidence": 0.995,
+      "decided_by": "document",
+      "doc_key": "d17895664a1",
+      "field": "currency",
+      "label": "สกุลเงิน",
+      "method": "etax_xml",
+      "name": "eTax_ใบเสร็จ.xml",
+      "page": null,
+      "raw_text": "eTax_ใบเสร็จ.xml: InvoiceCurrencyCode",
+      "value": "THB"
+    },
+    {
+      "bbox": null,
+      "candidates": [],
+      "checks": [
+        "vat_and_total_agree"
+      ],
+      "confidence": 0.995,
+      "decided_by": "document",
+      "doc_key": "d17895664a1",
+      "field": "vat_rate",
+      "label": "อัตรา VAT",
+      "method": "etax_xml",
+      "name": "eTax_ใบเสร็จ.xml",
+      "page": null,
+      "raw_text": "eTax_ใบเสร็จ.xml: ApplicableTradeTax/CalculatedRate",
+      "value": "7"
+    },
+    {
+      "bbox": null,
+      "candidates": [],
+      "checks": [
+        "lines_sum_to_base",
+        "discount_consistent",
+        "subtotal_sum",
+        "discount_arithmetic",
+        "vat_7_percent",
+        "grand_total"
+      ],
+      "confidence": 0.995,
+      "decided_by": "document",
+      "doc_key": "d17895664a1",
+      "field": "sum_lines",
+      "label": "รวมเป็นเงิน",
+      "method": "etax_xml",
+      "name": "eTax_ใบเสร็จ.xml",
+      "page": null,
+      "raw_text": "eTax_ใบเสร็จ.xml: MonetarySummation/LineTotalAmount",
+      "value": "10400.00"
+    },
+    {
+      "bbox": null,
+      "candidates": [],
+      "checks": [
+        "discount_consistent",
+        "discount_arithmetic",
+        "vat_7_percent",
+        "grand_total"
+      ],
+      "confidence": 0.995,
+      "decided_by": "document",
+      "doc_key": "d17895664a1",
+      "field": "discount",
+      "label": "ส่วนลด",
+      "method": "etax_xml",
+      "name": "eTax_ใบเสร็จ.xml",
+      "page": null,
+      "raw_text": "eTax_ใบเสร็จ.xml: MonetarySummation/AllowanceTotalAmount",
+      "value": "0.00"
+    },
+    {
+      "bbox": null,
+      "candidates": [],
+      "checks": [
+        "vat_and_total_agree",
+        "lines_sum_to_base",
+        "discount_arithmetic",
+        "vat_7_percent",
+        "grand_total"
+      ],
+      "confidence": 0.995,
+      "decided_by": "document",
+      "doc_key": "d17895664a1",
+      "field": "subtotal",
+      "label": "ยอดก่อน VAT",
+      "method": "etax_xml",
+      "name": "eTax_ใบเสร็จ.xml",
+      "page": null,
+      "raw_text": "eTax_ใบเสร็จ.xml: MonetarySummation/TaxBasisTotalAmount",
+      "value": "10400.00"
+    },
+    {
+      "bbox": null,
+      "candidates": [],
+      "checks": [
+        "vat_and_total_agree",
+        "vat_7_percent",
+        "grand_total"
+      ],
+      "confidence": 0.995,
+      "decided_by": "document",
+      "doc_key": "d17895664a1",
+      "field": "vat_amount",
+      "label": "VAT",
+      "method": "etax_xml",
+      "name": "eTax_ใบเสร็จ.xml",
+      "page": null,
+      "raw_text": "eTax_ใบเสร็จ.xml: MonetarySummation/TaxTotalAmount",
+      "value": "728.00"
+    },
+    {
+      "bbox": null,
+      "candidates": [],
+      "checks": [
+        "vat_and_total_agree",
+        "grand_total"
+      ],
+      "confidence": 0.995,
+      "decided_by": "document",
+      "doc_key": "d17895664a1",
+      "field": "total",
+      "label": "ยอดรวมทั้งสิ้น",
+      "method": "etax_xml",
+      "name": "eTax_ใบเสร็จ.xml",
+      "page": null,
+      "raw_text": "eTax_ใบเสร็จ.xml: MonetarySummation/GrandTotalAmount",
+      "value": "11128.00"
+    }
+  ],
+  "quotable": {
+    "documents": "3",
+    "excluded": "0",
+    "included": "3",
+    "total_thb": "77,478.70",
+    "vat_thb": "5,068.70"
+  },
+  "quotable_ids": [],
+  "ratios": [],
+  "schema": "invoice.register.v1",
+  "script": "packages/invoice_processing/scripts/register.py",
+  "source": {
+    "documents": [
+      {
+        "name": "ใบกำกับภาษี_IV6909-0015.pdf",
+        "sha256": "ad9d6316fec5e95ff4eec8a622f7b286fd815989d60c0814255aae67925e79b2",
+        "tier": "digital"
+      },
+      {
+        "name": "ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf",
+        "sha256": "9997af69057bb2ef23cf05be4eadbeacd0054144cd3238bc4342dd575b03c30e",
+        "tier": "digital"
+      },
+      {
+        "name": "eTax_ใบเสร็จ.xml",
+        "sha256": "17895664a18a303e57ce1bee59e90c3e76f043981442ef21feba6b4aa8c26042",
+        "tier": "etax"
+      }
+    ]
+  },
+  "top_movements": [],
+  "totals": {
+    "by_currency": {
+      "THB": {
+        "documents": 3,
+        "total": "77478.70",
+        "vat_amount": "5068.70"
+      }
+    },
+    "documents": 3,
+    "exceptions": 0,
+    "excluded": 0,
+    "included": 3,
+    "questions_answered": 0,
+    "thb": {
+      "net_payable": "52000.00",
+      "payable": "75978.70",
+      "subtotal": "72410.00",
+      "total": "77478.70",
+      "vat_amount": "5068.70",
+      "wht_amount": "1500.00"
+    }
+  }
+}

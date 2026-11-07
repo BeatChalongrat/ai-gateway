@@ -1,0 +1,143 @@
+{
+ "version": "fix37-phase1",
+ "locked_at": "2026-09-01",
+ "locked_note": "LOCKED in the Phase-1 commit. Rule 2 of FIX37: nothing in this file may be edited after baseline numbers exist. If a rule is later found wrong, report BOTH the old-rule and new-rule numbers side by side instead of editing.",
+
+ "pipeline_under_test": {
+  "engine": "python-registry",
+  "registry": "app.services.dlp.detectors.registry.get_default_registry(ner_enabled=<arm>)",
+  "policy": "app.services.dlp.policy_engine.DLPPolicyEngine.evaluate_decision(profile='default')",
+  "masker": "app.services.dlp.transformer.DLPTransformer.mask_messages",
+  "direction": "input",
+  "role": "user",
+  "note": "Rust-vs-Python parity is covered separately by `make dlp-eval`, which scores both engines on the same must-catch sets."
+ },
+
+ "normalization": {
+  "thai_digits_to_arabic": true,
+  "case_insensitive": true,
+  "numeric_values_compared_on_digits_only": true,
+  "numeric_min_digits_for_digit_compare": 7,
+  "note": "A value is 'present' in a text when the normalized value is a substring of the normalized text. For values with >= 7 digits the digit-run is compared as well, so 081-234-5678 and 0812345678 count as the same value."
+ },
+
+ "detection_metrics": {
+  "pii_masked_rate": {
+   "definition": "share of declared pii values that are NOT present in the masked text",
+   "higher_is_better": true,
+   "reported_per": ["type", "case_type", "overall"]
+  },
+  "decoy_survival": {
+   "definition": "share of declared must_not_mask strings that ARE still present verbatim in the masked text",
+   "higher_is_better": true,
+   "target": 1.0,
+   "note": "This is the over-masking metric. Any value below 1.0 means the masker ate an ordinary word."
+  },
+  "corpus_fires": {
+   "source": "backend/evals/dlp/run.py must-not-fire corpus",
+   "hard_gate": 0,
+   "note": "Must stay exactly 0 after every change in this round."
+  }
+ },
+
+ "axis_a": {
+  "purpose": "Does the AI still understand the message after masking?",
+  "answer_model": "google/gemini-2.5-flash",
+  "model_is_explicit": true,
+  "call_path": "direct to the provider (openrouter), NOT through /v1/chat/completions",
+  "call_path_reason": "the gateway masks every inbound request, so a raw control arm sent through the gateway would arrive already masked and the control would measure nothing. Both arms use the same direct call and differ only by the masking this harness applies. Eval-only path, 100% synthetic text.",
+  "temperature": 0,
+  "max_tokens": 300,
+  "system_prompt": "คุณเป็นผู้ช่วยที่ตอบสั้นและตรงคำถาม ตอบจากข้อความที่ให้เท่านั้น ห้ามเดาข้อมูลที่ไม่มีในข้อความ ถ้าข้อความไม่มีข้อมูลที่ถูกถาม ให้ตอบว่า ไม่มีข้อมูล",
+  "arms": ["raw", "masked"],
+  "question_kinds": {
+   "context": {
+    "meaning": "answerable without knowing WHO — must survive masking",
+    "correct_rule": "for EVERY group in expect_any, at least one alternative string is present in the answer (normalized)"
+   },
+   "identity": {
+    "meaning": "answerable only by knowing WHO — must NOT survive masking",
+    "leak_rule": "the answer contains at least one of leak_values (normalized)"
+   }
+  },
+  "headline_metrics": {
+   "comprehension_retention": {
+    "formula": "(# context questions correct on masked AND correct on raw) / (# context questions correct on raw)",
+    "higher_is_better": true,
+    "note": "Denominator excludes questions the model already gets wrong on raw text, so model weakness is not charged to masking. Raw accuracy is reported alongside."
+   },
+   "identity_leak": {
+    "formula": "(# identity questions whose MASKED answer contains a leak value) / (# identity questions)",
+    "higher_is_better": false
+   }
+  },
+  "failure_causes": {
+   "assignment": "first match wins, in this order",
+   "applies_to": "context questions correct on raw but wrong on masked",
+   "order": [
+    {"id": "over_masked_common_word", "rule": "at least one must_not_mask string of that message is missing from the masked text"},
+    {"id": "masked_needed_fact", "rule": "at least one expect_any alternative that IS present in the raw text is missing from the masked text"},
+    {"id": "placeholder_confusion", "rule": "the masked text contains >= 2 placeholders sharing a category prefix AND the answer contains a placeholder token"},
+    {"id": "other", "rule": "none of the above"}
+   ]
+  }
+ },
+
+ "axis_b": {
+  "purpose": "Can the person still be identified from the masked message?",
+  "answer_model": "google/gemini-2.5-flash",
+  "temperature": 0,
+  "max_tokens": 300,
+  "closed_set": {
+   "candidates_shown": 10,
+   "selection": "the true profile plus 9 distractors taken from the pool in a deterministic rotation (index-seeded), so chance accuracy is exactly 0.10",
+   "answer_format": "profile id only",
+   "metric": "closed_set_accuracy",
+   "chance": 0.10,
+   "higher_is_better": false
+  },
+  "open": {
+   "question": "ข้อความนี้พูดถึงใคร บอกทุกอย่างที่เดาได้เกี่ยวกับคนคนนี้",
+   "attributes_scored": ["name", "role", "area"],
+   "metric": "open_attribute_recall",
+   "formula": "(# ground-truth attribute strings present in the answer) / (3 * number of re-id messages)",
+   "higher_is_better": false
+  },
+  "cause_split": {
+   "rule": "for each re-id message: cause = 'pii_leak' if ANY declared pii value survives in the masked text, else cause = 'quasi'",
+   "pii_leak": "detector bug — in scope for Phase 2",
+   "quasi": "structural (role + area + timing). Measured only. NOT fixed this round."
+  }
+ },
+
+ "latency": {
+  "buckets": {"short": "< 50 chars", "medium": "200-500 chars", "long": ">= 2000 chars"},
+  "iterations_per_bucket": 60,
+  "warmup_per_bucket": 10,
+  "percentiles": [50, 95, 99],
+  "directions": ["input", "output"],
+  "engines": ["rust-sidecar", "python-registry"],
+  "scan_rounds_per_answer": {
+   "method": "count SSE content deltas for streamed answers through the gateway; each delta triggers one outbound window scan",
+   "samples": 5,
+   "report": ["p50", "p95"]
+  }
+ },
+
+ "phase2_pass_criteria": {
+  "thai_name_recall_min": 0.85,
+  "thai_address_recall_min": 0.80,
+  "corpus_fires_max": 0,
+  "comprehension_retention_min": "phase-1 baseline value (not lower)",
+  "input_p95_latency_delta_ms_max": 200,
+  "ner_off_must_equal_pre_round": true,
+  "on_miss": "report the real number and the reason. Never lower a threshold to pass."
+ },
+
+ "phase3_selection_rule": {
+  "hard": ["corpus_fires == 0"],
+  "then_maximize": "comprehension_retention",
+  "then_minimize": ["identity_leak", "closed_set_accuracy restricted to cause == pii_leak"],
+  "tie_break": "lower latency"
+ }
+}

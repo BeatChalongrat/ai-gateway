@@ -1,0 +1,4 @@
+{
+  "_doc": "FIX44 Part B — classes the check knows are NOT generated. Every entry is a known, decided-or-pending no-op with a reason; remove the entry when the class is fixed (the check tells you when an entry is stale). Adding here without a reason fails the check. FIX45 emptied it: every /NN modifier on an opaque token is generated since the channel-form tokens (Part A).",
+  "entries": []
+}

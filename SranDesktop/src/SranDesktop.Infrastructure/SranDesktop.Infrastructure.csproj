@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SranDesktop.Infrastructure</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SranDesktop.Tests" />
+    <InternalsVisibleTo Include="SranDesktop.Infrastructure.Windows" />
+    <InternalsVisibleTo Include="SranDesktop.Infrastructure.Windows.Desktop" />
+  </ItemGroup>
+
+  <!-- The WindowsDesktop SDK (UseWPF) drops these from implicit usings -->
+  <ItemGroup>
+    <Using Include="System.IO" />
+    <Using Include="System.Net.Http" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.*" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.*" />
+    <PackageReference Include="Microsoft.CognitiveServices.Speech" Version="1.*" />
+    <!-- Phase 12 E: local Office-plan executors (both MIT-licensed) -->
+    <PackageReference Include="ClosedXML" Version="0.104.*" />
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.*" />
+    <!-- read_document: local PDF text extraction. PdfPig is pure managed
+         .NET (Apache-2.0) — no native binary to install alongside the app,
+         which matters because SRAN Desktop ships as a per-user installer
+         with no admin rights. Deliberately NOT a wrapper over pdfium /
+         poppler for that reason. -->
+    <PackageReference Include="PdfPig" Version="0.1.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SranDesktop.Application\SranDesktop.Application.csproj" />
+    <ProjectReference Include="..\SranDesktop.Domain\SranDesktop.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

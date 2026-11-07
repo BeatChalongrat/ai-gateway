@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Maskable variant: fills the full safe zone so Android adaptive
+       icons can crop to any shape without losing the mark. The inner
+       content stays inside the 80% safe area (51..461). -->
+  <defs>
+    <linearGradient id="bg-m" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0F1835"/>
+      <stop offset="100%" stop-color="#060A1D"/>
+    </linearGradient>
+    <linearGradient id="accent-m" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#1D4ED8"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg-m)"/>
+  <path d="M150 200c0-22 18-40 40-40h132c22 0 40 18 40 40v90c0 22-18 40-40 40H236l-40 38c-5 5-13 1-13-6v-32h-6c-22 0-40-18-40-40v-90z"
+        fill="url(#accent-m)"/>
+  <text x="256" y="290" font-family="Outfit, -apple-system, sans-serif"
+        font-size="80" font-weight="700" text-anchor="middle"
+        fill="#F1F5F9" letter-spacing="-2">S</text>
+</svg>

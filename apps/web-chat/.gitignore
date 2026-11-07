@@ -1,0 +1,14 @@
+node_modules/
+.next/
+# next.config.js splits dist dirs per phase to keep dev / build
+# artifacts from stepping on each other. Both are derived output.
+.next-fresh/
+.next-dev/
+out/
+.env.local
+.env*.local
+*.tsbuildinfo
+next-env.d.ts.bak
+# Playwright output (e2e lane)
+test-results/
+playwright-report/

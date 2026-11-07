@@ -1,0 +1,95 @@
+{
+ "schema": "e2.expected.v1",
+ "id": "h06_pos_vatable",
+ "files": [
+  "docs/h06_pos_vatable.pdf"
+ ],
+ "class": "digital",
+ "purpose": "H6: another POS slip style (VATABLE / TOTAL / CASH / CHANGE).",
+ "source_fixture": null,
+ "duplicate_of": null,
+ "scope": "full",
+ "scope_fields": null,
+ "truth": {
+  "document_type": "abbreviated_tax_invoice",
+  "seller_name": {
+   "value": "บริษัท ฟู้ดมาร์ท เอ็กซ์ตร้า จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "ฟู้ดมาร์ท เอ็กซ์ตร้า"
+   }
+  },
+  "seller_tax_id": {
+   "value": "0105548110291",
+   "valid": true
+  },
+  "seller_branch": "00041",
+  "buyer_name": null,
+  "buyer_tax_id": null,
+  "buyer_branch": null,
+  "document_number": "0041-26092-01877",
+  "document_date": "2026-09-27",
+  "due_date": null,
+  "currency": "THB",
+  "vat_mode": "inclusive",
+  "sum_lines": "307.00",
+  "discount": "0.00",
+  "subtotal": "286.92",
+  "vat_rate": "7",
+  "vat_amount": "20.08",
+  "total": "307.00",
+  "wht_rate": null,
+  "wht_amount": null,
+  "net_payable": null,
+  "line_items": [
+   {
+    "description": "ข้าวหอมมะลิ 5 กก.",
+    "quantity": "1",
+    "unit_price": "189.00",
+    "amount": "189.00"
+   },
+   {
+    "description": "น้ำมันพืช 1 ลิตร",
+    "quantity": "2",
+    "unit_price": "59.00",
+    "amount": "118.00"
+   }
+  ]
+ },
+ "checks": {
+  "document_type": "pass",
+  "seller_tax_id_format": "pass",
+  "buyer_tax_id_format": "skip",
+  "document_date": "pass",
+  "line_arithmetic": "skip",
+  "subtotal_sum": "pass",
+  "vat_7_percent": "pass",
+  "grand_total": "pass",
+  "wht": "skip",
+  "currency": "pass",
+  "required_fields": "pass",
+  "buyer_match": "skip",
+  "duplicate": "pass",
+  "original_copy": "pass"
+ },
+ "history": [],
+ "questions": {
+  "must": [],
+  "may": false,
+  "allowed_extra": [],
+  "max": 0
+ },
+ "rules": [
+  "no_silent_errors",
+  "zero_questions"
+ ],
+ "provenance": {
+  "method": "pdf_text",
+  "pages": 1,
+  "totals_page": 1
+ },
+ "confidence": {
+  "money_min": 0.95
+ },
+ "ui": null
+}

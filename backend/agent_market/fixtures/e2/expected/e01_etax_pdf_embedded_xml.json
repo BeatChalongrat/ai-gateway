@@ -1,0 +1,104 @@
+{
+ "schema": "e2.expected.v1",
+ "id": "e01_etax_pdf_embedded_xml",
+ "files": [
+  "docs/e01_etax_pdf_embedded_xml.pdf"
+ ],
+ "class": "etax_pdf",
+ "purpose": "e-Tax Invoice PDF carrying the ETDA XML as an embedded file: the XML is the source, the text layer confirms it",
+ "source_fixture": null,
+ "duplicate_of": null,
+ "scope": "full",
+ "scope_fields": null,
+ "truth": {
+  "document_type": "full_tax_invoice",
+  "seller_name": {
+   "value": "บริษัท เอเชีย คลาวด์ โซลูชั่นส์ จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "เอเชีย คลาวด์ โซลูชั่นส์"
+   }
+  },
+  "seller_tax_id": {
+   "value": "0105562077611",
+   "valid": true
+  },
+  "seller_branch": "00002",
+  "buyer_name": {
+   "value": "บริษัท สรานเทค โซลูชั่นส์ จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "สรานเทค โซลูชั่นส์"
+   }
+  },
+  "buyer_tax_id": {
+   "value": "0105563012343",
+   "valid": true
+  },
+  "buyer_branch": "00000",
+  "document_number": "ET2569090042",
+  "document_date": "2026-09-19",
+  "due_date": "2026-10-19",
+  "currency": "THB",
+  "vat_mode": "exclusive",
+  "sum_lines": "20000.00",
+  "discount": "0.00",
+  "subtotal": "20000.00",
+  "vat_rate": "7",
+  "vat_amount": "1400.00",
+  "total": "21400.00",
+  "wht_rate": null,
+  "wht_amount": null,
+  "net_payable": null,
+  "line_items": [
+   {
+    "description": "บริการคลาวด์เซิร์ฟเวอร์ รายเดือน ก.ย. 2569",
+    "quantity": "1",
+    "unit_price": "18500.00",
+    "amount": "18500.00"
+   },
+   {
+    "description": "บริการสำรองข้อมูล 500GB",
+    "quantity": "1",
+    "unit_price": "1500.00",
+    "amount": "1500.00"
+   }
+  ]
+ },
+ "checks": {
+  "document_type": "pass",
+  "seller_tax_id_format": "pass",
+  "buyer_tax_id_format": "pass",
+  "document_date": "pass",
+  "line_arithmetic": "pass",
+  "subtotal_sum": "pass",
+  "vat_7_percent": "pass",
+  "grand_total": "pass",
+  "wht": "skip",
+  "currency": "pass",
+  "required_fields": "pass",
+  "buyer_match": "pass",
+  "duplicate": "pass",
+  "original_copy": "pass"
+ },
+ "history": [],
+ "questions": {
+  "must": [],
+  "may": false,
+  "allowed_extra": [],
+  "max": 0
+ },
+ "rules": [
+  "no_silent_errors",
+  "zero_questions"
+ ],
+ "provenance": {
+  "method": "etax_xml",
+  "pages": 1,
+  "totals_page": 1
+ },
+ "confidence": {
+  "money_min": 0.95
+ },
+ "ui": null
+}

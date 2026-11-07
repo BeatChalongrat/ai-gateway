@@ -1,0 +1,725 @@
+{
+ "_about": "FIX26 §1.1 — ordinary Thai chat prose that contains NO personal data. Every registered detector must stay silent on every line. Built by hand from the registers a person actually types into this product: questions, instructions, small talk, technical requests, work chatter, and numbers that are not identifiers (prices, quantities, times, dates without a person, percentages, versions). NOT covered: formal/legal documents, Isan/Northern dialect, mixed Thai-English transliteration of names, poetry, long-form articles, OCR noise.",
+ "sentences": [
+  {
+   "id": "q_recall_number",
+   "register": "question",
+   "text": "เลขที่ให้จำเมื่อกี้คืออะไร"
+  },
+  {
+   "id": "q_animal_kind",
+   "register": "instruction",
+   "text": "บอกชื่อสัตว์มา 1 ชนิด ตอบสั้นๆ"
+  },
+  {
+   "id": "q_capital",
+   "register": "question",
+   "text": "เมืองหลวงของประเทศไทยคือที่ไหน"
+  },
+  {
+   "id": "q_weather",
+   "register": "smalltalk",
+   "text": "วันนี้อากาศเป็นยังไงบ้าง ร้อนไหม"
+  },
+  {
+   "id": "q_how_are_you",
+   "register": "smalltalk",
+   "text": "สบายดีไหม ช่วงนี้งานยุ่งหรือเปล่า"
+  },
+  {
+   "id": "q_lunch",
+   "register": "smalltalk",
+   "text": "เที่ยงนี้กินอะไรดี แนะนำร้านแถวออฟฟิศหน่อย"
+  },
+  {
+   "id": "q_meaning",
+   "register": "question",
+   "text": "คำว่า resilience แปลว่าอะไรในบริบทของซอฟต์แวร์"
+  },
+  {
+   "id": "q_difference",
+   "register": "question",
+   "text": "TCP กับ UDP ต่างกันยังไง อธิบายแบบเข้าใจง่ายๆ"
+  },
+  {
+   "id": "q_why_slow",
+   "register": "tech",
+   "text": "ทำไมโปรแกรมถึงช้าลงหลังจากอัปเดตเวอร์ชันล่าสุด"
+  },
+  {
+   "id": "q_recipe",
+   "register": "smalltalk",
+   "text": "ต้มยำกุ้งใส่อะไรบ้าง ขอสูตรแบบง่ายๆ"
+  },
+  {
+   "id": "i_summarize",
+   "register": "instruction",
+   "text": "ช่วยสรุปเนื้อหาข้างบนให้สั้นลงเหลือสามบรรทัด"
+  },
+  {
+   "id": "i_translate",
+   "register": "instruction",
+   "text": "แปลประโยคนี้เป็นภาษาอังกฤษให้หน่อย"
+  },
+  {
+   "id": "i_email_customer",
+   "register": "work",
+   "text": "ช่วยเขียนอีเมลแจ้งลูกค้าว่าสินค้าจะส่งล่าช้าหนึ่งสัปดาห์"
+  },
+  {
+   "id": "i_email_polite",
+   "register": "work",
+   "text": "เขียนอีเมลขอเลื่อนประชุมแบบสุภาพหน่อย"
+  },
+  {
+   "id": "i_shorter",
+   "register": "instruction",
+   "text": "ตอบสั้นๆ ไม่ต้องอธิบายยาว"
+  },
+  {
+   "id": "i_longer",
+   "register": "instruction",
+   "text": "ขยายความข้อสองให้ละเอียดกว่านี้"
+  },
+  {
+   "id": "i_bullet",
+   "register": "instruction",
+   "text": "ทำเป็นหัวข้อย่อยให้อ่านง่าย"
+  },
+  {
+   "id": "i_table",
+   "register": "instruction",
+   "text": "จัดข้อมูลนี้เป็นตารางสองคอลัมน์"
+  },
+  {
+   "id": "i_check_grammar",
+   "register": "instruction",
+   "text": "ตรวจไวยากรณ์ย่อหน้านี้ให้ที"
+  },
+  {
+   "id": "i_rewrite_formal",
+   "register": "instruction",
+   "text": "เขียนใหม่ให้เป็นทางการมากขึ้น"
+  },
+  {
+   "id": "t_python_error",
+   "register": "tech",
+   "text": "รันแล้วขึ้น KeyError ต้องแก้ตรงไหน"
+  },
+  {
+   "id": "t_docker",
+   "register": "tech",
+   "text": "คอนเทนเนอร์รีสตาร์ทเองทุกห้านาที ดู log ยังไงดี"
+  },
+  {
+   "id": "t_git",
+   "register": "tech",
+   "text": "ช่วยอธิบายความต่างระหว่าง rebase กับ merge"
+  },
+  {
+   "id": "t_sql",
+   "register": "tech",
+   "text": "เขียน query หาสินค้าที่ขายดีที่สุดสิบอันดับ"
+  },
+  {
+   "id": "t_regex",
+   "register": "tech",
+   "text": "regex สำหรับจับอีเมลเขียนยังไง"
+  },
+  {
+   "id": "t_api_design",
+   "register": "tech",
+   "text": "ออกแบบ endpoint สำหรับดึงรายการสินค้าแบบแบ่งหน้า"
+  },
+  {
+   "id": "t_unit_test",
+   "register": "tech",
+   "text": "ช่วยเขียน unit test ให้ฟังก์ชันคำนวณภาษี"
+  },
+  {
+   "id": "t_excel",
+   "register": "work",
+   "text": "สูตร Excel รวมยอดเฉพาะแถวที่สถานะเป็นเสร็จแล้ว"
+  },
+  {
+   "id": "t_pptx",
+   "register": "work",
+   "text": "ทำสไลด์นำเสนอผลประกอบการไตรมาสสามให้หน่อย"
+  },
+  {
+   "id": "t_word",
+   "register": "work",
+   "text": "สร้างไฟล์เวิร์ดสรุปการประชุมวันนี้"
+  },
+  {
+   "id": "n_price",
+   "register": "numbers",
+   "text": "ราคา 1,290 บาท ถ้าซื้อสองชิ้นลดอีก 15%"
+  },
+  {
+   "id": "n_quantity",
+   "register": "numbers",
+   "text": "สั่งมา 24 กล่อง เหลืออยู่ 7 กล่อง"
+  },
+  {
+   "id": "n_time",
+   "register": "numbers",
+   "text": "ประชุมเลื่อนไปเป็น 14:30 นะ"
+  },
+  {
+   "id": "n_date",
+   "register": "numbers",
+   "text": "ส่งงานภายในวันที่ 5 กันยายน"
+  },
+  {
+   "id": "n_year",
+   "register": "numbers",
+   "text": "งบประมาณปี 2568 เพิ่มขึ้นจากปีก่อน 12 เปอร์เซ็นต์"
+  },
+  {
+   "id": "n_screen",
+   "register": "numbers",
+   "text": "โน้ตบุ๊กจอ 13 นิ้ว น้ำหนัก 1.2 กิโลกรัม"
+  },
+  {
+   "id": "n_version",
+   "register": "tech",
+   "text": "อัปเกรดเป็นเวอร์ชัน 3.7.4 แล้วยังพังอยู่"
+  },
+  {
+   "id": "n_room",
+   "register": "work",
+   "text": "จองห้องประชุม 3 ชั้น 5 ตอนบ่ายสอง"
+  },
+  {
+   "id": "n_temperature",
+   "register": "numbers",
+   "text": "อุณหภูมิวันนี้ 36 องศา ร้อนมาก"
+  },
+  {
+   "id": "n_distance",
+   "register": "numbers",
+   "text": "จากบ้านไปที่ทำงานประมาณ 12 กิโลเมตร ใช้เวลาครึ่งชั่วโมง"
+  },
+  {
+   "id": "n_percentage",
+   "register": "numbers",
+   "text": "ยอดขายเดือนนี้โต 8.5% เทียบกับเดือนก่อน"
+  },
+  {
+   "id": "n_order_count",
+   "register": "work",
+   "text": "วันนี้มีออเดอร์เข้ามา 153 รายการ"
+  },
+  {
+   "id": "n_page",
+   "register": "instruction",
+   "text": "ดูหน้า 42 ย่อหน้าที่สอง"
+  },
+  {
+   "id": "n_math",
+   "register": "question",
+   "text": "คำนวณง่ายๆ 1+1 เท่ากับเท่าไหร่"
+  },
+  {
+   "id": "n_sqrt",
+   "register": "question",
+   "text": "รากที่สองของ 144 คือเท่าไร"
+  },
+  {
+   "id": "n_currency",
+   "register": "numbers",
+   "text": "100 ดอลลาร์ตอนนี้ประมาณกี่บาท"
+  },
+  {
+   "id": "s_thanks",
+   "register": "smalltalk",
+   "text": "ขอบคุณมากครับ ช่วยได้เยอะเลย"
+  },
+  {
+   "id": "s_good_morning",
+   "register": "smalltalk",
+   "text": "สวัสดีตอนเช้า วันนี้มีอะไรให้ช่วยไหม"
+  },
+  {
+   "id": "s_tired",
+   "register": "smalltalk",
+   "text": "เหนื่อยจัง อยากพักสักแป๊บ"
+  },
+  {
+   "id": "s_joke",
+   "register": "smalltalk",
+   "text": "เล่าเรื่องตลกให้ฟังหน่อยสิ"
+  },
+  {
+   "id": "s_movie",
+   "register": "smalltalk",
+   "text": "แนะนำหนังดูวันหยุดหน่อย แนวสืบสวน"
+  },
+  {
+   "id": "s_music",
+   "register": "smalltalk",
+   "text": "เพลงไทยยุคเก้าศูนย์เพลงไหนดังที่สุด"
+  },
+  {
+   "id": "s_football",
+   "register": "smalltalk",
+   "text": "เมื่อคืนบอลผลเป็นยังไง ใครชนะ"
+  },
+  {
+   "id": "s_coffee",
+   "register": "smalltalk",
+   "text": "กาแฟดำกับลาเต้อันไหนแคลอรีน้อยกว่า"
+  },
+  {
+   "id": "s_exercise",
+   "register": "smalltalk",
+   "text": "วิ่งตอนเช้ากับตอนเย็นแบบไหนดีกว่ากัน"
+  },
+  {
+   "id": "s_travel",
+   "register": "smalltalk",
+   "text": "ไปเชียงใหม่ช่วงไหนอากาศดีที่สุด"
+  },
+  {
+   "id": "w_meeting_note",
+   "register": "work",
+   "text": "ช่วยจดประเด็นจากการประชุมเป็นข้อๆ"
+  },
+  {
+   "id": "w_deadline",
+   "register": "work",
+   "text": "เดดไลน์โปรเจกต์นี้ขยับไปสิ้นเดือนหน้า"
+  },
+  {
+   "id": "w_report",
+   "register": "work",
+   "text": "รายงานสรุปโฟลเดอร์นี้มีไฟล์อะไรบ้าง"
+  },
+  {
+   "id": "w_kpi",
+   "register": "work",
+   "text": "ตั้ง KPI ให้ทีมขายไตรมาสหน้ายังไงดี"
+  },
+  {
+   "id": "w_agenda",
+   "register": "work",
+   "text": "ร่างวาระการประชุมประจำสัปดาห์ให้หน่อย"
+  },
+  {
+   "id": "w_apology",
+   "register": "work",
+   "text": "เขียนข้อความขอโทษลูกค้าที่ระบบล่มเมื่อวาน"
+  },
+  {
+   "id": "w_announce",
+   "register": "work",
+   "text": "ประกาศวันหยุดชดเชยให้พนักงานทุกคนทราบ"
+  },
+  {
+   "id": "w_policy",
+   "register": "work",
+   "text": "นโยบายทำงานจากบ้านของบริษัทเป็นยังไง"
+  },
+  {
+   "id": "w_interview_q",
+   "register": "work",
+   "text": "ช่วยคิดคำถามสัมภาษณ์ตำแหน่งนักพัฒนาซอฟต์แวร์"
+  },
+  {
+   "id": "w_job_desc",
+   "register": "work",
+   "text": "เขียน job description ตำแหน่งนักวิเคราะห์ข้อมูล"
+  },
+  {
+   "id": "w_feedback",
+   "register": "work",
+   "text": "ช่วยเรียบเรียง feedback ให้ฟังดูสร้างสรรค์"
+  },
+  {
+   "id": "w_invoice_generic",
+   "register": "work",
+   "text": "ใบแจ้งหนี้เดือนนี้ครบกำหนดชำระเมื่อไหร่"
+  },
+  {
+   "id": "w_stock",
+   "register": "work",
+   "text": "สต็อกสินค้ารหัสไหนใกล้หมดบ้าง"
+  },
+  {
+   "id": "w_survey",
+   "register": "work",
+   "text": "ออกแบบแบบสอบถามความพึงพอใจสั้นๆ ห้าข้อ"
+  },
+  {
+   "id": "m_memory_ask",
+   "register": "question",
+   "text": "จำได้ไหมว่าเมื่อกี้เราคุยเรื่องอะไร"
+  },
+  {
+   "id": "m_remember_word",
+   "register": "instruction",
+   "text": "จำคำนี้ไว้นะ วันนี้เป็นวันที่ดี"
+  },
+  {
+   "id": "m_what_can_you_do",
+   "register": "question",
+   "text": "คุณทำอะไรได้บ้าง"
+  },
+  {
+   "id": "m_who_are_you",
+   "register": "question",
+   "text": "คุณคือใคร ชื่ออะไร"
+  },
+  {
+   "id": "m_model",
+   "register": "question",
+   "text": "โมเดลที่ใช้อยู่ตอนนี้คือตัวไหน"
+  },
+  {
+   "id": "m_language",
+   "register": "instruction",
+   "text": "ต่อจากนี้ตอบเป็นภาษาไทยเท่านั้น"
+  },
+  {
+   "id": "m_tone",
+   "register": "instruction",
+   "text": "ใช้โทนเป็นกันเองหน่อย ไม่ต้องทางการ"
+  },
+  {
+   "id": "m_continue",
+   "register": "instruction",
+   "text": "ต่อเลย ยังไม่จบ"
+  },
+  {
+   "id": "m_repeat",
+   "register": "instruction",
+   "text": "ทวนอีกทีได้ไหม"
+  },
+  {
+   "id": "m_stop",
+   "register": "instruction",
+   "text": "พอแล้ว หยุดตรงนี้"
+  },
+  {
+   "id": "d_health_generic",
+   "register": "question",
+   "text": "นอนวันละกี่ชั่วโมงถึงจะพอ"
+  },
+  {
+   "id": "d_food_generic",
+   "register": "question",
+   "text": "อาหารประเภทไหนช่วยเรื่องการนอน"
+  },
+  {
+   "id": "d_history",
+   "register": "question",
+   "text": "สงครามโลกครั้งที่สองเริ่มปีไหน"
+  },
+  {
+   "id": "d_science",
+   "register": "question",
+   "text": "ทำไมท้องฟ้าถึงเป็นสีฟ้า"
+  },
+  {
+   "id": "d_geo",
+   "register": "question",
+   "text": "แม่น้ำสายไหนยาวที่สุดในโลก"
+  },
+  {
+   "id": "d_law_generic",
+   "register": "question",
+   "text": "กฎหมายคุ้มครองข้อมูลส่วนบุคคลมีผลบังคับใช้เมื่อไหร่"
+  },
+  {
+   "id": "d_religion_generic",
+   "register": "question",
+   "text": "วันสำคัญทางศาสนาเดือนนี้มีวันไหนบ้าง"
+  },
+  {
+   "id": "d_finance_generic",
+   "register": "question",
+   "text": "กองทุนรวมกับหุ้นต่างกันยังไง"
+  },
+  {
+   "id": "d_tax_generic",
+   "register": "question",
+   "text": "ยื่นภาษีออนไลน์ต้องเตรียมเอกสารอะไรบ้าง"
+  },
+  {
+   "id": "d_insurance_generic",
+   "register": "question",
+   "text": "ประกันสุขภาพแบบไหนคุ้มที่สุดสำหรับคนวัยทำงาน"
+  },
+  {
+   "id": "c_spaces_1",
+   "register": "instruction",
+   "text": "ช่วยดู ไฟล์นี้ แล้วบอกว่า มีอะไรผิด"
+  },
+  {
+   "id": "c_spaces_2",
+   "register": "smalltalk",
+   "text": "เมื่อวาน ฝนตก หนักมาก รถติด สุดๆ"
+  },
+  {
+   "id": "c_spaces_3",
+   "register": "work",
+   "text": "ลูกค้า ถามมา ว่าสินค้า จะเข้าเมื่อไหร่"
+  },
+  {
+   "id": "c_spaces_4",
+   "register": "instruction",
+   "text": "ชื่อไฟล์ ควรตั้ง ยังไง ให้หาง่าย"
+  },
+  {
+   "id": "c_spaces_5",
+   "register": "work",
+   "text": "พนักงาน ทุกคน ต้องส่ง รายงาน ก่อนศุกร์"
+  },
+  {
+   "id": "c_particles",
+   "register": "smalltalk",
+   "text": "โอเคเลย งั้นเอาแบบนั้นนะ"
+  },
+  {
+   "id": "c_mixed",
+   "register": "tech",
+   "text": "deploy แล้ว build ผ่าน แต่ test พังสองตัว"
+  },
+  {
+   "id": "c_emoji",
+   "register": "smalltalk",
+   "text": "เยี่ยมมาก 👍 ขอบคุณนะ"
+  },
+  {
+   "id": "c_list_products",
+   "register": "work",
+   "text": "รายชื่อสินค้า: กล้วย, ส้ม, มะม่วง, แอปเปิล"
+  },
+  {
+   "id": "c_list_tasks",
+   "register": "work",
+   "text": "งานวันนี้: ตอบอีเมล, ประชุมทีม, เขียนรายงาน"
+  },
+  {
+   "id": "c_address_word",
+   "register": "question",
+   "text": "ที่อยู่ของบริษัทคืออะไร ต้องไปเอาจากหน้าไหน"
+  },
+  {
+   "id": "c_number_word",
+   "register": "question",
+   "text": "เบอร์ไหนของสาขาที่ติดต่อได้ ไม่ได้ขอเบอร์ใครนะ"
+  },
+  {
+   "id": "c_born_generic",
+   "register": "question",
+   "text": "คนที่เกิดปีมะโรงปีนี้อายุเท่าไหร่"
+  },
+  {
+   "id": "c_type_word",
+   "register": "instruction",
+   "text": "แยกประเภท ชนิด และหมวดหมู่ของสินค้าให้ที"
+  },
+  {
+   "id": "q_first_answer",
+   "register": "question",
+   "text": "คำตอบแรกที่คุณตอบผมคืออะไร ตอบสั้นๆ"
+  },
+  {
+   "id": "q_you_think",
+   "register": "question",
+   "text": "คุณคิดว่าอันไหนดีกว่ากัน"
+  },
+  {
+   "id": "q_you_help",
+   "register": "instruction",
+   "text": "คุณช่วยสรุปให้หน่อยได้ไหม"
+  },
+  {
+   "id": "s_you_said",
+   "register": "smalltalk",
+   "text": "คุณบอกว่าจะส่งไฟล์มาให้ตั้งแต่เมื่อวาน"
+  },
+  {
+   "id": "f38_announce_predicate",
+   "register": "work",
+   "text": "ประกาศแจ้งว่าวันศุกร์นี้บริษัทหยุดทำการหนึ่งวัน"
+  },
+  {
+   "id": "f38_rain_late",
+   "register": "work",
+   "text": "ฝนมาสายกว่าทุกปี ชาวนาเลยเริ่มหว่านช้า"
+  },
+  {
+   "id": "f38_discipline",
+   "register": "work",
+   "text": "วินัยเป็นเรื่องสำคัญที่สุดของการทำงานเป็นทีม"
+  },
+  {
+   "id": "f38_property_seized",
+   "register": "work",
+   "text": "สมบัติของบริษัทถูกยึดไว้ชั่วคราวระหว่างการตรวจสอบบัญชี"
+  },
+  {
+   "id": "f38_profit_sick",
+   "register": "work",
+   "text": "กำไรไตรมาสนี้ป่วยหนัก ตัวเลขลดลงเกือบครึ่ง"
+  },
+  {
+   "id": "f38_report_late",
+   "register": "work",
+   "text": "รายงานมาสายอีกแล้ว ขอให้ส่งก่อนเที่ยงทุกวันจันทร์"
+  },
+  {
+   "id": "f38_building_words",
+   "register": "work",
+   "text": "ประชุมที่ห้อง 402 ชั้น 5 ของอาคารสำนักงานใหญ่ตอนบ่ายสองนะ"
+  },
+  {
+   "id": "f38_condo_generic",
+   "register": "work",
+   "text": "คอนโดแถวนี้ราคาขึ้นทุกปี ตึกใหม่สร้างไม่ทันความต้องการ"
+  },
+  {
+   "id": "f38_estate_generic",
+   "register": "work",
+   "text": "นิคมอุตสาหกรรมทางภาคตะวันออกเปิดรับพนักงานเพิ่มหลายพันตำแหน่ง"
+  },
+  {
+   "id": "f38_kind_debt",
+   "register": "work",
+   "text": "ชนิดของหนี้ที่ค้างชำระนานที่สุดคือหนี้บัตรเครดิต"
+  },
+  {
+   "id": "f38_should_sign",
+   "register": "work",
+   "text": "ควรเซ็นสัญญาให้เรียบร้อยก่อนเริ่มงานทุกครั้ง"
+  },
+  {
+   "id": "f38_hope_late",
+   "register": "work",
+   "text": "ความหวังมาสายเสมอสำหรับคนที่ไม่ลงมือทำ"
+  },
+  {
+   "id": "f46_leadin_page",
+   "register": "work",
+   "text": "ไปที่หน้า 3 แล้วกดปุ่มสีเขียว"
+  },
+  {
+   "id": "f46_leadin_step",
+   "register": "work",
+   "text": "ให้ไปที่ขั้นตอนที่ 2 ก่อนแล้วค่อยกดยืนยัน"
+  },
+  {
+   "id": "f46_leadin_team",
+   "register": "work",
+   "text": "ส่งไปที่ทีมบัญชีภายในวันที่ 5 นะ"
+  },
+  {
+   "id": "f46_leadin_cafe",
+   "register": "work",
+   "text": "แวะที่ร้านกาแฟตอน 3 โมงแล้วค่อยไปต่อ"
+  },
+  {
+   "id": "f46_leadin_meeting_room",
+   "register": "work",
+   "text": "นัดที่ห้องประชุมชั้น 2 ตอนบ่าย 2"
+  },
+  {
+   "id": "f46_leadin_slide",
+   "register": "work",
+   "text": "ไปที่สไลด์ 12 จะเห็นกราฟยอดขาย"
+  },
+  {
+   "id": "f46_leadin_line",
+   "register": "work",
+   "text": "ไปที่บรรทัด 40 ของไฟล์แล้วแก้ค่า timeout"
+  },
+  {
+   "id": "f46_leadin_gate",
+   "register": "work",
+   "text": "มาที่ประตู 4 ก่อนเครื่องออก 30 นาที"
+  },
+  {
+   "id": "f46_leadin_counter",
+   "register": "work",
+   "text": "ไปที่เคาน์เตอร์ 7 เพื่อรับบัตรคิว"
+  },
+  {
+   "id": "f46_leadin_floor_shop",
+   "register": "work",
+   "text": "แวะที่ชั้น 3 ของห้างมีร้านหนังสือใหม่"
+  },
+  {
+   "id": "f46_leadin_channel",
+   "register": "work",
+   "text": "ไปที่ช่อง 3 ตอน 2 ทุ่มมีรายการที่ว่า"
+  },
+  {
+   "id": "f46_leadin_table",
+   "register": "work",
+   "text": "นัดที่โต๊ะ 12 ริมหน้าต่างเหมือนเดิม"
+  },
+  {
+   "id": "f46_leadin_stage",
+   "register": "work",
+   "text": "ไปที่เวที 2 ตอน 4 โมงเย็น"
+  },
+  {
+   "id": "f46_leadin_hour",
+   "register": "work",
+   "text": "ไปที่ 3 โมงเย็นพอดีนะ อย่าสาย"
+  },
+  {
+   "id": "f46_leadin_version",
+   "register": "work",
+   "text": "อยู่ที่เวอร์ชัน 2 ยังไม่ได้อัปเดตเป็น 3"
+  },
+  {
+   "id": "f46_leadin_years",
+   "register": "work",
+   "text": "อยู่ 3 ปีแล้วยังไม่เคยไปทะเล"
+  },
+  {
+   "id": "f46_leadin_queue",
+   "register": "work",
+   "text": "ตอนนี้อยู่ที่คิว 15 อีกประมาณ 20 นาที"
+  },
+  {
+   "id": "f46_leadin_chapter",
+   "register": "work",
+   "text": "ไปที่บทที่ 4 หัวข้อ 4.2 อ่านก่อนสอบ"
+  },
+  {
+   "id": "f46_leadin_temp",
+   "register": "work",
+   "text": "อยู่ที่ 25 องศาทั้งวัน แอร์ตั้งไว้ 25"
+  },
+  {
+   "id": "f46_leadin_percent",
+   "register": "work",
+   "text": "ตอนนี้อยู่ที่ 80 เปอร์เซ็นต์ของเป้า"
+  },
+  {
+   "id": "f46_leadin_road_traffic",
+   "register": "work",
+   "text": "รถติดที่ถนนนี้ 3 ชั่วโมงทุกเย็น"
+  },
+  {
+   "id": "f46_leadin_room_meeting2",
+   "register": "work",
+   "text": "ประชุมทีมที่ห้อง 501 ชั้น 5 ตอนบ่ายนะ"
+  },
+  {
+   "id": "f46_leadin_score",
+   "register": "work",
+   "text": "คะแนนอยู่ที่ 45 จาก 60 ข้อ"
+  },
+  {
+   "id": "f46_leadin_price",
+   "register": "work",
+   "text": "ราคาอยู่ที่ 1200 ต่อชั้น 2 ชิ้นได้ส่วนลด"
+  }
+ ]
+}

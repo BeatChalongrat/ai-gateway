@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The Windows half that genuinely needs the WindowsDesktop framework
+       (Infrastructure split, 2026-08-25): UI Automation (System.Windows.
+       Automation = UIAutomationClient), the WPF clipboard tools (a live
+       System.Windows.Application), and the WPF-window plumbing (GlobalHotkey
+       over HwndSource, SingleInstance marshalling to the Dispatcher). Only a
+       host that IS a WPF application references this; the tools sidecar does
+       not — its clipboard moves to the Electron host (E4). Namespaces are
+       unchanged (SranDesktop.Infrastructure.*). -->
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SranDesktop.Infrastructure</RootNamespace>
+    <AssemblyName>SranDesktop.Infrastructure.Windows.Desktop</AssemblyName>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+  <!-- The WindowsDesktop SDK (UseWPF) drops these from implicit usings -->
+  <ItemGroup>
+    <Using Include="System.IO" />
+    <Using Include="System.Net.Http" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SranDesktop.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SranDesktop.Infrastructure\SranDesktop.Infrastructure.csproj" />
+    <ProjectReference Include="..\SranDesktop.Infrastructure.Windows\SranDesktop.Infrastructure.Windows.csproj" />
+    <ProjectReference Include="..\SranDesktop.Application\SranDesktop.Application.csproj" />
+    <ProjectReference Include="..\SranDesktop.Domain\SranDesktop.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

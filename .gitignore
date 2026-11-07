@@ -1,0 +1,308 @@
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+# Example/template env files carry no secrets and MUST be tracked —
+# without this negation portal/.env.local.example was silently ignored.
+!*.env*.example
+!.env.*.example
+!scripts/uat/.env.uat.template
+.venv/
+venv/
+node_modules/
+.next/
+dist/
+build/
+coverage/
+.pytest_cache/
+.claude/
+.vscode/
+.idea/
+.DS_Store
+*.log
+logs/
+
+# Scratch/debug scratchpads — never commit (once held a real admin JWT; the
+# incident record is kept outside the repository). Ignored everywhere in the tree.
+.tmp_bugs/
+**/.tmp_bugs/
+tmp/
+storage/
+# Track the Go ``internal/storage/`` package — the generic
+# ``storage/`` rule above was meant for data dirs (./data/storage,
+# etc.), not Go source. Exception must come AFTER the broader rule.
+!services/chat-edge-api/internal/storage/
+!services/chat-edge-api/internal/storage/**
+# Same fix for the desktop's C# Storage source — the ``storage/`` rule
+# matched it case-insensitively on Windows, leaving these core files
+# UNTRACKED (a fresh clone wouldn't build). Re-include the source dir.
+!SranDesktop/src/SranDesktop.Infrastructure/Storage/
+!SranDesktop/src/SranDesktop.Infrastructure/Storage/**
+# ...and the matching TEST directory, for the same reason. This one bit later:
+# four test sources sat there untracked and did not even appear in git status,
+# so `git add -A` skipped them without a word. A rule meant for data directories
+# must never be left to match source by accident.
+!SranDesktop/src/SranDesktop.Tests/Storage/
+!SranDesktop/src/SranDesktop.Tests/Storage/**
+# ...and the fourth occurrence: the platform split moved the C# Storage source
+# into a NEW SranDesktop.Infrastructure.Windows project, and the same broad
+# `storage/` rule swallowed it too — DpapiCredentialStore.cs sat untracked, so
+# a fresh clone of the kept sidecar path would not build. Re-include it, same
+# as the three above. (The broad rule itself should be narrowed to data dirs;
+# that is a separate, reviewable change — not made mid-commit-of-untracked-work.)
+!SranDesktop/src/SranDesktop.Infrastructure.Windows/Storage/
+!SranDesktop/src/SranDesktop.Infrastructure.Windows/Storage/**
+uploads/
+*.sqlite3
+admin-ui/tsconfig.tsbuildinfo
+backend/uploads/
+
+# Perf-baseline track (deferred) — source lives on branch
+# archive/uncommitted-20260423 in perf/. Generated results and scratch
+# directories are never tracked on main.
+perf/
+perf_audit_tmp/
+
+# Local dev artifacts (DOM measurements, hero-tuning screenshots,
+# debug request/response traces) — not project sources.
+measure.js
+hero-*.png
+traces/
+
+# Report & audit docs (root level)
+*_REPORT.md
+*_AUDIT_REPORT.md
+*_VERIFICATION_REPORT.md
+*_PLAN.md
+# Exception: the retention plan is a real project document, not a working report.
+!docs/DATA_RETENTION_PLAN.md
+*_LOG.md
+
+# The same classes spelled with hyphens. The rules above were written with
+# underscores, so UX-TEST-PLAN.md and UX-TEST-QUESTIONS.md sat untracked and
+# visible at the root until 2026-09-10. A name that is not one of these shapes
+# is still not covered -- working documents belong in scratchpad/ (line 156).
+*-REPORT.md
+*-PLAN.md
+*-QUESTIONS.md
+BASELINE_STATUS.md
+IMPLEMENTATION_ROADMAP.md
+RUNBOOK.md
+TASK_BOARD.md
+POST_*.md
+THREE_FIXES_REPORT.md
+UX_CLEANUP_REPORT.md
+RUNTIME_CONSOLIDATION_REPORT.md
+
+# Shell test scripts
+real-loop-test.sh
+sran-pii-test.sh
+
+# Rust sidecar build artifacts
+dlp-sidecar/target/
+
+# UAT seed output — contains raw API keys printed once by 02_seed_uat.py.
+# Keep on disk only until copied into the customer's secret manager.
+uat-seed-output.txt
+
+# Secrets & local state (cross-cutting; defense in depth)
+*.pem
+*.key
+credentials.dat
+*.db
+*.sqlite
+*.sqlite-journal
+Thumbs.db
+.vs/
+
+# SranDesktop's Inno Setup script lives in build/ — a required build
+# input, not an output. Re-include it past the generic ``build/`` rule
+# above (dir first, then contents — same pattern as internal/storage).
+!SranDesktop/build/
+!SranDesktop/build/**
+
+# FIX19 — same case again: the Electron app's electron-builder NSIS include
+# (apps/desktop/build/installer.nsh) is a required build INPUT the config
+# references, swallowed by the generic ``build/`` rule. Re-include it. (The
+# electron-builder OUTPUT, apps/desktop/release/, stays ignored above.)
+!apps/desktop/build/
+!apps/desktop/build/**
+# FIX133 — the local CA the desktop pins is staged here by scripts/dist.js from
+# infra/caddy/certs (per machine, never committed).
+apps/desktop/build/trusted-ca.pem
+# FIX20 — but the runtime config scripts/dist.js STAGES there for
+# electron-builder (a copy of whatever config the build was pointed at — for
+# a server build, a file that lives outside the repo) is a build artefact.
+apps/desktop/build/desktop.config.json
+
+# Local data and dev-server artifacts (dev-server*.log already matches *.log)
+# ROOT-ANCHORED on purpose. Unanchored, ``data/`` matched at any depth and
+# silently ignored backend/app/services/dlp/data/ -- the five corpora the
+# detector engine loads at runtime (content_policy.py, thai_name_no_prefix.py,
+# public_entity_registry.py). They sat tracked-but-ignored for months. The
+# rule was only ever meant for the local ./data dir at the repo root.
+# Same failure mode as ``storage/``; see the hand-written escapes at :32-47.
+/data/
+test-results/
+.next-dev/
+.next-fresh/
+
+# Local pre-fix backup snapshots (multi-GB) - never commit
+_retired-*/
+
+# Local workflow scratch files - keep out of the repo (2026-08-12 hygiene pass)
+# Both spellings. PROMPT*.md matches a PREFIX only, so it never caught any
+# of the 75 *_PROMPT.md task briefs it was added for -- they stayed tracked
+# until the 2026-08-22 pass. The suffix form must be listed separately.
+# The lowercase working briefs (prompt-fix33-*.md ...) only match PROMPT*.md
+# because this checkout has core.ignorecase=true (Windows); a case-sensitive
+# clone (Linux CI) would see them as untracked noise, so the lowercase rule
+# is spelled out too (2026-09-03 pass).
+PROMPT*.md
+prompt-*.md
+*_PROMPT.md
+GAP-ANALYSIS-*.md
+*_sandbox_*
+scratchpad/
+*.patch
+
+# Build artifacts: installers and release binaries (2026-08-20 hygiene pass)
+# Nothing here is source — every one is regenerable by the desktop build.
+# The tree already carries a ~98 MB installer under releases/, which no rule
+# covered: a single `git add -A` would put it in history permanently, and
+# undoing that means rewriting history across every branch.
+# SranDesktop/publish/ and SranDesktop/installer/ were already covered by
+# SranDesktop/.gitignore:6-7; these extension rules are the repo-wide
+# backstop for artifacts produced anywhere else, including releases/.
+# Scoped by extension rather than by directory ON PURPOSE: releases/ is the
+# desktop update channel and releases/latest.json is the live manifest whose
+# history is the rollback path, so it must STAY TRACKED. A `releases/` rule
+# would have swallowed it.
+*.exe
+*.msi
+*.msix
+*.appx
+*.appxbundle
+*.nupkg
+
+# FIX19 — electron-builder output for the Electron desktop app. The installer
+# .exe is already covered above, but the win-unpacked/ tree (app.asar, *.dll,
+# *.pak, builder config) is not — this ignores the whole output dir. Note this
+# is apps/desktop/release/ (singular, a build artefact), NOT the tracked
+# releases/ desktop update channel.
+/apps/desktop/release/
+
+# Working documents: records of how the work got done, not how the system
+# works (2026-08-22 hygiene pass). ROOT-ANCHORED so they cannot reach a
+# same-named directory deeper in the tree, the way the old data/ rule did.
+/audit/
+/audit-functional/
+/reports/
+/sprint-reports/
+
+# Staged release manifests. releases/latest.json is the LIVE manifest and
+# stays tracked; the per-version staged files are build scratch that a
+# ``git add -A`` would otherwise sweep in.
+releases/*.staged.json
+
+# Stray desktop icon. The build uses Assets/app.ico (csproj:12, iss:31);
+# this one is referenced by nothing and has been committed by accident twice.
+SranDesktop/src/SranDesktop.App/Assets/sran-app.ico
+
+# Browser-bridge pairing token dropped into the unpacked extension folder by
+# the desktop app (contains a secret) — never commit it.
+pairing.json
+**/browser-extension/pairing.json
+
+# Owner hand-test session notes (working docs; kept on disk, never committed).
+docs/OWNER_*.md
+# Landing-redesign scratch/mock dir (design reference; the portal holds the shipped code).
+_landing-redesign/
+
+# ---------------------------------------------------------------------------
+# What belongs in the repo and what does not
+#
+#   IN:   source, tests, reusable tooling (scripts/probes/, backend/evals/),
+#         architecture and contract docs (docs/*.md, docs/known-issues/)
+#   OUT:  per-round working documents — reports (*_REPORT.md), task briefs
+#         (PROMPT*.md), plans (PLAN_*.md); evidence gathered while verifying
+#         a change (docs/fix*/, docs/audit/, docs/shots/); raw probe output
+#         (scripts/probes/**/results/, *.json beside the probes, scripts/*.txt);
+#         files a build step writes (apps/desktop/build/installer-defines.nsh)
+#
+# Everything under OUT stays on the author's disk; it is context for how a
+# change was made, not a description of how the system works.
+# ---------------------------------------------------------------------------
+PLAN_*.md
+docs/fix*/
+docs/audit/
+docs/shots/
+scripts/probes/**/results/
+scripts/probes/**/*.json
+# FIX99 — the exception is a PRE-REGISTRATION, not a result. The rule above
+# exists to keep probe output out of the repo; this file is the asks, their
+# labels, the labelling rule and the thresholds, all fixed before the run.
+# If it is not in the history, "written before" cannot be checked by anyone.
+!scripts/probes/format-eval/prereg.json
+scripts/probes/router-compare/results*.md
+scripts/*.txt
+scripts/*.jsonl
+apps/desktop/build/installer-defines.nsh
+
+# Output folders written by AI tooling. The repo is meant to read as the
+# owner's own work; a folder named after a tool does not belong in it.
+Claude outputs/
+
+# ---------------------------------------------------------------------------
+# AM19 — only what the code needs is tracked. The rule, in the owner's words: if it is not about how the
+# code works, keep it on the machine. A clone must hold source, tests, fixtures, migrations, package
+# definitions, build and deploy scripts, CI, and the documents someone needs to run the thing — never
+# the record of how we got here. Everything below stays on the author's disk. scripts/gate/tracks.py
+# (the gate's `tracks` lane, and CI) fails naming any tracked file that a rule here matches.
+# ---------------------------------------------------------------------------
+# per-card probes, walks and their output: the gate's own tooling moved out to scripts/gate, scripts/ops
+# and scripts/agent-market; what is left here is one round's instrument and stays on the machine
+scripts/probes/
+# output of the gate, the ops tools and the words tools
+scripts/**/results/
+# working notes in any spelling: cards, plans, notes, test sheets, progress logs, discovery papers
+CARD-RULES.md
+note-*.md
+plan-*.md
+PLAN-*.md
+TEST-SHEET-*.md
+PROGRESS.md
+**/PROGRESS.md
+_superseded-*
+DISCOVERY.md
+*-DISCOVERY.md
+OUTPUT-AUDIT.md
+# phase and sprint inventories, one-off exercise records
+*_INVENTORY.md
+docs/sprint-*.md
+docs/CAPACITY_VALIDATION_*.md
+docs/COMPACTION_FIRST_RUN.md
+docs/READY_PENDING_INTEGRATION.md
+docs/LOAD_TEST_GROWTH_BASELINE.md
+docs/PILOT_READINESS.md
+# stray outputs of a test run
+backend/tests/integration/fix_test_report.txt
+backend/evals/**/results/
+services/chat-edge-api/tests/phase1_results.json
+# records of finished rounds — audits, measurements, proposals, trial scripts, handovers (decided by the
+# same test in AM19: not needed to build, run, deploy or operate the system)
+docs/agent-market/HANDOVER.md
+docs/agent-market/COLLEAGUE-TRIAL.md
+docs/agent-market/TRIAL-WATCH.md
+# AM20a: the survey of how the admin console looks today (its pictures are under scripts/ops/results/)
+docs/agent-market/ADMIN-LOOK.md
+docs/DLP_DETECTOR_PARITY_MAP.md
+docs/PROVIDER_KEY_AUDIT.md
+docs/SECURITY_17A_TOKEN_PURGE.md
+docs/DESKTOP_WEB_PARITY_SPEC.md
+docs/ops/GITLAB_RUNNER_PROPOSAL.md
+docs/SYSTEM_PROMPT_COVERAGE.md
+docs/TOOL_LESS_MODELS.md
+docs/MODEL_CONTEXT_WINDOWS.md
+docs/ops/agent-api-readiness.md

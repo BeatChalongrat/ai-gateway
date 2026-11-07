@@ -1,0 +1,60 @@
+{
+  "detector": "iban",
+  "entity_type": "iban",
+  "category": "financial",
+  "severity": 3,
+  "cases": [
+    {
+      "id": "valid_de",
+      "input": "Wire to DE89370400440532013000 today",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 8,
+          "end": 30
+        }
+      ]
+    },
+    {
+      "id": "valid_gb_spaced",
+      "input": "GB82 WEST 1234 5698 7654 32 confirmed",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 27
+        }
+      ]
+    },
+    {
+      "id": "invalid_checksum",
+      "input": "DE00370400440532013001 wrong digits",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "no_iban_present",
+      "input": "no bank details in this text",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "too_short",
+      "input": "DE89 1234 not an iban",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "lowercase_country_not_match",
+      "input": "de89370400440532013000 lowercase",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

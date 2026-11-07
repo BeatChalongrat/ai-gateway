@@ -1,0 +1,385 @@
+{
+  "schema": "agent.market.look.v1",
+  "note": [
+    "The one file that decides how every agent's documents, decks, workbooks and charts look. Change a value here",
+    "and every deliverable of every agent changes with it; no code is touched. The colour of a table header is",
+    "themes.<theme>.table.header (a palette token); the colour behind it is that token's value in themes.<theme>.palette.",
+    "Sizes are in points, one set per format, five roles only: a renderer that is asked for a sixth refuses.",
+    "The layout catalogue is closed: a layout is added here, deliberately, never by a caller inline."
+  ],
+  "fonts": {
+    "family": "Sarabun",
+    "note": "the one family every deliverable is set in; it carries Thai and Latin and is embedded in every file",
+    "files": {
+      "regular": "/sandbox/scripts/fonts/Sarabun-Regular.ttf",
+      "bold": "/sandbox/scripts/fonts/Sarabun-Bold.ttf"
+    }
+  },
+  "scale": {
+    "roles": [
+      "display",
+      "heading",
+      "subheading",
+      "body",
+      "small"
+    ],
+    "weight": {
+      "display": "bold",
+      "heading": "bold",
+      "subheading": "bold",
+      "body": "regular",
+      "small": "regular"
+    },
+    "pt": {
+      "docx": {
+        "display": 28,
+        "heading": 16,
+        "subheading": 12,
+        "body": 10.5,
+        "small": 8.5
+      },
+      "pptx": {
+        "display": 54,
+        "heading": 28,
+        "subheading": 20,
+        "body": 18,
+        "small": 12
+      },
+      "xlsx": {
+        "display": 14,
+        "heading": 11,
+        "subheading": 10,
+        "body": 10,
+        "small": 9
+      }
+    },
+    "line": {
+      "docx": 1.2,
+      "pptx": 1.15,
+      "xlsx": 1.0
+    }
+  },
+  "default_theme": "navy",
+  "themes": {
+    "navy": {
+      "name": "docs.theme.navy",
+      "palette": {
+        "primary": "12264A",
+        "primary_dark": "0B1A33",
+        "accent": "2F6FD6",
+        "accent_soft": "E3ECFB",
+        "gold": "C99A2E",
+        "positive": "1E7F55",
+        "negative": "B93A32",
+        "ink": "1C2230",
+        "muted": "5F6B7A",
+        "rule": "D5DBE4",
+        "surface": "F3F5F9",
+        "on_primary": "FFFFFF",
+        "paper": "FFFFFF"
+      },
+      "chart": [
+        "accent",
+        "gold",
+        "primary",
+        "positive",
+        "muted",
+        "negative"
+      ],
+      "cover": "band",
+      "table": {
+        "header": "primary",
+        "header_text": "on_primary",
+        "zebra": true,
+        "strong": "accent_soft"
+      }
+    },
+    "teal": {
+      "name": "docs.theme.teal",
+      "palette": {
+        "primary": "0F4C4C",
+        "primary_dark": "093333",
+        "accent": "1C8C84",
+        "accent_soft": "DDF0EE",
+        "gold": "D08C2E",
+        "positive": "1E7F55",
+        "negative": "B5413A",
+        "ink": "1B2626",
+        "muted": "5C6B6A",
+        "rule": "D3DEDD",
+        "surface": "F2F7F6",
+        "on_primary": "FFFFFF",
+        "paper": "FFFFFF"
+      },
+      "chart": [
+        "accent",
+        "gold",
+        "primary",
+        "positive",
+        "muted",
+        "negative"
+      ],
+      "cover": "rule",
+      "table": {
+        "header": "surface",
+        "header_text": "primary",
+        "zebra": false,
+        "strong": "accent_soft"
+      }
+    },
+    "charcoal": {
+      "name": "docs.theme.charcoal",
+      "palette": {
+        "primary": "24272E",
+        "primary_dark": "16181C",
+        "accent": "D9642B",
+        "accent_soft": "FBE9DF",
+        "gold": "B8862B",
+        "positive": "2A7A4F",
+        "negative": "B23A31",
+        "ink": "1E2024",
+        "muted": "656B75",
+        "rule": "DADDE2",
+        "surface": "F4F4F5",
+        "on_primary": "FFFFFF",
+        "paper": "FFFFFF"
+      },
+      "chart": [
+        "accent",
+        "gold",
+        "primary",
+        "positive",
+        "muted",
+        "negative"
+      ],
+      "cover": "band",
+      "table": {
+        "header": "primary",
+        "header_text": "on_primary",
+        "zebra": true,
+        "strong": "accent_soft"
+      }
+    }
+  },
+  "brand": {
+    "note": "what an organisation may bring: a logo, a primary colour, a typeface. Each is refused with its reason when it would make the document unreadable, and the theme's own value stays.",
+    "logo_min_px": {
+      "width": 300,
+      "height": 90
+    },
+    "logo_max_bytes": 2000000,
+    "contrast_min": 4.5
+  },
+  "layouts": {
+    "pptx": {
+      "page": {
+        "width_in": 13.333,
+        "height_in": 7.5,
+        "margin_in": 0.6,
+        "title_in": 1.1,
+        "footer_in": 0.6
+      },
+      "catalogue": {
+        "title": {
+          "for": "the first slide: what this is, for whom, when",
+          "takes": {
+            "title": 60,
+            "subtitle": 80,
+            "lines": 4,
+            "line": 140
+          },
+          "refuses": "a fifth line, or a title over 60 characters"
+        },
+        "section": {
+          "for": "a divider between parts of the deck",
+          "takes": {
+            "title": 60
+          },
+          "refuses": "anything but one heading"
+        },
+        "figure": {
+          "for": "one big figure a room can read, with its label and one sentence",
+          "takes": {
+            "label": 40,
+            "value": 16,
+            "sentence": 160,
+            "title": 60
+          },
+          "refuses": "a second figure, or a sentence over 160 characters"
+        },
+        "figures": {
+          "for": "a row of two or three figures with their labels and changes",
+          "takes": {
+            "title": 60,
+            "items_min": 2,
+            "items": 3,
+            "label": 40,
+            "value": 16,
+            "delta": 48
+          },
+          "refuses": "one figure (that is a figure slide) or more than three"
+        },
+        "table": {
+          "for": "a table of up to ten rows; longer tables break across at most two slides with the header repeated",
+          "takes": {
+            "title": 60,
+            "columns": 7,
+            "rows": 10,
+            "cell": 40,
+            "caption": 120,
+            "parts_max": 2
+          },
+          "refuses": "more than seven columns, a cell over 40 characters, or more rows than two slides hold"
+        },
+        "chart": {
+          "for": "one chart with its title and a caption of up to two lines at the small size",
+          "takes": {
+            "title": 60,
+            "series": 4,
+            "categories": 12,
+            "caption": 300
+          },
+          "refuses": "more than four series or twelve categories, two charts, or a caption over 300 characters"
+        },
+        "bullets": {
+          "for": "a heading and up to four points of up to two lines, with an optional lead sentence",
+          "takes": {
+            "title": 60,
+            "lead": 200,
+            "items": 4,
+            "item": 110
+          },
+          "shrink": true,
+          "refuses": "a fifth point (the points break across slides), or a point too long for two lines even at the small size"
+        },
+        "statement": {
+          "for": "one paragraph that stands on its own — the summary",
+          "takes": {
+            "title": 60,
+            "text": 480
+          },
+          "shrink": true,
+          "refuses": "a second paragraph, or more than 480 characters even at the small size"
+        },
+        "closing": {
+          "for": "the last slide: the sources with their hashes, the references, the model and the scope",
+          "takes": {
+            "title": 60,
+            "lines": 14,
+            "line": 160
+          },
+          "refuses": "a fifteenth line (the lines break across slides)"
+        }
+      }
+    },
+    "docx": {
+      "page": {
+        "size": "A4",
+        "margins_in": {
+          "top": 0.85,
+          "bottom": 0.8,
+          "left": 0.9,
+          "right": 0.9
+        }
+      },
+      "catalogue": {
+        "cover": {
+          "for": "the first page: the organisation, the title, the period, the headline figures, how the report was made",
+          "takes": {
+            "title": 60,
+            "subtitle": 80,
+            "figures_min": 2,
+            "figures": 4,
+            "lines": 3,
+            "line": 180
+          },
+          "refuses": "a fourth cover line, or a title over 60 characters"
+        },
+        "section": {
+          "for": "a heading and the blocks under it",
+          "takes": {
+            "title": 80
+          },
+          "refuses": "a heading over 80 characters"
+        },
+        "table": {
+          "for": "a table that may run over pages with its header repeated and no row split",
+          "takes": {
+            "columns": 9,
+            "cell": 400
+          },
+          "refuses": "more than nine columns, or a cell over 400 characters"
+        },
+        "chart": {
+          "for": "a chart picture with its title, its caption and the table of its numbers, kept together",
+          "takes": {
+            "title": 80,
+            "series": 4,
+            "categories": 14,
+            "caption": 200
+          },
+          "refuses": "more than four series or fourteen categories"
+        },
+        "prose": {
+          "for": "paragraphs and bullet lists, with their references listed under the block",
+          "takes": {
+            "paragraph": 2000,
+            "items": 20,
+            "item": 400
+          },
+          "refuses": "a paragraph over 2,000 characters, a list over twenty items, or an item over 400 characters"
+        },
+        "appendix": {
+          "for": "the appendices: two columns of small entries",
+          "takes": {
+            "title": 80,
+            "entry": 1000
+          },
+          "refuses": "an entry over 1,000 characters"
+        }
+      }
+    },
+    "xlsx": {
+      "page": {
+        "size": "A4"
+      },
+      "catalogue": {
+        "face": {
+          "for": "the first sheet, which prints on one page: who, what, when, the balances and the verdict",
+          "takes": {
+            "title": 120
+          },
+          "refuses": "a face longer than one printed page"
+        },
+        "table": {
+          "for": "a table sheet: one header row, frozen and repeated on every printed page, one page wide",
+          "takes": {
+            "sheet_name": 31,
+            "columns": 26,
+            "cell": 2000
+          },
+          "refuses": "a sheet name over 31 characters or with [ ] : * ? / \\ in it, or a table still wider than a page at 67 percent after its text columns are narrowed and wrapped"
+        },
+        "notes": {
+          "for": "a sheet of notes and assumptions",
+          "takes": {
+            "sheet_name": 31,
+            "note": 2000
+          },
+          "refuses": "a note over 2,000 characters"
+        },
+        "commentary": {
+          "for": "a sheet of the commentary a model (or the rules) wrote about the round: the summary, the points, what to watch, the next steps, each with its references",
+          "takes": {
+            "title": 120,
+            "text": 600,
+            "items": 12,
+            "item": 200
+          },
+          "shrink": true,
+          "refuses": "a summary over 600 characters or a point over 200 even at the small size, or more than twelve points under one heading"
+        }
+      }
+    }
+  }
+}

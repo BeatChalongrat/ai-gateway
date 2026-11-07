@@ -1,0 +1,1275 @@
+import warnings
+from decimal import Decimal
+from urllib.parse import quote_plus, urlsplit
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_INSECURE_DEFAULTS = {"change-me", "changeme", "secret", "password", "", "dev-stable-key-change-in-prod"}
+_DEV_ENVS = {"development", "test", "testing"}
+# Minimum byte length for security-critical secrets. 32 bytes = 256 bits,
+# the safe floor for HMAC-SHA256 / AES-256. Shorter values pass a
+# string-match against _INSECURE_DEFAULTS but still offer weak entropy,
+# so we reject them explicitly in production.
+_MIN_SECRET_LENGTH = 32
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # Application
+    app_name: str = "secure-ai-gateway"
+    app_env: str = "development"
+    app_port: int = 8080
+    # Startup schema-drift guard (FIX 3). Empty = auto by env
+    # (development → "autoupgrade", otherwise → "failclosed"). Explicit
+    # values: "autoupgrade" | "failclosed" | "warn" | "off". See
+    # app/core/schema_guard.py + .env.example.
+    schema_drift_mode: str = ""
+    log_level: str = "INFO"
+    # 3000 = admin-ui, 3001 = portal, 3002 = web-chat, 5173 = legacy vite.
+    # allow_credentials=True (main.py) requires explicit origins — "*" is
+    # rejected by browsers when credentials are included.
+    cors_origins: str = (
+        "http://localhost:3000,http://localhost:3001,"
+        "http://localhost:3002,http://localhost:5173"
+    )
+
+    # Database
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+    postgres_db: str = "ai_gateway"
+    postgres_user: str = "postgres"
+    postgres_password: str = "postgres"
+
+    # Redis
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    # Empty = unauthenticated (dev default; matches the redis service
+    # in docker-compose.yml). docker-compose.prod.yml sets a value and
+    # adds --requirepass on the redis service. Folded into redis_url
+    # below as the AUTH segment.
+    redis_password: str = ""
+
+    # Security — jwt_secret MUST be stable across restarts (not random)
+    jwt_secret: str = "change-me"
+    master_encryption_key: str = "change-me"
+    access_token_expire_minutes: int = 1440  # 24 hours
+
+    # AES-256-GCM master key for provider API keys at rest (64 hex chars
+    # = 32 bytes). Empty in dev/test (effective_master_key falls back to a
+    # deterministic dev key); REQUIRED in production — validate_secrets()
+    # blocks startup when it's missing or not 32 bytes of hex.
+    provider_key_master_key: str = ""
+
+    # Rate-limit behaviour when Redis is unreachable — GENERAL TRAFFIC
+    # limiters only (the chat request limiter and the image/media window
+    # limiters in rate_limit_service.py). "fail_open" (default) admits
+    # unlimited: for those paths availability beats throttling during an
+    # outage — chat should not 429 because Redis blipped, the upstream
+    # providers enforce their own limits, and the media paths keep their
+    # spend guards. "conservative" applies a small in-process per-key
+    # limit instead, for deployments where cost control outweighs
+    # availability.
+    # NOT governed by this knob (Phase 12 A4): credential-guarding
+    # limiters — admin login (services/admin/login_service.py) and portal
+    # password reset (services/portal/password_reset_service.py) — ALWAYS
+    # fall back to the in-process conservative cap during an outage;
+    # failing open there would turn every Redis blip into a free
+    # brute-force window.
+    rate_limit_redis_outage_mode: str = "fail_open"
+
+    # --- Rate-limit ceilings (env-overridable; Growth-tier defaults) -----
+    # The per-API-key / per-end-user window stays at 60/min. The project +
+    # tenant ceilings were raised from the legacy 300 / 1000 because a
+    # SHARED web-chat API key fans MANY end-users through ONE key_id: the
+    # per-end-user keying (see app.api.deps.resolve_rate_limit_key_id) now
+    # gives each trusted web-chat user their own 60/min bucket, so the
+    # project/tenant caps act only as the aggregate backstop. Override per
+    # deployment via the RATE_LIMIT_*_PER_MINUTE env vars.
+    rate_limit_key_per_minute: int = 60
+    rate_limit_project_per_minute: int = 3000
+    rate_limit_tenant_per_minute: int = 10000
+
+    # Trusted internal-service signal. When chat-edge (or any internal
+    # caller) presents ``X-Internal-Service-Secret`` matching this value,
+    # the gateway HONOURS its ``X-User-ID`` header for per-end-user rate
+    # limiting. Empty (default) => X-User-ID is NEVER trusted, so an
+    # external API-key client cannot forge its own per-user bucket.
+    internal_service_secret: str = ""
+
+    # Service-JWT trust anchor (decouples chat from any user-facing gw_ key).
+    # chat-edge mints a short-lived HS256 JWT (iss="chat-edge-api",
+    # aud="gateway-api") signed with its SERVICE_JWT_SECRET and sends it as the
+    # Bearer for completion calls; the gateway validates it here and then
+    # resolves the END-USER from the trusted X-User-ID / X-Tenant-ID headers
+    # (charging that user's quota). MUST equal chat-edge's SERVICE_JWT_SECRET.
+    # Empty (default) => the service-JWT chat path is DISABLED (feature off);
+    # gw_ keys and admin JWTs are unaffected. This is ADDITIVE: it never
+    # removes gw_/admin auth and never opens an endpoint to anonymous access.
+    service_jwt_secret: str = ""
+
+    # Image-generation cost-control ceilings (gpt-image-1 has direct $
+    # exposure, so the endpoint must never be unthrottled). Per-end-user
+    # hourly + per-tenant daily windows, enforced via the same Redis
+    # sliding-window backend the request limiter uses.
+    image_rate_limit_user_per_hour: int = 10
+    image_rate_limit_tenant_per_day: int = 100
+
+    # Media-generation cost-control ceilings (Sprint 5). Video is the most
+    # expensive modality (per-second provider billing), audio cheaper; job
+    # polling is high-frequency. Per-key sliding windows, same Redis backend
+    # as the image limiter, fail-open on a Redis outage.
+    media_rate_limit_video_per_hour: int = 5
+    media_rate_limit_audio_per_hour: int = 30
+    media_rate_limit_jobs_per_min: int = 60
+    media_rate_limit_cancel_per_min: int = 10
+
+    # Portal JWT — separate secret so leaking the admin secret does not
+    # forge portal tokens (and vice versa). Payload carries type="portal".
+    portal_jwt_secret: str = "change-me-portal-secret"
+    portal_access_token_expire_minutes: int = 60
+    # 90 days. Rotation (auth_service.refresh) re-issues the refresh
+    # token on every renew, so an actively-used session never hits this
+    # ceiling — it only bounds an account that's been idle for 3 months.
+    portal_refresh_token_expire_days: int = 90
+
+    # Portal auth cookies (HttpOnly cookie migration). The backend now
+    # sets the access + refresh tokens as HttpOnly cookies instead of
+    # returning them in the JSON body, so JS (and any XSS) can't read
+    # them. See app/services/portal/cookies.py.
+    #   * auth_cookie_domain: empty = host-only. On localhost a host-only
+    #     cookie is shared across ports (:3001/:3002/:4000/:8080), which
+    #     is exactly the cross-app sharing we want in dev. In production
+    #     set ".yourdomain.com" to share across sub-domains.
+    #   * auth_cookie_secure: None = auto (Secure outside dev/test). Set
+    #     explicitly to force on/off.
+    #   * auth_cookie_samesite: "lax" forwards cookies on same-site
+    #     navigation + fetch (all localhost ports are same-site) while
+    #     blocking cross-site programmatic POSTs.
+    auth_cookie_domain: str = ""
+    auth_cookie_secure: bool | None = None
+    auth_cookie_samesite: str = "lax"
+
+    # Admin session (Phase 2A): Redis-backed sessions keyed by signed
+    # HttpOnly cookie. SESSION_SIGNING_SECRETS is a comma-separated list;
+    # the first entry is used to sign new cookies, later entries remain
+    # valid for verification (zero-downtime key rotation). Any entry in
+    # _INSECURE_DEFAULTS is rejected outside dev by validate_secrets().
+    session_signing_secrets: str = "change-me-session-signing"
+    session_cookie_name: str = "admin_session"
+    session_idle_ttl_seconds: int = 86400  # 24h sliding
+    session_absolute_ttl_seconds: int = 604800  # 7d hard cap
+    # FIX134 B2 — the OAuth ``return_to`` allowlist (portal_auth.oauth_start)
+    # as the browser sees the two UIs: ADMIN_UI_ORIGIN / PORTAL_ORIGIN. The
+    # defaults are the dev stack's plain-http ports (3000 = admin-ui, 3001 =
+    # portal); compose derives them from the public URLs, and outside
+    # development validate_secrets refuses an http:// value here — since
+    # FIX133 the UIs are served over https behind Caddy, and an http origin
+    # in this list rejected every https return_to (invalid_return_to).
+    admin_ui_origin: str = "http://localhost:3000"
+    portal_origin: str = "http://localhost:3001"
+
+    # Server-side OAuth (Phase 2A Commit 4, P0-8 fix). Client secrets
+    # stay on the backend; the portal never touches them. Empty values
+    # mean the matching provider's /oauth/start endpoint will fail the
+    # fetch_token call — that's the correct behaviour on a dev box that
+    # hasn't set up OAuth yet.
+    oauth_google_client_id: str = ""
+    oauth_google_client_secret: str = ""
+    oauth_github_client_id: str = ""
+    oauth_github_client_secret: str = ""
+
+    # Google Workspace SSO — domain lock (Phase 0). Comma-separated email
+    # domains allowed to sign in / sign up. Enforced SERVER-SIDE in
+    # oauth_service.login_or_create (covers every OAuth entry point,
+    # including the link-existing-account branch) and auth_service.signup.
+    # Empty string = allow every domain, so opening up to gmail later is
+    # an env edit, not a code change. Never rely on the frontend or on
+    # Google's ``hd`` claim for this — the check is email-domain +
+    # email_verified on the server-verified claims.
+    allowed_email_domains: str = "gbtech.co.th"
+    # Kill-switch for the email+password surface ("ปิด ไม่ลบ"). False =
+    # POST /portal/auth/login and /signup return 403 password_login_disabled
+    # while the code stays in place for a future re-enable.
+    password_login_enabled: bool = True
+    # FIX134 B5 — addresses that may still sign in by password while the
+    # switch above is off (PASSWORD_LOGIN_ALLOWED_EMAILS, comma-separated,
+    # case-insensitive). Meant for the smoke-test account only, never a real
+    # person: everyone else stays Google-only. Login only — signup and the
+    # password-reset routes keep the 403 for every address.
+    password_login_allowed_emails: str = ""
+    # Optional UX hint only: forwarded as the ``hd`` param on the Google
+    # authorize URL so the account chooser pre-filters to the workspace
+    # domain. NOT a security control — a forged ``hd`` never bypasses the
+    # allowed_email_domains check above.
+    google_hosted_domain: str = ""
+    # Internal-tool tenancy: every OAuth-created portal user joins this
+    # single shared tenant instead of getting a personal tenant. The slug
+    # is the idempotency key (Tenant.slug is UNIQUE); the name is only
+    # used when the row is first created.
+    central_tenant_slug: str = "gbtech"
+    central_tenant_name: str = "GB Tech"
+
+    # Connector OAuth broker (Desktop Phase 7). SEPARATE OAuth apps from
+    # the login flow above: login only proves identity; connectors ask
+    # for data scopes (Gmail/Drive/Calendar/Slack/GitHub). Empty values
+    # mean the matching connector's /oauth/start bounces the browser
+    # back to the desktop with reason=not_configured.
+    connector_oauth_google_client_id: str = ""
+    connector_oauth_google_client_secret: str = ""
+    # Where the Google connectors' consent page and token exchange are. Empty
+    # (every real deployment) = Google's own. A test stack names a stand-in
+    # here, so the consent round trip can be walked in a browser without a
+    # Google client; nothing else reads these.
+    connector_oauth_google_authorize_url: str = ""
+    connector_oauth_google_token_url: str = ""
+    connector_oauth_slack_client_id: str = ""
+    connector_oauth_slack_client_secret: str = ""
+    connector_oauth_github_client_id: str = ""
+    connector_oauth_github_client_secret: str = ""
+
+    # Provider API keys
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+    openrouter_api_key: str = ""
+    minimax_api_key: str = ""
+    qwen_api_key: str = ""
+    kimi_api_key: str = ""
+    zai_api_key: str = ""
+    google_api_key: str = ""
+    groq_api_key: str = ""
+    deepseek_api_key: str = ""
+    xai_api_key: str = ""
+    mistral_api_key: str = ""
+    cohere_api_key: str = ""
+    perplexity_api_key: str = ""
+
+    # Utility OpenAI endpoints proxied by the gateway so chat-edge never
+    # calls OpenAI directly (FIX 2 — closes the embeddings/voice DLP
+    # bypass). All three run BEHIND the DLP raw-egress gate
+    # (app.services.dlp.egress_policy). ``openai_utility_base_url`` is
+    # OpenAI-compatible (override for Azure OpenAI / self-hosted). Empty
+    # ``openai_api_key`` disables these routes (503), same as the old
+    # chat-edge behaviour.
+    openai_utility_base_url: str = "https://api.openai.com/v1"
+    openai_embedding_model: str = "text-embedding-3-small"
+    openai_whisper_model: str = "whisper-1"
+    openai_tts_model: str = "tts-1"
+    # FIX134 B4 — the OpenAI /v1/moderations scan that a policy profile with
+    # ``moderation_enabled`` runs on each turn. ``auto`` (default): only when
+    # a usable OpenAI key exists (the UI-owned key store first, then
+    # OPENAI_API_KEY); ``off``: never. A 401/403 from the endpoint opens a
+    # breaker for 30 minutes with one warning (moderation_service).
+    moderation_mode: str = "auto"
+
+    # USD→credit conversion rate (USAGE_CREDITS_PER_USD env). THE rate
+    # behind both the balance DEDUCTION and the usage display — see
+    # ``credit_service.credits_for_cost``, the single conversion:
+    #     credits = ceil(cost_usd * tenant_markup * this rate), min 1
+    # per billable request. 3,000,000/USD anchors 1 credit ≈ 1 blended
+    # gpt-4o-mini token, so budget models burn ~1 credit/token and
+    # premium models the ~10–30x their pricing implies.
+    usage_credits_per_usd: int = 3_000_000
+
+    # Video generation (Sprint 2A). Feature-flagged OFF by default; the
+    # internal video route returns 403 when disabled. A submit response
+    # sets ``requires_confirmation`` when the estimated USD cost meets this
+    # threshold so the frontend can show a confirm modal.
+    video_gen_enabled: bool = False
+    # FIX11 §1: the owner's one-time acknowledgement that the CONFIGURED video
+    # model is current on the provider. Our own seed (migration 059) labels the
+    # Replicate video models UNVERIFIED, and code cannot confirm a provider model
+    # is still alive without a live call, so video stays unavailable until this is
+    # set — rather than auto-enabling a possibly-retired model on faith (ChatGPT
+    # retired Sora in April 2026). Env: VIDEO_MODEL_VERIFIED. See GET /v1/video/config.
+    video_model_verified: bool = False
+    video_gen_default_threshold_usd: float = 1.00
+
+    # FIX22 §2 — update NOTIFICATION, stage 1. The SRAN Desktop version the
+    # operator wants installed, served by GET /v1/desktop/version as a bare
+    # string. No file, no URL, no feed: the app compares it with its own
+    # version and shows a dismissible banner; the user installs by hand.
+    # Unset (the default) → the endpoint 404s and the app shows nothing.
+    # Env: DESKTOP_LATEST_VERSION, e.g. "0.1.0-e4".
+    desktop_latest_version: str = ""
+
+    # --- Replicate video provider (Sprint 2B) --------------------------
+    # ALL THREE cost guards (L1 session budget, L2 tenant daily cap, L3
+    # per-job confirmation) are mandatory — there is NO bypass flag. To
+    # raise a limit, change the DB column (tenants.max_daily_spend_usd),
+    # which leaves an audit trail. The token + webhook secret use
+    # ``repr=False`` so they never appear in ``repr(settings)`` or an
+    # accidental settings dump in logs.
+    replicate_api_token: str | None = Field(default=None, repr=False)
+    # ElevenLabs TTS env fallback (Sprint 4). ``repr=False`` so the key never
+    # appears in ``repr(settings)``. Prefer the UI provider-key flow; this is
+    # the dev/CI fallback (resolution priority: provider_keys → legacy → env).
+    elevenlabs_api_key: str | None = Field(default=None, repr=False)
+    # L1: session-wide spend ceiling (USD) enforced atomically in Redis.
+    replicate_test_budget_usd: Decimal = Field(default=Decimal("5.00"))
+    # Hard server-side duration clamp — a request asking for 60s is capped
+    # to this regardless, so a bad client can't 6x the cost.
+    replicate_max_video_duration_sec: int = 10
+    replicate_request_timeout_sec: int = 600
+    replicate_webhook_secret: str | None = Field(default=None, repr=False)
+    # Public URL the gateway is reachable at; used to build the Replicate
+    # webhook callback. Empty → no webhook registered (poll-only fallback).
+    replicate_webhook_base_url: str = ""
+    replicate_poll_interval_sec_no_webhook: int = 5
+    replicate_poll_interval_sec_with_webhook: int = 15
+    # SSRF guard (Phase 12 A2). Result "output" URLs arrive in Replicate
+    # webhook BODIES and poll responses, and the gateway fetches them
+    # server-side (``fetch_result_bytes``). Only https URLs whose host is
+    # one of these hostnames (exact match or any subdomain) are fetched;
+    # everything else — http, IP-literal hosts (loopback/private/link-
+    # local/metadata included), internal service names, unknown CDNs — is
+    # rejected BEFORE any HTTP request is made. Replicate serves
+    # prediction artifacts from ``replicate.delivery`` (see the poll /
+    # webhook fixtures in tests/unit/test_replicate_adapter.py), hence the
+    # default. Because only allowlisted hostnames are ever resolved, DNS
+    # rebinding is moot: an attacker-supplied URL never reaches DNS unless
+    # its host is already an allowlisted Replicate CDN name.
+    # Comma-separated hostnames.
+    replicate_delivery_allowed_hosts: str = "replicate.delivery"
+
+    # Provider timeouts and retry
+    provider_timeout_connect: float = 5.0
+    provider_timeout_read: float = 30.0
+    provider_max_retries: int = 2
+    # FIX26 §2.2 — armour against a hung request taking the worker down.
+    # A non-streaming chat completion is bounded end to end (DLP, DB, cache,
+    # provider, restore); a streaming one is bounded per-frame (idle) and
+    # in total (hard). Chat admission per worker is capped so one stuck
+    # request cannot consume the worker; /ready reports requests that have
+    # outlived the bound ("stuck") and goes red.
+    request_hard_timeout_seconds: float = 120.0
+    stream_idle_timeout_seconds: float = 60.0
+    stream_hard_timeout_seconds: float = 900.0
+    chat_inflight_limit: int = 64
+    chat_admit_timeout_seconds: float = 5.0
+    # FIX133 A2/A3 — the turn queue (app/core/turn_queue.py): a cap on the
+    # turns generating at once across every worker (0 = the CPU count,
+    # sizing.default_max_active_turns), a visible waiting line above it, a
+    # per-caller share (0 = max(1, max_active // 6)), a refusal only past
+    # max_waiting (0 = 4 x max_active) and a bounded wait.
+    turn_queue_enabled: bool = True
+    turn_queue_max_active: int = 0
+    turn_queue_max_per_identity: int = 0
+    turn_queue_max_waiting: int = 0
+    turn_queue_max_wait_seconds: float = 120.0
+    turn_queue_poll_seconds: float = 0.5
+    turn_queue_frame_seconds: float = 5.0
+    turn_queue_active_ttl_seconds: float = 45.0
+    turn_queue_recent_turn_seconds: int = 30
+    turn_queue_retry_after_seconds: int = 10
+    readiness_timeout_seconds: float = 3.0
+    # FIX129 A2 — the credit deduction's own transaction limits (SET LOCAL,
+    # tighter than the connection-wide DB_*_TIMEOUT_MS in core/db.py) and
+    # the point at which one deduction is logged as slow.
+    credit_deduction_lock_timeout_ms: int = 5000
+    credit_deduction_idle_timeout_ms: int = 15000
+    credit_deduction_slow_seconds: float = 2.0
+    # FIX129 A2/A3 — pg_stat_activity sampler: how often it looks, and the
+    # transaction age (idle in transaction, or waiting on a lock) at which
+    # /ready goes red and the "transaction stuck" alert rule fires.
+    pg_activity_sample_seconds: float = 15.0
+    pg_stuck_transaction_seconds: float = 60.0
+    # FIX129 A4 — where alerts go, on top of a rule's own webhook_url.
+    # ntfy: any topic URL (https://ntfy.sh/<topic>); the owner subscribes to
+    # it in the ntfy app. Email needs RESEND_API_KEY (production) — in
+    # development the email sender only logs. Empty = channel off.
+    alert_ntfy_url: str = ""
+    alert_ntfy_token: str = ""
+    alert_email_to: str = ""
+    alert_webhook_url: str = ""
+    # FIX131 D — which deployment an alert comes from. Empty / production /
+    # live = the real system (no label). Anything else prefixes every title
+    # and body ("[TEST] …", "[STAGING] …"); test / testing / ci / lane /
+    # test-stack also ROUTE every alert to alert_test_ntfy_url only, never to
+    # the channels above. A test fire is always [TEST] and goes there too.
+    alert_environment: str = ""
+    alert_test_ntfy_url: str = ""
+    # AM1c — Agent Market's own topic (ops-watch pages its Prometheus alerts
+    # there, never on the channels above; a core incident never pages it).
+    # In a test environment its alerts go to alert_test_ntfy_url instead.
+    agent_market_ntfy_url: str = ""
+    # FIX131 D — the pager (services/alert_pager.py): one incident = one page
+    # + one "recovered". Re-paged only on escalation or after the reminder
+    # interval (urgent 4 h, high 24 h — Grafana's default repeat is 4 h);
+    # container / readiness findings must last alert_debounce_seconds before
+    # they page (a normal restart heals first); "no successful turn" pages
+    # only with at least alert_page_min_attempts attempts in the window.
+    alert_reminder_seconds: float = 14400.0
+    alert_reminder_high_seconds: float = 86400.0
+    alert_debounce_seconds: float = 90.0
+    alert_page_min_attempts: int = 3
+    # Seed the three baseline rules (no successful turn, error rate,
+    # stuck transaction) when no rule with that metric exists yet.
+    alert_default_rules_enabled: bool = True
+    # FIX129 B2 — chat-edge's internal base URL, so logout can revoke the
+    # access token there too (POST /internal/auth/revoke, gated by
+    # INTERNAL_SERVICE_SECRET on both sides). Empty = chat-edge is not told.
+    chat_edge_internal_url: str = ""
+    # FIX132 C — self-service account deletion. The account is refused at
+    # once (status pending_deletion) and purged ACCOUNT_PURGE_DAYS later by
+    # the nightly retention pipeline: chat-edge erases the chat data
+    # (POST /internal/accounts/{id}/purge), then the portal row becomes an
+    # anonymised tombstone. ACCOUNT_PURGE_MODE: on (the owner's decision,
+    # 2026-09-24) | dry_run (count, log, audit; delete nothing) | off.
+    account_purge_mode: str = "on"
+    account_purge_days: int = 30
+    image_generation_timeout_seconds: float = 180.0
+    openai_image_timeout_seconds: float = 180.0
+    # Ceiling for /v1/voice/* (transcribe + synthesize). Audio work on a
+    # long clip routinely outruns the global 20s request timeout, which
+    # 504'd mid-transcription (Batch 1 B1).
+    voice_timeout_seconds: float = 120.0
+
+    # Provider endpoint SEED, read exactly once per provider on its first
+    # boot and written to the ``system_settings`` row
+    # ``provider_base_url:<name>`` — after which the database owns it and
+    # this value is never read again. It is NOT a resolution tier:
+    # ``services/providers/base_urls.py`` does not import ``settings`` at
+    # all, so an endpoint cannot be changed by editing the environment of a
+    # running system. See app/services/provider_env_seed.py.
+    # JSON dict keyed by provider_name, e.g.
+    #   PROVIDER_BASE_URL_OVERRIDES='{"openai":"http://mock:9090"}'
+    provider_base_url_overrides: str = ""
+
+    # --- Per-provider concurrency bulkhead (Batch A) ---------------------
+    # JSON dict provider_name → max concurrent in-flight upstream calls
+    # for that provider. Empty (default) = no caps anywhere — cloud
+    # providers keep today's behavior. Intended for small self-hosted
+    # boxes, e.g. PROVIDER_CONCURRENCY_CAPS='{"sranai": 4}'.
+    #
+    # SCOPE: the semaphore is PER WORKER PROCESS (one event loop each),
+    # so the effective ceiling a provider sees is
+    #     cap × GUNICORN_WORKERS   (× pods, if horizontally scaled).
+    # Size the number accordingly: a box that tolerates 16 concurrent
+    # requests behind 4 workers wants cap=4. A global cross-worker cap
+    # is deliberately NOT implemented here — that belongs in the Rust
+    # rate-limiter (Redis-backed), see docs/DEFERRED_WORK.md.
+    provider_concurrency_caps: str = ""
+    # How long a request may wait for a free slot before load is shed
+    # with 503 + Retry-After (non-stream) / fallback (streaming). Short
+    # by design: waiting longer just builds an invisible queue in front
+    # of a saturated box.
+    provider_concurrency_acquire_timeout_seconds: float = 1.0
+
+    # --- Outbound httpx pool sizing (Batch A; were hardcoded) ------------
+    # Per-base_url pool limits. Defaults preserve the previous constants
+    # exactly (50 / 20 / 30s). Per-provider max_connections override via
+    # JSON dict, e.g. PROVIDER_POOL_OVERRIDES='{"sranai": 8}' — a capped
+    # box doesn't need 50 warm sockets. NOTE: limits are captured when a
+    # base_url's client is FIRST built (clients are cached per base_url),
+    # so changing them needs a worker restart to take effect.
+    provider_pool_max_connections: int = 50
+    provider_pool_max_keepalive_connections: int = 20
+    provider_pool_keepalive_expiry_seconds: float = 30.0
+    provider_pool_overrides: str = ""
+
+    # DLP
+    dlp_enabled: bool = True
+    dlp_default_profile: str = "default"
+    dlp_disabled_detectors: str = ""
+    dlp_scan_responses: bool = True
+    # Masking follows where the data goes (app/services/dlp/in_house.py): the project ids, comma
+    # separated, whose ``X-Sran-Egress: closed`` is believed. Empty = no request is ever sent unmasked.
+    dlp_in_house_projects: str = ""
+    # Phase 1 — Central DLP Policy Engine rollout flags.
+    # ``shadow`` (default True): the V2 engine computes a decision in
+    # parallel with the legacy seam and logs any divergence, but the
+    # LEGACY decision is the one that takes effect — zero behavior change.
+    # ``enabled`` (default False): makes the V2 engine authoritative.
+    # Both are read on every evaluation, so toggling them takes effect on
+    # the next request (config-only rollback, no redeploy). In Phase 1 the
+    # V2 decision reuses the same classifier + PolicyEvaluator, so it is
+    # action-identical to legacy for the current fixtures.
+    dlp_policy_engine_v2_enabled: bool = False
+    dlp_policy_engine_v2_shadow: bool = True
+    # Phase 1 blocker B1 — AI Sensitive-Data Reviewer egress trust
+    # boundary. The reviewer receives the post-DLP, pre-restore output,
+    # which may still contain non-secret PII the detectors MISSED (that
+    # is the feature's purpose). Sending that to an arbitrary operator-
+    # set external host is unsafe, so egress is gated by host class:
+    #   - internal/local host (localhost, private IP, single-label docker
+    #     service name, *.internal/.local/.svc) → always allowed.
+    #   - host in ``ai_review_allowed_hosts`` → trusted, allowed.
+    #   - any other external host → BLOCKED (review skipped, fail-closed)
+    #     unless ``ai_review_allow_external`` is explicitly true.
+    # Set ``ai_review_require_trusted_endpoint=false`` to disable the gate
+    # entirely (legacy behavior; not recommended).
+    ai_review_require_trusted_endpoint: bool = True
+    ai_review_allow_external: bool = False
+    ai_review_allowed_hosts: str = ""  # comma-separated hostnames
+    # P1 Item 1 — Thai NER false-positive guard. The shipped image has an
+    # English-only spaCy model (no th_core_news_*), so Presidio NER run on
+    # Thai prose mis-tags common words ("สวัสดีครับ", "อัตราแลกเปลี่ยน") as
+    # PERSON/NRP. When ``dlp_ner_thai_enabled`` is False (default) we skip
+    # Presidio NER for text that is predominantly Thai (≥
+    # ``dlp_ner_thai_min_ratio`` Thai chars) — the regex Thai detectors
+    # (thai_name, thai_national_id, phone, …) still cover real Thai PII.
+    # Flip to True once a Thai spaCy model / Thai-capable NER service is
+    # deployed.
+    dlp_ner_thai_enabled: bool = False
+    dlp_ner_thai_min_ratio: float = 0.30
+
+    # FIX37 — the Thai NER layer (``detectors/thai_ner.py``). Independent
+    # of ``dlp_ner_thai_enabled`` above, which gates the ENGLISH Presidio
+    # analyzer's behaviour on Thai text. This one gates the dedicated Thai
+    # detector: the CRF ThaiNER model in the ner-service, the nickname
+    # lexicon, and the context enhancer that scores them.
+    #
+    # OFF is the pre-FIX37 shape exactly: registries are built without the
+    # detector, so a deployment can fall back with one env var and no
+    # rollback. The detector runs on the INPUT direction only — the
+    # outbound path scans once per streamed chunk (26 window scans for a
+    # long answer) and cannot afford a model pass.
+    #
+    # ``dlp_thai_ner_threshold`` is the confidence bar a scored candidate
+    # must clear; it was chosen by the Phase-3 sweep in
+    # ``backend/evals/mask_quality`` and is the one knob to retune when
+    # the corpus changes. ``dlp_thai_ner_max_chars`` skips the model for
+    # pasted-document turns, where the regex layer still applies.
+    dlp_thai_ner_enabled: bool = True
+    dlp_thai_ner_threshold: float = 0.50
+    dlp_thai_ner_max_chars: int = 4000
+
+    # FIX38 B3 — Presidio-style decision trace. One structured log line
+    # (``dlp_decision_trace``) per scan that had findings: detector, layer,
+    # confidence, the context-enhancer signals and the action — never the
+    # matched text. This is how a false fire or a leak is debugged after
+    # the fact; see ``app/services/dlp/decision_trace.py``.
+    dlp_decision_trace_enabled: bool = True
+
+    # P1 Item 4 — Anthropic prompt caching. When True (default) the
+    # Anthropic adapter sends the system prompt as a content-block array
+    # with ``cache_control: {type: ephemeral}`` so Claude caches the large,
+    # stable SRAN persona across turns (cached reads bill at ~10% of the
+    # input rate). The OpenRouter adapter applies the same breakpoint for
+    # ``anthropic/*`` models. No-op for non-Anthropic providers.
+    anthropic_prompt_caching_enabled: bool = True
+    # Days to retain raw PII content (input_raw / output_raw / matched_text
+    # in dlp_findings_json) on request_logs rows. After this window,
+    # scripts/dlp_retention_cleanup.py NULL-ifies the raw columns and
+    # strips matched_text from each finding — leaving the masked
+    # snapshots, summary counts, and per-finding metadata intact for
+    # analytics and post-hoc audits.
+    dlp_raw_retention_days: int = 90
+
+    # NER microservice — the gateway delegates Presidio NER to a
+    # dedicated service so the heavy spaCy model loads once per pod
+    # instead of once per worker. Leave the URL empty to fall back to
+    # in-process Presidio (the legacy path) on dev machines without
+    # docker-compose. The client treats any error as "no entities"
+    # so DLP regex detectors continue to fire even if the service is
+    # unreachable.
+    ner_service_url: str = ""
+    ner_service_timeout_seconds: float = 2.0
+    # NER service worker count — the ner-service container uses this
+    # to size its uvicorn worker pool (Dockerfile CMD reads
+    # ``${NER_WORKERS}``). Documented here so a single .env file
+    # controls the whole stack's tuning; the backend process itself
+    # does not consume the value.
+    ner_workers: int = 4
+
+    # Archive kill-switch — ON as of FIX60, after the retention plan
+    # (docs/DATA_RETENTION_PLAN.md, OPEN_DECISIONS #64) was signed off.
+    #
+    # It was off for a specific reason, and that reason is gone. The
+    # DLP raw-retention job and the archive job used to be two
+    # independent 24h loops with no ordering between them, so on any
+    # given day the archive could copy rows whose raw columns had not
+    # been stripped yet into ``request_logs_archive`` — a table that
+    # then had no expiry and no delete path. Both halves are fixed:
+    # ``app.jobs.retention_pipeline`` runs strip → archive → expiry →
+    # audit as ONE ordered sequence and skips the archive step outright
+    # on a night the strip step failed, and the expiry step below gives
+    # the archive a way out.
+    #
+    # When False the task is NEVER CREATED (not created-and-idle), so
+    # there is no code path that can run it — the kill switch stays a
+    # kill switch.
+    log_archive_enabled: bool = True
+
+    # Archive retention — rows older than this are moved from
+    # ``request_logs`` to ``request_logs_archive`` by the nightly
+    # pipeline (only when ``log_archive_enabled`` is true — see above).
+    # Ordering against the DLP raw-stripper is no longer a matter of
+    # matching windows: ``app.jobs.retention_pipeline`` runs strip →
+    # archive → expiry → audit-aging as ONE ordered sequence at 00:00
+    # UTC, and the archive step is skipped outright on a night the
+    # strip step failed.
+    log_archive_days: int = 90
+
+    # Archive EXPIRY — the way out of ``request_logs_archive`` (the
+    # table used to be write-only). Rows older than
+    # ``archive_retention_days`` are deleted by the pipeline's expiry
+    # step. Off by default, and dry-run (counts only, deletes nothing)
+    # by default when enabled — the operator reads the dry-run number,
+    # then flips ``archive_expiry_dry_run`` off. Live deletions write
+    # an admin-audit row.
+    archive_expiry_enabled: bool = True
+    archive_expiry_dry_run: bool = True
+    archive_retention_days: int = 365
+
+    # Admin-audit-log aging — the audit trail's own retention.
+    #
+    # 365 as of FIX60 (was 730, a placeholder that could not answer
+    # "why this number"). One year is the window SOC 2 / ISO 27001
+    # reviews typically expect, and it is long enough that deletion
+    # evidence still outlives the data it describes: an expiry audit
+    # row is written AT the moment of deletion and then lives its own
+    # full year, so it outlasts the archive row it records by 365 days.
+    # What the equal windows do give up is the old margin on
+    # SAME-DAY pairs — an admin action audited on day 0 now ages out
+    # the same day as a request logged on day 0, where 730 kept the
+    # record a year longer. Raise it if an audit ever asks for that.
+    #
+    # Dry-run first, like every deleting step.
+    audit_log_aging_enabled: bool = True
+    audit_log_aging_dry_run: bool = True
+    audit_log_retention_days: int = 365
+
+    # C2 — model discovery sync behaviour.
+    # ``model_discovery_auto_add`` False (default) makes the daily sync
+    # LOG newly-listed upstream models for admin review instead of
+    # auto-inserting them into the routable pool with un-vetted
+    # pricing/capabilities. Flip True to restore eager auto-add.
+    # ``model_discovery_health_check`` gates an optional 1-token live
+    # probe per model during sync (off by default — a daily probe of
+    # every model is a paid request per model). The admin "Test" button
+    # runs the same probe on demand regardless of this flag.
+    model_discovery_auto_add: bool = False
+    model_discovery_health_check: bool = False
+    # FIX47.6 Part B — weekly capability-flag drift check (see
+    # ``services/capability_probe.py``): a sweep of every model on every
+    # provider with a usable key, paid requests included, hard-capped and
+    # advisory-locked to one worker. It logs drift; it repairs nothing.
+    # FIX64 turned the default OFF: the owner's rule since FIX57 is that
+    # nothing fires capability requests on a schedule — a box that happens
+    # to be down when the sweep runs reads as a wrong flag, and a paid
+    # provider is billed for a report nobody asked for. Capabilities are
+    # now measured by a person's click per model (the admin page's Test
+    # button, ``services/capability_test.py``). Set
+    # CAPABILITY_PROBE_WEEKLY=true to run the sweep anyway.
+    capability_probe_weekly: bool = False
+    # Per-provider auto-add allowlist (CSV). Providers here get their
+    # discovered models auto-inserted even while the global flag above
+    # stays False. Default: the self-hosted set — the operator's own
+    # box IS the catalog, there is no un-vetted-pricing risk.
+    model_discovery_auto_add_providers: str = "sranai"
+
+    # Phase-1 async request-log queue (``app.services.request_log_queue``).
+    # The orchestrator's success path enqueues records instead of
+    # synchronously persisting; a background worker started by the
+    # lifespan hook drains the queue every ``flush_interval_ms`` (or
+    # whenever ``batch_size`` is reached) and bulk-inserts. ``queue_max``
+    # caps memory pressure under a Postgres outage — once the queue is
+    # full, the oldest record is dropped to make room.
+    request_log_batch_size: int = 50
+    request_log_flush_interval_ms: int = 100
+    request_log_queue_max: int = 10000
+
+    # Phase-3 Go log-worker sidecar.
+    #
+    # ``log_worker_engine`` selects which sink ``request_log_queue.enqueue``
+    # dispatches to:
+    #
+    #   * "python" (default) — keeps the legacy in-process asyncio
+    #     queue + ORM-based bulk insert. Backward compatible; no
+    #     external service required.
+    #   * "go" — fire-and-forget gRPC to the ``log-worker`` sidecar,
+    #     which buffers + COPY-inserts on its own connection pool.
+    #     Falls back to the legacy persist on the caller's session if
+    #     the RPC times out so a sidecar outage cannot lose audit rows.
+    #
+    # The address is the in-cluster DNS name; the timeout is small on
+    # purpose (audit writes are fire-and-forget and the gateway must
+    # never block on a slow sidecar).
+    log_worker_engine: str = "python"
+    log_worker_grpc_address: str = "log-worker:50052"
+    log_worker_grpc_timeout_seconds: float = 0.5
+
+    # Phase-3b Rust rate-limiter sidecar.
+    #
+    # ``rate_limiter_engine`` selects which implementation handles
+    # ``RateLimitService.check_all_async``:
+    #
+    #   * "python" (default) — keeps the legacy in-process Redis
+    #     ZSET pipeline that ships with the gateway. No external
+    #     service required.
+    #   * "rust" — dispatches one CheckAll gRPC to the
+    #     ``rate-limiter`` sidecar. On *any* failure (timeout,
+    #     RPC error, sidecar unreachable, grpcio import error)
+    #     the service falls back to the Python pipeline so a
+    #     sidecar outage cannot block requests.
+    #
+    # Default ``python`` keeps the behaviour identical to the
+    # pre-Phase-3b runtime.
+    rate_limiter_engine: str = "python"
+    rate_limiter_grpc_address: str = "rate-limiter:50053"
+    rate_limiter_grpc_timeout_seconds: float = 0.5
+
+    # Phase-3c Rust DLP sidecar.
+    #
+    # ``dlp_engine`` selects which engine the orchestrator runs:
+    #
+    #   * "python" (default) — keeps the legacy in-process registry.
+    #     No external service required.
+    #   * "rust" — dispatches every scan to ``dlp-sidecar`` over
+    #     gRPC. On any failure (timeout, RpcError, sidecar
+    #     unreachable, grpcio import error) the orchestrator falls
+    #     back to the Python registry so a sidecar incident cannot
+    #     downgrade DLP coverage.
+    #   * "shadow" — runs BOTH engines in parallel, uses the Python
+    #     result on the hot path, and logs a structured ``dlp_shadow_diff``
+    #     event whenever the two engines disagree. Cutover from
+    #     ``shadow`` → ``rust`` is gated on diff_count = 0 across a
+    #     7-day sample of production traffic (see Phase 3c brief).
+    #
+    # Per-tenant override lives on ``tenants.dlp_engine`` (migration
+    # 043). Tenants with ``dlp_engine != "inherit"`` ignore this
+    # global setting.
+    dlp_engine: str = "python"
+    dlp_grpc_address: str = "dlp-sidecar:50051"
+    dlp_grpc_timeout_seconds: float = 1.0
+    # Re-audit H11: the Rust sidecar ports only the regex/heuristic
+    # detectors — Presidio NER (PERSON/LOCATION/ORG/GPE/NRP) is Python-
+    # only. With this True (default), the rust DLP client runs the Python
+    # NER detector as a post-pass and merges its findings, so flipping
+    # DLP_ENGINE=rust does NOT silently drop NER coverage. Set False to
+    # accept the NER gap (rust regex only) — logged at startup.
+    dlp_ner_on_rust_path: bool = True
+
+    # Semantic router (intent classification via sentence-transformers).
+    # Off by default — flipping this to true requires the optional
+    # sentence-transformers + torch stack (see requirements-semantic.txt).
+    semantic_router_enabled: bool = False
+    semantic_router_model: str = "all-MiniLM-L6-v2"
+    semantic_router_threshold: float = 0.65
+    # Perf-baseline only: when ``SEMANTIC_ROUTER_MOCK=1`` the encoder is
+    # replaced by a deterministic hash-seeded 384-dim vector + calibrated
+    # lognormal sleep (p50=200ms, p95=600ms, p99=1500ms). Avoids torch /
+    # sentence-transformers install on the runner. See
+    # PERF_BASELINE_PLAN.md §5.7 (Variant C) for rationale.
+    semantic_router_mock: bool = False
+
+    # Optional full DATABASE_URL override (used in Docker / production).
+    # When set, takes precedence over individual postgres_* fields.
+    database_url_override: str = ""
+
+    # Email (Phase 3.5 — Resend transactional provider)
+    # ``RESEND_API_KEY`` is mandatory in production; validate_secrets
+    # refuses to boot without it. Dev/test leaves the sender in
+    # "log-to-console" mode and never calls the real API.
+    resend_api_key: str = ""
+    # FIX133 B — how transactional mail leaves the box: auto (Resend outside
+    # dev/test, the console log in dev/test), resend, console, or disabled
+    # (no sender: a verification / reset mail is reported as not delivered
+    # and logged, never silently dropped; production no longer demands a
+    # Resend key when this is the stated choice).
+    email_delivery: str = "auto"
+    # FIX133 B — /docs, /redoc, /openapi.json. Unset = on in dev/test, off
+    # outside; "true"/"false" overrides.
+    api_docs_enabled: bool | None = None
+    email_from_address: str = "no-reply@sran.ai"
+    email_from_name: str = "SRAN AI Gateway"
+    # Absolute URL to prefix verification / password-reset links with.
+    # Must match the portal origin the user browses from.
+    portal_public_url: str = "http://localhost:3010"
+
+    # Cost display — ``estimated_cost_usd`` stays the canonical
+    # numeric on every response / DB row, but UIs in the TH market
+    # need a Baht surface alongside. ``display_currency`` selects
+    # the secondary unit shown in API responses; ``usd_to_thb_rate``
+    # is the offline fallback when the live exchangerate-api lookup
+    # fails or is disabled. Pydantic-settings reads from
+    # ``DISPLAY_CURRENCY`` / ``USD_TO_THB_RATE`` env vars.
+    display_currency: str = "THB"
+    usd_to_thb_rate: float = 35.0
+
+    # DLP system-prompt variant (A/B-able).
+    #
+    #   * ``v1`` (default) — verbose "Critical rule: do not invent"
+    #     copy that has shipped to date. Contains a ``[CATEGORY_NUMBER]``
+    #     example token; regression tests in test_dlp_prompt.py lock
+    #     in this shape.
+    #   * ``v3`` — drops the literal example token to remove the
+    #     pattern seed the May 2026 50-request audit identified as
+    #     the leading hallucination driver (~48% of replies invented
+    #     tokens). Positive-frame instruction in place of the prior
+    #     negative list.
+    #
+    # Switch per-deployment via ``DLP_PROMPT_VARIANT=v3`` to A/B.
+    # Unknown values silently fall back to v1.
+    dlp_prompt_variant: str = "v1"
+
+    # (There is no ``dlp_hmac_key``. Mask tokens were once derived from an
+    # HMAC of the value; they are counters now — ``<rN>`` / ``<<CATEGORY_N>>``
+    # — kept stable across turns by the vault below. The setting was read by
+    # nothing and was removed so that nobody takes it for a key in use;
+    # tests/test_no_dead_dlp_hmac_key.py keeps it from coming back.)
+    # Redis-backed cross-turn token vault stores raw token->original
+    # mappings. Required for safe multi-turn DLP: when turn 2's history
+    # echoes a turn-1 ``<rN>`` token, the vault lets the transformer
+    # resolve it back to the original value instead of leaking the
+    # placeholder. Clients SHOULD send ``metadata.conversation_id`` for
+    # deterministic per-conversation tokenization. Without that header
+    # the gateway falls back to per-request counter mode — no PII
+    # leaks, but multi-turn history may receive newly minted tokens.
+    dlp_conversation_vault_enabled: bool = True
+
+    # Phase 4A.1 — Scoped Vault V2 rollout flags. V2 binds the Redis key
+    # to the authenticated owner scope (tenant/project/actor/conversation)
+    # and authorization-checks every restore. DEFAULTS MUST NOT CHANGE
+    # PRODUCTION BEHAVIOR:
+    #   ``enabled`` (default False): when off, the legacy unscoped vault
+    #     path is used byte-for-byte; V2 never reads/writes Redis.
+    #   ``shadow`` (default True): with V2 disabled, the pipeline may build
+    #     + validate a VaultScope and emit sanitized readiness counters,
+    #     but performs NO V2 Redis read/write and changes no token/output.
+    # When ``enabled`` is True (test/opt-in process), the pipeline uses the
+    # scoped V2 store ONLY — no legacy key read/write, no fallback,
+    # migration is expiry-only.
+    dlp_vault_v2_enabled: bool = False
+    dlp_vault_v2_shadow: bool = True
+    # Bounded per-scope entry ceiling (safety backstop, not a product cap).
+    dlp_vault_v2_max_entries: int = 5000
+
+    # Phase 4A.2.1 — Dual canonical/display response artifact rollout.
+    # DEFAULTS MUST NOT CHANGE PRODUCTION BEHAVIOR:
+    #   ``enabled`` (default False): when off, no internal canonical
+    #     extension/event is produced; public JSON + SSE are byte-identical.
+    #   ``shadow`` (default True): the gateway builds + validates the
+    #     canonical artifact IN MEMORY and logs sanitized counters only —
+    #     NO response/field/event change, NO persistence, NO transport.
+    # Transport (extension/event) additionally requires the managed
+    # internal-trusted WebChat gate; public Direct API never receives it.
+    # Decoupled from the Vault V2 flags on purpose.
+    dlp_canonical_artifact_enabled: bool = False
+    dlp_canonical_artifact_shadow: bool = True
+
+    # Phase 4A.2.6 — Secure Calculator. When ``enabled`` the secure-calc path
+    # may compute over Vault V2 ``calculation_eligible`` confidential-numeric
+    # tokens and mint result tokens ``<CALC_n>`` (raw operands/result never
+    # egress to the provider; results restore only on the authorized owner
+    # display path). REQUIRES policy-v2 + vault-v2 + canonical-artifact +
+    # canonical-history + display-lifecycle to also be enabled (composed gate);
+    # any missing precondition denies the calculator and chat proceeds normally.
+    # ``shadow`` reserves observe-only semantics. Defaults keep the calculator
+    # fully inert.
+    dlp_secure_calc_enabled: bool = False
+    dlp_secure_calc_shadow: bool = True
+
+    # Phase 4A.2.7 — Tenant-scoped feature gating. A canary-sensitive DLP
+    # feature is effectively enabled for a request ONLY when its global flag is
+    # true AND the request's (tenant_id/project_id) passes the scope check:
+    #   off       → no tenant gets the feature (default; safe).
+    #   allowlist → only ``tenant_id/project_id`` pairs in DLP_FEATURE_ALLOWLIST.
+    #   global    → all managed tenants (FULL rollout only; future).
+    # Missing tenant/project or malformed mode/allowlist → fail closed (off).
+    # Direct API secure-calc stays denied regardless. Same semantics mirrored in
+    # the Go chat-edge config.
+    dlp_feature_scope_mode: str = "off"
+    dlp_feature_allowlist: str = ""
+
+    # Pseudonymization layer — **default-on for production**.
+    # When True (default), identity-class detectors (email, phone,
+    # names, IDs, addresses, DOB, etc.) emit readable per-category
+    # tokens like ``<<PERSON_A>>`` / ``<<EMAIL_1>>`` instead of opaque
+    # ``<rN>``, which lets the LLM reason about entity relationships
+    # ("the same person") without seeing raw values. Secret-class
+    # detectors keep the ``<rN>`` shape (and are never restored to the
+    # user). The ``income`` detector is bypassed entirely so the LLM
+    # can compute on the raw value.
+    # Set to False to revert to the legacy ``<rN>`` shape on every
+    # detector — kept as an escape hatch for downgrade scenarios.
+    dlp_pseudonym_mode: bool = True
+
+    # AES-256-GCM key for the admin Safe Trace audit channel
+    # (``request_logs.input_raw_encrypted``). The orchestrator
+    # encrypts the user's raw prompt with this key before masking; the
+    # ``/admin/requests/{id}/trace`` endpoint decrypts on demand for
+    # the admin UI. Held only in the backend process — leaking a DB
+    # snapshot alone does not reveal the raw prompts.
+    #
+    # Empty in dev (auto-derived from ``master_encryption_key`` via
+    # HKDF in :mod:`app.core.dlp_audit_crypto` so the dev box just
+    # works); production deploys MUST set a dedicated 32-byte value.
+    # Generate with ``python3 -c "import secrets; print(secrets.token_hex(32))"``.
+    dlp_audit_key: str = ""
+
+    @property
+    def redis_url(self) -> str:
+        if self.redis_password:
+            from urllib.parse import quote
+            return f"redis://:{quote(self.redis_password, safe='')}@{self.redis_host}:{self.redis_port}/0"
+        return f"redis://{self.redis_host}:{self.redis_port}/0"
+
+    @property
+    def session_signing_secrets_list(self) -> list[str]:
+        """Parsed rotation list. First entry signs, all entries verify."""
+        return [s.strip() for s in self.session_signing_secrets.split(",") if s.strip()]
+
+    @property
+    def database_url(self) -> str:
+        if self.database_url_override:
+            return self.database_url_override
+        return (
+            f"postgresql+psycopg://{quote_plus(self.postgres_user)}:{quote_plus(self.postgres_password)}"
+            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+        )
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def allowed_email_domains_list(self) -> list[str]:
+        """Parsed sign-in domain allowlist, lowercased. Empty = allow all.
+
+        Accepts entries with or without a leading ``@`` so an operator
+        writing ``@gbtech.co.th`` in the env doesn't silently lock
+        everyone out.
+        """
+        return [
+            d.strip().lower().lstrip("@")
+            for d in self.allowed_email_domains.split(",")
+            if d.strip().lstrip("@")
+        ]
+
+    @property
+    def schema_drift_mode_effective(self) -> str:
+        """Resolve the startup schema-drift behaviour (FIX 3).
+
+        An explicit ``SCHEMA_DRIFT_MODE`` wins; otherwise default by env —
+        dev/test auto-upgrade the hot-reloaded schema in-process, prod fails
+        closed so a stale-schema deploy refuses to boot instead of 500ing.
+        An unrecognised explicit value falls back to the safe ``failclosed``.
+        """
+        explicit = (self.schema_drift_mode or "").strip().lower()
+        if explicit in {"autoupgrade", "failclosed", "warn", "off"}:
+            return explicit
+        if explicit:
+            # Set but unrecognised — be safe, don't silently disable the guard.
+            return "failclosed"
+        return "autoupgrade" if self.app_env.lower() in _DEV_ENVS else "failclosed"
+
+    @property
+    def cookie_secure_effective(self) -> bool:
+        """Resolve whether auth cookies get the Secure flag.
+
+        ``auth_cookie_secure`` overrides when set explicitly; otherwise
+        Secure is on everywhere except dev/test (so localhost http works
+        but any real deployment gets Secure cookies automatically).
+        """
+        if self.auth_cookie_secure is not None:
+            return self.auth_cookie_secure
+        return self.app_env.lower() not in _DEV_ENVS
+
+    def _provider_int_map(self, raw: str, env_name: str) -> dict[str, int]:
+        """Decode a JSON provider→positive-int map; malformed = {} + warn."""
+        raw = (raw or "").strip()
+        if not raw:
+            return {}
+        try:
+            import json as _json
+
+            data = _json.loads(raw)
+        except Exception:
+            warnings.warn(
+                f"{env_name} is not valid JSON — ignoring.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        result: dict[str, int] = {}
+        for k, v in data.items():
+            try:
+                n = int(v)
+            except (TypeError, ValueError):
+                continue
+            if n > 0:
+                result[str(k)] = n
+        return result
+
+    @property
+    def provider_concurrency_caps_map(self) -> dict[str, int]:
+        """Decoded ``PROVIDER_CONCURRENCY_CAPS`` (fail-open to {})."""
+        return self._provider_int_map(
+            self.provider_concurrency_caps, "PROVIDER_CONCURRENCY_CAPS"
+        )
+
+    @property
+    def provider_pool_overrides_map(self) -> dict[str, int]:
+        """Decoded ``PROVIDER_POOL_OVERRIDES`` (fail-open to {})."""
+        return self._provider_int_map(
+            self.provider_pool_overrides, "PROVIDER_POOL_OVERRIDES"
+        )
+
+    @property
+    def replicate_delivery_allowed_hosts_list(self) -> list[str]:
+        """Parsed, lowercased SSRF allowlist for provider result URLs."""
+        return [
+            h.strip().lower().strip(".")
+            for h in self.replicate_delivery_allowed_hosts.split(",")
+            if h.strip().strip(".")
+        ]
+
+    @property
+    def dlp_disabled_detectors_list(self) -> list[str]:
+        return [d.strip() for d in self.dlp_disabled_detectors.split(",") if d.strip()]
+
+    @property
+    def model_discovery_auto_add_providers_set(self) -> frozenset[str]:
+        return frozenset(
+            p.strip().lower()
+            for p in self.model_discovery_auto_add_providers.split(",")
+            if p.strip()
+        )
+
+    def oauth_return_to_origins(self) -> list[str]:
+        """FIX134 B2 — the origins an absolute OAuth ``return_to`` may name:
+        PORTAL_ORIGIN then ADMIN_UI_ORIGIN, stripped of blanks and a
+        trailing slash so they compare equal to ``scheme://host[:port]``."""
+        out: list[str] = []
+        for raw in (self.portal_origin, self.admin_ui_origin):
+            value = (raw or "").strip().rstrip("/")
+            if value:
+                out.append(value)
+        return out
+
+    @property
+    def moderation_mode_effective(self) -> str:
+        """FIX134 B4 — ``off`` when MODERATION_MODE says so, else ``auto``."""
+        return "off" if (self.moderation_mode or "").strip().lower() == "off" else "auto"
+
+    @property
+    def password_login_allowed_emails_set(self) -> frozenset[str]:
+        """FIX134 B5 — PASSWORD_LOGIN_ALLOWED_EMAILS, normalised (strip, lower)."""
+        return frozenset(
+            e.strip().lower()
+            for e in (self.password_login_allowed_emails or "").split(",")
+            if e.strip()
+        )
+
+    @field_validator("auth_cookie_secure", "api_docs_enabled", mode="before")
+    @classmethod
+    def _empty_means_unset(cls, v):
+        """FIX133 B — compose passes ``${VAR:-}`` (an empty string) for these
+        optional booleans; empty means "not set" (auto), never a parse error.
+        Found live: the backend restart-looped on '' for AUTH_COOKIE_SECURE."""
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
+
+    @property
+    def api_docs_on(self) -> bool:
+        """FIX133 B — /docs, /redoc, /openapi.json: API_DOCS_ENABLED when set,
+        else only in dev/test."""
+        if self.api_docs_enabled is not None:
+            return bool(self.api_docs_enabled)
+        return self.app_env.lower() in _DEV_ENVS
+
+    @property
+    def effective_master_key(self) -> str:
+        """The AES-256-GCM master key for provider-key encryption.
+
+        Uses ``provider_key_master_key`` when set. In dev/test ONLY it
+        falls back to a deterministic all-zero key so a fresh checkout
+        works without ceremony. In production an empty key is rejected by
+        ``validate_secrets`` at startup, so this never returns the dev key
+        there.
+        """
+        if self.provider_key_master_key:
+            return self.provider_key_master_key
+        if self.app_env.lower() in _DEV_ENVS:
+            return "0" * 64
+        raise RuntimeError("PROVIDER_KEY_MASTER_KEY is not configured")
+
+    def service_jwt_wiring_issue(self) -> str | None:
+        """FIX 1b — detect the FIX-1 service-JWT decoupling being DORMANT.
+
+        The gateway can't see chat-edge's env directly. The signal that
+        chat-edge is WIRED to this gateway is a non-empty
+        ``internal_service_secret`` (the older header trust anchor both sides
+        share). If chat-edge is wired but ``service_jwt_secret`` is empty,
+        chat-edge mints service JWTs this gateway can never verify — they are
+        rejected and the call silently falls back to the
+        INTERNAL_SERVICE_SECRET header trust, so FIX 1's whole point (chat
+        auth decoupled from gw_ keys) is unmet, silently. Returns a problem
+        string in that case, else None.
+
+        A gateway-only deploy (no chat-edge → no INTERNAL_SERVICE_SECRET)
+        expects no service JWT, so this returns None and never bricks it.
+        """
+        if (self.service_jwt_secret or "").strip():
+            return None  # configured — the service-JWT path is active
+        if (self.internal_service_secret or "").strip():
+            return (
+                "SERVICE_JWT_SECRET is empty but INTERNAL_SERVICE_SECRET is set "
+                "(chat-edge is wired): the service-JWT auth path is DISABLED — "
+                "chat-edge service tokens are rejected and silently fall back to "
+                "the INTERNAL_SERVICE_SECRET header trust. Set SERVICE_JWT_SECRET "
+                "to the SAME value as the chat-edge service."
+            )
+        return None  # gateway-only / chat-edge-less deploy — nothing expected
+
+    def validate_secrets(self) -> None:
+        """Reject insecure default / too-short secrets outside dev/test.
+
+        Raises RuntimeError if critical secrets are left at placeholder
+        values or fall below ``_MIN_SECRET_LENGTH``. This MUST be called
+        at process startup (``app.main`` does so at import time) so a
+        misconfigured production deploy never accepts a single request.
+        """
+        if self.app_env.lower() in _DEV_ENVS:
+            return  # Allow insecure defaults in dev/test
+
+        issues: list[str] = []
+
+        def _check(name: str, value: str) -> None:
+            if value.lower() in _INSECURE_DEFAULTS:
+                issues.append(f"{name} is set to an insecure default")
+            elif len(value.encode("utf-8")) < _MIN_SECRET_LENGTH:
+                issues.append(
+                    f"{name} is too short "
+                    f"(need ≥{_MIN_SECRET_LENGTH} bytes, got {len(value.encode('utf-8'))})"
+                )
+
+        _check("JWT_SECRET", self.jwt_secret)
+        _check("MASTER_ENCRYPTION_KEY", self.master_encryption_key)
+        _check("PORTAL_JWT_SECRET", self.portal_jwt_secret)
+        # FIX 1b — fail closed on a dormant/weak service-JWT decoupling.
+        # If chat-edge is wired (INTERNAL_SERVICE_SECRET set) but the
+        # verifying secret is empty, refuse to start; if it's set, hold it
+        # to the same strength bar as the other secrets.
+        wiring = self.service_jwt_wiring_issue()
+        if wiring:
+            issues.append(wiring)
+        elif (self.service_jwt_secret or "").strip():
+            _check("SERVICE_JWT_SECRET", self.service_jwt_secret)
+        # Required in production so the Safe Trace audit channel is
+        # not silently encrypted with an HKDF-of-master fallback that
+        # would be invalidated if the master key ever rotated.
+        if not (self.dlp_audit_key or "").strip():
+            issues.append(
+                "DLP_AUDIT_KEY is empty — set a 32-byte hex value "
+                "(generate with `python3 -c \"import secrets; print(secrets.token_hex(32))\"`)"
+            )
+        else:
+            _check("DLP_AUDIT_KEY", self.dlp_audit_key)
+
+        signing = self.session_signing_secrets_list
+        if not signing:
+            issues.append("SESSION_SIGNING_SECRETS is empty")
+        else:
+            for idx, s in enumerate(signing):
+                _check(f"SESSION_SIGNING_SECRETS[{idx}]", s)
+
+        # Phase 3.5 — Resend is mandatory in production so the
+        # verification + password-reset flows aren't silently dropped.
+        # Dev/test runs with the console-log sender and doesn't need
+        # a real key.
+        delivery = (self.email_delivery or "auto").strip().lower()
+        if delivery not in ("auto", "resend", "console", "disabled"):
+            issues.append(f"EMAIL_DELIVERY must be auto|resend|console|disabled (got {self.email_delivery!r})")
+        elif delivery in ("auto", "resend") and not (self.resend_api_key or "").strip():
+            issues.append(
+                "RESEND_API_KEY is empty "
+                "(required in production — set a Resend API key, or state "
+                "EMAIL_DELIVERY=disabled for a deployment without a mail sender)"
+            )
+
+        # FIX134 B2 — the OAuth return_to allowlist must name the UIs as the
+        # browser reaches them. Since FIX133 that is https behind Caddy; an
+        # http:// entry here silently rejected every https return_to
+        # (invalid_return_to). Empty = no absolute return_to to that UI.
+        for name, raw in (("PORTAL_ORIGIN", self.portal_origin), ("ADMIN_UI_ORIGIN", self.admin_ui_origin)):
+            value = (raw or "").strip()
+            if not value:
+                continue
+            parts = urlsplit(value)
+            if parts.scheme.lower() != "https":
+                issues.append(
+                    f"{name} must be an https:// origin outside development "
+                    f"(got {value!r}) — the OAuth return_to allowlist compares "
+                    "scheme://host[:port], and the UIs are served over https "
+                    "(set it to the public URL, e.g. PORTAL_PUBLIC_URL)"
+                )
+            elif not parts.netloc or parts.path.strip("/") or parts.query or parts.fragment:
+                issues.append(
+                    f"{name} must be a bare origin (scheme://host[:port]) — got {value!r}"
+                )
+
+        # FIX134 B4 — MODERATION_MODE: auto (only with a usable OpenAI key) or off.
+        if (self.moderation_mode or "").strip().lower() not in ("auto", "off"):
+            issues.append(f"MODERATION_MODE must be auto|off (got {self.moderation_mode!r})")
+
+        # Provider API keys are encrypted at rest with AES-256-GCM
+        # (app.core.security.encrypt_provider_key). Without the master key
+        # the service can't decrypt stored keys; the dev all-zero fallback
+        # is not acceptable in production.
+        if not (self.provider_key_master_key or "").strip():
+            issues.append(
+                "PROVIDER_KEY_MASTER_KEY is empty — set a 32-byte hex value "
+                "(generate with `python3 -c \"import secrets; print(secrets.token_hex(32))\"`)"
+            )
+        else:
+            try:
+                if len(bytes.fromhex(self.provider_key_master_key)) != 32:
+                    issues.append(
+                        "PROVIDER_KEY_MASTER_KEY must be 32 bytes (64 hex chars)"
+                    )
+            except ValueError:
+                issues.append("PROVIDER_KEY_MASTER_KEY must be valid hex (64 hex chars)")
+
+        # Phase 11 A2 — cross-origin auth-cookie correctness. web-chat has
+        # NO Bearer fallback: every authed fetch (files, media playback,
+        # SSE streams) depends on the portal_* cookies reaching the
+        # chat-edge/gateway origins. A misconfigured cookie scope doesn't
+        # error loudly at runtime — it just 401s every request — so we
+        # fail startup instead. See app/services/portal/cookies.py.
+        samesite = (self.auth_cookie_samesite or "").strip().lower()
+        if samesite not in ("lax", "strict", "none"):
+            issues.append(
+                "AUTH_COOKIE_SAMESITE must be one of lax|strict|none "
+                f"(got {self.auth_cookie_samesite!r})"
+            )
+        if samesite == "none":
+            # Cross-SITE cookie mode: the web apps and the API live on
+            # different registrable domains. A host-only cookie can never
+            # reach the other origin, and browsers reject SameSite=None
+            # without Secure — both must be configured explicitly.
+            if not (self.auth_cookie_domain or "").strip():
+                issues.append(
+                    "AUTH_COOKIE_SAMESITE=none (cross-origin cookie mode) "
+                    "requires AUTH_COOKIE_DOMAIN to be set to the shared "
+                    'parent domain (e.g. ".yourdomain.com") — without it the '
+                    "login cookies never reach the chat/API origins and every "
+                    "authed fetch 401s. NOTE: SameSite=None also removes the "
+                    "portal's CSRF defence (SameSite=Lax) — a CSRF token MUST "
+                    "be introduced for /portal mutations before deploying "
+                    "cross-site (see app/services/portal/cookies.py)."
+                )
+            if not self.cookie_secure_effective:
+                issues.append(
+                    "AUTH_COOKIE_SAMESITE=none requires Secure cookies — "
+                    "browsers reject SameSite=None without Secure. Remove "
+                    "AUTH_COOKIE_SECURE=false (Secure auto-enables outside "
+                    "dev/test)."
+                )
+
+        if issues:
+            raise RuntimeError(
+                "STARTUP BLOCKED — insecure secrets detected:\n"
+                + "\n".join(f"  - {i}" for i in issues)
+                + "\n\nSet strong secret values or set APP_ENV=development for local use."
+            )
+
+
+settings = Settings()

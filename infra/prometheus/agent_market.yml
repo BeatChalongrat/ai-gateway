@@ -1,0 +1,108 @@
+# Agent Market — its own recording rules and alerts (AM1b §0.4).
+#
+# Every alert here carries channel="agent-market". Prometheus in this stack has
+# no Alertmanager: ops-watch reads the firing ones every tick and pages them on
+# Agent Market's own ntfy topic (AGENT_MARKET_NTFY_URL, AM1c) through a pager
+# of their own — never the core channel, which also ignores the agent_market.*
+# smoke checks. They show on the "Agent Market" Grafana dashboard too
+# (docs/agent-market/OPERATIONS.md).
+#
+# SLO: 95 % of the agent runs that end, end succeeded (cancelled by the person
+# excluded), over a rolling 14 days (retention is 15 d). Error budget: 5 %.
+# AM6: a run that finished open — its draft delivered, its package's gate not
+# passed (a reconciliation that does not tie) — delivered its work: it counts
+# as a run that ended, never as a failure (status="completed_open").
+groups:
+  - name: agent-market
+    rules:
+      - record: agent_market:runs_ended:increase14d
+        expr: sum(increase(agent_market_runs_finished_total{status=~"succeeded|completed_open|failed"}[14d]))
+      - record: agent_market:runs_failed:increase14d
+        expr: sum(increase(agent_market_runs_finished_total{status="failed"}[14d]))
+      # 1 = untouched budget, 0 = spent, below 0 = SLO missed
+      - record: agent_market:error_budget_remaining:ratio14d
+        expr: 1 - (agent_market:runs_failed:increase14d / clamp_min(agent_market:runs_ended:increase14d, 1)) / 0.05
+
+      - alert: AgentMarketErrorBudgetBurning
+        # a quarter of the runs that ended in the last 6 h failed (at least 3)
+        expr: |
+          sum(increase(agent_market_runs_finished_total{status="failed"}[6h])) >= 3
+          and
+          sum(increase(agent_market_runs_finished_total{status="failed"}[6h]))
+            / clamp_min(sum(increase(agent_market_runs_finished_total{status=~"succeeded|completed_open|failed"}[6h])), 1) > 0.25
+        labels:
+          severity: warning
+          channel: agent-market
+        annotations:
+          summary: "Agent Market: a quarter of recent runs failed — the 14-day error budget is burning"
+      - alert: AgentMarketErrorBudgetSpent
+        expr: agent_market:error_budget_remaining:ratio14d < 0
+        for: 30m
+        labels:
+          severity: warning
+          channel: agent-market
+        annotations:
+          summary: "Agent Market: more than 5 % of runs failed over 14 days (SLO missed)"
+      - alert: AgentMarketRunnerDown
+        expr: up{job="agent-runner"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          channel: agent-market
+        annotations:
+          summary: "Agent Market runner is not answering /metrics (runs wait; chat is unaffected)"
+      - alert: AgentMarketQueueStuck
+        expr: agent_market_oldest_queued_seconds > 600
+        for: 5m
+        labels:
+          severity: warning
+          channel: agent-market
+        annotations:
+          summary: "Agent Market: a run has waited in the queue for more than 10 minutes"
+      - alert: AgentMarketSandboxNotReady
+        expr: agent_market_sandbox_ready == 0
+        for: 5m
+        labels:
+          severity: warning
+          channel: agent-market
+        annotations:
+          summary: "Agent Market: the runner cannot start sandboxes"
+      - alert: AgentMarketPoolSaturated
+        expr: agent_market_pool_acquired_conns >= agent_market_pool_max_conns
+        for: 5m
+        labels:
+          severity: warning
+          channel: agent-market
+        annotations:
+          summary: "Agent Market: the runner's own DB pool is full (chat uses its own pool)"
+      # AM3: a person pressed "แจ้งปัญหา" (report a problem) and nobody has
+      # closed it yet — the admins' page lists it with the run and the step.
+      - alert: AgentMarketProblemReported
+        expr: agent_market_problem_reports_open > 0
+        labels:
+          severity: warning
+          channel: agent-market
+        annotations:
+          summary: "Agent Market: someone reported a problem with a run — read it on the admins' page (จัดการ Agent Market → ปัญหาที่แจ้ง)"
+      # AM3: runs have waited more than an hour for a budget (someone is stuck
+      # until an admin raises a person's or a department's month).
+      - alert: AgentMarketRunsWaitingForBudget
+        expr: agent_market_runs_waiting_budget > 0
+        for: 1h
+        labels:
+          severity: warning
+          channel: agent-market
+        annotations:
+          summary: "Agent Market: runs have waited over an hour for budget — raise a person's or department's budget, or tell them"
+      # AM15: runs have stopped because no model they may use can be reached, and have waited ten minutes
+      # (the runner asks the model a word every two minutes and puts them back when it answers: ten
+      # minutes of waiting is the model being away, not a slow answer). Each such run has delivered
+      # nothing and says so in its thread; this is the same said to whoever can bring the model back.
+      - alert: AgentMarketRunsWaitingForModel
+        expr: agent_market_runs_waiting_model > 0
+        for: 10m
+        labels:
+          severity: warning
+          channel: agent-market
+        annotations:
+          summary: "Agent Market: runs are waiting because the model the agents use cannot be reached — they go on by themselves when it answers; nothing was delivered meanwhile"

@@ -1,0 +1,88 @@
+syntax = "proto3";
+
+package logworker;
+
+option go_package = "github.com/beatchalongrat/ai-gateway/log-worker/pb;pb";
+
+// LogWorkerService — the async sink for request_logs.
+//
+// The Python gateway dispatches one Enqueue RPC per request when
+// LOG_WORKER_ENGINE=go. The server channels the record onto an
+// in-memory buffer; a background goroutine flushes batches of up to
+// BATCH_SIZE records every FLUSH_INTERVAL_MS via the Postgres COPY
+// protocol. Enqueue returns immediately (accepted=true) once the
+// record is on the channel — the actual INSERT lag is invisible to
+// the gateway. Buffer overflows DROP the oldest pending record so
+// the channel send never blocks the gateway's request path.
+service LogWorkerService {
+  rpc Enqueue (LogRecord) returns (EnqueueResponse);
+  rpc Health (HealthRequest) returns (HealthResponse);
+}
+
+// LogRecord — the subset of fields that map 1:1 to request_logs
+// columns. The ordering here mirrors the COPY column list in
+// db/inserter.go so the proto + the DDL drift together.
+message LogRecord {
+  string request_id = 1;
+  string tenant_id = 2;
+  string project_id = 3;
+  string provider = 4;
+  string model = 5;
+  string status = 6;
+  string policy_action = 7;
+  double latency_ms = 8;
+  int32 prompt_tokens = 9;
+  int32 completion_tokens = 10;
+  int32 total_tokens = 11;
+  double estimated_cost_usd = 12;
+  string error_code = 13;
+  string router_used = 14;
+  bool fallback_used = 15;
+  string fallback_attempts_json = 16;
+  string original_provider = 17;
+  string original_model = 18;
+  int32 dlp_input_findings = 19;
+  string dlp_input_action = 20;
+  int32 dlp_output_findings = 21;
+  string dlp_categories = 22;
+  string policy_profile_id = 23;
+  // Stage 1-4 DLP trace snapshots — masked or [BLOCKED_BY_DLP] only.
+  // Raw plaintext bound for ``input_raw_encrypted`` is the ciphertext
+  // produced upstream; we move it unchanged.
+  string input_raw = 24;
+  string input_masked = 25;
+  string output_raw = 26;
+  string output_final = 27;
+  string dlp_findings_json = 28;
+  string input_raw_encrypted = 29;
+  // Wall-clock when the gateway built the record. Unused for storage
+  // (server_default fills created_at on the row) but kept here so
+  // the worker can compute end-to-end enqueue→insert latency.
+  int64 created_at_unix_ms = 30;
+  // Reasoning-model accounting. 0 for non-reasoning requests (the
+  // request_logs columns are NOT NULL DEFAULT 0, so COPY omitting them
+  // already wrote 0 — these fields close the gap so the Go path
+  // persists the real values once reasoning models are provisioned).
+  int32 reasoning_tokens = 31;
+  double reasoning_cost = 32;
+  // Portal-user attribution (migration 062). Empty string → SQL NULL
+  // via emptyToNil (admin/tenant keys with no portal owner).
+  string user_id = 33;
+}
+
+message EnqueueResponse {
+  // Always true under steady state. False indicates the server
+  // rejected the record outright (e.g. queue full + drop policy
+  // failed). The gateway treats false as "fall back to inline
+  // persist on the dependency session".
+  bool accepted = 1;
+  string reason = 2;
+}
+
+message HealthRequest {}
+message HealthResponse {
+  string status = 1;       // "ready" | "draining" | "error: ..."
+  int64 queue_depth = 2;   // current buffered (not-yet-flushed) records
+  int64 dropped_total = 3; // lifetime overflow drops since process start
+  int64 flushed_total = 4; // lifetime records successfully COPY'd
+}

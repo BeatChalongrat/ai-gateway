@@ -1,0 +1,18 @@
+{
+ "note": "FIX37 Axis-B closed-set candidate pool. 100% synthetic. Each re-identification question shows the TRUE profile plus 9 deterministically-chosen distractors => random chance is exactly 1/10 = 10%.",
+ "construct_rule": "A card carries name | role | area | detail. For a message tagged quasi_strong=true the role/area DELIBERATELY match the quasi-identifiers the message states in the clear — that is the effect being measured. For quasi_strong=false the role/area/detail are unrelated to that message's subject, so once the PII is masked the card is unreachable and accuracy should collapse toward chance. Cards must never restate the message's topic: the first draft of this file did (a 'solar panel' detail against a solar-panel message), which made topic-matching look like re-identification. Details are therefore non-topical facts only (tenure, membership tier).",
+ "profiles": [
+  {"id": "p01", "name": "กมล ศรีบุญเรือง", "role": "เจ้าของอู่ซ่อมรถ", "area": "บางแค กรุงเทพ", "detail": "ลูกค้าตั้งแต่ปี 2560"},
+  {"id": "p02", "name": "รัตนา พงศ์พันธุ์", "role": "พนักงานบริษัทเอกชน", "area": "นครราชสีมา", "detail": "สมาชิกระดับเงิน"},
+  {"id": "p03", "name": "ศิริชัย บุญเกิด", "role": "ครูสอนดำน้ำ", "area": "เกาะเต่า สุราษฎร์ธานี", "detail": "เพิ่งเปิดร้านเช่าอุปกรณ์เมื่อต้นปี"},
+  {"id": "p04", "name": "แก้ว ประเสริฐศรี", "role": "พนักงานราชการ", "area": "พิษณุโลก", "detail": "สมาชิกระดับเงิน"},
+  {"id": "p05", "name": "บุญส่ง แซ่ลิ้ม", "role": "เจ้าของโรงสีข้าว", "area": "บางเลน นครปฐม", "detail": "โรงสีเก่าแก่ที่สุดในอำเภอ"},
+  {"id": "p06", "name": "วีรพล นาคทอง", "role": "ครูโรงเรียนมัธยม", "area": "ลำปาง", "detail": "สมาชิกตั้งแต่ปี 2564"},
+  {"id": "p07", "name": "ธนดล อินทโชติ", "role": "ช่างภาพงานแต่ง", "area": "หัวหิน ประจวบคีรีขันธ์", "detail": "รับงานเฉพาะในพื้นที่"},
+  {"id": "p08", "name": "เพชร บูรพา", "role": "เภสัชกร", "area": "ตรัง", "detail": "ลูกค้าใหม่ปีนี้"},
+  {"id": "p09", "name": "พิมพ์ชนก ทองใบ", "role": "พนักงานขายประกัน", "area": "ยโสธร", "detail": "ลูกค้าเก่าสิบปี"},
+  {"id": "p10", "name": "ณัฐวุฒิ เพียรทอง", "role": "ผู้รับเหมาก่อสร้าง", "area": "แม่สอด ตาก", "detail": "ทำงานให้เทศบาลต่อเนื่องห้าปี"},
+  {"id": "p11", "name": "ฟ้า อรุณรัตน์", "role": "นักบัญชีอิสระ", "area": "ชุมพร", "detail": "สมาชิกระดับทอง"},
+  {"id": "p12", "name": "ปรีดา วงศ์สุริยา", "role": "ผู้จัดการโรงแรมบูติก", "area": "ตัวเมืองน่าน", "detail": "โรงแรมสิบห้าห้อง"}
+ ]
+}

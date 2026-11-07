@@ -1,0 +1,9 @@
+-r requirements.txt
+
+respx
+# Phase-2: async SQLite driver so the test suite can exercise the async
+# (AsyncSession) hot path against the in-memory integration engine.
+aiosqlite>=0.19.0
+# SSO Phase 1 (A4): per-test timeout so a test that reaches for a live
+# Redis/Postgres hangs the run visibly (--timeout=N) instead of forever.
+pytest-timeout>=2.3.0

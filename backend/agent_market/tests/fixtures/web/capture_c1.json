@@ -1,0 +1,81 @@
+{
+ "schema": "web.capture.v1",
+ "fetcher_version": "1.0.0",
+ "requested_url": "http://www.sukjai-office.test/p/ergomesh-m2",
+ "started_at": "2026-10-06T11:42:28.524Z",
+ "clock": "UTC",
+ "outcome": "captured",
+ "final_url": "http://www.sukjai-office.test/p/ergomesh-m2",
+ "http": {
+  "status": 200,
+  "content_type": "text/html; charset=utf-8",
+  "content_length": 2924,
+  "headers": {
+   "connection": "close",
+   "content-type": "text/html; charset=utf-8",
+   "date": "Tue, 06 Oct 2026 11:42:28 GMT",
+   "transfer-encoding": "chunked"
+  }
+ },
+ "body_sha256": "8809b3706f60f2c0c97d1394537646232e7c39a4d23062f3dbec80001970a456",
+ "snapshot_sha256": "62cafcf3bd1c33aae96734d37e4a28094779be30b5133629f54cdbc7421c3d86",
+ "robots": {
+  "url": "http://www.sukjai-office.test/robots.txt",
+  "status": 200,
+  "allowed": true,
+  "rule": "",
+  "group": "*",
+  "sha256": "34f61f3e3fedb0174b3a1ea8da425f6a350747318c9f08d92dde2599d979d06d"
+ },
+ "page_rules": [],
+ "hosts": {
+  "named": "www.sukjai-office.test",
+  "address": "93.184.215.14",
+  "reached": [
+   "www.sukjai-office.test"
+  ],
+  "not_opened": []
+ },
+ "bytes": {
+  "document": 2924,
+  "transfer": 2924,
+  "transfer_capped": false
+ },
+ "page": {
+  "width": 1280,
+  "height": 900,
+  "screenshot_height": 900,
+  "lang": "th",
+  "markup_truncated": false,
+  "text_truncated": false
+ },
+ "counts": {
+  "shown_blocks": 20,
+  "shown_characters": 522,
+  "struck_blocks": 0,
+  "hidden_pieces": 0,
+  "attributes": 1,
+  "comments": 0,
+  "structured": 0,
+  "meta": 2
+ },
+ "files": {
+  "hidden.json": {
+   "sha256": "73aa0d3acd48215f8073c2afc3d691c9487beaf1a23f973807c1de7d293512fa",
+   "bytes": 530
+  },
+  "page.html": {
+   "sha256": "5f84d0e9214f0b10849faaf3cb296b1072bcad323a6231d2619ee30078697fa5",
+   "bytes": 2938
+  },
+  "screenshot.jpg": {
+   "sha256": "3f9a1895fb293032205004ec66b69c685abd9a5f544bbe05fa5e2b54d35ebcac",
+   "bytes": 60715
+  },
+  "text.json": {
+   "sha256": "76472d83604622dbf2c1b2bf3bedaebb5ea3126dc14853dc0d4373a55d616d20",
+   "bytes": 3467
+  }
+ },
+ "finished_at": "2026-10-06T11:42:29.427Z"
+}

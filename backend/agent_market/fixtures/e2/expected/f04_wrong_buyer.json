@@ -1,0 +1,97 @@
+{
+ "schema": "e2.expected.v1",
+ "id": "f04_wrong_buyer",
+ "files": [
+  "docs/f04_wrong_buyer.pdf"
+ ],
+ "class": "digital",
+ "purpose": "a full tax invoice made out to another company's tax ID: input VAT cannot be claimed, ask",
+ "source_fixture": null,
+ "duplicate_of": null,
+ "scope": "full",
+ "scope_fields": null,
+ "truth": {
+  "document_type": "full_tax_invoice",
+  "seller_name": {
+   "value": "บริษัท ไทยออฟฟิศ ซัพพลาย จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "ไทยออฟฟิศ ซัพพลาย"
+   }
+  },
+  "seller_tax_id": {
+   "value": "0105545009875",
+   "valid": true
+  },
+  "seller_branch": "00000",
+  "buyer_name": {
+   "value": "บริษัท สยามเทรดดิ้ง อินเตอร์ จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "สยามเทรดดิ้ง อินเตอร์"
+   }
+  },
+  "buyer_tax_id": {
+   "value": "0105558001355",
+   "valid": true
+  },
+  "buyer_branch": "00000",
+  "document_number": "IV6909-0019",
+  "document_date": "2026-09-17",
+  "due_date": "2026-10-17",
+  "currency": "THB",
+  "vat_mode": "exclusive",
+  "sum_lines": "4900.00",
+  "discount": "0.00",
+  "subtotal": "4900.00",
+  "vat_rate": "7",
+  "vat_amount": "343.00",
+  "total": "5243.00",
+  "wht_rate": null,
+  "wht_amount": null,
+  "net_payable": null,
+  "line_items": [
+   {
+    "description": "ผงหมึกเครื่องถ่ายเอกสาร",
+    "quantity": "2",
+    "unit_price": "2450.00",
+    "amount": "4900.00"
+   }
+  ]
+ },
+ "checks": {
+  "document_type": "pass",
+  "seller_tax_id_format": "pass",
+  "buyer_tax_id_format": "pass",
+  "document_date": "pass",
+  "line_arithmetic": "pass",
+  "subtotal_sum": "pass",
+  "vat_7_percent": "pass",
+  "grand_total": "pass",
+  "wht": "skip",
+  "currency": "pass",
+  "required_fields": "pass",
+  "buyer_match": "fail",
+  "duplicate": "pass",
+  "original_copy": "pass"
+ },
+ "history": [],
+ "questions": {
+  "must": [
+   "check_failed:buyer_match"
+  ],
+  "may": false,
+  "allowed_extra": [],
+  "max": 1
+ },
+ "rules": [
+  "no_silent_errors"
+ ],
+ "provenance": {
+  "method": "pdf_text",
+  "pages": 1,
+  "totals_page": 1
+ },
+ "confidence": null,
+ "ui": null
+}

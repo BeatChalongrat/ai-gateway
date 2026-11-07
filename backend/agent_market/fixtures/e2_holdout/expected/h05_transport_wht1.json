@@ -1,0 +1,98 @@
+{
+ "schema": "e2.expected.v1",
+ "id": "h05_transport_wht1",
+ "files": [
+  "docs/h05_transport_wht1.pdf"
+ ],
+ "class": "digital",
+ "purpose": "H5: transport services with 1 % WHT and a \"ยอดโอนสุทธิ\" net line.",
+ "source_fixture": null,
+ "duplicate_of": null,
+ "scope": "full",
+ "scope_fields": null,
+ "truth": {
+  "document_type": "full_tax_invoice",
+  "seller_name": {
+   "value": "บริษัท สยามโลจิสติกส์ เอ็กซ์เพรส จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "สยามโลจิสติกส์ เอ็กซ์เพรส"
+   }
+  },
+  "seller_tax_id": {
+   "value": "0105552077163",
+   "valid": true
+  },
+  "seller_branch": "00003",
+  "buyer_name": {
+   "value": "บริษัท สรานเทค โซลูชั่นส์ จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "สรานเทค โซลูชั่นส์"
+   }
+  },
+  "buyer_tax_id": {
+   "value": "0105563012343",
+   "valid": true
+  },
+  "buyer_branch": "00000",
+  "document_number": "TR2569/0877",
+  "document_date": "2026-09-26",
+  "due_date": null,
+  "currency": "THB",
+  "vat_mode": "exclusive",
+  "sum_lines": "14000.00",
+  "discount": "0.00",
+  "subtotal": "14000.00",
+  "vat_rate": "7",
+  "vat_amount": "980.00",
+  "total": "14980.00",
+  "wht_rate": "1",
+  "wht_amount": "140.00",
+  "net_payable": "14840.00",
+  "line_items": [
+   {
+    "description": "ค่าขนส่งสินค้าเที่ยวเดียว 6 ล้อ",
+    "quantity": "5",
+    "unit_price": "2800.00",
+    "amount": "14000.00"
+   }
+  ]
+ },
+ "checks": {
+  "document_type": "pass",
+  "seller_tax_id_format": "pass",
+  "buyer_tax_id_format": "pass",
+  "document_date": "pass",
+  "line_arithmetic": "pass",
+  "subtotal_sum": "pass",
+  "vat_7_percent": "pass",
+  "grand_total": "pass",
+  "wht": "pass",
+  "currency": "pass",
+  "required_fields": "pass",
+  "buyer_match": "pass",
+  "duplicate": "pass",
+  "original_copy": "pass"
+ },
+ "history": [],
+ "questions": {
+  "must": [],
+  "may": false,
+  "allowed_extra": [],
+  "max": 0
+ },
+ "rules": [
+  "no_silent_errors",
+  "zero_questions"
+ ],
+ "provenance": {
+  "method": "pdf_text",
+  "pages": 1,
+  "totals_page": 1
+ },
+ "confidence": {
+  "money_min": 0.95
+ },
+ "ui": null
+}

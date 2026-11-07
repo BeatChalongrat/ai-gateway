@@ -1,0 +1,153 @@
+// Silent session refresh for Web Chat.
+//
+// Mirror of the portal's lib/auth-refresh, pointed at the gateway. Keeps
+// a logged-in chat user's access cookie fresh so they're never bounced
+// to the Portal login mid-conversation, and catches the "tab idle for an
+// hour, now focused" case.
+//
+//   * Timer every REFRESH_INTERVAL_MS (50 min < 60 min access TTL).
+//   * Refresh-on-focus when backgrounded past the interval.
+//   * Cross-tab coordination via BroadcastChannel so multiple chat tabs
+//     don't all refresh at once (the gateway's 30s grace makes a race
+//     safe; this just avoids the noise).
+//
+// A refresh the gateway REJECTS (401/403: refresh token expired/revoked/
+// version-bumped) means the session is genuinely over → bounce to the
+// Portal login. A refresh that could not reach the gateway (network error,
+// 5xx) keeps the page and retries on the next tick or focus (FIX125 M6).
+
+import { CHAT_API_BASE } from "./api";
+import { HOSTED_MODE, redirectToPortalLogin, refreshSession } from "./auth";
+
+const REFRESH_INTERVAL_MS = 50 * 60 * 1000; // 50 minutes
+const CHANNEL_NAME = "webchat-auth";
+
+// FIX129 B2 — session heartbeat. Sign-out now revokes the access token on
+// the gateway AND chat-edge, but an idle tab would only notice on its next
+// request (or the 50-minute refresh). While the tab is visible it asks
+// chat-edge every 5 s whether its session is still valid (a Redis lookup,
+// no DB); a 401/403 goes through the normal refresh path, and only a
+// rejected refresh sends the person to the login page — so a copied or
+// signed-out token is off every open tab within seconds.
+const SESSION_CHECK_INTERVAL_MS = 5_000;
+const SESSION_URL = `${CHAT_API_BASE}/auth/session`;
+
+let started = false;
+let timer: ReturnType<typeof setInterval> | null = null;
+let sessionTimer: ReturnType<typeof setInterval> | null = null;
+let sessionCheckInFlight = false;
+let lastRefresh = 0;
+let channel: BroadcastChannel | null = null;
+
+async function refreshOnce(): Promise<boolean> {
+  const outcome = await refreshSession();
+  if (outcome === "ok") {
+    lastRefresh = Date.now();
+    return true;
+  }
+  if (outcome === "unreachable") {
+    // FIX125 M6 — the gateway could not be reached (network error, 5xx
+    // during a redeploy). That says nothing about the session: keep the
+    // page, leave lastRefresh alone so the next tick or focus tries again.
+    return false;
+  }
+  // The gateway REJECTED the refresh token: the one legitimate "log in
+  // again". The login page brings the person back to this same page.
+  stopSilentRefresh();
+  redirectToPortalLogin();
+  return false;
+}
+
+async function tick(): Promise<void> {
+  const ok = await refreshOnce();
+  if (ok && channel) {
+    try {
+      channel.postMessage({ type: "refreshed", at: lastRefresh });
+    } catch {
+      /* channel closed — ignore */
+    }
+  }
+}
+
+function onVisible(): void {
+  if (document.visibilityState !== "visible") return;
+  if (Date.now() - lastRefresh >= REFRESH_INTERVAL_MS) {
+    void tick();
+  }
+}
+
+/** One heartbeat: is this session still valid on chat-edge? */
+export async function sessionCheckOnce(): Promise<void> {
+  if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+  if (sessionCheckInFlight) return;
+  sessionCheckInFlight = true;
+  try {
+    const res = await fetch(SESSION_URL, { credentials: "include", cache: "no-store" });
+    if (res.status !== 401 && res.status !== 403) return;
+    // The token is gone (signed out, revoked, expired). A refresh that the
+    // gateway ACCEPTS means only the access token had lapsed — carry on; a
+    // REJECTED one is the real sign-out.
+    const outcome = await refreshSession();
+    if (outcome === "rejected") {
+      stopSilentRefresh();
+      redirectToPortalLogin();
+    }
+  } catch {
+    /* unreachable — says nothing about the session; try again next tick */
+  } finally {
+    sessionCheckInFlight = false;
+  }
+}
+
+/** Begin proactive refresh. Idempotent. */
+export function startSilentRefresh(): void {
+  // Hosted mode (desktop shell): the host owns rotation. No timer, no
+  // focus refresh, no BroadcastChannel — this module does nothing at
+  // all, so the page can never race the host for the refresh token.
+  // The console line is deliberate: the shell captures page console via
+  // CDP, so hosted mode being active is visible in the host log.
+  if (HOSTED_MODE) {
+    console.info("[auth] hosted mode: page-side silent refresh disabled (host owns the session)");
+    return;
+  }
+  if (started || typeof window === "undefined") return;
+  started = true;
+  lastRefresh = Date.now();
+
+  timer = setInterval(() => void tick(), REFRESH_INTERVAL_MS);
+  sessionTimer = setInterval(() => void sessionCheckOnce(), SESSION_CHECK_INTERVAL_MS);
+  document.addEventListener("visibilitychange", onVisible);
+
+  if ("BroadcastChannel" in window) {
+    channel = new BroadcastChannel(CHANNEL_NAME);
+    channel.onmessage = (ev: MessageEvent) => {
+      if (ev.data?.type === "refreshed" && typeof ev.data.at === "number") {
+        lastRefresh = ev.data.at;
+      }
+    };
+  }
+}
+
+/** Tear down timers + listeners. */
+export function stopSilentRefresh(): void {
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+  if (sessionTimer) {
+    clearInterval(sessionTimer);
+    sessionTimer = null;
+  }
+  if (typeof document !== "undefined") {
+    document.removeEventListener("visibilitychange", onVisible);
+  }
+  if (channel) {
+    try {
+      channel.close();
+    } catch {
+      /* ignore */
+    }
+    channel = null;
+  }
+  started = false;
+}

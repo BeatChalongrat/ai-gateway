@@ -1,0 +1,19 @@
+{
+  "name": "web-fetcher",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Agent Market's page fetcher: one URL in, one inert evidence package or one refusal out.",
+  "license": "UNLICENSED",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test \"test/unit/*.test.js\"",
+    "test:browser": "node --test --test-concurrency=1 \"test/browser/*.test.js\""
+  },
+  "dependencies": {
+    "playwright-core": "1.63.0"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "schema": "agent.market.selftest.v1",
+  "note": "Runs the whole agent on a bundled month of five clean claims (meals, taxi and a hotel night; three with receipts, two under the receipt threshold) against the install's policy table, and shows the real audit workbook before the user trusts it with their own claims. Every claim passes every rule and none needs a question.",
+  "files": ["sample-data/เบิกค่าใช้จ่าย_ตัวอย่าง.xlsx", "sample-data/r_c01.pdf", "sample-data/r_c05.pdf", "sample-data/r_c15.pdf"],
+  "message": "ตรวจการเบิกค่าใช้จ่ายจากไฟล์ตัวอย่าง",
+  "formats": ["xlsx"],
+  "expect": {
+    "findings": [],
+    "period": "2026-10",
+    "totals": {"claims": 5, "pass": 5, "exception": 0, "question": 0}
+  }
+}

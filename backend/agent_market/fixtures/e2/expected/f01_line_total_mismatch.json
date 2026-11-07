@@ -1,0 +1,109 @@
+{
+ "schema": "e2.expected.v1",
+ "id": "f01_line_total_mismatch",
+ "files": [
+  "docs/f01_line_total_mismatch.pdf"
+ ],
+ "class": "digital",
+ "purpose": "line 2 prints 1,530.00 for 3 × 450.00 (1,350.00): the line check fails and asks, never picks a number",
+ "source_fixture": null,
+ "duplicate_of": null,
+ "scope": "full",
+ "scope_fields": null,
+ "truth": {
+  "document_type": "full_tax_invoice",
+  "seller_name": {
+   "value": "บริษัท ไทยออฟฟิศ ซัพพลาย จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "ไทยออฟฟิศ ซัพพลาย"
+   }
+  },
+  "seller_tax_id": {
+   "value": "0105545009875",
+   "valid": true
+  },
+  "seller_branch": "00000",
+  "buyer_name": {
+   "value": "บริษัท สรานเทค โซลูชั่นส์ จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "สรานเทค โซลูชั่นส์"
+   }
+  },
+  "buyer_tax_id": {
+   "value": "0105563012343",
+   "valid": true
+  },
+  "buyer_branch": "00000",
+  "document_number": "IV6909-0018",
+  "document_date": "2026-09-17",
+  "due_date": "2026-10-17",
+  "currency": "THB",
+  "vat_mode": "exclusive",
+  "sum_lines": "9710.00",
+  "discount": "0.00",
+  "subtotal": "9710.00",
+  "vat_rate": "7",
+  "vat_amount": "679.70",
+  "total": "10389.70",
+  "wht_rate": null,
+  "wht_amount": null,
+  "net_payable": null,
+  "line_items": [
+   {
+    "description": "เก้าอี้สำนักงาน รุ่น ERGO-2",
+    "quantity": "2",
+    "unit_price": "3200.00",
+    "amount": "6400.00"
+   },
+   {
+    "description": "ที่วางเท้าปรับระดับ",
+    "quantity": "3",
+    "unit_price": "450.00",
+    "amount": "1530.00"
+   },
+   {
+    "description": "โคมไฟตั้งโต๊ะ LED",
+    "quantity": "2",
+    "unit_price": "890.00",
+    "amount": "1780.00"
+   }
+  ]
+ },
+ "checks": {
+  "document_type": "pass",
+  "seller_tax_id_format": "pass",
+  "buyer_tax_id_format": "pass",
+  "document_date": "pass",
+  "line_arithmetic": "fail",
+  "subtotal_sum": "pass",
+  "vat_7_percent": "pass",
+  "grand_total": "pass",
+  "wht": "skip",
+  "currency": "pass",
+  "required_fields": "pass",
+  "buyer_match": "pass",
+  "duplicate": "pass",
+  "original_copy": "pass"
+ },
+ "history": [],
+ "questions": {
+  "must": [
+   "check_failed:line_arithmetic"
+  ],
+  "may": false,
+  "allowed_extra": [],
+  "max": 1
+ },
+ "rules": [
+  "no_silent_errors"
+ ],
+ "provenance": {
+  "method": "pdf_text",
+  "pages": 1,
+  "totals_page": 1
+ },
+ "confidence": null,
+ "ui": null
+}

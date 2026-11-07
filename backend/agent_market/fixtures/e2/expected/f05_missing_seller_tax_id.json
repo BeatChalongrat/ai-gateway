@@ -1,0 +1,94 @@
+{
+ "schema": "e2.expected.v1",
+ "id": "f05_missing_seller_tax_id",
+ "files": [
+  "docs/f05_missing_seller_tax_id.pdf"
+ ],
+ "class": "digital",
+ "purpose": "a full tax invoice with no seller tax ID: a required field for this document type is missing",
+ "source_fixture": null,
+ "duplicate_of": null,
+ "scope": "full",
+ "scope_fields": null,
+ "truth": {
+  "document_type": "full_tax_invoice",
+  "seller_name": {
+   "value": "บจก. เอเชีย คลาวด์ โซลูชั่นส์",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "เอเชีย คลาวด์ โซลูชั่นส์"
+   }
+  },
+  "seller_tax_id": null,
+  "seller_branch": "00002",
+  "buyer_name": {
+   "value": "บริษัท สรานเทค โซลูชั่นส์ จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "สรานเทค โซลูชั่นส์"
+   }
+  },
+  "buyer_tax_id": {
+   "value": "0105563012343",
+   "valid": true
+  },
+  "buyer_branch": "00000",
+  "document_number": "AC-0923",
+  "document_date": "2026-09-23",
+  "due_date": "2026-10-23",
+  "currency": "THB",
+  "vat_mode": "exclusive",
+  "sum_lines": "3500.00",
+  "discount": "0.00",
+  "subtotal": "3500.00",
+  "vat_rate": "7",
+  "vat_amount": "245.00",
+  "total": "3745.00",
+  "wht_rate": null,
+  "wht_amount": null,
+  "net_payable": null,
+  "line_items": [
+   {
+    "description": "ค่าบริการเครือข่ายรายเดือน",
+    "quantity": "1",
+    "unit_price": "3500.00",
+    "amount": "3500.00"
+   }
+  ]
+ },
+ "checks": {
+  "document_type": "pass",
+  "seller_tax_id_format": "skip",
+  "buyer_tax_id_format": "pass",
+  "document_date": "pass",
+  "line_arithmetic": "pass",
+  "subtotal_sum": "pass",
+  "vat_7_percent": "pass",
+  "grand_total": "pass",
+  "wht": "skip",
+  "currency": "pass",
+  "required_fields": "fail",
+  "buyer_match": "pass",
+  "duplicate": "pass",
+  "original_copy": "pass"
+ },
+ "history": [],
+ "questions": {
+  "must": [
+   "field_missing:seller_tax_id"
+  ],
+  "may": false,
+  "allowed_extra": [],
+  "max": 1
+ },
+ "rules": [
+  "no_silent_errors"
+ ],
+ "provenance": {
+  "method": "pdf_text",
+  "pages": 1,
+  "totals_page": 1
+ },
+ "confidence": null,
+ "ui": null
+}

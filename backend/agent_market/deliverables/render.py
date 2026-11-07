@@ -1,0 +1,124 @@
+"""render_all — one render step: the requested formats, each through the gate.
+
+Request fields used: formats[], names{format: filename}, theme, narrative,
+assumptions[], run{id, date, agent_version}, model_info{model, self_hosted},
+logo (input file name, optional).
+
+AM18: the files are written in the run's language, like everything the run says, and so are the gate's lines.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+
+from ..engine import words
+from . import content as content_mod
+from . import quality
+from .charts import render_png
+from .formats import wanted_formats
+from .look.catalogue import DoesNotFit
+from .theme import logo_refusal, resolve
+
+# No PDF: its Thai shaping was wrong (AM1b). It returns in AM-2 as the
+# finished .docx converted by LibreOffice, not as a second renderer.
+FORMATS = {"docx": "report", "pptx": "deck", "xlsx": "table"}
+
+
+def _sha(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 16), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def render_all(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
+    from .look import commentary as _commentary
+
+    theme = resolve(req.get("theme"))
+    req = {**req, "theme": theme}
+    model = content_mod.build(computed, req)
+    computed = model["computed"]  # with the cosmetic (presentation) answers applied
+    formats = [f for f in wanted_formats(req, ["docx", "pptx"]) if f in FORMATS]
+    names = req.get("names") or {}
+    logo = os.path.join(in_dir, os.path.basename(req["logo"])) if req.get("logo") else None
+    # AM21 §6.3: a logo that would not render at the size the cover needs is refused with the reason, and
+    # the documents go out without it (the theme's own look stays)
+    if logo and (why := logo_refusal(logo)):
+        theme.setdefault("refused", []).append(why)
+        logo = None
+
+    chart_files: dict[str, str] = {}
+    chart_bindings: list[dict] = []
+    # (the pictures the report itself places: a short report has no chart section — AM11b)
+    in_report = {b["chart"] for s in model["sections"] for b in s["blocks"] if b["type"] == "chart"}
+    if "docx" in formats:
+        for spec in [c for c in model["charts"] if c["id"] in in_report]:
+            path = os.path.join("/tmp", f"chart_{spec['id']}.png")
+            chart_bindings.append(render_png(spec, theme, path))
+            chart_files[spec["id"]] = path
+    # AM21: the deck's charts are the same pictures, drawn at the chart layout's frame (the gate draws
+    # them again at that frame and compares)
+    deck_charts: dict[str, str] = {}
+    if "pptx" in formats:
+        from .look.potx import CHART_BOX
+
+        for spec in model["charts"]:
+            path = os.path.join("/tmp", f"chart_deck_{spec['id']}.png")
+            render_png(spec, theme, path, width_in=CHART_BOX[0], height_in=CHART_BOX[1])
+            deck_charts[spec["id"]] = path
+
+    artifacts = []
+    refused = []   # AM21: a format whose content fits no layout of the catalogue — said, and no file written
+    all_ok = True
+    organisation = str((req.get("run") or {}).get("organisation") or "")
+    # The run-level checks (citations, assumptions) are asserted once — on the report, or on the deck
+    # when there is no report — never counted again for every file (AM8: "14/14" was 6 + 6 + 2 with
+    # the citations check counted on each format).
+    run_level = [quality.check_citations(model, computed), quality.check_assumptions(model, req)]
+    carrier = "docx" if "docx" in formats else ("pptx" if "pptx" in formats else None)
+    for fmt in formats:
+        name = os.path.basename(names.get(fmt) or f"output.{fmt}")
+        path = os.path.join(out_dir, name)
+        meta: dict = {}
+        try:
+            if fmt == "docx":
+                from .report_docx import ReportWriter
+
+                meta = ReportWriter(model, theme, chart_files).write(path, logo, organisation=organisation)
+                checks = quality.check_docx(path, model, theme, req)
+            elif fmt == "pptx":
+                from .deck_pptx import DeckWriter
+
+                meta = DeckWriter(model, computed, theme, deck_charts).write(path, organisation=organisation, logo=logo)
+                checks = quality.check_pptx(path, meta, computed, theme, asked=model["asked"]["applied"])
+            else:
+                from .table_xlsx import XlsxWriter
+
+                meta = XlsxWriter(model, computed, theme).write(path, organisation=organisation)
+                checks = quality.check_xlsx(path, computed)
+        except DoesNotFit as e:
+            # the run says the content does not fit and names the section; nothing is written past a frame
+            if os.path.exists(path):
+                os.remove(path)
+            refused.append({"format": fmt, "name": name, "check": quality.fit_refused(e)})
+            all_ok = False
+            continue
+        checks = checks + [quality.fit_ok(meta.get("layouts") or [])]
+        # AM23 §3.1: no model's name in the finished file (the run's own record keeps it)
+        checks.append(_commentary.no_model_name(_commentary.file_texts(path), _commentary.model_names(model["narrative"], computed, req)))
+        if fmt == carrier:
+            checks = checks + run_level
+        ok = all(c["ok"] for c in checks)
+        all_ok &= ok
+        meta.pop("path", None)
+        artifacts.append({"name": name, "format": fmt, "kind": FORMATS[fmt], "size": os.path.getsize(path),
+                          "sha256": _sha(path), "quality": {"passed": ok, "checks": checks},
+                          "meta": {k: v for k, v in meta.items() if k in ("slides", "sheets", "embedded_fonts", "ledger_rows", "layouts", "slide_cites")},
+                          "chart_bindings": meta.get("chart_bindings") or (chart_bindings if fmt == "docx" else []),
+                          "citations": len(computed["citations"])})
+    return {"passed": all_ok, "artifacts": artifacts, "refused": refused,
+            "theme": {"id": theme["id"], "version": theme.get("version", 1), "name": theme["name"], "refused": theme.get("refused") or []},
+            "assumptions": model["assumptions"], "sections": [s["key"] for s in model["sections"]],
+            "asked": model["asked"]}

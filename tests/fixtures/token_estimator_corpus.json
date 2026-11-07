@@ -1,0 +1,99 @@
+{
+  "_comment": [
+    "SHARED token-estimator corpus — the single source of truth for how BOTH",
+    "clients count tokens for context budgeting.",
+    "",
+    "Consumed by:",
+    "  services/chat-edge-api/internal/service/token_estimator_corpus_test.go  (Go)",
+    "  SranDesktop/src/SranDesktop.Tests/Agent/TokenEstimatorCorpusTests.cs    (C#)",
+    "",
+    "Both suites assert EstimateTokens(text) == tokens for every case, so a",
+    "change to one implementation fails the other side's tests. If you are here",
+    "because a test failed: fix the implementation, do not edit the numbers",
+    "unless you are deliberately changing the model on BOTH sides at once.",
+    "",
+    "The model (see token_estimator.go): count CODE POINTS, not UTF-16 units.",
+    "  latin/other : floor(n / 4)",
+    "  dense script: ceil(2n / 3)   i.e. ~1.5 chars per token",
+    "  non-empty text never estimates below 1 token; empty text is 0.",
+    "Dense scripts are Thai (U+0E00-0E7F), CJK (U+4E00-9FFF), Kana",
+    "(U+3040-30FF), Hangul (U+AC00-D7AF) and Fullwidth forms (U+FF00-FFEF).",
+    "",
+    "Per-message framing (+4), tool-call overhead (+8) and the image-block",
+    "constant are NOT part of this corpus — it pins text estimation only."
+  ],
+  "cases": [
+    {
+      "name": "empty",
+      "text": "",
+      "tokens": 0,
+      "note": "Empty text is the only input that may estimate 0."
+    },
+    {
+      "name": "single_ascii_char",
+      "text": "a",
+      "tokens": 1,
+      "note": "floor(1/4) = 0, raised to the 1-token floor for non-empty text."
+    },
+    {
+      "name": "pure_ascii",
+      "text": "The quick brown fox jumps over the lazy dog",
+      "tokens": 10,
+      "note": "43 code points, floor(43/4) = 10."
+    },
+    {
+      "name": "pure_thai",
+      "text": "สวัสดีครับ ยินดีที่ได้รู้จัก",
+      "tokens": 18,
+      "note": "27 Thai + 1 space. The case the flat 4-chars/token model undercounted ~2.7x."
+    },
+    {
+      "name": "mixed_thai_ascii",
+      "text": "ราคา API อยู่ที่ 100 บาทต่อเดือนครับ",
+      "tokens": 20,
+      "note": "26 Thai + 10 latin — the realistic shape of SRAN conversations."
+    },
+    {
+      "name": "thai_numerals_and_punctuation",
+      "text": "๑๒๓ + 456 = เท่าไร?",
+      "tokens": 8,
+      "note": "Thai digits U+0E51-0E53 are inside the Thai block, so they count as dense."
+    },
+    {
+      "name": "thai_long_paragraph",
+      "text": "ระบบนี้ใช้สำหรับจัดการข้อมูลลูกค้าและออกใบเสนอราคาให้อัตโนมัติ ผู้ใช้สามารถกำหนดสิทธิ์การเข้าถึงได้ตามบทบาทของแต่ละแผนก",
+      "tokens": 79,
+      "note": "Realistic Thai paragraph: 118 Thai + 1 space = 79 tokens, versus 30 under the old flat 4-chars/token model — the 2.6x gap in one message."
+    },
+    {
+      "name": "emoji",
+      "text": "🎉🎉🎉 great job 🚀",
+      "tokens": 3,
+      "note": "REGRESSION GUARD: 4 astral emoji are 4 code points but 8 UTF-16 units. An implementation that walks UTF-16 chars reports 4 here instead of 3."
+    },
+    {
+      "name": "cjk",
+      "text": "你好世界、こんにちは、안녕하세요",
+      "tokens": 10,
+      "note": "14 dense runes; U+3001 is outside the dense ranges, so the two are latin-counted."
+    },
+    {
+      "name": "fullwidth_forms",
+      "text": "ＳＲＡＮ　Ｃｈａｔ",
+      "tokens": 6,
+      "note": "8 fullwidth runes are dense; U+3000 ideographic space is not in the ranges."
+    },
+    {
+      "name": "code_snippet_latin",
+      "text": "const x = await fetch(url).then(r => r.json());",
+      "tokens": 11,
+      "note": "Code is latin-dense in practice; the estimator makes no special case for it."
+    },
+    {
+      "name": "thai_with_url",
+      "text": "ดูรายละเอียดที่ https://sran.ai/docs/pricing ครับ",
+      "tokens": 20,
+      "note": "Mixed real-world message: 19 Thai runes of prose around a 30-character latin URL."
+    }
+  ]
+}

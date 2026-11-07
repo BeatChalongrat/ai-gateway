@@ -1,0 +1,201 @@
+package runner
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+
+	am "github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/agentmarket"
+)
+
+// ── The print proof (AM9) ────────────────────────────────────────────────
+//
+// A working paper is read on paper. The package sets its page setup from the
+// sheet's shape and its own gate checks those settings; this is the proof
+// that does not trust settings: the finished workbook is printed — converted
+// to PDF by LibreOffice in the doc-converter service, the same renderer the
+// report's PDF comes from — and every row the package lists (its identity:
+// number and description; its amounts) must be found together on one
+// rendered page. A description on page 5 and its amount on page 6 fails.
+// An amount is found as a number among the numbers the page prints, not as
+// a piece of its text (AM14, printnumbers.go).
+
+// printRow is one row the package says carries an amount (workpaper.print_rows).
+type printRow struct {
+	Sheet    string   `json:"sheet"`
+	Row      int      `json:"row"`
+	Identity []string `json:"identity"`
+	Amounts  []string `json:"amounts"`
+	// Values (AM14) are the amounts as numbers: plain decimals, at the two decimals a working paper
+	// prints, without the zeros it prints as a dash. An engine older than AM14 does not state them, and
+	// its amounts are read from the form it expected them printed in.
+	Values []string `json:"values"`
+}
+
+// needles are what a row is looked for by on a page: the words of its name, and its numbers. A number
+// is looked for as a number (printnumbers.go), whatever shape the page printed it in.
+func (r printRow) needles() (words []string, numbers []decimal) {
+	var amounts []decimal
+	if r.Values != nil {
+		for _, v := range r.Values {
+			if d, ok := stated(v); ok {
+				amounts = append(amounts, d)
+			} else {
+				words = append(words, thaiKey(v))
+			}
+		}
+	} else {
+		for _, a := range r.Amounts {
+			if strings.TrimSpace(a) == "-" {
+				continue // a zero, printed as a dash: there is no number to find
+			}
+			if d, ok := stated(a); ok {
+				amounts = append(amounts, d)
+			} else {
+				words = append(words, thaiKey(a))
+			}
+		}
+	}
+	for _, t := range r.Identity {
+		if plainNumber.MatchString(strings.TrimSpace(t)) {
+			d, _ := stated(t)
+			// a zero may be printed as a dash, and a 0 found somewhere on a page proves nothing
+			own := d.isZero()
+			// an engine older than AM14 named a summary row by its own amount as well, as the cell holds
+			// it (3600, 3852.004999): it is the amount, and is looked for once
+			for _, a := range amounts {
+				own = own || d.rounded(2) == a.rounded(2)
+			}
+			if !own {
+				numbers = append(numbers, d)
+			}
+			continue
+		}
+		k := []rune(thaiKey(t))
+		if len(k) > identityKeyRunes {
+			k = k[:identityKeyRunes]
+		}
+		if len(k) > 0 {
+			words = append(words, string(k))
+		}
+	}
+	return words, append(numbers, amounts...)
+}
+
+// identityKeyRunes is how much of an identity text is looked for: enough to
+// name the row, short of where a long description may be cut by its cell.
+const identityKeyRunes = 24
+
+// printProof prints the workbook and looks for every row on one page. No
+// converter: no check (the package's own setup check still ran); a converter
+// that does not answer: a failed check, like the PDF's.
+func (rc *runCtx) printProof(ctx context.Context, name, path string, rows []printRow) (*gateCheck, error) {
+	if len(rows) == 0 || rc.r.Converter == nil || !rc.r.Converter.Available() {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	label := am.Text("พิมพ์จริงแล้วตรวจ: รายการกับจำนวนเงินอยู่หน้าเดียวกัน")
+	pdf, err := rc.r.Converter.Convert(ctx, name, data, "pdf")
+	if err != nil {
+		rc.technical(ctx, "xlsx.printed", err)
+		return &gateCheck{Name: "xlsx.printed", Label: label, Detail: am.Text(converterDown)}, nil
+	}
+	chk, err := rc.r.Converter.Check(ctx, pdf)
+	if err != nil {
+		rc.technical(ctx, "xlsx.printed", err)
+		return &gateCheck{Name: "xlsx.printed", Label: label, Detail: am.Text(converterDown)}, nil
+	}
+	c := checkPrinted(chk, rows)
+	c.Label = label
+	return &c, nil
+}
+
+// checkPrinted is the proof itself, on what the converter read back: the
+// PDF's text layer page by page (pdftotext -raw separates pages with a form
+// feed). A row's words are compared in thaiKey form; its numbers are compared
+// as numbers, with the numbers read off the page (AM14).
+func checkPrinted(chk CheckResult, rows []printRow) gateCheck {
+	pages := strings.Split(chk.RawText, "\f")
+	keys := make([]string, len(pages))
+	printed := make([]map[string]bool, len(pages))
+	for i, p := range pages {
+		keys[i] = thaiKey(p)
+		printed[i] = printedNumbers(p)
+	}
+	var bad []printRow
+	for _, r := range rows {
+		words, numbers := r.needles()
+		found := false
+		for i, page := range keys {
+			all := true
+			for _, w := range words {
+				if !strings.Contains(page, w) {
+					all = false
+					break
+				}
+			}
+			for _, n := range numbers {
+				if !all || !printed[i][n.canonical()] {
+					all = false
+					break
+				}
+			}
+			if all {
+				found = true
+				break
+			}
+		}
+		if !found {
+			bad = append(bad, r)
+		}
+	}
+	out := gateCheck{Name: "xlsx.printed", OK: len(bad) == 0 && chk.Pages > 0,
+		Detail: am.Text("พิมพ์ %s หน้า · %s แถวที่มีจำนวนเงิน รายการกับจำนวนเงินอยู่หน้าเดียวกันทุกแถว",
+			am.Count(chk.Pages), am.Count(len(rows)))}
+	if len(bad) > 0 {
+		// AM11: which rows, and how many more, are said as each language says them (the sheet's name and
+		// a row's own words are the person's); both go into the detail, and whoever writes it picks
+		rest := 0
+		if len(bad) > 3 {
+			rest = len(bad) - 3
+			bad = bad[:3]
+		}
+		which := am.EachTyped(300, func(l am.Lang) string {
+			said := make([]string, 0, len(bad))
+			for _, r := range bad {
+				said = append(said, fmt.Sprintf(am.T(l, "%s แถว %d (%s)"), r.Sheet, r.Row, strings.Join(r.Identity, " · ")))
+			}
+			return strings.Join(said, "; ")
+		})
+		more := am.EachNamed(120, func(l am.Lang) string {
+			if rest == 0 {
+				return ""
+			}
+			return fmt.Sprintf(am.T(l, " และอีก %d แถว"), rest)
+		})
+		out.Detail = am.Text("พิมพ์ %s หน้า · รายการกับจำนวนเงินไม่อยู่หน้าเดียวกัน: %s%s", am.Count(chk.Pages), which, more)
+	}
+	return out
+}
+
+// withCheck adds a runner-made check to a file's quality (and fails it when the check failed). The
+// quality is kept on the artifact and read on the files card: the check's texts are written in l, the
+// run's language.
+func withCheck(l am.Lang, quality json.RawMessage, c gateCheck) json.RawMessage {
+	var q map[string]any
+	if json.Unmarshal(quality, &q) != nil || q == nil {
+		q = map[string]any{"passed": true}
+	}
+	checks, _ := q["checks"].([]any)
+	q["checks"] = append(checks, c)
+	if !c.OK {
+		q["passed"] = false
+	}
+	b, _ := am.MarshalIn(l, q)
+	return b
+}

@@ -1,0 +1,9 @@
+{
+  "version": "1.0.0",
+  "releaseDate": "2026-07-11T00:00:00Z",
+  "downloadUrl": "SranDesktop-1.0.0-Setup.exe",
+  "sha256": "ADD8A3864D0142464F924C5C715B9117B991268985EBE1278188C3A84A853B5E",
+  "releaseNotes": "Initial release",
+  "minVersion": "1.0.0",
+  "mandatory": false
+}

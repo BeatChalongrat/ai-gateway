@@ -1,0 +1,198 @@
+{
+  "detector": "thai_name",
+  "entity_type": "thai_name",
+  "category": "pii",
+  "severity": 3,
+  "cases": [
+    {
+      "id": "fix26_khun_no_surname_masks",
+      "input": "ฝากบอกคุณสมชายด้วย",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 6,
+          "end": 14
+        }
+      ]
+    },
+    {
+      "id": "fix26_khun_surname_masks",
+      "input": "คุณสมหญิง รักดี โทรมา",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 15
+        }
+      ]
+    },
+    {
+      "id": "fix26_compound_title_masks",
+      "input": "ผศ.ดร. สมศักดิ์ มากมี",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 21
+        }
+      ]
+    },
+    {
+      "id": "fix26_trailing_label_trimmed",
+      "input": "คุณสมหญิง จำนวน 10,000 บาท",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 9
+        }
+      ]
+    },
+    {
+      "id": "fix26_khob_khun_mak_no_mask",
+      "input": "ขอบคุณมากครับ ช่วยได้เยอะเลย",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_khob_khun_na_no_mask",
+      "input": "เยี่ยมมาก 👍 ขอบคุณนะ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_khun_keu_krai_no_mask",
+      "input": "คุณคือใคร ชื่ออะไร",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_khun_tham_no_mask",
+      "input": "คุณทำอะไรได้บ้าง",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_khun_thi_rak_no_mask",
+      "input": "คุณที่รักทั้งหลาย",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "thai_prefix_full",
+      "input": "ลูกค้าชื่อ นาย สมชาย ใจดี",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 11,
+          "end": 25
+        }
+      ]
+    },
+    {
+      "id": "nang_sao",
+      "input": "ผู้รับ นางสาว สมหญิง สมบูรณ์",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 7,
+          "end": 28
+        }
+      ]
+    },
+    {
+      "id": "doctor",
+      "input": "ดร. สมศักดิ์ มากมี เข้าร่วม",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 18
+        }
+      ]
+    },
+    {
+      "id": "english_dr_thai_name",
+      "input": "Dr. สมชาย ใจดี attended",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 14
+        }
+      ]
+    },
+    {
+      "id": "nayok_compound_no_match",
+      "input": "นายกรัฐมนตรี กล่าวต่อ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "nay_pol_compound_no_match",
+      "input": "นายพล ผู้บัญชาการ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "plain_prose_no_match",
+      "input": "วันนี้ฝนตก",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix28_khun_verb_no_mask",
+      "input": "คำตอบแรกที่คุณตอบผมคืออะไร ตอบสั้นๆ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix28_khun_think_no_mask",
+      "input": "คุณคิดว่าอันไหนดีกว่ากัน",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix28_khun_real_name_still_masks",
+      "input": "ลูกค้าชื่อคุณสมชาย ใจดี โทรมา",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 10,
+          "end": 23
+        }
+      ]
+    },
+    {
+      "id": "fix29_titled_glued_verb_trimmed",
+      "input": "คุณมีชัยจองห้องประชุมไว้",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 8
+        }
+      ]
+    }
+  ]
+}

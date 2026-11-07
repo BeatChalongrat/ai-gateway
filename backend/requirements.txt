@@ -1,0 +1,60 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+# FIX131 — the production process manager (gunicorn.conf.py). Pinned: it was
+# installed unpinned by the Dockerfile, so every rebuild could change the
+# process model (the image had drifted to 26.2.0).
+gunicorn==26.2.0
+pydantic==2.9.2
+pydantic-settings==2.5.2
+sqlalchemy==2.0.35
+psycopg[binary]>=3.2.1  # sync AND async engine (psycopg3 async mode) — see core/db.py
+alembic==1.13.2
+redis==5.0.8
+httpx==0.27.2
+python-dotenv==1.0.1
+structlog==24.4.0
+orjson==3.10.7
+PyJWT==2.13.0
+bcrypt==4.2.0
+cryptography==49.0.0
+itsdangerous==2.2.0
+authlib==1.6.12
+Pillow>=10.2.0
+prometheus-client==0.25.0
+python-multipart>=0.0.9
+# Phase-3: gRPC client for the Go log-worker sidecar. Installed
+# unconditionally so LOG_WORKER_ENGINE=go works without a rebuild;
+# the LogWorkerClient falls through to the legacy queue on any
+# import-time failure (LogWorkerUnavailable).
+grpcio==1.65.0
+protobuf>=5.27,<6.0
+resend==2.5.1
+apscheduler>=3.10.0
+pytest==8.3.3
+pytest-asyncio==0.24.0
+# Shuffles test order, which is how this suite's shared-state bugs get
+# caught at all (FIX55, FIX56.1). It was already installed in the test
+# image and declared NOWHERE, so the release gate's answer could change
+# with no commit behind it — the reason it is written down now.
+#
+# The seed is pinned in pyproject.toml, and that is load-bearing, not
+# tidiness: _reseed() computes ``randomly_seed + offset`` where the
+# offset is a CRC32, clamps that for its OWN numpy call
+# (``seed % 2**32``) and then hands the UNCLAMPED value to every
+# ``pytest_randomly.random_seeder`` entry point. thinc ships one (it
+# arrives with spaCy/Presidio, the NER stage) and calls
+# ``numpy.random.seed`` without the clamp, so a time-derived default
+# seed overflows and every test errors in setup AND teardown — 6276 of
+# them, before anything is measured. Seed 0 keeps every offset in range.
+pytest-randomly==5.0.0
+fakeredis==2.26.1
+black==24.8.0
+ruff==0.6.4
+
+# --- NER stage (optional at runtime; gated by OrgSettingsORM.ner_enabled
+# and TenantORM.ner_enabled; registry is ImportError-safe so the app
+# starts without these installed). Needs Python <=3.12 on Windows
+# because the spacy→thinc→blis chain has no Python 3.14 wheels. ---
+presidio-analyzer==2.2.354
+presidio-anonymizer==2.2.354
+spacy==3.7.4

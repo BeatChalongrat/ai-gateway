@@ -1,0 +1,78 @@
+# Alert rules — only reference metrics that actually exist in the current
+# stack (gateway_*, rate_limit_*, up, redis_up). PgBouncer / Redis-memory
+# alerts are intentionally omitted until that infra is deployed.
+groups:
+  - name: gateway
+    rules:
+      - alert: GatewayHighErrorRate
+        expr: |
+          sum(rate(gateway_requests_total{status=~"5.."}[5m]))
+            / sum(rate(gateway_requests_total[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Gateway 5xx rate > 5% over 5m"
+
+      - alert: GatewayHighLatencyP99
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(gateway_request_duration_seconds_bucket[5m])) by (le)) > 30
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Gateway p99 latency > 30s over 5m"
+
+  - name: backend
+    rules:
+      # Emitted by app/services/rate_limit_service.py when Redis is down.
+      - alert: RateLimitFailingOpen
+        expr: rate(rate_limit_fail_open_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Rate limiter failing open — Redis backend likely down"
+
+      - alert: RateLimitConservativeDenies
+        expr: rate(rate_limit_conservative_deny_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Rate limiter denying via conservative outage mode (Redis down)"
+
+      # FIX103 — emitted by orchestrator._run_dlp_scan when DLP_ENGINE=rust
+      # and the dlp-sidecar cannot answer (stopped, wedged, RPC error).
+      # Masking continues on the Python registry — proven live — so this is
+      # a warning, not a leak; but while the sidecar is wedged every request
+      # pays the 1 s gRPC timeout first. reason="refused" is excluded: the
+      # sidecar answered and declined an input too large for its regex
+      # engine (routine for English text over ~8,000 characters).
+      - alert: DlpSidecarFallingBack
+        expr: sum(rate(sidecar_fallback_total{engine="dlp",reason!="refused"}[5m])) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DLP sidecar not answering — requests are masked by the Python fallback"
+
+  - name: infra
+    rules:
+      - alert: TargetDown
+        # the Agent Market runner has its own alert (agent_market.yml, channel agent-market)
+        expr: up{job!="agent-runner"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus target {{ $labels.job }} is down"
+
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis is unreachable (redis_exporter)"

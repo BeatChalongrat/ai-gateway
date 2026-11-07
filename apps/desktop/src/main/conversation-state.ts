@@ -1,0 +1,437 @@
+// FIX33 A-D1 / A-D2 — the desktop conversation state: store, extractor,
+// renderer. Closes FIX32 divergence #3 (the desktop trimmed but never
+// summarised).
+//
+// STORE (A-D1). One JSON file per conversation under
+// <userData>/conversation-state/, holding the SAME fields as
+// chat.conversation_states (migration 015 + 037) so the day desktop turns
+// route through chat-edge the rows move across unchanged. Chosen over a
+// SQLite table in the sidecar because the extraction call must be made by
+// the Electron host — it holds the session and the gateway key; the sidecar
+// deliberately holds neither (FIX3 §4) — and the state is consumed at
+// message-build time in the host. A sidecar store would add a host↔sidecar
+// round trip per turn and put summary text in the process that runs tools.
+//
+// SUMMARISER. FIX111: the server is the one summariser (server-summariser.ts,
+// through POST /compact). The desktop's own extractor (GatewayStateExtractor,
+// FIX33 A-D2) is gone with the fold it served; the state kept here is a
+// COPY of chat.conversation_states, anchored on the local chain by row
+// count (anchorStateOnChain) or, when the host builds from the server
+// transcript, by row id (adoptServerState, FIX109). buildExtractionUserBody,
+// parseExtraction and mergeExtraction stay as the desktop's copy of the
+// extraction contract for scripts/probes/summary-recall and the cross-tree
+// pin (state-contract.test.ts); no desktop code sends that request.
+//
+// DLP (A-D6, read this before touching the injection): the desktop talks to
+// the gateway on the PUBLIC path, where the default policy RESTORES
+// pii/identity/financial/network/thai_name placeholders in responses
+// (backend/app/services/policy/profiles.py, category_actions_output). So the
+// summary that comes back — and therefore the stored state — can contain
+// raw values, exactly like the local chain already does. It is therefore
+// injected as a USER-role message pair (renderStateMessages), never into the
+// system message: user/assistant roles are scanned and masked on egress like
+// every other message, while role=system is skipped by the default profile
+// (scan_system_messages=False — FIX32 §1.3 C3). No DLP code is touched; the
+// desktop simply never puts summary text in the one unscanned channel.
+//
+// No 'electron' import: unit-tested in plain Node.
+
+import fs from "node:fs";
+import path from "node:path";
+
+import { chainIndexAfterVisibleRows, countVisibleRows } from "./chain-freshness";
+import { STATE_INJECTION_ASSISTANT_ACK, STATE_INJECTION_USER_PREAMBLE } from "./state-injection-prompt";
+import type { GatewayMessage } from "./gateway-client";
+import type { Logger } from "./logger";
+
+// ── the numbers both surfaces share (web: chat-edge config + web-chat UI) ──
+/** Auto-compact fires when history ≥ this × the messages budget (CONTEXT_COMPACT_TRIGGER_RATIO). */
+export const COMPACT_TRIGGER_RATIO = 0.85;
+/** …and trims the middle down to this × the budget (CONTEXT_COMPACT_TARGET_RATIO). */
+export const COMPACT_TARGET_RATIO = 0.6;
+/** UI: the context meter + "summarise and continue" appear from here; below it, nothing (spec addendum #1). */
+export const CONTEXT_METER_SHOW_RATIO = 0.7;
+/** One extraction call folds at most this many chain messages (chat-edge: extractionBatchLimit). */
+export const EXTRACTION_BATCH_LIMIT = 120;
+/** At most this many batches per turn (chat-edge: extractionMaxBatches). */
+export const EXTRACTION_MAX_BATCHES = 8;
+
+/** Same sentence chat-edge appends inside every rendered block (service.StateHonestyNote). */
+export const STATE_HONESTY_NOTE =
+  "This summary stands in for older messages that are no longer sent verbatim. If the user refers to something that is in neither this summary nor the visible messages, say you may have lost that detail and ask them to restate it — do not guess.";
+
+// ── the record: chat.conversation_states, field for field ──
+export interface ConversationStateRecord {
+  conversation_id: string;
+  current_goal: string | null;
+  structured_summary: Record<string, unknown>;
+  confirmed_decisions: Record<string, unknown>[];
+  active_artifacts: Record<string, unknown>[];
+  open_tasks: Record<string, unknown>[];
+  rejected_approaches: Record<string, unknown>[];
+  unresolved_questions: Record<string, unknown>[];
+  /** The desktop chain has no message ids; stays null until the turn path merges. */
+  summarized_up_to_message_id: string | null;
+  /** The anchor on the desktop: how many chain messages (after the system
+   *  message) have been folded. Extraction resumes from this index. */
+  message_count_at_summary: number;
+  summary_token_count: number;
+  manual_compact_boundary_message_id: string | null;
+  compaction_instructions: string;
+  /** Desktop-only companion to the id column above: the boundary as a chain
+   *  index (everything at or before it is dropped, head excepted). */
+  manual_compact_boundary_index: number | null;
+  updated_at: string;
+}
+
+export function emptyState(conversationId: string): ConversationStateRecord {
+  return {
+    conversation_id: conversationId,
+    current_goal: null,
+    structured_summary: {},
+    confirmed_decisions: [],
+    active_artifacts: [],
+    open_tasks: [],
+    rejected_approaches: [],
+    unresolved_questions: [],
+    summarized_up_to_message_id: null,
+    message_count_at_summary: 0,
+    summary_token_count: 0,
+    manual_compact_boundary_message_id: null,
+    compaction_instructions: "",
+    manual_compact_boundary_index: null,
+    updated_at: new Date(0).toISOString(),
+  };
+}
+
+/**
+ * FIX109 Part B — the server's state row (GET /conversations/{id}/state,
+ * chat.conversation_states) as a desktop record, anchored on the transcript
+ * the host just loaded. The two anchors differ in kind: the server pins the
+ * LAST FOLDED ROW BY ID (summarized_up_to_message_id), the desktop the COUNT
+ * OF CHAIN MESSAGES folded (message_count_at_summary, an index). The
+ * translation is exact when the id is among `rowIds` — the ids of the
+ * visible rows, in the order they become the chain: the row's index + 1.
+ * An id that is not there (a row past the load ceiling, on another branch,
+ * or filtered out as empty) translates to 0: everything is re-folded, at the
+ * price of extraction tokens and never of content. The manual boundary id
+ * translates the same way, to null when absent. The server's own
+ * message_count_at_summary (its logical counter, not an index) is NOT
+ * carried — read as an index it would fold rows the summary never covered.
+ *
+ * Returns null when the server has no state worth adopting (the empty
+ * envelope the handler sends in place of a 404), so a caller never replaces
+ * a local summary with nothing.
+ */
+export function adoptServerState(conversationId: string, dto: Record<string, unknown> | null | undefined, rowIds: readonly string[]): ConversationStateRecord | null {
+  if (!dto || typeof dto !== "object") return null;
+  const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+  const arr = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x)) : []);
+  const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+  const s: ConversationStateRecord = {
+    ...emptyState(conversationId),
+    current_goal: str(dto["current_goal"]),
+    structured_summary: obj(dto["structured_summary"]),
+    confirmed_decisions: arr(dto["confirmed_decisions"]),
+    active_artifacts: arr(dto["active_artifacts"]),
+    open_tasks: arr(dto["open_tasks"]),
+    rejected_approaches: arr(dto["rejected_approaches"]),
+    unresolved_questions: arr(dto["unresolved_questions"]),
+    summarized_up_to_message_id: str(dto["summarized_up_to_message_id"]),
+    summary_token_count: typeof dto["summary_token_count"] === "number" ? Math.max(0, Math.trunc(dto["summary_token_count"] as number)) : 0,
+    manual_compact_boundary_message_id: str(dto["manual_compact_boundary_message_id"]),
+    compaction_instructions: typeof dto["compaction_instructions"] === "string" ? (dto["compaction_instructions"] as string) : "",
+    updated_at: str(dto["updated_at"]) ?? new Date().toISOString(),
+  };
+  if (isStateEmpty(s)) return null;
+  const upTo = s.summarized_up_to_message_id ? rowIds.indexOf(s.summarized_up_to_message_id) : -1;
+  s.message_count_at_summary = upTo >= 0 ? upTo + 1 : 0;
+  const boundary = s.manual_compact_boundary_message_id ? rowIds.indexOf(s.manual_compact_boundary_message_id) : -1;
+  s.manual_compact_boundary_index = boundary >= 0 ? boundary : null;
+  return s;
+}
+
+/**
+ * FIX111 — the same server state, anchored on the LOCAL chain (the one with
+ * tool rows and no ids). `coveredRows` and `boundaryRows` are counts of the
+ * server's visible rows: how many the summary covers and how many sit at or
+ * before the boundary. Both are capped at what the chain itself holds — a
+ * server that is behind (an import that failed) covers less, never more.
+ */
+export function anchorStateOnChain(record: ConversationStateRecord, chain: readonly GatewayMessage[], coveredRows: number, boundaryRows: number): ConversationStateRecord {
+  const total = countVisibleRows(chain);
+  record.message_count_at_summary = chainIndexAfterVisibleRows(chain, Math.min(Math.max(0, coveredRows), total));
+  const b = chainIndexAfterVisibleRows(chain, Math.min(Math.max(0, boundaryRows), total));
+  record.manual_compact_boundary_index = b > 0 ? b - 1 : null;
+  return record;
+}
+
+export function isStateEmpty(s: ConversationStateRecord | null | undefined): boolean {
+  if (!s) return true;
+  if (s.current_goal && s.current_goal.trim()) return false;
+  if (Object.values(s.structured_summary ?? {}).some((v) => summaryText(v) !== "")) return false;
+  return [s.confirmed_decisions, s.active_artifacts, s.open_tasks, s.rejected_approaches, s.unresolved_questions].every((a) => !a || a.length === 0);
+}
+
+// ── store ──
+export interface ConversationStateStore {
+  get(conversationId: string): ConversationStateRecord | null;
+  put(state: ConversationStateRecord): void;
+  delete(conversationId: string): void;
+}
+
+export class JsonConversationStateStore implements ConversationStateStore {
+  constructor(private readonly dir: string) {}
+  private file(id: string): string {
+    return path.join(this.dir, `${id.replace(/[^A-Za-z0-9_-]/g, "_")}.json`);
+  }
+  get(conversationId: string): ConversationStateRecord | null {
+    try {
+      const p = this.file(conversationId);
+      if (!fs.existsSync(p)) return null;
+      const parsed = JSON.parse(fs.readFileSync(p, "utf8")) as Partial<ConversationStateRecord>;
+      return { ...emptyState(conversationId), ...parsed, conversation_id: conversationId };
+    } catch {
+      return null;
+    }
+  }
+  put(state: ConversationStateRecord): void {
+    fs.mkdirSync(this.dir, { recursive: true });
+    const p = this.file(state.conversation_id);
+    const tmp = `${p}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ ...state, updated_at: new Date().toISOString() }, null, 2));
+    fs.renameSync(tmp, p);
+  }
+  delete(conversationId: string): void {
+    fs.rmSync(this.file(conversationId), { force: true });
+  }
+}
+
+export class MemoryConversationStateStore implements ConversationStateStore {
+  private readonly m = new Map<string, ConversationStateRecord>();
+  get(id: string): ConversationStateRecord | null {
+    const v = this.m.get(id);
+    return v ? { ...v } : null;
+  }
+  put(s: ConversationStateRecord): void {
+    this.m.set(s.conversation_id, { ...s, updated_at: new Date().toISOString() });
+  }
+  delete(id: string): void {
+    this.m.delete(id);
+  }
+}
+
+// ── extractor ──
+export interface ExtractedState {
+  current_goal?: string;
+  structured_summary?: Record<string, unknown>;
+  confirmed_decisions?: Record<string, unknown>[];
+  active_artifacts?: Record<string, unknown>[];
+  open_tasks?: Record<string, unknown>[];
+  rejected_approaches?: Record<string, unknown>[];
+  unresolved_questions?: Record<string, unknown>[];
+}
+
+/**
+ * How much of each message the summariser reads: chat-edge's extractionMessageLimit,
+ * 500 UTF-8 bytes, cut on a character boundary. FIX106: the desktop used to cut
+ * at 500 UTF-16 units — three times as much Thai as chat-edge sends.
+ */
+export const EXTRACTION_MESSAGE_BYTES = 500;
+
+function truncateUtf8(text: string, limit: number): string {
+  if (Buffer.byteLength(text, "utf8") <= limit) return text;
+  let bytes = 0;
+  let out = "";
+  for (const ch of text) {
+    const b = Buffer.byteLength(ch, "utf8");
+    if (bytes + b > limit) break;
+    bytes += b;
+    out += ch;
+  }
+  return out + "... [truncated]";
+}
+
+const LANGUAGE_NAMES: Record<string, string> = { th: "Thai", en: "English", ja: "Japanese", ko: "Korean", zh: "Chinese" };
+
+/** chat-edge's detectLanguage: the first character that names a script decides. */
+export function detectLanguage(text: string): string {
+  for (const ch of text) {
+    const c = ch.codePointAt(0) ?? 0;
+    if (c >= 0x0e00 && c <= 0x0e7f) return "th";
+    if (/\p{Script=Hiragana}|\p{Script=Katakana}/u.test(ch)) return "ja";
+    if (/\p{Script=Hangul}/u.test(ch)) return "ko";
+    if (/\p{Script=Han}/u.test(ch)) return "zh";
+  }
+  return "en";
+}
+
+function plainText(m: GatewayMessage): string {
+  const c = m.content as unknown;
+  if (typeof c === "string") return c;
+  if (Array.isArray(c)) return (c as { type?: string; text?: string }[]).map((b) => (b?.type === "text" ? b.text ?? "" : "[image]")).join(" ");
+  return "";
+}
+
+/** chat-edge's conversationLanguageName: the language of the user's messages, most frequent wins. */
+export function conversationLanguageName(messages: readonly GatewayMessage[]): string {
+  const count = (onlyUser: boolean) => {
+    const c: Record<string, number> = {};
+    for (const m of messages) if (!onlyUser || m.role === "user") c[detectLanguage(plainText(m))] = (c[detectLanguage(plainText(m))] ?? 0) + 1;
+    return c;
+  };
+  let counts = count(true);
+  if (Object.keys(counts).length === 0) counts = count(false);
+  let best = "";
+  let n = 0;
+  for (const code of ["th", "ja", "ko", "zh", "en"]) {
+    if ((counts[code] ?? 0) > n) {
+      best = code;
+      n = counts[code]!;
+    }
+  }
+  return LANGUAGE_NAMES[best] ?? "";
+}
+
+/**
+ * The prompt body — chat-edge's buildExtractionPrompt, byte for byte
+ * (FIX106: testdata/state_contract.json is checked by both trees). Before
+ * FIX106 this body had no language line, cut messages by a different unit and
+ * wrote the existing state in a different key order.
+ */
+export function buildExtractionUserBody(existing: ConversationStateRecord | null, messages: readonly GatewayMessage[], instructions: string): string {
+  const parts: string[] = ["Analyse the following conversation messages and produce the structured state summary described in your instructions.\n"];
+  const instr = instructions.trim();
+  if (instr) parts.push(`\n--- USER INSTRUCTIONS FOR THIS SUMMARY (take precedence over the defaults) ---\n${instr}\n`);
+  const lang = conversationLanguageName(messages);
+  if (lang) parts.push(`\n--- LANGUAGE ---\nThis conversation is in ${lang}. Write every value in the JSON in ${lang}; do not translate it. The JSON keys stay as specified.\n`);
+  const hasSummary = existing && Object.keys(existing.structured_summary ?? {}).length > 0;
+  if (existing && (existing.current_goal !== null || hasSummary || (existing.confirmed_decisions ?? []).length > 0 || (existing.open_tasks ?? []).length > 0)) {
+    parts.push("\n--- EXISTING STATE (update/merge with new information) ---\n");
+    // Keys in chat-edge's order (encoding/json sorts map keys).
+    parts.push(
+      JSON.stringify({
+        active_artifacts: existing.active_artifacts ?? [],
+        confirmed_decisions: existing.confirmed_decisions ?? [],
+        current_goal: existing.current_goal ?? "",
+        open_tasks: existing.open_tasks ?? [],
+        rejected_approaches: existing.rejected_approaches ?? [],
+        structured_summary: existing.structured_summary ?? {},
+        unresolved_questions: existing.unresolved_questions ?? [],
+      }) + "\n",
+    );
+  }
+  parts.push("\n--- NEW MESSAGES TO ANALYSE ---\n");
+  for (const m of messages) {
+    let text = plainText(m);
+    if (m.role === "assistant" && m.tool_calls && m.tool_calls.length > 0) {
+      text = `${text} (called tool${m.tool_calls.length > 1 ? "s" : ""}: ${m.tool_calls.map((t) => t.function?.name ?? "?").join(", ")})`.trim();
+    }
+    text = truncateUtf8(text, EXTRACTION_MESSAGE_BYTES);
+    parts.push(`[${m.role}] ${text}\n`);
+  }
+  return parts.join("");
+}
+
+/** Tolerant of the fences some models add even when told not to. */
+export function parseExtraction(raw: string): ExtractedState | null {
+  let s = raw.trim();
+  if (s.startsWith("```json")) s = s.slice(7);
+  else if (s.startsWith("```")) s = s.slice(3);
+  if (s.endsWith("```")) s = s.slice(0, -3);
+  s = s.trim();
+  try {
+    const v = JSON.parse(s) as unknown;
+    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    return v as ExtractedState;
+  } catch {
+    return null;
+  }
+}
+
+/** chat-edge's mergeExtractionIntoState: keep what exists, take what is new. */
+export function mergeExtraction(existing: ConversationStateRecord | null, fresh: ExtractedState, conversationId: string): ConversationStateRecord {
+  const out: ConversationStateRecord = { ...(existing ?? emptyState(conversationId)), conversation_id: conversationId };
+  if (typeof fresh.current_goal === "string" && fresh.current_goal.trim()) out.current_goal = fresh.current_goal.trim();
+  if (fresh.structured_summary && typeof fresh.structured_summary === "object" && Object.keys(fresh.structured_summary).length > 0) out.structured_summary = fresh.structured_summary;
+  const arr = (v: unknown): Record<string, unknown>[] | null => (Array.isArray(v) && v.length > 0 ? (v as Record<string, unknown>[]) : null);
+  const d = arr(fresh.confirmed_decisions);
+  if (d) out.confirmed_decisions = d;
+  const a = arr(fresh.active_artifacts);
+  if (a) out.active_artifacts = a;
+  const t = arr(fresh.open_tasks);
+  if (t) out.open_tasks = t;
+  const r = arr(fresh.rejected_approaches);
+  if (r) out.rejected_approaches = r;
+  const q = arr(fresh.unresolved_questions);
+  if (q) out.unresolved_questions = q;
+  out.summary_token_count = Math.ceil(JSON.stringify(out.structured_summary).length / 4);
+  return out;
+}
+
+// ── renderer: chat-edge's renderStateBlock, byte for byte (testdata/state_contract.json) ──
+
+/** chat-edge's stateSummarySections: the three keys the extraction prompt asks for, in order. */
+export const STATE_SUMMARY_SECTIONS: readonly { key: string; label: string }[] = [
+  { key: "key_context", label: "Key context" },
+  { key: "progress", label: "Progress" },
+  { key: "technical_details", label: "Technical details" },
+];
+
+/** chat-edge's summaryText: a string as written, a list of strings as "- " lines, anything else left out. */
+export function summaryText(v: unknown): string {
+  if (typeof v === "string") return v.trim();
+  if (Array.isArray(v)) {
+    return v
+      .filter((x): x is string => typeof x === "string" && x.trim() !== "")
+      .map((x) => (x.trim().startsWith("- ") ? x.trim() : `- ${x.trim()}`))
+      .join("\n");
+  }
+  return "";
+}
+function list(label: string, items: Record<string, unknown>[] | undefined, field: string): string {
+  if (!items || items.length === 0) return "";
+  const lines = items.map((it) => (typeof it[field] === "string" ? (it[field] as string).trim() : "")).filter(Boolean);
+  if (lines.length === 0) return "";
+  return `\n${label}:\n${lines.map((l) => `- ${l}`).join("\n")}\n`;
+}
+
+/** The <conversation_state> block, exactly the shape chat-edge renders. */
+export function renderStateBlock(state: ConversationStateRecord): string {
+  let out = "<conversation_state>\nSummary of this conversation so far (older messages have been compacted):\n";
+  if (state.current_goal && state.current_goal.trim()) out += `\nGoal: ${state.current_goal.trim()}\n`;
+  for (const sec of STATE_SUMMARY_SECTIONS) {
+    const v = summaryText(state.structured_summary?.[sec.key]);
+    if (v) out += `\n${sec.label}: ${v}\n`;
+  }
+  out += list("Confirmed decisions", state.confirmed_decisions, "decision");
+  if (state.active_artifacts && state.active_artifacts.length > 0) {
+    const lines = state.active_artifacts
+      .map((it) => {
+        const name = typeof it["name"] === "string" ? (it["name"] as string).trim() : "";
+        if (!name) return "";
+        const status = typeof it["status"] === "string" ? (it["status"] as string) : "";
+        return status ? `- ${name} (${status})` : `- ${name}`;
+      })
+      .filter(Boolean);
+    if (lines.length) out += `\nActive artifacts:\n${lines.join("\n")}\n`;
+  }
+  out += list("Open tasks", state.open_tasks, "task");
+  out += list("Rejected approaches", state.rejected_approaches, "approach");
+  out += list("Unresolved questions", state.unresolved_questions, "question");
+  out += `\n${STATE_HONESTY_NOTE}\n</conversation_state>\n`;
+  return out;
+}
+
+/**
+ * The state as a USER/assistant pair (see the DLP note at the top). Placed
+ * right after the system message and before the preserved first exchange.
+ */
+export function renderStateMessages(state: ConversationStateRecord): GatewayMessage[] {
+  // FIX33.1 Part 2 — wording from the shared asset (state-injection-prompt.ts
+  // = chat-edge's prompt_state_injection.txt); web injects the same pair.
+  return [
+    { role: "user", content: `${STATE_INJECTION_USER_PREAMBLE}\n${renderStateBlock(state)}` },
+    { role: "assistant", content: STATE_INJECTION_ASSISTANT_ACK },
+  ];
+}

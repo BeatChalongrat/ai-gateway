@@ -1,0 +1,1306 @@
+services:
+  postgres:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 2g
+    mem_reservation: 768m
+    oom_score_adj: -900
+    # pgvector build of PG16 (R11 B1): chat-edge-api's KB embeddings need the
+    # vector extension. Data-directory compatible with the previous postgres:16.
+    image: pgvector/pgvector:pg16
+    # Phase-1 tuning. Two motivations:
+    #   1. max_connections=200 — backend (4 workers × pool 30) + admin-ui +
+    #      portal + alembic + ad-hoc psql must coexist below the cap.
+    #      Defaulting to 100 leaves no margin once we add a second
+    #      backend pod.
+    #   2. synchronous_commit=off — request_logs is non-financial; durability
+    #      lag of a few hundred ms on a crash is acceptable in exchange for
+    #      removing fsync from every INSERT. audit_log, portal_users, and
+    #      provider_keys still carry application-level integrity (AES-GCM
+    #      audit blob, bcrypt, encrypted provider secrets) so a crash window
+    #      cannot forge admin actions or leak credentials.
+    # shared_buffers / effective_cache_size / wal_writer_delay /
+    # checkpoint_completion_target are sized for the 8 GB dev box; bump
+    # on production hardware via a compose override.
+    #
+    # FIX129 A1 — the 2026-09-22 incident (NIGHT2): one abandoned
+    # `SELECT ... FOR UPDATE` transaction held its row lock for 34 minutes
+    # and every writer queued behind it, because every server-side timeout
+    # was 0. Two server-level safety nets now cap that blast radius:
+    #   idle_in_transaction_session_timeout=120000  a session that sits in
+    #       an open transaction doing nothing for 120 s is terminated and
+    #       its locks released;
+    #   lock_timeout=30000  a statement that waits more than 30 s for a lock
+    #       fails with 55P03 instead of queueing forever.
+    # Deliberately NO global statement_timeout: pg_dump, VACUUM and
+    # migrations need long statements; the services set their own
+    # per-connection statement_timeout in code.
+    command: >
+      postgres
+      -c max_connections=250
+      -c shared_buffers=256MB
+      -c synchronous_commit=off
+      -c wal_writer_delay=200ms
+      -c checkpoint_completion_target=0.9
+      -c effective_cache_size=512MB
+      -c idle_in_transaction_session_timeout=120000
+      -c lock_timeout=30000
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ai_gateway}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      # Dev fallback is the legacy "postgres" so `make up` keeps working
+      # on a clean checkout. Production MUST set POSTGRES_PASSWORD in
+      # .env (and docker-compose.prod.yml's binding to 127.0.0.1 keeps
+      # the port off the public interface either way).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    # No host port: Postgres is reached over the docker network by
+    # service name. Removes the direct-to-DB attack surface the log-worker
+    # superuser DSN would otherwise expose on the host. For local psql,
+    # add a port mapping in a personal docker-compose.override.yml.
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # R11 B1: create the chat-edge database + apply its migrations on FIRST
+      # volume init (fresh deploys). Existing volumes: run
+      # scripts/apply_chat_edge_migrations_main.sh (or make chat-edge-migrate-main).
+      - ./infra/postgres/init-chat-edge-db.sh:/docker-entrypoint-initdb.d/02-chat-edge.sh:ro
+      - ./services/chat-edge-api/migrations:/chat-edge-migrations:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 512m
+    mem_reservation: 128m
+    oom_score_adj: -900
+    image: redis:7
+    # Cap memory + LRU eviction so an unbounded key set can't OOM the box.
+    # The image default is maxmemory=0 (unlimited) / noeviction, under which
+    # an OOM makes writes fail; allkeys-lru evicts cold keys instead. Tune
+    # the ceiling via REDIS_MAXMEMORY.
+    # --requirepass enforces AUTH on every connection — base parity with
+    # docker-compose.prod.yml. REDIS_PASSWORD is required (set it in .env;
+    # see .env.example). Every consumer passes the same secret: backend
+    # folds it into redis_url (config.py), rate-limiter and the Go gateway via REDIS_URL,
+    # redis-exporter via REDIS_PASSWORD. No host port is published — the
+    # session store / DLP token vault / rate-limit state stay on the
+    # internal docker network only.
+    command: >
+      redis-server
+      --maxmemory ${REDIS_MAXMEMORY:-512mb}
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+    healthcheck:
+      # redis-cli ping returns NOAUTH once --requirepass is on, so auth.
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  mock-provider:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 384m
+    mem_reservation: 128m
+    oom_score_adj: -100
+    build:
+      context: ./mock
+      # FIX126 O6: every service build here takes REVISION/CREATED and
+      # stamps org.opencontainers.image.revision/.created (see the Dockerfile
+      # tails). `REVISION=$(git rev-parse --short HEAD) docker compose ...
+      # build`; releases: scripts/build-images.sh (clean git-archive build).
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    image: ai-gateway-mock-provider:latest
+    container_name: ai-gateway-mock-provider
+    ports:
+      - "127.0.0.1:9090:9090"
+    environment:
+      # DLP instrument (the DLP instrument record): when set, the mock
+      # appends every completion request (full raw body + redacted headers)
+      # to this file. Empty (default) = capture off. Point it inside the
+      # /capture mount below, e.g. MOCK_CAPTURE_PATH=/capture/requests.jsonl
+      # — the host side (./data/mock-capture) is gitignored (/data/) and
+      # WILL contain whatever test PII is sent. Delete it after each run.
+      MOCK_CAPTURE_PATH: ${MOCK_CAPTURE_PATH:-}
+    volumes:
+      - ./data/mock-capture:/capture
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9090/health', timeout=3)"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # Dedicated NER service — owns the heavy spaCy model so the gateway
+  # workers stay light. The gateway calls this via NER_SERVICE_URL;
+  # leaving the URL unset falls back to the legacy in-process loader.
+  #
+  # Multi-worker: each uvicorn worker is its own process with its own
+  # spaCy/Presidio analyzer AND (FIX37) its own Thai CRF tagger, both
+  # loaded at startup via the lifespan hook. Concurrent requests across
+  # workers are CPU-parallel; within one worker spaCy holds the GIL
+  # during analyze() but the read-only AnalyzerEngine is safe to share
+  # across coroutines.
+  #
+  # FIX37 sizing, measured: 4 workers with the Thai tagger reached
+  # 3.98 GiB against the old 4g cap — one allocation from an OOM kill.
+  # Per worker is ~1 GiB (en_core_web_lg + the Thai corpus), against
+  # ~380 MiB before. Two workers is ample for the load this service
+  # sees (the Thai path answers in ~3 ms and the gateway's timeout is
+  # 2 s), and the cap has headroom for a burst.  Raise NER_WORKERS only
+  # together with the memory limit.
+  #
+  # FIX131 — measured on the test stack with 10 users chatting non-stop:
+  # with the backend on 4 gunicorn workers the next bottleneck was NER
+  # (2 workers at 100 % in bursts; every turn scans the whole history, so
+  # the work grows with the chat). 4 NER workers kept first-token p95 at
+  # 2.1-2.3 s for five minutes and 5.8 s at minute 9, against 10.0 s with
+  # 2 workers. 4 workers measured 4.74 GiB, so the cap goes to 7g.
+  ner-service:
+    # memory guard (scripts/ops/live_memory.py): its turn when the Docker VM runs out
+    oom_score_adj: -500
+    build:
+      context: ./backend
+      dockerfile: ner_service/Dockerfile
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    image: ai-gateway-ner-service:latest
+    environment:
+      # FIX133 A1 — empty = computed in the image from cores and the memory
+      # limit (backend/ner_service/sizing.py); a number here pins it.
+      NER_WORKERS: ${NER_WORKERS:-}
+      # FIX38 — the CRF ThaiNER tagger. "0" runs the service English-only
+      # and /health reports th_ner=disabled (still "ready"); any load
+      # failure while "1" reports "degraded" and fails the healthcheck.
+      NER_THAI_ENABLED: ${NER_THAI_ENABLED:-1}
+      # Per-language confidence floors. Thai NER is noisier than
+      # English on conversational prose, so its floor stays higher
+      # by default. Both are overridable per-deployment if a
+      # particular workload needs tuning.
+      NER_SCORE_THRESHOLD_EN: ${NER_SCORE_THRESHOLD_EN:-0.7}
+      NER_SCORE_THRESHOLD_TH: ${NER_SCORE_THRESHOLD_TH:-0.85}
+    ports:
+      - "127.0.0.1:8001:8001"
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: "7g"
+        reservations:
+          cpus: "2.0"
+          memory: "2g"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8001/health | grep -q '\"status\":\"ready\"' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    restart: unless-stopped
+
+  # Phase-3c Rust DLP sidecar. gRPC server is OPERATIONAL: ScanText,
+  # ScanMessages and Health are all implemented (src/main.rs). The
+  # registry ports 29 regex/heuristic detectors (NER-on default;
+  # NER-off swaps in thai_name_no_prefix → 30) — full parity with the
+  # Python regex detector set. spaCy NER is intentionally NOT ported;
+  # it stays in the dedicated ner-service. Shadow mode is wired
+  # (DLP_ENGINE=shadow runs both and logs dlp_shadow_diff).
+  # Gated by DLP_ENGINE (default: python). Fail-open: any gRPC
+  # error/timeout falls back to the Python registry.
+  # PARITY: remediated to 100% (211/211, 0 FN/0 FP) — all 4 blocking +
+  # 7 minor detector gaps fixed in Rust, and the encoding-bypass
+  # preprocessing (zero-width strip + offset remap, homoglyph, base64
+  # decode-and-scan) runs in a Python wrapper in rust_dlp_client before
+  # the gRPC call. Safe to flip DLP_ENGINE=rust (see DLP_BENCHMARK.md;
+  # rollback = python). Re-verify with backend/tests/dlp_parity_runner.py.
+  dlp-sidecar:
+    # memory guard (scripts/ops/live_memory.py): its turn when the Docker VM runs out
+    oom_score_adj: -600
+    build:
+      context: ./dlp-sidecar
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    image: ai-gateway-dlp-sidecar:latest
+    environment:
+      GRPC_PORT: "50051"
+      METRICS_PORT: "9102"
+    # gRPC 50051 is internal-only (backend reaches it via the docker
+    # network). Metrics port stays published for local Prometheus.
+    ports:
+      - "127.0.0.1:9102:9102"
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: "512m"
+    healthcheck:
+      test: ["CMD", "/healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # Phase-3b Rust rate-limiter — gRPC sidecar that runs the same
+  # sliding-window check as the legacy Python service against the
+  # shared Redis. Gated by RATE_LIMITER_ENGINE=rust on the backend;
+  # default (python) leaves this service idle.
+  rate-limiter:
+    # memory guard (scripts/ops/live_memory.py): its turn when the Docker VM runs out
+    oom_score_adj: -700
+    build:
+      context: ./rate-limiter
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    image: ai-gateway-rate-limiter:latest
+    environment:
+      # REDIS_PASSWORD required (redis --requirepass). Folded into the
+      # URL the deadpool-redis pool reads (main.rs).
+      REDIS_URL: "redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379"
+      GRPC_PORT: "50053"
+      METRICS_PORT: "9101"
+    # gRPC 50053 is internal-only (reached via the docker network by the
+    # backend). Metrics port stays published for local Prometheus.
+    ports:
+      - "127.0.0.1:9101:9101"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "128m"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # Distroless cc has no shell — the Rust ``/healthcheck``
+      # binary (built by the same Dockerfile) HTTP-GETs the metrics
+      # port's /healthz and exits 0/1.
+      test: ["CMD", "/healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  # Phase-3 Go log-worker — asynchronous sink for request_logs.
+  #
+  # Activated only when the gateway sets LOG_WORKER_ENGINE=go; the
+  # default (python) path runs the legacy in-process queue and never
+  # touches this service. Sidecar is a small distroless image
+  # (~30MB) so leaving it running idle has negligible cost.
+  log-worker:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 512m
+    mem_reservation: 64m
+    oom_score_adj: -500
+    build:
+      context: ./log-worker
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    image: ai-gateway-log-worker:latest
+    environment:
+      POSTGRES_DSN: "host=postgres port=5432 dbname=${POSTGRES_DB:-ai_gateway} user=${POSTGRES_USER:-postgres} password=${POSTGRES_PASSWORD:-postgres} sslmode=disable"
+      GRPC_PORT: "50052"
+      METRICS_PORT: "9100"
+      BATCH_SIZE: ${LOG_WORKER_BATCH_SIZE:-100}
+      FLUSH_INTERVAL_MS: ${LOG_WORKER_FLUSH_INTERVAL_MS:-100}
+      QUEUE_BUFFER: ${LOG_WORKER_QUEUE_BUFFER:-50000}
+    # gRPC 50052 is internal-only (backend reaches it via the docker
+    # network). Metrics port stays published for local Prometheus.
+    ports:
+      - "127.0.0.1:9100:9100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # Distroless static has no shell or wget, so we ship a tiny
+      # Go ``/healthcheck`` binary alongside the worker (see the
+      # log-worker Dockerfile). It HTTP-GETs :9100/healthz and
+      # exits 0 / 1; Docker invokes the binary directly without
+      # going through a shell.
+      test: ["CMD", "/healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # Go API gateway (Phase 1 strangler-fig) — the public entry point on
+  # :8080. Transparent reverse proxy in front of the Python backend:
+  # coarse API-key auth on /v1/*, Prometheus metrics, request-ID
+  # propagation. Forwards EVERY request (streaming included) to
+  # backend:8080 unchanged — Python stays authoritative for routing,
+  # DLP, full auth, dispatch, and logging. See services/gateway/README.md.
+  gateway:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 512m
+    mem_reservation: 128m
+    oom_score_adj: -800
+    build:
+      context: ./services/gateway
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    environment:
+      PORT: "8080"
+      # Python's container bind is unchanged (gunicorn -b 0.0.0.0:8080);
+      # only its host publish moved to 8081. The gateway reaches it on
+      # the compose network at the container port.
+      PYTHON_SERVICE_URL: http://backend:8080
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-ai_gateway}
+      # FIX134 — Redis requires AUTH; without the password the gateway logged NOAUTH
+      # once and ran with its API-key cache off (every lookup went to Postgres).
+      REDIS_URL: "redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379/0"
+      GATEWAY_AUTH_CACHE_TTL: ${GATEWAY_AUTH_CACHE_TTL:-30s}
+      GATEWAY_MAX_BODY_BYTES: ${GATEWAY_MAX_BODY_BYTES:-26214400}
+      APP_ENV: ${APP_ENV:-development}
+    ports:
+      # FIX133 A4 — the public port (8080) is Caddy's (service `edge`, https);
+      # this is the plain-http debug door for scripts and probes.
+      - "127.0.0.1:28080:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # GET (not --spider/HEAD): the gateway's chi router serves /__gw/health
+      # on GET only, and wget --spider sends HEAD -> 404 -> false "unhealthy".
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/__gw/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    # FIX129 A3: autoheal restarts this container when its healthcheck
+    # says "unhealthy" (see the autoheal service).
+    labels:
+      autoheal: "true"
+
+  # FIX129 A3 — a watchdog that ACTS on "unhealthy". `restart:
+  # unless-stopped` only reacts to the process exiting; on 2026-09-22 the
+  # backend's /ready healthcheck failed for 34 minutes (NIGHT2, one wedged
+  # row lock) while the container stayed "Up (unhealthy)" and nothing
+  # restarted it. autoheal polls the daemon every AUTOHEAL_INTERVAL seconds
+  # and restarts any container labelled `autoheal=true` whose health is
+  # "unhealthy" (after AUTOHEAL_START_PERIOD seconds of grace from the
+  # autoheal start, and with a STOP_TIMEOUT-second graceful stop).
+  # Labelled: backend, gateway (here), chat-edge-api, web-chat (webchat
+  # file) — only services with a healthcheck; a container without one is
+  # never "unhealthy" and is ignored.
+  # It needs the docker socket = host control; it is NOT part of the test
+  # stack (scripts/test_stack_gen.py refuses socket mounts).
+  autoheal:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 128m
+    mem_reservation: 32m
+    oom_score_adj: -400
+    image: willfarrell/autoheal:1.2.0
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: "10"
+      AUTOHEAL_START_PERIOD: "60"
+      # FIX133 A5 — a restart by autoheal must not cut a drain short: the
+      # backend and chat-edge carry autoheal.stop.timeout labels equal to
+      # their stop_grace_period; 20 s is the default for the rest.
+      AUTOHEAL_DEFAULT_STOP_TIMEOUT: "20"
+      DOCKER_SOCK: /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  # FIX129 A3/A4 — the ops watcher (backend/app/ops/watch.py): the alerts
+  # the backend cannot raise about itself. Every OPS_WATCH_INTERVAL seconds
+  # it reads the Docker API (read-only socket) for unhealthy / restarting /
+  # exited containers of this project, probes the backend's /ready from the
+  # OUTSIDE (during the 2026-09-22 wedge the backend could not answer its
+  # own probe), and checks the Docker data disk and VM memory. Findings go
+  # to the same channels as the alert rules (ALERT_NTFY_URL / ALERT_EMAIL_TO
+  # / ALERT_WEBHOOK_URL), once per OPS_WATCH_COOLDOWN, plus a "recovered"
+  # note. Same image as the backend; not part of the test stack (socket).
+  ops-watch:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 256m
+    mem_reservation: 96m
+    oom_score_adj: -400
+    image: ai-gateway-backend:latest
+    restart: unless-stopped
+    command: ["python", "-m", "app.ops.watch"]
+    # FIX131 — runs the image's code (no source mount; the dev file adds one).
+    # A Python PID 1 without a SIGTERM handler ignores SIGTERM, so every
+    # stop waited for the SIGKILL; `init` puts a real init in front of it.
+    init: true
+    stop_grace_period: 10s
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      OPS_WATCH_PROJECT: ai-gateway
+      OPS_WATCH_INTERVAL: ${OPS_WATCH_INTERVAL:-30}
+      # (FIX131: OPS_WATCH_COOLDOWN retired — the pager re-pages only on
+      # escalation or after ALERT_REMINDER_SECONDS.)
+      OPS_WATCH_BACKEND_URL: http://backend:8080
+      OPS_WATCH_DISK_PATHS: /host/docker
+      OPS_WATCH_DISK_PCT: ${OPS_WATCH_DISK_PCT:-90}
+      OPS_WATCH_MEM_PCT: ${OPS_WATCH_MEM_PCT:-90}
+      # One-shot containers that are allowed to sit "exited" (name prefixes).
+      OPS_WATCH_IGNORE_EXITED: ${OPS_WATCH_IGNORE_EXITED:-}
+      # pg_stat_activity watch from OUTSIDE the backend: the chat database
+      # (nobody else samples it) and the gateway database (the backend does,
+      # but not while it is the thing that is wedged). name=dsn;name=dsn.
+      OPS_WATCH_PG_DSNS: >-
+        gateway=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-ai_gateway};chat=postgresql://chatedge:${WEBCHAT_POSTGRES_PASSWORD:-chatedge_pass}@postgres-webchat:5432/sran_ai
+      OPS_WATCH_PG_STUCK_S: ${OPS_WATCH_PG_STUCK_S:-60}
+      # Open findings + last-announced times survive a restart of the watcher.
+      OPS_WATCH_STATE_FILE: /state/ops_watch_state.json
+      # FIX131 B3 — "no fresh backup": the backup folder, read-only (below).
+      # Same BACKUP_MAX_AGE_H as the backup service (26 h).
+      OPS_WATCH_BACKUP_DIR: /backups
+      # FIX133 C/D — off-site copy freshness (h), the two paging speeds (s):
+      # a hard outage (no /ready, container not restarting) pages after
+      # READY_DEBOUNCE + one tick (~60-75 s); a restarting container gets
+      # RESTART_DEBOUNCE; the queue / saturation rules page only after
+      # CAPACITY_DEBOUNCE of continuous backlog.
+      OPS_WATCH_OFFSITE_MAX_AGE_H: ${OPS_WATCH_OFFSITE_MAX_AGE_H:-48}
+      OPS_WATCH_READY_DEBOUNCE_S: ${OPS_WATCH_READY_DEBOUNCE_S:-45}
+      OPS_WATCH_RESTART_DEBOUNCE_S: ${OPS_WATCH_RESTART_DEBOUNCE_S:-150}
+      OPS_WATCH_QUEUE_MIN_WAITING: ${OPS_WATCH_QUEUE_MIN_WAITING:-0}
+      OPS_WATCH_QUEUE_OLDEST_S: ${OPS_WATCH_QUEUE_OLDEST_S:-60}
+      OPS_WATCH_SATURATION_PCT: ${OPS_WATCH_SATURATION_PCT:-90}
+      OPS_WATCH_CAPACITY_DEBOUNCE_S: ${OPS_WATCH_CAPACITY_DEBOUNCE_S:-180}
+      OPS_WATCH_BACKUP_MAX_AGE_H: ${BACKUP_MAX_AGE_H:-26}
+      # FIX131 D5 — replies still "streaming" after N minutes.
+      OPS_WATCH_TURN_STUCK_MIN: ${OPS_WATCH_TURN_STUCK_MIN:-15}
+      # The host's power (a laptop): on battery it is said; at this charge (%) or
+      # this many minutes left it pages, while there is still time to plug in.
+      # The reading is power_last.json in the backup folder, written by the host's
+      # task "SRAN power watch" (scripts/ops/power-watch.ps1).
+      OPS_WATCH_POWER_PAGE_PCT: ${OPS_WATCH_POWER_PAGE_PCT:-40}
+      OPS_WATCH_POWER_PAGE_MIN: ${OPS_WATCH_POWER_PAGE_MIN:-60}
+      # FIX131 D — the pager's shared incident store: the backend's Redis
+      # (db 0), so the backend rules and this watcher page once per incident.
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      ALERT_NTFY_URL: ${ALERT_NTFY_URL:-}
+      ALERT_NTFY_TOKEN: ${ALERT_NTFY_TOKEN:-}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      # FIX131 D4 — empty = the real system; "test" labels every alert [TEST]
+      # and sends it only to ALERT_TEST_NTFY_URL (a throwaway topic).
+      ALERT_ENVIRONMENT: ${ALERT_ENVIRONMENT:-}
+      ALERT_TEST_NTFY_URL: ${ALERT_TEST_NTFY_URL:-}
+      # AM1c — Agent Market's alerts from Prometheus to its own topic only.
+      OPS_WATCH_PROMETHEUS_URL: ${OPS_WATCH_PROMETHEUS_URL:-http://prometheus:9090}
+      AGENT_MARKET_NTFY_URL: ${AGENT_MARKET_NTFY_URL:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-no-reply@sran.ai}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # The Docker data root (the VM disk on Docker Desktop, the host disk
+      # on a Linux engine) — what "disk nearly full" has to measure.
+      - /var/lib/docker:/host/docker:ro
+      - ops_watch_state:/state
+      # FIX131 B3 — the backup service's folder (same source as its /backups
+      # in docker-compose.webchat.yml), READ-ONLY: last_success.json /
+      # last_failure.json. The backup container cannot report its own death.
+      - ${BACKUP_DIR:-../ai-gateway-backups/daily}:/backups:ro
+    depends_on:
+      backend:
+        condition: service_started
+
+  # Chat Edge API (R11 B1) — conversations, messages, memory, KB/RAG, files,
+  # web search, share links. The desktop app and web chat both talk to this
+  # service. Shares the main postgres (dedicated database, created by
+  # infra/postgres/init-chat-edge-db.sh) and the main redis (db 2).
+  # NOTE: the Go binary does NOT run migrations itself — it fail-closed
+  # verifies them. Fresh volumes get them via the postgres init hook; after
+  # pulling new migrations run scripts/apply_chat_edge_migrations_main.sh.
+  chat-edge-api:
+    build:
+      context: ./services/chat-edge-api
+      dockerfile: Dockerfile
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    # FIX131 E2 — the stop drains turns (CHAT_EDGE_DRAIN_TIMEOUT 60s + grace
+    # 10s by default); keep this above both. Same as docker-compose.webchat.yml.
+    stop_grace_period: 120s
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${CHAT_EDGE_DB:-sran_chat}?sslmode=disable
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379/2
+      GATEWAY_API_URL: http://gateway:8080/v1
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:-}
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-}
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:-dev-service-jwt-secret-change-in-prod}
+      USER_JWT_SECRET: ${USER_JWT_SECRET:-dev-user-jwt-secret-change-in-prod}
+      CSRF_SECRET: ${CSRF_SECRET:-dev-csrf-secret-change-in-prod}
+      PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:-dev-stable-portal-key-change-in-prod}
+      PORT: "4000"
+      CHAT_EDGE_DEV: ${CHAT_EDGE_DEV:-1}
+      CHAT_EDGE_ADMIN_API_KEY: ${CHAT_EDGE_ADMIN_API_KEY:-dev-chat-edge-admin-key-change-in-prod}
+      CORS_ALLOW_ORIGINS: ${CHAT_CORS_ORIGINS:-https://localhost:3002}
+      MAX_CONTEXT_MESSAGES: ${MAX_CONTEXT_MESSAGES:-1000}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      S3_BUCKET: ${S3_BUCKET:-sran-chat-files}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      IMAGE_GEN_MODEL: ${IMAGE_GEN_MODEL:-gpt-image-1}
+      CHAT_EDGE_IMAGE_TIMEOUT_SECONDS: ${CHAT_EDGE_IMAGE_TIMEOUT_SECONDS:-180}
+      # FIX132 B — the knowledge base; same knobs as docker-compose.webchat.yml
+      # (docs/ops/knowledge-base.md). kb-models below is desktop-profile too.
+      KB_MODELS_URL: ${KB_MODELS_URL:-http://kb-models:8090}
+      KB_INDEX_WORKERS: ${KB_INDEX_WORKERS:-2}
+      KB_CHUNK_SIZE: ${KB_CHUNK_SIZE:-1000}
+      KB_CHUNK_OVERLAP: ${KB_CHUNK_OVERLAP:-150}
+      KB_SPARSE_WEIGHT: ${KB_SPARSE_WEIGHT:-0.3}
+      KB_CANDIDATES: ${KB_CANDIDATES:-50}
+      KB_MIN_SCORE: ${KB_MIN_SCORE:-0.40}
+      KB_TOP_K: ${KB_TOP_K:-20}
+      KB_CONTEXT_MAX_CHARS: ${KB_CONTEXT_MAX_CHARS:-24000}
+      KB_RERANK_ENABLED: ${KB_RERANK_ENABLED:-false}
+      KB_RERANK_CANDIDATES: ${KB_RERANK_CANDIDATES:-40}
+      KB_RERANK_BUDGET_MS: ${KB_RERANK_BUDGET_MS:-4000}
+      KB_RERANK_FLOOR: ${KB_RERANK_FLOOR:-0.01}
+    volumes:
+      - chat_edge_uploads:/app/data/uploads
+    ports:
+      - "127.0.0.1:24000:4000" # FIX133 A4 — 4000 is Caddy's (https)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      # chat-edge serves GET /health at the router root (NOT /api/v1/health).
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:4000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    # Profile-gated: dev `make up` must not start chat-edge (the webchat
+    # SHAPE, docker-compose.webchat.yml, carries its own). Consequence:
+    # merging this file with docker-compose.webchat.yml is INVALID — the
+    # two chat-edge-api definitions collapse into one profile-gated
+    # service, compose drops it, and web-chat's depends_on fails with
+    #   service "web-chat" depends on undefined service "chat-edge-api"
+    # Supported combinations: `make compose-check` / README "Deployment
+    # shapes".
+    profiles: ["desktop"]
+
+  # FIX132 B — the knowledge base's models for the desktop-profile chat-edge
+  # above (the webchat shape defines its own in docker-compose.webchat.yml;
+  # see the note on chat-edge-api about merging the two files). Internal
+  # only, no host port; weights in the kb_models volume.
+  kb-models:
+    build:
+      context: ./services/kb-models
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    image: ai-gateway-kb-models:latest
+    environment:
+      KB_THREADS: ${KB_THREADS:-} # FIX133 A1 — empty = min(6, CPUs / 2) in the image
+      KB_DTYPE: ${KB_DTYPE:-bf16}
+      KB_RERANK_ENABLED: ${KB_RERANK_ENABLED:-false}
+      HF_HUB_OFFLINE: ${KB_MODELS_OFFLINE:-1}
+    volumes:
+      - kb_models:/models
+    deploy:
+      resources:
+        limits:
+          cpus: "6.0"
+          memory: "6g"
+    restart: unless-stopped
+    profiles: ["desktop"]
+
+  # MCP Gateway (R11 B2 + Phase 10 C1) — hosts stdio MCP servers behind
+  # streamable-HTTP via supergateway; the desktop app reads /catalog.json to
+  # discover them. ALL servers (built-in filesystem/memory included) are
+  # reached through :3200's JWT-verified per-user proxy — the old shared,
+  # unauthenticated children on :3201/:3202 are gone.
+  mcp-gateway:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 512m
+    mem_reservation: 96m
+    oom_score_adj: -500
+    build:
+      context: ./services/mcp-gateway
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    environment:
+      # Dev: catalog advertises http://localhost:3200/mcp/servers/{id}.
+      # Prod: set MCP_PUBLIC_BASE=https://sran.yourcompany.com and
+      # MCP_PUBLIC_MODE=path → URLs become {base}/mcp/servers/{id} (nginx routes).
+      # FIX134 B3 — on this box the catalogue stays http://localhost:3200 on
+      # purpose: :3200 is published on 127.0.0.1 only (loopback, not behind the
+      # Caddy https front door), every call carries a portal JWT that this
+      # service verifies with the backend's secret (B1), and the desktop's
+      # tools sidecar that consumes these URLs speaks plain Node https with no
+      # local-CA trust. A LAN/prod deployment sets the two variables above.
+      MCP_PUBLIC_BASE: ${MCP_PUBLIC_BASE:-http://localhost}
+      MCP_PUBLIC_MODE: ${MCP_PUBLIC_MODE:-port}
+      # Phase 7: per-user oauth2 connector instances. The gateway verifies
+      # the caller's portal JWT (same HS256 secret the backend signs with)
+      # and fetches the user's provider token from the backend broker.
+      # FIX134 B1 — this service is behind the "desktop" profile, so a plain
+      # `up -d` does not recreate it: after rotating PORTAL_JWT_SECRET run
+      # `docker compose -p ai-gateway --profile desktop up -d mcp-gateway`
+      # (the FIX133 cutover missed it and every new token failed here).
+      PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:-dev-stable-portal-key-change-in-prod}
+      BACKEND_BASE: http://backend:8080
+      # Slack workspace id for the slack connector (deployment-level).
+      MCP_SLACK_TEAM_ID: ${MCP_SLACK_TEAM_ID:-}
+      # AM9: the mail connector ("send as me") answers chat-edge only — this
+      # token (shared with chat-edge's AGENT_MARKET_MAIL_GATEWAY_TOKEN). Empty:
+      # the mail server answers no one. MCP_MAIL_API_BASE overrides the Gmail
+      # API address (a local sink in tests); leave it empty in production.
+      MCP_INTERNAL_TOKEN: ${MCP_INTERNAL_TOKEN:-}
+      MCP_MAIL_API_BASE: ${MCP_MAIL_API_BASE:-}
+    ports:
+      - "127.0.0.1:3200:3200"
+    volumes:
+      - mcp_workspace:/data/workspace
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3200/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    profiles: ["desktop"]
+
+  backend:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 3g
+    mem_reservation: 1g
+    oom_score_adj: -700
+    build:
+      context: ./backend
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    environment:
+      # Pin UTF-8 everywhere so Thai-language request bodies, mask
+      # tokens, and the ฿ symbol travel through Python stdout / SQL
+      # client / JSON encoders without ambient-locale surprises.
+      # The base image already ships C.UTF-8, but setting these
+      # explicitly documents the contract and survives a future
+      # image rebase to a locale-less variant.
+      PYTHONIOENCODING: utf-8
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      APP_ENV: ${APP_ENV:-development}
+      # Schema-drift guard (FIX 3). Base stack defaults to failclosed: the
+      # Dockerfile CMD migrates before gunicorn, so a stale schema at boot
+      # means the migrate step was bypassed — refuse to start (named error)
+      # rather than serve 500s. The dev override flips this to autoupgrade.
+      SCHEMA_DRIFT_MODE: ${SCHEMA_DRIFT_MODE:-failclosed}
+      # Nightly retention pipeline (00:00 UTC): strip -> archive ->
+      # archive-expiry -> audit-aging. Each step that MOVES or DELETES
+      # is passed through explicitly so an operator can see the whole
+      # policy in one place. The defaults below repeat the code
+      # defaults on purpose — listing a knob here must not change what
+      # a deployment does; only an explicit value in the environment
+      # does that.
+      #
+      # The stripper always runs and has no switch: stopping the mover
+      # must never stop the redaction of raw columns.
+      LOG_ARCHIVE_ENABLED: ${LOG_ARCHIVE_ENABLED:-false}
+      LOG_ARCHIVE_DAYS: ${LOG_ARCHIVE_DAYS:-90}
+      # Expiry DELETES archive rows. Two switches on purpose: the
+      # feature flag, and a dry-run that reports counts without
+      # deleting. Turn the flag on first, read the numbers, then the
+      # dry-run off.
+      ARCHIVE_EXPIRY_ENABLED: ${ARCHIVE_EXPIRY_ENABLED:-false}
+      ARCHIVE_EXPIRY_DRY_RUN: ${ARCHIVE_EXPIRY_DRY_RUN:-true}
+      ARCHIVE_RETENTION_DAYS: ${ARCHIVE_RETENTION_DAYS:-365}
+      # Audit-log aging, same two-switch shape. 365 as of FIX60 (was
+      # 730): deletion evidence still outlives the data it describes,
+      # because an expiry audit row is written AT the moment of
+      # deletion and then ages on its own clock — a full year after the
+      # archive row it records is gone. The windows are now equal in
+      # wall-clock terms, so a same-day pair ages out together; raise
+      # this if an audit ever needs that margin back.
+      AUDIT_LOG_AGING_ENABLED: ${AUDIT_LOG_AGING_ENABLED:-false}
+      AUDIT_LOG_AGING_DRY_RUN: ${AUDIT_LOG_AGING_DRY_RUN:-true}
+      AUDIT_LOG_RETENTION_DAYS: ${AUDIT_LOG_RETENTION_DAYS:-365}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-ai_gateway}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      # Track A pool sizing — TWO pools (see backend/app/core/db.py):
+      #  * ASYNC (chat hot path): connection RELEASED during the provider
+      #    call, so a small pool serves high concurrency.
+      #  * SYNC (admin/portal/background + 3 rare chat sync points): small.
+      # Budget/worker: sync(5+5) + async(10+15) = 35; ×4 workers = 140,
+      # well under Postgres max_connections=250 (leaves headroom for
+      # migrations / psql / background sessions). db.py reads these at
+      # import; missing → the same defaults shown here.
+      DB_SYNC_POOL_SIZE: ${DB_SYNC_POOL_SIZE:-5}
+      DB_SYNC_MAX_OVERFLOW: ${DB_SYNC_MAX_OVERFLOW:-5}
+      DB_ASYNC_POOL_SIZE: ${DB_ASYNC_POOL_SIZE:-10}
+      DB_ASYNC_MAX_OVERFLOW: ${DB_ASYNC_MAX_OVERFLOW:-15}
+      POSTGRES_MAX_CONNECTIONS: "250"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      # Empty in dev (redis runs unauthenticated on the compose
+      # network). docker-compose.prod.yml sets this AND adds
+      # --requirepass on the redis service so both ends stay in sync.
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      JWT_SECRET: ${JWT_SECRET:-dev-stable-key-change-in-prod}
+      MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:-dev-stable-key-change-in-prod}
+      # FIX133 B — production mode needs every one of these set in .env
+      # (validate_secrets refuses the dev defaults outside dev/test):
+      # session signing keys (comma list, newest first), the Safe Trace
+      # audit key, the master key that encrypts provider / search / connector
+      # secrets at rest (64 hex; rotate with backend/scripts/reencrypt_master_key.py),
+      # the first admin's address and password (only used when no admin exists yet).
+      SESSION_SIGNING_SECRETS: ${SESSION_SIGNING_SECRETS:-}
+      DLP_AUDIT_KEY: ${DLP_AUDIT_KEY:-}
+      PROVIDER_KEY_MASTER_KEY: ${PROVIDER_KEY_MASTER_KEY:-}
+      # The first admin is this deployment's own configuration (app/core/first_admin.py):
+      # no address is built in, and without INITIAL_ADMIN_EMAIL none is created.
+      INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:-}
+      INITIAL_ADMIN_USERNAME: ${INITIAL_ADMIN_USERNAME:-}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
+      # FIX133 B — email: auto (Resend in production, the console in dev),
+      # resend, console, or disabled (an internal tool without a mail
+      # sender: verification / reset mails are reported as not delivered,
+      # never silently dropped).
+      EMAIL_DELIVERY: ${EMAIL_DELIVERY:-auto}
+      # FIX133 B — /docs, /redoc and /openapi.json: on in dev, off in
+      # production unless API_DOCS_ENABLED=true.
+      API_DOCS_ENABLED: ${API_DOCS_ENABLED:-}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-}
+      PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:-dev-stable-portal-key-change-in-prod}
+      # Trust anchor for the chat-edge → gateway X-User-ID header
+      # (per-end-user rate limiting AND per-end-user credit billing
+      # behind the shared service key). MUST match the chat-edge
+      # stack's INTERNAL_SERVICE_SECRET. Empty disables the trust
+      # (headers are then ignored — safe default).
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-}
+      # FIX 1b — the gateway VERIFIES chat-edge's service JWT with this
+      # secret (deps.py::_resolve_service_jwt). It MUST equal the same var
+      # under chat-edge-api (which SIGNS with it) or every service JWT is
+      # rejected and chat silently falls back to INTERNAL_SERVICE_SECRET —
+      # leaving FIX 1's gw_-key decoupling dormant. One var feeds both so
+      # they always match. Empty = feature disabled (gateway-only deploys).
+      SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:-dev-service-jwt-secret-change-in-prod}
+      # Media generation (Sprint 2A/2A.5). Feature-flagged OFF by default;
+      # set VIDEO_GEN_ENABLED=true in the host env to surface dedicated video
+      # models in /v1/models + enable the video gen routes/tool. Controlled
+      # here (not hardcoded) so `VIDEO_GEN_ENABLED=true docker compose up -d
+      # backend` flips it without a code change.
+      VIDEO_GEN_ENABLED: ${VIDEO_GEN_ENABLED:-false}
+      # NER microservice URL. When set, presidio_ner.py delegates to
+      # this service instead of loading spaCy in-process.
+      NER_SERVICE_URL: ${NER_SERVICE_URL:-http://ner-service:8001}
+      NER_SERVICE_TIMEOUT_SECONDS: ${NER_SERVICE_TIMEOUT_SECONDS:-2.0}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      IMAGE_GENERATION_TIMEOUT_SECONDS: ${IMAGE_GENERATION_TIMEOUT_SECONDS:-180}
+      OPENAI_IMAGE_TIMEOUT_SECONDS: ${OPENAI_IMAGE_TIMEOUT_SECONDS:-180}
+      # 3000=admin-ui, 3001=portal, 3002=web-chat. allow_credentials=True
+      # requires explicit origins (no "*"), and web-chat (:3002) now calls
+      # the gateway directly for silent refresh, so it must be listed.
+      # FIX133 B — the browser origins (https once Caddy fronts them); the
+      # 127.0.0.1 twins used to live in docker-compose.override.yml.
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://localhost:3000,https://127.0.0.1:3000,https://localhost:3001,https://127.0.0.1:3001,https://localhost:3002,https://127.0.0.1:3002}
+      # Portal auth cookies (HttpOnly migration). Empty domain = host-only
+      # (localhost shares across ports in dev). AUTH_COOKIE_SECURE unset =
+      # auto (off in dev, on in prod — no configuration needed for Secure).
+      # PROD: set AUTH_COOKIE_DOMAIN (+ AUTH_COOKIE_SAMESITE if you leave
+      # "lax") in .env — docker-compose.prod.yml does NOT set them. On a
+      # subdomain deployment a host-only cookie never reaches the chat /
+      # gateway origins and every authed fetch 401s. See docs/SSO-GO-LIVE.md.
+      AUTH_COOKIE_DOMAIN: ${AUTH_COOKIE_DOMAIN:-}
+      AUTH_COOKIE_SAMESITE: ${AUTH_COOKIE_SAMESITE:-lax}
+      # The portal origin the user browses to. Verification links,
+      # password-reset links, and invite-link emails are stamped with
+      # this host — mismatched value = dead links in email.
+      PORTAL_PUBLIC_URL: ${PORTAL_PUBLIC_URL:-https://localhost:3001}
+      # FIX134 B2 — the OAuth return_to allowlist (portal_auth.oauth_start):
+      # the portal and admin-ui origins as the browser reaches them (https
+      # behind Caddy). Outside development the backend refuses an http://
+      # value here. Defaults: the portal's public URL, then the https front door
+      # (an http default would block a production boot, the FIX133 trap).
+      PORTAL_ORIGIN: ${PORTAL_ORIGIN:-${PORTAL_PUBLIC_URL:-https://localhost:3001}}
+      ADMIN_UI_ORIGIN: ${ADMIN_UI_ORIGIN:-https://localhost:3000}
+      # Google SSO (Phase 1). The portal's NextAuth flow forwards the
+      # Google id_token to /portal/auth/oauth/verify; the backend pins
+      # the token's ``aud`` to this client id, so it MUST be the same
+      # Google OAuth client the portal uses (single ${GOOGLE_CLIENT_ID}
+      # env var feeds both services).
+      OAUTH_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      # SSO Phase 2 (desktop server-side PKCE): the backend exchanges
+      # the auth code with Google itself, which needs the client secret
+      # — it lives ONLY here, never in the desktop app.
+      OAUTH_GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # Sign-in domain lock (Phase 0) — comma-separated; empty = allow
+      # every domain. Enforced server-side in login_or_create + signup.
+      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-gbtech.co.th}
+      # ``hd`` account-chooser hint on the server-driven /oauth/start
+      # path (UX only, never enforcement).
+      GOOGLE_HOSTED_DOMAIN: ${GOOGLE_HOSTED_DOMAIN:-gbtech.co.th}
+      # Phase 3 cutover: false = email+password surface answers 403
+      # (login / signup / password-reset) while the code stays in
+      # place; the login UIs hide the form off the same flag via
+      # /portal/auth/public-settings. Default true so a bare checkout
+      # still boots in the pre-cutover shape.
+      PASSWORD_LOGIN_ENABLED: ${PASSWORD_LOGIN_ENABLED:-true}
+      # FIX134 B5 — addresses that may still sign in by password while the
+      # switch above is off (comma-separated, case-insensitive; the login
+      # route only). The smoke-test account only; never a real person.
+      PASSWORD_LOGIN_ALLOWED_EMAILS: ${PASSWORD_LOGIN_ALLOWED_EMAILS:-}
+      # FIX134 B4 — the OpenAI /v1/moderations scan on turns whose policy
+      # profile has moderation on: auto = only with a usable OpenAI key
+      # (a 401/403 opens a 30-minute breaker with one warning), off = never.
+      MODERATION_MODE: ${MODERATION_MODE:-auto}
+      # Empty by default → adapters hit real provider URLs. Uncomment
+      # PROVIDER_BASE_URL_OVERRIDES in .env to redirect openai/
+      # anthropic/openrouter at the in-cluster mock-provider service.
+      PROVIDER_BASE_URL_OVERRIDES: ${PROVIDER_BASE_URL_OVERRIDES:-}
+      # Batch A provider-resilience knobs — all default to previous
+      # behavior when unset (no caps, pool 50/20/30s, 4 workers). See
+      # .env.example for the cap x GUNICORN_WORKERS sizing formula.
+      PROVIDER_CONCURRENCY_CAPS: ${PROVIDER_CONCURRENCY_CAPS:-}
+      PROVIDER_CONCURRENCY_ACQUIRE_TIMEOUT_SECONDS: ${PROVIDER_CONCURRENCY_ACQUIRE_TIMEOUT_SECONDS:-1.0}
+      PROVIDER_POOL_MAX_CONNECTIONS: ${PROVIDER_POOL_MAX_CONNECTIONS:-50}
+      PROVIDER_POOL_MAX_KEEPALIVE_CONNECTIONS: ${PROVIDER_POOL_MAX_KEEPALIVE_CONNECTIONS:-20}
+      PROVIDER_POOL_KEEPALIVE_EXPIRY_SECONDS: ${PROVIDER_POOL_KEEPALIVE_EXPIRY_SECONDS:-30.0}
+      PROVIDER_POOL_OVERRIDES: ${PROVIDER_POOL_OVERRIDES:-}
+      # FIX131 — the process model (backend/gunicorn.conf.py): workers,
+      # worker heartbeat, and how long in-flight turns get after SIGTERM.
+      # stop_grace_period below must stay above GUNICORN_GRACEFUL_TIMEOUT.
+      # FIX133 A1 — WORKERS in .env wins, then GUNICORN_WORKERS; empty (the
+      # default) = computed from cores, RAM and the Postgres budget
+      # (backend/app/core/sizing.py: 4 on this box). Nothing hardcoded.
+      WORKERS: ${WORKERS:-}
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-}
+      # FIX133 A2/A3 — the turn queue (app/core/turn_queue.py). 0 = computed:
+      # max_active = CPUs, per-caller share = max_active/6, refuse past
+      # 4 x max_active waiting; the wait itself is bounded.
+      CHAT_INFLIGHT_LIMIT: ${CHAT_INFLIGHT_LIMIT:-64}
+      TURN_QUEUE_ENABLED: ${TURN_QUEUE_ENABLED:-true}
+      TURN_QUEUE_MAX_ACTIVE: ${TURN_QUEUE_MAX_ACTIVE:-0}
+      TURN_QUEUE_MAX_PER_IDENTITY: ${TURN_QUEUE_MAX_PER_IDENTITY:-0}
+      TURN_QUEUE_MAX_WAITING: ${TURN_QUEUE_MAX_WAITING:-0}
+      TURN_QUEUE_MAX_WAIT_SECONDS: ${TURN_QUEUE_MAX_WAIT_SECONDS:-120}
+      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-60}
+      GUNICORN_GRACEFUL_TIMEOUT: ${GUNICORN_GRACEFUL_TIMEOUT:-180}
+      # FIX133 B — proxies whose X-Forwarded-* headers uvicorn honours ("*":
+      # the compose network is the only way in; see gunicorn.conf.py).
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
+      # Phase-3 log-worker engine selector. ``python`` keeps the
+      # legacy in-process queue; ``go`` dispatches to the Go sidecar
+      # over gRPC. Falls back to the legacy path automatically when
+      # the sidecar is unreachable or grpcio is missing.
+      LOG_WORKER_ENGINE: ${LOG_WORKER_ENGINE:-python}
+      LOG_WORKER_GRPC_ADDRESS: ${LOG_WORKER_GRPC_ADDRESS:-log-worker:50052}
+      LOG_WORKER_GRPC_TIMEOUT_SECONDS: ${LOG_WORKER_GRPC_TIMEOUT_SECONDS:-0.5}
+      # Phase-3b Rust rate-limiter sidecar. ``python`` keeps the
+      # legacy in-process sliding-window; ``rust`` dispatches to the
+      # gRPC sidecar (fail-open fallback to Python on any error).
+      RATE_LIMITER_ENGINE: ${RATE_LIMITER_ENGINE:-python}
+      RATE_LIMITER_GRPC_ADDRESS: ${RATE_LIMITER_GRPC_ADDRESS:-rate-limiter:50053}
+      RATE_LIMITER_GRPC_TIMEOUT_SECONDS: ${RATE_LIMITER_GRPC_TIMEOUT_SECONDS:-0.5}
+      # Phase-3c Rust DLP sidecar engine selector. ``python`` keeps
+      # the in-process registry; ``rust`` dispatches scans via gRPC
+      # (fail-open fallback to Python); ``shadow`` runs both in
+      # parallel and logs diffs.
+      DLP_ENGINE: ${DLP_ENGINE:-python}
+      DLP_GRPC_ADDRESS: ${DLP_GRPC_ADDRESS:-dlp-sidecar:50051}
+      DLP_GRPC_TIMEOUT_SECONDS: ${DLP_GRPC_TIMEOUT_SECONDS:-1.0}
+      # DLP system-prompt variant. ``v1`` (default) = verbose
+      # "Critical rule: do not invent" copy with [CATEGORY_NUMBER]
+      # example. ``v3`` = no-example variant audited to lower
+      # hallucination rate. A/B by flipping per deployment.
+      DLP_PROMPT_VARIANT: ${DLP_PROMPT_VARIANT:-v1}
+      # Pseudonymization mode — readable <<CATEGORY_N>> token shape
+      # on identity-class detectors. Default-on; set to ``false`` in
+      # .env to revert to the legacy <rN> shape on every detector.
+      DLP_PSEUDONYM_MODE: ${DLP_PSEUDONYM_MODE:-true}
+      # Masking follows where the data goes (app/services/dlp/in_house.py): the project ids,
+      # comma separated, whose ``X-Sran-Egress: closed`` is believed. Empty (the default) = no
+      # request is ever sent to a model unmasked, whatever its headers say.
+      DLP_IN_HOUSE_PROJECTS: ${DLP_IN_HOUSE_PROJECTS:-}
+      # FIX129 A1 — per-connection Postgres time limits (ms; 0 = off). The
+      # code defaults are 60000 / 10000 / 30000; these are the override knobs.
+      DB_STATEMENT_TIMEOUT_MS: ${DB_STATEMENT_TIMEOUT_MS:-}
+      DB_LOCK_TIMEOUT_MS: ${DB_LOCK_TIMEOUT_MS:-}
+      DB_IDLE_IN_TRANSACTION_TIMEOUT_MS: ${DB_IDLE_IN_TRANSACTION_TIMEOUT_MS:-}
+      # FIX129 A4 — alert channels (see docs/ops/monitoring.md). ntfy is the
+      # phone channel: ALERT_NTFY_URL is a full topic URL the owner
+      # subscribes to in the ntfy app. Email needs RESEND_API_KEY.
+      ALERT_NTFY_URL: ${ALERT_NTFY_URL:-}
+      ALERT_NTFY_TOKEN: ${ALERT_NTFY_TOKEN:-}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      # FIX131 D4 — see ops-watch: [TEST] label + the throwaway test topic.
+      ALERT_ENVIRONMENT: ${ALERT_ENVIRONMENT:-}
+      ALERT_TEST_NTFY_URL: ${ALERT_TEST_NTFY_URL:-}
+      # FIX129 B2 — logout also revokes the access token on chat-edge
+      # (POST /internal/auth/revoke, gated by INTERNAL_SERVICE_SECRET on
+      # both sides). Same docker network, so the service name resolves.
+      CHAT_EDGE_INTERNAL_URL: ${CHAT_EDGE_INTERNAL_URL:-http://chat-edge-api:4000}
+    # FIX131 — the live backend runs the IMAGE (Dockerfile CMD = serve.sh:
+    # migrate, then gunicorn with GUNICORN_WORKERS workers): no source mount,
+    # no --reload; editing the checkout changes nothing until an image is
+    # built and deployed (docs/ops/deploy-backend.md). The only volume is the
+    # runtime data the app writes: users' avatars (served at /static). The
+    # DLP parity fixtures mount moved to docker-compose.dev.yml with the
+    # other test-time mounts; tests run in a throwaway container
+    # (scripts/backend-test-lane.sh), never in this one.
+    volumes:
+      - backend_uploads:/app/uploads
+    # FIX131 — Docker's SIGTERM starts gunicorn's graceful drain (in-flight
+    # turns finish, up to GUNICORN_GRACEFUL_TIMEOUT = 180 s); this is how
+    # long Docker waits before SIGKILL. It must exceed the drain plus the
+    # lifespan shutdown (request-log flush, leader hand-over). Without it the
+    # engine's default applies — measured 1 s on this Docker Desktop (a
+    # stopped test container exited 137 after 1.4 s).
+    stop_grace_period: 200s
+    ports:
+      # Python is now an internal service behind the Go gateway. Its
+      # container bind stays 8080; the host publish moved to 8081 so you
+      # can still curl Python directly for debugging during the
+      # migration. External clients should hit the gateway on :8080.
+      - "127.0.0.1:8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mock-provider:
+        condition: service_healthy
+      ner-service:
+        condition: service_healthy
+    # FIX26 §2.2 — probe /ready, not /health: /health answered 200 through
+    # the whole FIX24 outage (DB and Redis were fine; the chat PATH was
+    # stuck). /ready exercises the real request path (async DB, Redis, a
+    # real DLP scan) and reports stuck in-flight requests; 503 = cannot
+    # serve. Bounded server-side (readiness_timeout_seconds) and here.
+    # FIX131 — backend/healthcheck.py: the same /ready probe, but a
+    # container draining after SIGTERM reports healthy (its socket is closed
+    # on purpose), so autoheal does not restart it in the middle of the drain.
+    # The fallback is the old inline probe, for an image built before FIX131
+    # (a rollback), which has no healthcheck.py.
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /app/healthcheck.py && exec python /app/healthcheck.py || exec python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/ready', timeout=4)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    # FIX129 A3: autoheal restarts this container when /ready fails for
+    # retries × interval (see the autoheal service).
+    labels:
+      autoheal: "true"
+      # FIX133 A5 — an autoheal restart gets the same drain as a deploy.
+      autoheal.stop.timeout: "200"
+
+  admin-ui:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 512m
+    mem_reservation: 128m
+    oom_score_adj: -400
+    build:
+      context: ./admin-ui
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_GATEWAY_URL:-https://localhost:8080}
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_GATEWAY_URL:-https://localhost:8080}
+      # Server-side base URL the chat-edge proxy uses to validate the
+      # admin session against gateway-api's /auth/session/me. MUST be the
+      # in-network service hostname — NEXT_PUBLIC_API_BASE_URL is a
+      # browser URL (localhost:8080) and is unreachable from inside the
+      # container, which would make every admin session check 401.
+      GATEWAY_API_URL: http://backend:8080
+      CHAT_EDGE_API_URL: http://chat-edge-api:4000/api/v1
+      CHAT_EDGE_ADMIN_API_KEY: ${CHAT_EDGE_ADMIN_API_KEY:-dev-chat-edge-admin-key-change-in-prod}
+      # FIX133 B — the built (standalone) Next server must listen on every
+      # interface of the container, not only localhost, for Caddy to reach it.
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:23000:3000" # FIX133 A4 — 3000 is Caddy's (https)
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  portal:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 512m
+    mem_reservation: 128m
+    oom_score_adj: -400
+    build:
+      context: ./portal
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_GATEWAY_URL:-https://localhost:8080}
+        NEXT_PUBLIC_OAUTH_ENABLED: ${NEXT_PUBLIC_OAUTH_ENABLED:-false}
+        # Where SRAN Chat lives — the "Open SRAN Chat" dashboard link plus
+        # the three redirect allowlists (middleware.ts, LoginForm,
+        # oauth-complete) all read this. It was never set anywhere, so the
+        # bundler inlined the localhost:3002 fallback at build time and the
+        # portal→chat handoff broke on any real hostname. NEXT_PUBLIC_* is a
+        # BUILD-time substitution: changing WEB_CHAT_PUBLIC_URL requires
+        # rebuilding the portal image (`make build`), not just a restart.
+        # The three allowlist sites take .origin of this value, so the /chat
+        # suffix the dashboard link wants is harmless to them.
+        NEXT_PUBLIC_WEB_CHAT_URL: ${WEB_CHAT_PUBLIC_URL:-https://localhost:3002/chat}
+        # FIX134 A2 — where the portal's server-side /api and /static rewrites
+        # go. With `output: 'standalone'` next.config.js bakes the rewrite
+        # destinations into the build, so this is a BUILD arg: the runtime
+        # twin below never reached them, and every image rewrote to the
+        # http://localhost:8080 fallback inside the container (/api/health
+        # 500, /api/portal/me 503). Changing it means rebuilding the image.
+        BACKEND_URL: ${PORTAL_BACKEND_URL:-http://backend:8080}
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_GATEWAY_URL:-https://localhost:8080}
+      NEXT_PUBLIC_OAUTH_ENABLED: ${NEXT_PUBLIC_OAUTH_ENABLED:-false}
+      # Runtime twin of the build arg above (server-render parity). The build
+      # arg is the authoritative one for anything the browser executes.
+      NEXT_PUBLIC_WEB_CHAT_URL: ${WEB_CHAT_PUBLIC_URL:-https://localhost:3002/chat}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-https://localhost:3001}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev-portal-nextauth-secret}
+      # Runtime twin of the build arg: read per request by lib/session-check.ts
+      # and the cookie-bridge route (not by the rewrites — see the build arg).
+      BACKEND_URL: ${PORTAL_BACKEND_URL:-http://backend:8080}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # Google account-chooser ``hd`` hint (UX only; the backend's
+      # ALLOWED_EMAIL_DOMAINS check is the enforcement).
+      GOOGLE_HOSTED_DOMAIN: ${GOOGLE_HOSTED_DOMAIN:-gbtech.co.th}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      # FIX133 B — see admin-ui.
+      HOSTNAME: 0.0.0.0
+      PORT: "3001"
+    ports:
+      - "127.0.0.1:23001:3001" # FIX133 A4 — 3001 is Caddy's (https)
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- Observability (Phase 3, Commit 4) ----------------------------------
+  # Prometheus scrapes the Go gateway (/__gw/metrics), Python backend
+  # (/metrics), and Redis (via redis-exporter). Host port 9091 — 9090 is
+  # already taken by mock-provider.
+  prometheus:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 768m
+    mem_reservation: 160m
+    oom_score_adj: -200
+    image: prom/prometheus:v2.53.0
+    volumes:
+      - ./infra/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+    ports:
+      - "127.0.0.1:9091:9090"
+    depends_on:
+      - gateway
+      - backend
+    restart: unless-stopped
+
+  grafana:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 512m
+    mem_reservation: 128m
+    oom_score_adj: -200
+    image: grafana/grafana:11.1.0
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      # 3100 on the host — 3000/3001 are admin-ui/portal.
+      - "127.0.0.1:3100:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  redis-exporter:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 128m
+    mem_reservation: 32m
+    oom_score_adj: -200
+    image: oliver006/redis_exporter:v1.61.0
+    environment:
+      REDIS_ADDR: redis://redis:6379
+      # Redis now requires AUTH (--requirepass) — the exporter must send it.
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+    expose:
+      - "9121"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # --- Scaling infra (INERT — compose profile "scaling" only) -------------
+  # None of these start under `docker compose up -d`; the current stack is
+  # UNCHANGED. Bring them up additively with:
+  #     docker compose --profile scaling up -d
+  # Adding them here wires up NOTHING on its own. Full ACTIVATION (repoint
+  # backend -> pgbouncer, disable prepared statements, bypass migrations,
+  # remove the equivalent lifespan jobs, rebuild admin-ui base URL) is in
+  # docs/SCALING_ACTIVATION_RUNBOOK.md.
+  pgbouncer:
+    profiles: ["scaling"]
+    image: edoburu/pgbouncer:1.22.0
+    entrypoint: ["/bin/sh", "/pgbouncer-entrypoint.sh"]
+    volumes:
+      - ./infra/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./infra/pgbouncer/entrypoint.sh:/pgbouncer-entrypoint.sh:ro
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "127.0.0.1:${PGBOUNCER_PORT:-6432}:6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Singleton background-job runner (advisory-locked). DIRECT to postgres —
+  # NOT pgbouncer — because the jobs hold session-level advisory locks.
+  worker:
+    profiles: ["scaling"]
+    build:
+      context: ./backend
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    command: ["python", "-m", "worker"]
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-ai_gateway}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      APP_ENV: ${APP_ENV:-development}
+      PROVIDER_KEY_MASTER_KEY: ${PROVIDER_KEY_MASTER_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Unified reverse proxy (R11 B3): one domain + TLS in front of the whole
+  # stack, path-routed for the desktop app's single-URL mode. Kept behind
+  # profiles so dev `make up` doesn't grab :80; `make prod-desktop` enables it.
+  nginx:
+    profiles: ["scaling", "desktop"]
+    image: nginx:1.27-alpine
+    volumes:
+      - ./infra/nginx/sran-desktop.conf:/etc/nginx/conf.d/default.conf:ro
+      # .inc (not .conf): nginx auto-includes conf.d/*.conf, which would
+      # double-load the location blocks outside a server{} and fail.
+      - ./infra/nginx/sran-routes.inc:/etc/nginx/conf.d/sran-routes.inc:ro
+      - ./infra/nginx/certs:/etc/nginx/certs:ro
+      - ./releases:/var/www/releases:ro # desktop installer + update manifest
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    depends_on:
+      - gateway
+      - chat-edge-api
+      - portal
+    restart: unless-stopped
+
+  # FIX133 A4/B — the front door (infra/caddy/Caddyfile): TLS for every
+  # browser-facing port, least-connections balancing, active health checks
+  # and a graceful hand-over while a service drains. Same port numbers as
+  # before, https instead of http; the services themselves keep a plain
+  # loopback debug door at port + 20000. The certificate and key are the
+  # machine's own (infra/caddy/certs, gitignored; docs/ops/tls.md).
+  edge:
+    # memory guard (scripts/ops/live_memory.py): a ceiling, the floor the others leave it, and its turn
+    # when the Docker VM runs out — negative, so a gate's containers go first
+    mem_limit: 256m
+    mem_reservation: 96m
+    oom_score_adj: -800
+    image: caddy:2-alpine
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/caddy/certs:/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "${EDGE_BIND:-127.0.0.1}:3000:3000"
+      - "${EDGE_BIND:-127.0.0.1}:3001:3001"
+      - "${EDGE_BIND:-127.0.0.1}:3002:3002"
+      - "${EDGE_BIND:-127.0.0.1}:4000:4000"
+      - "${EDGE_BIND:-127.0.0.1}:8080:8080"
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    stop_grace_period: 130s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:
+  chat_edge_uploads:
+  # FIX129 — the ops watcher's open findings / last-announced times.
+  ops_watch_state:
+  # FIX131 — backend runtime uploads (avatars). Before FIX131 they lived in
+  # the bind-mounted checkout (backend/uploads/); see
+  # docs/ops/deploy-backend.md for the one-time copy into this volume.
+  backend_uploads:
+  mcp_workspace:
+  # FIX132 B — kb-models' pinned weights, filled once.
+  kb_models:
+  caddy_data:
+  caddy_config:

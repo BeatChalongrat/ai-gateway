@@ -1,0 +1,822 @@
+"use client";
+
+import { useState, useMemo } from "react";
+import { outfit } from "../fonts";
+import ErrorState from "../../components/ui/ErrorState";
+import EmptyState from "../../components/ui/EmptyState";
+import { Icon } from "../../components/ui/Icon";
+import Modal from "../../components/ui/Modal";
+import { SkeletonTable } from "../../components/ui/Skeleton";
+import { useApi } from "../../lib/useApi";
+import { api } from "../../lib/api";
+import { useToast } from "../../components/ui/Toast";
+import { ThemeToggle } from "../../components/ThemeToggle";
+import { useT } from "../../lib/i18n";
+
+// Theme-reactive tokens. Values resolve from CSS vars set on <html data-theme>
+// so the whole page re-tints on theme toggle without re-rendering.
+const T = {
+  bg: "var(--bg-base)", card: "var(--bg-surface)",
+  bl: "var(--border-default)", bm: "var(--border-default)",
+  tp: "var(--text-primary)", ts: "var(--text-secondary)",
+  th: "var(--text-secondary)", tt: "var(--text-muted)",
+  accent: "var(--accent-primary)",
+  green: "var(--accent-success)", red: "var(--accent-danger)",
+  mono: "'JetBrains Mono','Fira Code',monospace",
+  // Code-block background stays dark in both themes (syntax-highlighted output
+  // reads poorly on a light card background).
+  dark: "#1a1d27",
+};
+
+interface RequestDetail {
+  request_id: string; provider: string; model: string; status: string;
+  policy_action: string; latency_ms: number;
+  prompt_tokens?: number; completion_tokens?: number; total_tokens?: number;
+  estimated_cost_usd?: number; error_code?: string | null;
+  created_at?: string | null;
+  input_raw?: string | null; input_masked?: string | null;
+  output_raw?: string | null; output_final?: string | null;
+  input_raw_encrypted?: string | null;
+  dlp_findings?: any[] | null;
+}
+
+interface SecureTrace {
+  request_id: string;
+  trace_mode: "admin_secure" | "persisted";
+  stages: Record<string, { visibility: string; content: string | null; source?: string }>;
+  dlp: {
+    policy_action: string;
+    findings_count?: number;
+    detectors?: string[];
+    input_findings_count?: number;
+    output_findings_count?: number;
+  };
+  decrypt_status?: string;
+}
+
+// Composite shape rendered in the Safe Trace panel — stages 2/3 read
+// from the persisted /trace endpoint; stage 1 prefers /trace (decrypted
+// from ``input_raw_encrypted``) but falls back to /secure-trace for
+// rows written before the audit ciphertext column existed; stage 4
+// reads the ``output_final`` column directly (post-restore plaintext).
+interface SafeTracePanelData {
+  user_to_service: string | null;
+  service_to_ai: string | null;
+  ai_to_service: string | null;
+  service_to_user: string | null;
+  source_user: "persisted" | "secure_trace" | "placeholder" | "unavailable";
+  source_final: "persisted" | "placeholder" | "unavailable";
+}
+
+const CSS = `
+@keyframes rqFadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes rqSlideIn{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:translateX(0)}}
+@keyframes rqBlink{0%,100%{opacity:1}50%{opacity:0.3}}
+.rq-anim{animation:rqFadeUp 0.35s ease-out both}
+.rq-detail-in{animation:rqSlideIn 0.25s ease-out both}
+.rq-row{transition:background 80ms}
+.rq-row:hover{background:rgba(59,108,246,0.04)}
+/* Detail panel positioning lives here (not inline) so the narrow-screen
+   media query can override it into a bottom sheet. */
+.rq-detail-panel{position:sticky;top:20px;align-self:start;max-height:calc(100vh - 60px);overflow-y:auto;border-radius:14px}
+.rq-sheet-close{display:none}
+.rq-sheet-backdrop{display:none}
+@keyframes rqSheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+@media(max-width:1100px){
+  .rq-split{grid-template-columns:1fr!important}
+  /* Unselected: keep the placeholder panel out of the way on narrow. */
+  .rq-detail-panel{display:none!important}
+  /* Selected: slide up as a bottom sheet instead of vanishing. */
+  .rq-detail-panel.rq-detail-open{display:block!important;position:fixed!important;left:0;right:0;bottom:0;top:auto!important;max-height:85vh;border-radius:16px 16px 0 0;z-index:60;animation:rqSheetUp 0.25s ease-out}
+  .rq-detail-open .rq-sheet-close{display:inline-flex}
+  .rq-sheet-backdrop{display:block;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:55}
+}
+`;
+
+/* ── Sparkline ────────────────────────────────────────────────────── */
+
+function Sparkline({ items }: { items: any[] }) {
+  const t = useT();
+  // Build 48 buckets (30min each over 24h) from request timestamps
+  const now = Date.now();
+  const buckets = useMemo(() => {
+    const b = Array.from({ length: 48 }, () => ({ ok: 0, err: 0 }));
+    items.forEach((r) => {
+      if (!r.created_at) return;
+      const age = now - new Date(r.created_at).getTime();
+      const idx = 47 - Math.min(47, Math.floor(age / (30 * 60 * 1000)));
+      if (r.status === "success") b[idx].ok++; else b[idx].err++;
+    });
+    return b;
+  }, [items]);
+
+  const maxH = Math.max(1, ...buckets.map((b) => b.ok + b.err));
+  const totalOk = buckets.reduce((s, b) => s + b.ok, 0);
+  const totalErr = buckets.reduce((s, b) => s + b.err, 0);
+
+  return (
+    <div className="rq-anim" style={{ background: T.card, borderRadius: 10, border: `1px solid ${T.bl}`, boxShadow: "0 1px 2px rgba(0,0,0,0.04)", padding: "14px 20px", marginBottom: 14, display: "flex", alignItems: "center", gap: 16 }}>
+      <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: T.tt, flexShrink: 0 }}>24h</span>
+      <div style={{ display: "flex", gap: 2, alignItems: "flex-end", height: 28, flex: 1 }}>
+        {buckets.map((b, i) => {
+          const total = b.ok + b.err;
+          const h = total > 0 ? Math.max(3, Math.round((total / maxH) * 28)) : 2;
+          const hasErr = b.err > 0;
+          return <div key={i} style={{ flex: 1, minWidth: 2, height: h, borderRadius: "2px 2px 0 0", background: hasErr ? T.red : total > 0 ? T.green : "var(--border-default)", opacity: 0.85, transition: "opacity 100ms" }}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.85"; }}
+          />;
+        })}
+      </div>
+      <div style={{ display: "flex", gap: 14, flexShrink: 0, alignItems: "center" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.green }} />
+          <span style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 700, color: T.tp }}>{totalOk}</span>
+          <span style={{ fontSize: 11, color: T.tt }}>{t("obs.req.spark.ok")}</span>
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.red }} />
+          <span style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 700, color: T.tp }}>{totalErr}</span>
+          <span style={{ fontSize: 11, color: T.tt }}>{t("obs.req.spark.err")}</span>
+        </span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 100, background: "rgba(16,185,129,0.08)", fontSize: 11, fontWeight: 600, color: "#059669" }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.green, animation: "rqBlink 1.2s ease-in-out infinite" }} />
+          {t("obs.req.spark.live")}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/* ── JSON highlight ───────────────────────────────────────────────── */
+
+function JsonBlock({ data }: { data: any }) {
+  const json = JSON.stringify(data, null, 2);
+  // Simple syntax highlight
+  const html = json
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"([^"]+)":/g, '<span style="color:rgba(255,255,255,0.35)">"$1"</span>:')
+    .replace(/: "([^"]*)"/g, ': <span style="color:#10b981">"$1"</span>')
+    .replace(/: (\d+\.?\d*)/g, ': <span style="color:#06b6d4">$1</span>')
+    .replace(/: (true|false|null)/g, ': <span style="color:#f59e0b">$1</span>');
+
+  return (
+    <pre style={{
+      background: T.dark, borderRadius: 8, padding: "14px 16px", margin: 0,
+      fontFamily: T.mono, fontSize: "10.5px", lineHeight: 1.7, color: "rgba(255,255,255,0.7)",
+      overflowX: "auto", maxHeight: 320,
+    }} dangerouslySetInnerHTML={{ __html: html }} />
+  );
+}
+
+// Small header strip for the JSON panel in the detail pane — label
+// on the left, "Copy JSON" action on the right. Hoisted so the page
+// body doesn't repeat the layout markup.
+function JsonPanelHeader({ label, onCopy }: { label: string; onCopy: () => void }) {
+  const t = useT();
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+      <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt }}>{label}</span>
+      <button
+        onClick={(e) => { e.stopPropagation(); onCopy(); }}
+        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, color: T.accent, padding: 0, fontFamily: "inherit" }}
+      >
+        {t("obs.copyJson")}
+      </button>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/* PAGE                                                                */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+export default function RequestsPage() {
+  const { data, loading, error, refetch } = useApi<{ items: any[] }>("/admin/requests");
+  const [selected, setSelected] = useState<any | null>(null);
+  const [detail, setDetail] = useState<RequestDetail | null>(null);
+  const [secureTrace, setSecureTrace] = useState<SecureTrace | null>(null);
+  const [secureTraceLoading, setSecureTraceLoading] = useState(false);
+  const [safeTracePanel, setSafeTracePanel] = useState<SafeTracePanelData | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [downloading, setDownloading] = useState(false);
+  const [secureReasonOpen, setSecureReasonOpen] = useState(false);
+  const [secureReason, setSecureReason] = useState("");
+  const { toast } = useToast();
+  const t = useT();
+
+  const items = data?.items ?? [];
+
+  const filtered = useMemo(() => {
+    let r = items;
+    if (statusFilter === "ok") r = r.filter((x) => x.status === "success");
+    else if (statusFilter === "error") r = r.filter((x) => x.status !== "success");
+    else if (statusFilter === "masked") r = r.filter((x) => x.policy_action === "mask");
+    if (search) {
+      const q = search.toLowerCase();
+      r = r.filter((x) => x.request_id?.toLowerCase().includes(q) || x.model?.toLowerCase().includes(q) || x.provider?.toLowerCase().includes(q) || x.status?.toLowerCase().includes(q));
+    }
+    return r;
+  }, [items, statusFilter, search]);
+
+  const pageSize = 15;
+  const paged = useMemo(() => filtered.slice((page - 1) * pageSize, page * pageSize), [filtered, page]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+
+  async function selectRow(r: any) {
+    setSelected(r);
+    setDetail(null);
+    setSecureTrace(null);
+    setSafeTracePanel(null);
+    setDetailLoading(true);
+    try {
+      const d = (await api.get(`/admin/requests/${r.request_id}`)) as RequestDetail;
+      setDetail(d);
+      // Auto-load Safe Trace panel content: /trace decrypts stage 1
+      // from input_raw_encrypted; stage 4 (post-restore plaintext) is
+      // never persisted, so we ask /secure-trace as a best-effort
+      // backfill while the in-memory record exists (~15 min).
+      void loadSafeTracePanel(r.request_id, d);
+    } catch {
+      setDetail(null);
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  async function loadSafeTracePanel(requestId: string, d: RequestDetail) {
+    let user_to_service: string | null = null;
+    let source_user: SafeTracePanelData["source_user"] = "unavailable";
+    let service_to_ai: string | null = d.input_masked ?? null;
+    let ai_to_service: string | null = d.output_raw ?? null;
+
+    // 1. Try /trace — persisted, decrypted, no 15-min TTL.
+    try {
+      const trace = (await api.get(`/admin/requests/${requestId}/trace?reason=safe-trace-panel-auto`)) as SecureTrace;
+      const u = trace.stages?.user_to_service?.content ?? null;
+      if (u) {
+        user_to_service = u;
+        source_user = "persisted";
+      }
+      // Stages 2 and 3 from /trace are the same DB columns we already
+      // have on ``detail`` — keep ``detail`` as the source so we don't
+      // double-fetch when the user toggles filter/search.
+      service_to_ai = trace.stages?.service_to_ai?.content ?? service_to_ai;
+      ai_to_service = trace.stages?.ai_to_service?.content ?? ai_to_service;
+    } catch {
+      // /trace 403 / 404 — fall through to /secure-trace below.
+    }
+
+    // 2. Backfill stage 1 only when /trace had no ciphertext (legacy
+    //    rows). Stage 4 (Service → User) deliberately never reads from
+    //    the in-memory secure-trace store here — that path leaks the
+    //    AI's full restored response (which may include curl examples,
+    //    code blocks, or any text the model produced) directly under
+    //    the [MASKED_BY_DLP] placeholder in the panel UI. The explicit
+    //    "Admin Secure Trace" button still surfaces it under a separate
+    //    consent flow.
+    if (!user_to_service) {
+      try {
+        const sec = (await api.get(
+          `/admin/requests/${requestId}/secure-trace?reason=safe-trace-panel-stage1-fallback`,
+        )) as SecureTrace;
+        if (sec.stages?.user_to_service?.content) {
+          user_to_service = sec.stages.user_to_service.content;
+          source_user = "secure_trace";
+        }
+      } catch {
+        // No in-memory record — stage 1 stays on the placeholder below.
+      }
+    }
+
+    if (!user_to_service) {
+      user_to_service = d.input_raw ?? null;
+      source_user = "placeholder";
+    }
+
+    // Stage 4 renders the persisted ``output_final`` column directly.
+    // It now stores the actual post-restore plaintext the user
+    // received (admin-only via the Role.ADMIN gate on this route);
+    // legacy rows / blocked requests may still hold the
+    // ``[MASKED_BY_DLP]`` / ``[BLOCKED_BY_DLP]`` placeholder, in which
+    // case we surface that verbatim with the placeholder badge.
+    const service_to_user: string | null = d.output_final ?? null;
+    const looks_like_placeholder =
+      service_to_user === "[MASKED_BY_DLP]" || service_to_user === "[BLOCKED_BY_DLP]";
+    const source_final: SafeTracePanelData["source_final"] = looks_like_placeholder
+      ? "placeholder"
+      : "persisted";
+
+    setSafeTracePanel({
+      user_to_service,
+      service_to_ai,
+      ai_to_service,
+      service_to_user,
+      source_user,
+      source_final,
+    });
+  }
+
+  async function loadSecureTrace(reason: string) {
+    if (!detail || secureTraceLoading) return;
+    setSecureTraceLoading(true);
+    try {
+      const path = `/admin/requests/${detail.request_id}/secure-trace?reason=${encodeURIComponent(reason || "admin-debug")}`;
+      const d = await api.get(path);
+      setSecureTrace(d as SecureTrace);
+      toast(t("obs.req.secureLoaded"));
+    } catch {
+      toast(t("obs.req.secureDenied"));
+      setSecureTrace(null);
+    } finally {
+      setSecureTraceLoading(false);
+    }
+  }
+
+  function submitSecureReason() {
+    const reason = secureReason.trim();
+    if (!reason) return;
+    setSecureReasonOpen(false);
+    void loadSecureTrace(reason);
+  }
+
+  const okCount = items.filter((x) => x.status === "success").length;
+  const errCount = items.filter((x) => x.status !== "success").length;
+  const allowedCount = items.filter((x) => x.policy_action === "allow").length;
+  const maskedCount = items.filter((x) => x.policy_action === "mask").length;
+  const blockedCount = items.filter((x) => x.policy_action === "block" || x.status === "blocked").length;
+
+  // Client-side CSV export. The list endpoint doesn't carry detail
+  // fields (input_masked, dlp_findings, etc.), so the export sticks
+  // to what every row reliably has — consistent with what the old
+  // /audit page exported before it was folded into this page.
+  async function handleDownload() {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      const res = (await api.get("/admin/requests?limit=1000")) as { items?: any[] };
+      let rows = res?.items ?? [];
+      if (statusFilter === "ok") rows = rows.filter((x) => x.status === "success");
+      else if (statusFilter === "error") rows = rows.filter((x) => x.status !== "success");
+      else if (statusFilter === "masked") rows = rows.filter((x) => x.policy_action === "mask");
+      if (search) {
+        const q = search.toLowerCase();
+        rows = rows.filter((x) =>
+          x.request_id?.toLowerCase().includes(q) ||
+          x.model?.toLowerCase().includes(q) ||
+          x.provider?.toLowerCase().includes(q) ||
+          x.status?.toLowerCase().includes(q),
+        );
+      }
+
+      const header = ["request_id", "timestamp", "provider", "model", "policy", "latency_ms", "status"];
+      const esc = (v: any) => {
+        const s = v == null ? "" : String(v);
+        return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const lines = [header.join(",")];
+      for (const r of rows) {
+        lines.push([
+          r.request_id ?? "",
+          r.created_at ?? "",
+          r.provider ?? "",
+          r.model ?? "",
+          r.policy_action ?? "",
+          r.latency_ms ?? "",
+          r.status ?? "",
+        ].map(esc).join(","));
+      }
+      const csv = lines.join("\n");
+
+      const today = new Date().toISOString().slice(0, 10);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `requests-${today}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      toast(t("obs.req.downloaded", { n: rows.length }));
+    } catch (e: any) {
+      toast(e?.body?.error?.message || t("obs.req.downloadFailed"), "error");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  return (
+    <div className={outfit.className} style={{ background: T.bg, margin: "-1.75rem -2.25rem -2.5rem", padding: "1.75rem 2.25rem 2.5rem", minHeight: "100%" }}>
+      <style>{CSS}</style>
+
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+        <div>
+          <h1 style={{ fontSize: 30, fontWeight: 800, color: T.tp, letterSpacing: "-0.03em", lineHeight: 1.2, margin: 0 }}>{t("obs.req.title")}</h1>
+          <p style={{ fontSize: 15, fontWeight: 500, color: T.ts, margin: "4px 0 0" }}>{t("obs.req.subtitle")}</p>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={refetch} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px", fontSize: 13, fontWeight: 500, fontFamily: "inherit", borderRadius: 8, border: `1px solid ${T.bl}`, background: T.card, color: T.ts, cursor: "pointer" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+            {t("action.refresh")}
+          </button>
+          <button
+            onClick={handleDownload}
+            disabled={downloading || items.length === 0}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px",
+              fontSize: 13, fontWeight: 500, fontFamily: "inherit", borderRadius: 8,
+              border: `1px solid ${T.bl}`, background: T.card, color: T.ts,
+              cursor: downloading ? "wait" : items.length === 0 ? "not-allowed" : "pointer",
+              opacity: downloading || items.length === 0 ? 0.65 : 1,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            {downloading ? t("obs.req.preparing") : t("obs.req.download")}
+          </button>
+          <ThemeToggle />
+        </div>
+      </div>
+
+      {/* Stats chips — total / allowed / masked / blocked.
+          Matches the summary row the old /audit page had before the
+          two pages were folded together. */}
+      {!loading && !error && items.length > 0 && (
+        <div className="rq-anim" style={{ animationDelay: "0.02s", display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+          {([
+            { label: "obs.req.chip.totalRecords", count: items.length, dot: null },
+            { label: "obs.req.chip.allowed", count: allowedCount, dot: T.green },
+            { label: "obs.req.chip.masked", count: maskedCount, dot: "#f59e0b" },
+            { label: "obs.req.chip.blocked", count: blockedCount, dot: T.red },
+          ] as const).map((c) => (
+            <span key={c.label} style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              padding: "6px 14px", borderRadius: 16,
+              background: T.card, border: `1px solid ${T.bl}`, fontSize: 13,
+            }}>
+              {c.dot && <span style={{ width: 7, height: 7, borderRadius: "50%", background: c.dot }} />}
+              <span style={{ fontFamily: T.mono, fontWeight: 600, color: T.tp }}>{c.count}</span>
+              <span style={{ color: T.ts }}>{t(c.label)}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Sparkline */}
+      {!loading && !error && items.length > 0 && <Sparkline items={items} />}
+
+      {/* Filter bar */}
+      {!loading && !error && items.length > 0 && (
+        <div className="rq-anim" style={{ animationDelay: "0.05s", display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+          <div style={{ position: "relative", flex: "0 1 320px", minWidth: 160 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.tt} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder={t("obs.req.searchPlaceholder")}
+              style={{ width: "100%", padding: "6px 24px 6px 30px", fontSize: 13, fontFamily: T.mono, border: `1.5px solid ${T.bl}`, borderRadius: 6, background: "var(--bg-base)", color: T.tp, outline: "none", transition: "border-color 120ms, box-shadow 120ms, background 120ms" }}
+              onFocus={(e) => { e.currentTarget.style.borderColor = T.accent; e.currentTarget.style.boxShadow = "0 0 0 3px rgba(99,102,241,0.18)"; e.currentTarget.style.background = "var(--bg-surface)"; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = T.bl; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.background = "var(--bg-base)"; }}
+            />
+            {search && <button onClick={() => { setSearch(""); setPage(1); }} style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: T.tt, fontSize: 12, padding: 2 }}><Icon name="x" size={12} /></button>}
+          </div>
+          <div style={{ display: "flex", gap: 4 }}>
+            {([
+              { key: null, label: "field.all", count: items.length, dot: null },
+              { key: "ok", label: "obs.req.filter.ok", count: okCount, dot: T.green },
+              { key: "error", label: "obs.req.filter.error", count: errCount, dot: T.red },
+              { key: "masked", label: "obs.req.filter.masked", count: maskedCount, dot: "#f59e0b" },
+            ] as const).map((f) => {
+              const active = statusFilter === f.key;
+              return (
+                <button key={f.label} onClick={() => { setStatusFilter(f.key); setPage(1); }} style={{
+                  display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", fontSize: 11, fontWeight: active ? 600 : 500, borderRadius: 6, cursor: "pointer", fontFamily: "inherit",
+                  border: active ? `1.5px solid ${T.accent}` : "1.5px solid transparent",
+                  background: active ? "rgba(59,108,246,0.06)" : "transparent", color: active ? T.accent : T.tt, transition: "all 120ms",
+                }}>
+                  {f.dot && <span style={{ width: 7, height: 7, borderRadius: "50%", background: f.dot, opacity: active ? 1 : 0.5 }} />}
+                  {t(f.label)} <span style={{ fontWeight: 700, fontSize: 10 }}>{f.count}</span>
+                </button>
+              );
+            })}
+          </div>
+          <span style={{ flex: 1 }} />
+          <span style={{ fontFamily: T.mono, fontSize: 12, color: T.tt }}>{t("obs.req.results", { n: filtered.length })}</span>
+        </div>
+      )}
+
+      {/* Content */}
+      {loading ? (
+        <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, padding: 20 }}><SkeletonTable rows={10} cols={6} /></div>
+      ) : error ? (
+        <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, padding: 20 }}><ErrorState message={error} onRetry={refetch} /></div>
+      ) : items.length === 0 ? (
+        <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, padding: 20 }}><EmptyState message={t("obs.req.empty")} icon={<Icon name="inbox" size={22} />} /></div>
+      ) : (
+        <div className="rq-anim rq-split" style={{ animationDelay: "0.1s", display: "grid", gridTemplateColumns: "1fr 380px", gap: 16 }}>
+          {/* Left: list */}
+          <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bl}`, boxShadow: "0 1px 2px rgba(0,0,0,0.04)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+            <div style={{ flex: 1, overflowY: "auto" }}>
+              {filtered.length === 0 ? (
+                <div style={{ padding: "40px 20px", textAlign: "center", color: T.tt, fontSize: 13 }}>
+                  {t("obs.req.noMatch")}
+                </div>
+              ) : null}
+              {paged.map((r) => {
+                const isOk = r.status === "success";
+                const isSel = selected?.request_id === r.request_id;
+                return (
+                  <div key={r.request_id} className="rq-row" onClick={() => selectRow(r)} style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "12px 20px", cursor: "pointer",
+                    borderBottom: `1px solid ${T.bl}`,
+                    background: isSel ? "rgba(59,108,246,0.05)" : "transparent",
+                    borderLeft: isSel ? `3px solid ${T.accent}` : "3px solid transparent",
+                  }}>
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: isOk ? T.green : T.red, flexShrink: 0 }} />
+                    <span style={{ fontFamily: T.mono, fontSize: "10.5px", color: T.tt, width: 76, flexShrink: 0 }}>
+                      {r.created_at ? new Date(r.created_at).toLocaleTimeString() : "—"}
+                    </span>
+                    <span style={{ fontFamily: T.mono, fontSize: "11.5px", color: T.tp, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>
+                      {r.model}
+                    </span>
+                    <span style={{ fontSize: 11, color: T.tt, width: 70, flexShrink: 0, textTransform: "capitalize" }}>{r.provider}</span>
+                    {r.policy_action && (
+                      <span style={{
+                        fontFamily: T.mono, fontSize: "9.5px", fontWeight: 600, padding: "2px 7px", borderRadius: 100,
+                        color: r.policy_action === "allow" ? "#059669" : "#d97706",
+                        background: r.policy_action === "allow" ? "rgba(16,185,129,0.08)" : "rgba(245,158,11,0.08)",
+                      }}>{r.policy_action}</span>
+                    )}
+                    <span style={{ fontFamily: T.mono, fontSize: "10.5px", color: T.tt, width: 55, textAlign: "right", flexShrink: 0 }}>{r.latency_ms}ms</span>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Pagination */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 20px", borderTop: `1px solid ${T.bl}`, fontSize: 12 }}>
+              <span style={{ fontFamily: T.mono, color: T.tt }}>
+                {filtered.length > 0
+                  ? t("obs.req.pageRange", {
+                      from: (page - 1) * pageSize + 1,
+                      to: Math.min(page * pageSize, filtered.length),
+                      total: filtered.length,
+                    })
+                  : t("obs.req.results", { n: 0 })}
+              </span>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button disabled={page <= 1} onClick={() => setPage(page - 1)} style={{ padding: "4px 10px", fontSize: 12, fontWeight: 500, fontFamily: "inherit", borderRadius: 6, border: `1px solid ${T.bl}`, background: T.card, color: page <= 1 ? T.tt : T.ts, cursor: page <= 1 ? "not-allowed" : "pointer", opacity: page <= 1 ? 0.5 : 1 }}>{t("table.previous")}</button>
+                <span style={{ fontFamily: T.mono, fontSize: 12, color: T.tt, padding: "4px 6px" }}>{page}/{totalPages}</span>
+                <button disabled={page >= totalPages} onClick={() => setPage(page + 1)} style={{ padding: "4px 10px", fontSize: 12, fontWeight: 500, fontFamily: "inherit", borderRadius: 6, border: `1px solid ${T.bl}`, background: T.card, color: page >= totalPages ? T.tt : T.ts, cursor: page >= totalPages ? "not-allowed" : "pointer", opacity: page >= totalPages ? 0.5 : 1 }}>{t("table.next")}</button>
+              </div>
+            </div>
+          </div>
+
+          {/* Right: detail panel — sticky sidebar on desktop; below 1100px it
+              becomes a bottom sheet (with backdrop) so row selection stays
+              usable instead of doing nothing. */}
+          {selected && (
+            <div className="rq-sheet-backdrop" onClick={() => setSelected(null)} aria-hidden="true" />
+          )}
+          <div className={`rq-detail-panel${selected ? " rq-detail-open" : ""}`} style={{ background: T.card, border: `1px solid ${T.bl}`, boxShadow: "0 1px 2px rgba(0,0,0,0.04)", padding: 24 }}>
+            <button className="rq-sheet-close" onClick={() => setSelected(null)} aria-label={t("obs.req.closeDetails")} style={{ position: "absolute", top: 12, right: 12, background: "none", border: "none", cursor: "pointer", color: T.tt, padding: 4 }}>
+              <Icon name="x" size={18} />
+            </button>
+            {!selected ? (
+              <div style={{ textAlign: "center", padding: "60px 20px", color: T.tt, fontSize: 13 }}>{t("obs.req.selectPrompt")}</div>
+            ) : detailLoading ? (
+              <div style={{ textAlign: "center", padding: "60px 20px", color: T.tt, fontSize: 13 }}>{t("state.loading")}</div>
+            ) : detail ? (
+              <div className="rq-detail-in" key={detail.request_id}>
+                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", color: T.tt, marginBottom: 16 }}>{t("obs.req.detailTitle")}</div>
+
+                {/* Request ID */}
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt, marginBottom: 3 }}>{t("obs.req.requestId")}</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 12, color: T.tp, wordBreak: "break-all" }}>{detail.request_id}</div>
+                </div>
+
+                {/* Grid fields */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px 14px", marginBottom: 18 }}>
+                  {[
+                    [t("field.provider"), <span key="p" style={{ textTransform: "capitalize" }}>{detail.provider}</span>],
+                    [t("field.model"), <span key="m" style={{ fontFamily: T.mono, fontSize: 12 }}>{detail.model}</span>],
+                    [t("field.status"), <span key="s" style={{ display: "inline-block", padding: "2px 8px", borderRadius: 100, fontSize: 11, fontWeight: 600, color: detail.status === "success" ? "#059669" : "#dc2626", background: detail.status === "success" ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)" }}>{detail.status}</span>],
+                    [t("obs.req.dlpPolicy"), <span key="d" style={{ display: "inline-block", padding: "2px 8px", borderRadius: 100, fontSize: 11, fontWeight: 600, color: detail.policy_action === "allow" ? "#059669" : "#d97706", background: detail.policy_action === "allow" ? "rgba(16,185,129,0.08)" : "rgba(245,158,11,0.08)" }}>{detail.policy_action}</span>],
+                    [t("obs.req.latency"), <span key="l" style={{ fontFamily: T.mono, fontSize: 12 }}>{detail.latency_ms}ms</span>],
+                    [
+                      t("obs.req.tokens"),
+                      <span key="t" style={{ fontFamily: T.mono, fontSize: 12 }}>
+                        {t("obs.req.tokensInOut", { in: detail.prompt_tokens ?? "—", out: detail.completion_tokens ?? "—" })}
+                      </span>,
+                    ],
+                  ].map(([label, value]) => (
+                    <div key={label as string}>
+                      <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt, marginBottom: 3 }}>{label}</div>
+                      <div style={{ fontSize: 13, color: T.tp }}>{value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Trace: 4 stages */}
+                {(detail.input_raw || detail.input_masked || detail.output_raw || detail.output_final) && (
+                  <div style={{ marginBottom: 18 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", color: T.tt }}>{t("obs.req.safeTrace")}</div>
+                        <div style={{ fontSize: 11, color: T.tt, marginTop: 2 }}>{t("obs.req.safeTraceHint")}</div>
+                      </div>
+                      <button
+                        onClick={() => { setSecureReason(""); setSecureReasonOpen(true); }}
+                        disabled={secureTraceLoading}
+                        style={{
+                          border: `1px solid ${T.bl}`, background: "var(--bg-elevated)",
+                          color: T.tp, borderRadius: 6, padding: "7px 10px",
+                          fontSize: 11, fontWeight: 700, cursor: secureTraceLoading ? "wait" : "pointer",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {secureTraceLoading ? t("state.loading") : t("obs.req.secureTrace")}
+                      </button>
+                    </div>
+                    {(() => {
+                      const panel = safeTracePanel;
+                      const stages = [
+                        {
+                          id: "user_to_service",
+                          label: t("obs.req.stage.userToService"),
+                          value: panel?.user_to_service ?? detail.input_raw,
+                          tone: "#3b6cf6",
+                          source: panel?.source_user,
+                        },
+                        {
+                          id: "service_to_ai",
+                          label: t("obs.req.stage.serviceToAi"),
+                          value: panel?.service_to_ai ?? detail.input_masked,
+                          tone: "#f59e0b",
+                          source: "persisted" as const,
+                        },
+                        {
+                          id: "ai_to_service",
+                          label: t("obs.req.stage.aiToService"),
+                          value: panel?.ai_to_service ?? detail.output_raw,
+                          tone: "#10b981",
+                          source: "persisted" as const,
+                        },
+                        {
+                          id: "service_to_user",
+                          label: t("obs.req.stage.serviceToUser"),
+                          value: panel?.service_to_user ?? detail.output_final,
+                          tone: "#6366f1",
+                          source: panel?.source_final,
+                        },
+                      ];
+                      const sourceBadge = (src?: string) => {
+                        if (!src) return null;
+                        const label =
+                          src === "persisted" ? t("obs.req.source.decrypted") :
+                          src === "secure_trace" ? t("obs.req.source.inMemory") :
+                          src === "placeholder" ? t("obs.req.source.placeholder") :
+                          src;
+                        const tint =
+                          src === "persisted" ? "rgba(99,102,241,0.14)" :
+                          src === "secure_trace" ? "rgba(245,158,11,0.14)" :
+                          "rgba(100,116,139,0.12)";
+                        const fg =
+                          src === "persisted" ? "#6366f1" :
+                          src === "secure_trace" ? "#d97706" :
+                          "var(--text-tertiary)";
+                        return (
+                          <span style={{
+                            fontSize: 9, fontWeight: 600, textTransform: "uppercase",
+                            letterSpacing: "0.05em", color: fg, background: tint,
+                            padding: "1px 6px", borderRadius: 4, marginLeft: 6,
+                          }}>{label}</span>
+                        );
+                      };
+                      return stages.map((stage) => (
+                        <div key={stage.id} style={{ marginBottom: 8 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                            <span style={{ width: 6, height: 6, borderRadius: "50%", background: stage.tone, flexShrink: 0 }} />
+                            <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt }}>{stage.label}</span>
+                            {sourceBadge(stage.source)}
+                          </div>
+                          <pre style={{
+                            background: "var(--bg-elevated)", border: `1px solid ${T.bl}`, borderRadius: 6,
+                            padding: "8px 10px", margin: 0, fontFamily: T.mono, fontSize: "11px",
+                            lineHeight: 1.5, color: T.tp, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                            maxHeight: 140, overflowY: "auto",
+                          }}>{stage.value ?? "—"}</pre>
+                        </div>
+                      ));
+                    })()}
+                    {detail.dlp_findings && detail.dlp_findings.length > 0 && (
+                      <div style={{ marginTop: 10 }}>
+                        <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt, marginBottom: 4 }}>{t("obs.req.dlpFindings", { n: detail.dlp_findings.length })}</div>
+                        <JsonBlock data={detail.dlp_findings} />
+                      </div>
+                    )}
+                    {secureTrace && (
+                      <div style={{ marginTop: 12, border: `1px solid rgba(220,38,38,0.35)`, borderRadius: 8, padding: 10, background: "rgba(220,38,38,0.04)" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#dc2626", marginBottom: 4 }}>{t("obs.req.secureTrace")}</div>
+                        <div style={{ fontSize: 11, color: T.tt, marginBottom: 10 }}>{t("obs.req.secureWarning")}</div>
+                        {[
+                          { id: "user_to_service", label: t("obs.req.stage.userToService"), value: secureTrace.stages.user_to_service?.content, tone: "#3b6cf6" },
+                          { id: "service_to_ai", label: t("obs.req.stage.serviceToAi"), value: secureTrace.stages.service_to_ai?.content, tone: "#f59e0b" },
+                          { id: "ai_to_service", label: t("obs.req.stage.aiToService"), value: secureTrace.stages.ai_to_service?.content, tone: "#10b981" },
+                          { id: "service_to_user", label: t("obs.req.stage.serviceToUser"), value: secureTrace.stages.service_to_user?.content, tone: "#6366f1" },
+                        ].map((stage) => (
+                          <div key={`secure-${stage.id}`} style={{ marginBottom: 8 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                              <span style={{ width: 6, height: 6, borderRadius: "50%", background: stage.tone, flexShrink: 0 }} />
+                              <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: T.tt }}>{stage.label}</span>
+                            </div>
+                            <pre style={{
+                              background: "var(--bg-elevated)", border: `1px solid ${T.bl}`, borderRadius: 6,
+                              padding: "8px 10px", margin: 0, fontFamily: T.mono, fontSize: "11px",
+                              lineHeight: 1.5, color: T.tp, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                              maxHeight: 140, overflowY: "auto",
+                            }}>{stage.value ?? "—"}</pre>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* JSON */}
+                {(() => {
+                  const payload = {
+                    request_id: detail.request_id,
+                    provider: detail.provider,
+                    model: detail.model,
+                    status: detail.status,
+                    code: detail.error_code || null,
+                    dlp: detail.policy_action,
+                    latency_ms: detail.latency_ms,
+                    tokens: { in: detail.prompt_tokens ?? 0, out: detail.completion_tokens ?? 0 },
+                    time: detail.created_at,
+                  };
+                  return (
+                    <>
+                      <JsonPanelHeader
+                        label={t("obs.req.rawPayload")}
+                        onCopy={() => {
+                          navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+                          toast(t("obs.req.jsonCopied"));
+                        }}
+                      />
+                      <JsonBlock data={payload} />
+                    </>
+                  );
+                })()}
+              </div>
+            ) : (
+              <div style={{ textAlign: "center", padding: "60px 20px", color: T.tt, fontSize: 13 }}>{t("obs.req.detailFailed")}</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <Modal
+        open={secureReasonOpen}
+        onClose={() => setSecureReasonOpen(false)}
+        title={t("obs.req.secureTrace")}
+        footer={
+          <>
+            <button
+              className="sran-btn sran-btn-secondary"
+              onClick={() => setSecureReasonOpen(false)}
+            >
+              {t("action.cancel")}
+            </button>
+            <button
+              className="sran-btn sran-btn-primary"
+              onClick={submitSecureReason}
+              disabled={!secureReason.trim()}
+            >
+              {t("obs.req.viewTrace")}
+            </button>
+          </>
+        }
+      >
+        <label
+          style={{ display: "block", fontSize: 13, fontWeight: 600, color: T.ts, marginBottom: 8 }}
+        >
+          {t("obs.req.reasonLabel")}
+        </label>
+        <input
+          className="sran-input"
+          autoFocus
+          value={secureReason}
+          onChange={(e) => setSecureReason(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submitSecureReason(); }}
+          placeholder={t("obs.req.reasonLabel")}
+          style={{ width: "100%" }}
+        />
+      </Modal>
+    </div>
+  );
+}

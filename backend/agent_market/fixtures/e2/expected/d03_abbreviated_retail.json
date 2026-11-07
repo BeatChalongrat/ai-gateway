@@ -1,0 +1,107 @@
+{
+ "schema": "e2.expected.v1",
+ "id": "d03_abbreviated_retail",
+ "files": [
+  "docs/d03_abbreviated_retail.pdf"
+ ],
+ "class": "digital",
+ "purpose": "abbreviated tax invoice: no buyer is normal for this type (not a failure); VAT included in prices",
+ "source_fixture": null,
+ "duplicate_of": null,
+ "scope": "full",
+ "scope_fields": null,
+ "truth": {
+  "document_type": "abbreviated_tax_invoice",
+  "seller_name": {
+   "value": "บริษัท มินิมาร์ท 24 จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "มินิมาร์ท 24"
+   }
+  },
+  "seller_tax_id": {
+   "value": "0105543033779",
+   "valid": true
+  },
+  "seller_branch": "01234",
+  "buyer_name": null,
+  "buyer_tax_id": null,
+  "buyer_branch": null,
+  "document_number": "01234-2609-004512",
+  "document_date": "2026-09-15",
+  "due_date": null,
+  "currency": "THB",
+  "vat_mode": "inclusive",
+  "sum_lines": "199.00",
+  "discount": "0.00",
+  "subtotal": "185.98",
+  "vat_rate": "7",
+  "vat_amount": "13.02",
+  "total": "199.00",
+  "wht_rate": null,
+  "wht_amount": null,
+  "net_payable": null,
+  "line_items": [
+   {
+    "description": "น้ำดื่ม 600มล. แพ็ค 6",
+    "quantity": "2",
+    "unit_price": "42.00",
+    "amount": "84.00"
+   },
+   {
+    "description": "กาแฟกระป๋อง",
+    "quantity": "3",
+    "unit_price": "17.00",
+    "amount": "51.00"
+   },
+   {
+    "description": "แซนด์วิชทูน่า",
+    "quantity": "1",
+    "unit_price": "35.00",
+    "amount": "35.00"
+   },
+   {
+    "description": "ทิชชู่เปียก",
+    "quantity": "1",
+    "unit_price": "29.00",
+    "amount": "29.00"
+   }
+  ]
+ },
+ "checks": {
+  "document_type": "pass",
+  "seller_tax_id_format": "pass",
+  "buyer_tax_id_format": "skip",
+  "document_date": "pass",
+  "line_arithmetic": "pass",
+  "subtotal_sum": "pass",
+  "vat_7_percent": "pass",
+  "grand_total": "pass",
+  "wht": "skip",
+  "currency": "pass",
+  "required_fields": "pass",
+  "buyer_match": "skip",
+  "duplicate": "pass",
+  "original_copy": "pass"
+ },
+ "history": [],
+ "questions": {
+  "must": [],
+  "may": false,
+  "allowed_extra": [],
+  "max": 0
+ },
+ "rules": [
+  "no_silent_errors",
+  "zero_questions"
+ ],
+ "provenance": {
+  "method": "pdf_text",
+  "pages": 1,
+  "totals_page": 1
+ },
+ "confidence": {
+  "money_min": 0.95
+ },
+ "ui": null
+}

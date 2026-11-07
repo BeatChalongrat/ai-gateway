@@ -1,0 +1,501 @@
+{
+ "schema": "web.research.v1",
+ "lang": "th",
+ "brief": {
+  "items": [
+   {
+    "name": "กระดานไวท์บอร์ดแม่เหล็ก 120 x 240 ซม.",
+    "quantity": "6",
+    "unit": "แผ่น",
+    "requirements": [
+     "ติดแม่เหล็กได้",
+     "มีรางวางปากกา"
+    ]
+   }
+  ],
+  "delivery_place": "สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ",
+  "needed_by": "30 พฤศจิกายน 2569"
+ },
+ "caps": {
+  "searches": 4,
+  "pages": 8,
+  "pages_per_host": 3,
+  "seconds": 300,
+  "source_mb": 10,
+  "results": 8
+ },
+ "used": {
+  "searches": 1,
+  "pages": 3,
+  "seconds": 9,
+  "bytes": 5446
+ },
+ "cap_hit": [],
+ "search": "ok",
+ "searches": [
+  {
+   "item": "i1",
+   "query": "กระดานไวท์บอร์ดแม่เหล็ก 120 x 240 ซม.",
+   "provider": "sample",
+   "results": 3
+  }
+ ],
+ "sources": [
+  {
+   "id": "s1",
+   "item": "i1",
+   "url": "http://www.baan-stationery.test/p/wb-120240-m",
+   "host": "www.baan-stationery.test",
+   "from": "search",
+   "outcome": "captured",
+   "reason": "",
+   "detail": {},
+   "capture": {
+    "schema": "web.capture.v1",
+    "fetcher_version": "1.0.0",
+    "requested_url": "http://www.baan-stationery.test/p/wb-120240-m",
+    "started_at": "2026-10-06T11:42:21.802Z",
+    "clock": "UTC",
+    "outcome": "captured",
+    "final_url": "http://www.baan-stationery.test/p/wb-120240-m",
+    "http": {
+     "status": 200,
+     "content_type": "text/html; charset=utf-8",
+     "content_length": 2722,
+     "headers": {
+      "connection": "close",
+      "content-type": "text/html; charset=utf-8",
+      "date": "Tue, 06 Oct 2026 11:42:22 GMT",
+      "transfer-encoding": "chunked"
+     }
+    },
+    "body_sha256": "e2ede10aad6dc6eda71f82d1376894c6817014786c0958883eaf98d043def5aa",
+    "snapshot_sha256": "9ef3ff85b782491a67280102222a47f492b517a41a7ca59b893515aa45455a33",
+    "robots": {
+     "url": "http://www.baan-stationery.test/robots.txt",
+     "status": 200,
+     "allowed": true,
+     "rule": "",
+     "group": "*",
+     "sha256": "34f61f3e3fedb0174b3a1ea8da425f6a350747318c9f08d92dde2599d979d06d"
+    },
+    "page_rules": [],
+    "hosts": {
+     "named": "www.baan-stationery.test",
+     "address": "93.184.215.14",
+     "reached": [
+      "www.baan-stationery.test"
+     ],
+     "not_opened": []
+    },
+    "bytes": {
+     "document": 2722,
+     "transfer": 2722,
+     "transfer_capped": false
+    },
+    "page": {
+     "width": 1280,
+     "height": 900,
+     "screenshot_height": 900,
+     "lang": "th",
+     "markup_truncated": false,
+     "text_truncated": false
+    },
+    "counts": {
+     "shown_blocks": 18,
+     "shown_characters": 522,
+     "struck_blocks": 0,
+     "hidden_pieces": 0,
+     "attributes": 1,
+     "comments": 0,
+     "structured": 0,
+     "meta": 1
+    },
+    "files": {
+     "hidden.json": {
+      "sha256": "63227dc7441cf056b4f46bac3660e8e7e7981aa89ef89e5b3fd180659ef9c97c",
+      "bytes": 340
+     },
+     "page.html": {
+      "sha256": "5b8c444f542eb8b4753cc4a83d5f1d9321fe1d2a31501887eac64103862160bb",
+      "bytes": 2736
+     },
+     "screenshot.jpg": {
+      "sha256": "1f0335321ab11c9c4d33600fda16b24b943bb942227c95b7374dfbe37ec138a7",
+      "bytes": 59048
+     },
+     "text.json": {
+      "sha256": "742fe18e214829cb1b4bf97b586ddc83bb546f70bee44c6379694aa2f20473a2",
+      "bytes": 3271
+     }
+    },
+    "finished_at": "2026-10-06T11:42:22.814Z"
+   },
+   "reading": {
+    "page": "product",
+    "says_no": null,
+    "offers": [
+     {
+      "name": {
+       "quote": "กระดานไวท์บอร์ดแม่เหล็ก ขนาด 120 x 240 ซม.",
+       "block": 2
+      },
+      "model": {
+       "quote": "WB-120240-M",
+       "block": 3
+      },
+      "kind": "own_site",
+      "price": {
+       "quote": "฿3,200.00",
+       "block": 4,
+       "amount": "3200.00",
+       "currency": "THB"
+      },
+      "price_basis": {
+       "quote": "ราคาต่อแผ่น",
+       "block": 5
+      },
+      "vat": {
+       "quote": "ราคารวมภาษีมูลค่าเพิ่มแล้ว",
+       "block": 5,
+       "says": "included"
+      },
+      "shipping": {
+       "quote": "จัดส่งฟรีในกรุงเทพฯ และปริมณฑล",
+       "block": 8
+      },
+      "lead_time": {
+       "quote": "ภายใน 2-4 วันทำการ",
+       "block": 8
+      },
+      "stock": {
+       "quote": "มีสินค้า 18 แผ่น",
+       "block": 6
+      },
+      "warranty": {
+       "quote": "รับประกันผิวกระดาน 2 ปี",
+       "block": 7
+      },
+      "legal_name": {
+       "quote": "บริษัท บ้านเครื่องเขียน จำกัด",
+       "block": 16
+      },
+      "tax_id": {
+       "quote": "0105559876543",
+       "block": 16
+      },
+      "requirements": [
+       {
+        "quote": "เหล็กเคลือบ ติดแม่เหล็กได้",
+        "block": 11,
+        "need": "ติดแม่เหล็กได้",
+        "verdict": "meets"
+       },
+       {
+        "quote": "พร้อมรางวางปากกา",
+        "block": 13,
+        "need": "มีรางวางปากกา",
+        "verdict": "meets"
+       }
+      ]
+     }
+    ]
+   },
+   "read_by": "sample"
+  },
+  {
+   "id": "s2",
+   "item": "i1",
+   "url": "http://shop.ruam-raan.test/item/mb-2412",
+   "host": "shop.ruam-raan.test",
+   "from": "search",
+   "outcome": "captured",
+   "reason": "",
+   "detail": {},
+   "capture": {
+    "schema": "web.capture.v1",
+    "fetcher_version": "1.0.0",
+    "requested_url": "http://shop.ruam-raan.test/item/mb-2412",
+    "started_at": "2026-10-06T11:42:22.831Z",
+    "clock": "UTC",
+    "outcome": "captured",
+    "final_url": "http://shop.ruam-raan.test/item/mb-2412",
+    "http": {
+     "status": 200,
+     "content_type": "text/html; charset=utf-8",
+     "content_length": 1599,
+     "headers": {
+      "connection": "close",
+      "content-type": "text/html; charset=utf-8",
+      "date": "Tue, 06 Oct 2026 11:42:22 GMT",
+      "transfer-encoding": "chunked"
+     }
+    },
+    "body_sha256": "ba89edf925bd5369c31235ace638b265f30a4eef078b875f74f04654c6097ce9",
+    "snapshot_sha256": "65dc2c666ab02af7648bf6db80a8b34b2081fefa885336f5180063c35fec44d1",
+    "robots": {
+     "url": "http://shop.ruam-raan.test/robots.txt",
+     "status": 200,
+     "allowed": true,
+     "rule": "Allow: /item/",
+     "group": "*",
+     "sha256": "79f724e44f34d0f156c29531c8d66ccae8f715fadb7bcc218151972f7d0a8057"
+    },
+    "page_rules": [],
+    "hosts": {
+     "named": "shop.ruam-raan.test",
+     "address": "93.184.215.14",
+     "reached": [
+      "shop.ruam-raan.test"
+     ],
+     "not_opened": []
+    },
+    "bytes": {
+     "document": 1599,
+     "transfer": 1599,
+     "transfer_capped": false
+    },
+    "page": {
+     "width": 1280,
+     "height": 900,
+     "screenshot_height": 900,
+     "lang": "th",
+     "markup_truncated": false,
+     "text_truncated": false
+    },
+    "counts": {
+     "shown_blocks": 10,
+     "shown_characters": 226,
+     "struck_blocks": 1,
+     "hidden_pieces": 0,
+     "attributes": 0,
+     "comments": 0,
+     "structured": 0,
+     "meta": 1
+    },
+    "files": {
+     "hidden.json": {
+      "sha256": "1b25ab1ea109e5c4479f5ff9ff9a72f498eb9f944263f2684afb6db8f94de4da",
+      "bytes": 243
+     },
+     "page.html": {
+      "sha256": "1f982280df3409dc8e1d41c8e19311b361e70942535df6ae9d72c9da301ed6fe",
+      "bytes": 1598
+     },
+     "screenshot.jpg": {
+      "sha256": "7217546e649db5baf11076c0cc4ef469af52d5b47ff3ef024113235f844469f1",
+      "bytes": 34602
+     },
+     "text.json": {
+      "sha256": "72679abc99fac59e2eb2114f92c51c15b598f19f1c5744d3eb6beb0c843c8ac5",
+      "bytes": 1526
+     }
+    },
+    "finished_at": "2026-10-06T11:42:23.589Z"
+   },
+   "reading": {
+    "page": "product",
+    "says_no": null,
+    "offers": [
+     {
+      "name": {
+       "quote": "ไวท์บอร์ดแม่เหล็ก 120x240 ซม. ขอบอะลูมิเนียม",
+       "block": 1
+      },
+      "model": {
+       "quote": "MB-2412",
+       "block": 2
+      },
+      "variant": {
+       "quote": "แขวนผนัง",
+       "block": 2
+      },
+      "seller": {
+       "quote": "ร้าน บอร์ดดี ออฟฟิเชียล",
+       "block": 8
+      },
+      "kind": "marketplace",
+      "price": {
+       "quote": "฿2,890",
+       "block": 4,
+       "amount": "2890",
+       "currency": "THB"
+      },
+      "shipping": {
+       "quote": "ค่าจัดส่ง ฿350 ต่อคำสั่งซื้อ",
+       "block": 5
+      },
+      "stock": {
+       "quote": "เหลือ 7 ชิ้น",
+       "block": 6
+      },
+      "warranty": {
+       "quote": "รับประกันร้านค้า 6 เดือน",
+       "block": 7
+      },
+      "requirements": [
+       {
+        "quote": "ไวท์บอร์ดแม่เหล็ก",
+        "block": 1,
+        "need": "ติดแม่เหล็กได้",
+        "verdict": "meets"
+       },
+       {
+        "need": "มีรางวางปากกา",
+        "verdict": "not_stated"
+       }
+      ]
+     }
+    ]
+   },
+   "read_by": "sample"
+  },
+  {
+   "id": "s3",
+   "item": "i1",
+   "url": "http://www.meetingroom-supply.test/catalogue/mw-240",
+   "host": "www.meetingroom-supply.test",
+   "from": "search",
+   "outcome": "captured",
+   "reason": "",
+   "detail": {},
+   "capture": {
+    "schema": "web.capture.v1",
+    "fetcher_version": "1.0.0",
+    "requested_url": "http://www.meetingroom-supply.test/catalogue/mw-240",
+    "started_at": "2026-10-06T11:42:23.603Z",
+    "clock": "UTC",
+    "outcome": "captured",
+    "final_url": "http://www.meetingroom-supply.test/catalogue/mw-240",
+    "http": {
+     "status": 200,
+     "content_type": "text/html; charset=utf-8",
+     "content_length": 1125,
+     "headers": {
+      "connection": "close",
+      "content-type": "text/html; charset=utf-8",
+      "date": "Tue, 06 Oct 2026 11:42:23 GMT",
+      "transfer-encoding": "chunked"
+     }
+    },
+    "body_sha256": "eb1e56e8572d84ff53854b61f0617de1f56d9a4b1e36a2607f4e8840883f8422",
+    "snapshot_sha256": "3387028c9bb32d94a24a2d870189f5f973267a3207f7311628569129a658b506",
+    "robots": {
+     "url": "http://www.meetingroom-supply.test/robots.txt",
+     "status": 404,
+     "allowed": true,
+     "rule": "",
+     "group": "",
+     "sha256": ""
+    },
+    "page_rules": [],
+    "hosts": {
+     "named": "www.meetingroom-supply.test",
+     "address": "93.184.215.14",
+     "reached": [
+      "www.meetingroom-supply.test"
+     ],
+     "not_opened": []
+    },
+    "bytes": {
+     "document": 1125,
+     "transfer": 1125,
+     "transfer_capped": false
+    },
+    "page": {
+     "width": 1280,
+     "height": 900,
+     "screenshot_height": 900,
+     "lang": "en",
+     "markup_truncated": false,
+     "text_truncated": false
+    },
+    "counts": {
+     "shown_blocks": 16,
+     "shown_characters": 398,
+     "struck_blocks": 0,
+     "hidden_pieces": 0,
+     "attributes": 0,
+     "comments": 0,
+     "structured": 0,
+     "meta": 1
+    },
+    "files": {
+     "hidden.json": {
+      "sha256": "eb5ea59e4a538dff470f1f83f06cd94cd996b53b5752bfd2fb199fe32353438b",
+      "bytes": 187
+     },
+     "page.html": {
+      "sha256": "adffc2c3399fd14c2014580688051547f72fad302de4dc9fed4c1ac3c7b1032b",
+      "bytes": 1124
+     },
+     "screenshot.jpg": {
+      "sha256": "068a4945e4d30a015c030ef0140f4fd257df3e0c09d3560b24019165e25f5458",
+      "bytes": 42143
+     },
+     "text.json": {
+      "sha256": "dcf6853db7a610a182d085d205ad10496e750e1b0bb1c0df2eb944c94be8b401",
+      "bytes": 1883
+     }
+    },
+    "finished_at": "2026-10-06T11:42:24.385Z"
+   },
+   "reading": {
+    "page": "product",
+    "says_no": null,
+    "offers": [
+     {
+      "name": {
+       "quote": "Magnetic Whiteboard MW-240, 120 x 240 cm",
+       "block": 1
+      },
+      "model": {
+       "quote": "MW-240",
+       "block": 4
+      },
+      "kind": "own_site",
+      "price": {
+       "quote": "THB 3,050.00",
+       "block": 6,
+       "amount": "3050.00",
+       "currency": "THB"
+      },
+      "vat": {
+       "quote": "excl. VAT",
+       "block": 6,
+       "says": "excluded"
+      },
+      "minimum_order": {
+       "quote": "5 units",
+       "block": 8
+      },
+      "lead_time": {
+       "quote": "10 working days from order confirmation",
+       "block": 10
+      },
+      "warranty": {
+       "quote": "3-year warranty on the board surface",
+       "block": 12
+      },
+      "requirements": [
+       {
+        "quote": "Lacquered steel, magnetic",
+        "block": 14,
+        "need": "ติดแม่เหล็กได้",
+        "verdict": "meets"
+       },
+       {
+        "quote": "pen tray",
+        "block": 2,
+        "need": "มีรางวางปากกา",
+        "verdict": "meets"
+       }
+      ]
+     }
+    ]
+   },
+   "read_by": "sample"
+  }
+ ],
+ "suppliers": []
+}

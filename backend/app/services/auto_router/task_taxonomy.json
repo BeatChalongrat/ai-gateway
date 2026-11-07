@@ -1,0 +1,1086 @@
+{
+  "version": 1,
+  "_doc": "FIX35 Part C — the ONE task taxonomy the Auto router classifies into (step 1). Single asset so no service drifts its own list (same rule as prompt_compaction_extraction.txt). Fields per task: label (en/th), signals (case-insensitive substrings; Thai has no word boundaries so substrings are the right unit), weight bump per hit, needs (hard capability preferences), prefer_tier (the cheapest band this task is still served well at — the router starts there and lets the ceiling cap it), default_rank (cold-start ordering of model ids, best-first; anything not listed sorts after by cost). Unknown / weak signal → general_chat. FIX36: rank_groups (7) are the RANKING unit — every task maps to a group via tasks[t].group; rank_groups[g].prior is the day-one ordered opinion (capability+price) blended with the tenant's live data by w=n/(n+prior_weight_samples); exploration_rate sends that share of auto turns to under-sampled candidates so newcomers can earn data (never on an explicit model).",
+  "default_tier": "medium",
+  "cold_start_min_samples": 20,
+  "ranking_window_days": 7,
+  "tasks": {
+    "general_chat": {
+      "label": {
+        "en": "General chat",
+        "th": "คุยทั่วไป"
+      },
+      "signals": [],
+      "weight": 0,
+      "needs": [],
+      "prefer_tier": "low",
+      "default_rank": [
+        "gpt-4o-mini",
+        "openai/gpt-4o-mini",
+        "google/gemini-2.5-flash",
+        "anthropic/claude-3.5-haiku",
+        "gpt-4o"
+      ],
+      "group": "chat_light"
+    },
+    "greeting_smalltalk": {
+      "label": {
+        "en": "Greeting / small talk",
+        "th": "ทักทาย"
+      },
+      "signals": [
+        "hello",
+        "hi there",
+        "thanks",
+        "thank you",
+        "good morning",
+        "สวัสดี",
+        "ขอบคุณ",
+        "หวัดดี",
+        "ฝันดี",
+        "โอเค"
+      ],
+      "weight": 2,
+      "needs": [],
+      "prefer_tier": "low",
+      "default_rank": [
+        "gpt-4o-mini",
+        "openai/gpt-4o-mini",
+        "google/gemini-2.5-flash",
+        "anthropic/claude-3.5-haiku"
+      ],
+      "group": "chat_light"
+    },
+    "short_factual_qa": {
+      "label": {
+        "en": "Short factual Q&A",
+        "th": "ถามตอบข้อเท็จจริงสั้น"
+      },
+      "signals": [
+        "what is",
+        "who is",
+        "when did",
+        "where is",
+        "how many",
+        "define",
+        "คืออะไร",
+        "ใครคือ",
+        "เมื่อไหร่",
+        "อยู่ที่ไหน",
+        "กี่",
+        "หมายถึง"
+      ],
+      "weight": 2,
+      "needs": [],
+      "prefer_tier": "low",
+      "default_rank": [
+        "gpt-4o-mini",
+        "google/gemini-2.5-flash",
+        "openai/gpt-4o-mini",
+        "gpt-4o"
+      ],
+      "group": "chat_light"
+    },
+    "knowledge_explain": {
+      "label": {
+        "en": "Explain a concept",
+        "th": "อธิบายแนวคิด"
+      },
+      "signals": [
+        "explain",
+        "how does",
+        "why does",
+        "what's the difference",
+        "difference between",
+        "อธิบาย",
+        "ทำไม",
+        "ต่างกันยังไง",
+        "ต่างกันอย่างไร",
+        "หลักการ"
+      ],
+      "weight": 2,
+      "needs": [],
+      "prefer_tier": "medium",
+      "default_rank": [
+        "gpt-4o",
+        "openai/gpt-4o",
+        "anthropic/claude-sonnet-4.5",
+        "google/gemini-2.5-pro",
+        "gpt-4o-mini"
+      ],
+      "group": "knowledge"
+    },
+    "research_report": {
+      "label": {
+        "en": "Research / long report",
+        "th": "ค้นคว้า / รายงานยาว"
+      },
+      "signals": [
+        "research",
+        "in depth",
+        "comprehensive",
+        "literature",
+        "report on",
+        "write a report",
+        "รายงาน",
+        "ค้นคว้า",
+        "เจาะลึก",
+        "อย่างละเอียด",
+        "ครบถ้วน"
+      ],
+      "weight": 3,
+      "needs": [],
+      "prefer_tier": "high",
+      "default_rank": [
+        "claude-sonnet-4-20250514",
+        "claude-3-5-sonnet-20241022",
+        "anthropic/claude-sonnet-4.5",
+        "gpt-4o",
+        "openai/gpt-4o",
+        "google/gemini-2.5-pro",
+        "anthropic/claude-opus-4.1"
+      ],
+      "group": "knowledge"
+    },
+    "summarize_document": {
+      "label": {
+        "en": "Summarise a document",
+        "th": "สรุปเอกสาร"
+      },
+      "signals": [
+        "summarize",
+        "summarise",
+        "summary of",
+        "tl;dr",
+        "key points",
+        "สรุป",
+        "ย่อ",
+        "ใจความ",
+        "สาระสำคัญ",
+        "ประเด็นหลัก"
+      ],
+      "weight": 3,
+      "needs": [],
+      "prefer_tier": "medium",
+      "default_rank": [
+        "google/gemini-2.5-flash",
+        "gpt-4o-mini",
+        "gpt-4o",
+        "anthropic/claude-sonnet-4.5",
+        "anthropic/claude-3.5-haiku"
+      ],
+      "group": "writing"
+    },
+    "extract_structured": {
+      "label": {
+        "en": "Extract structured data",
+        "th": "ดึงข้อมูลเป็นโครงสร้าง"
+      },
+      "signals": [
+        "extract",
+        "as json",
+        "into json",
+        "into a table",
+        "as csv",
+        "list all the",
+        "fields",
+        "ดึงข้อมูล",
+        "ทำเป็นตาราง",
+        "เป็น json",
+        "แยกเป็น",
+        "จัดเป็นรายการ"
+      ],
+      "weight": 3,
+      "needs": [
+        "tools_ok"
+      ],
+      "prefer_tier": "low",
+      "default_rank": [
+        "gpt-4o-mini",
+        "gpt-4o",
+        "google/gemini-2.5-flash",
+        "anthropic/claude-3.5-haiku"
+      ],
+      "group": "language"
+    },
+    "classify_label": {
+      "label": {
+        "en": "Classify / label",
+        "th": "จัดหมวด / ติดป้าย"
+      },
+      "signals": [
+        "classify",
+        "categorize",
+        "categorise",
+        "which category",
+        "sentiment",
+        "is this spam",
+        "จัดหมวด",
+        "จัดประเภท",
+        "หมวดหมู่",
+        "อารมณ์ของข้อความ",
+        "เป็นสแปม"
+      ],
+      "weight": 3,
+      "needs": [],
+      "prefer_tier": "low",
+      "default_rank": [
+        "gpt-4o-mini",
+        "google/gemini-2.5-flash",
+        "anthropic/claude-3.5-haiku",
+        "gpt-4o"
+      ],
+      "group": "language"
+    },
+    "translate": {
+      "label": {
+        "en": "Translate",
+        "th": "แปลภาษา"
+      },
+      "signals": [
+        "translate",
+        "translation",
+        "in english",
+        "in thai",
+        "แปล",
+        "เป็นภาษาอังกฤษ",
+        "เป็นภาษาไทย",
+        "เป็นภาษาจีน",
+        "เป็นภาษาญี่ปุ่น"
+      ],
+      "weight": 3,
+      "needs": [],
+      "prefer_tier": "low",
+      "default_rank": [
+        "gpt-4o-mini",
+        "gpt-4o",
+        "google/gemini-2.5-flash",
+        "anthropic/claude-sonnet-4.5"
+      ],
+      "group": "language"
+    },
+    "proofread_edit": {
+      "label": {
+        "en": "Proofread / edit",
+        "th": "ตรวจแก้ / ปรับภาษา"
+      },
+      "signals": [
+        "proofread",
+        "fix the grammar",
+        "grammar",
+        "rephrase",
+        "rewrite this",
+        "make it sound",
+        "ตรวจแก้",
+        "ตรวจคำผิด",
+        "ปรับภาษา",
+        "เกลาสำนวน",
+        "เขียนใหม่ให้",
+        "แก้ไวยากรณ์"
+      ],
+      "weight": 3,
+      "needs": [],
+      "prefer_tier": "low",
+      "default_rank": [
+        "gpt-4o-mini",
+        "gpt-4o",
+        "anthropic/claude-3.5-haiku",
+        "anthropic/claude-sonnet-4.5"
+      ],
+      "group": "language"
+    },
+    "creative_writing": {
+      "label": {
+        "en": "Creative writing",
+        "th": "งานเขียนสร้างสรรค์"
+      },
+      "signals": [
+        "write a story",
+        "poem",
+        "short story",
+        "lyrics",
+        "screenplay",
+        "fiction",
+        "แต่งเรื่อง",
+        "แต่งกลอน",
+        "บทกวี",
+        "นิยาย",
+        "เรื่องสั้น",
+        "แต่งเพลง"
+      ],
+      "weight": 3,
+      "needs": [],
+      "prefer_tier": "medium",
+      "default_rank": [
+        "anthropic/claude-sonnet-4.5",
+        "gpt-4o",
+        "openai/gpt-4o",
+        "google/gemini-2.5-pro"
+      ],
+      "group": "writing"
+    },
+    "business_writing": {
+      "label": {
+        "en": "Business writing (email/memo)",
+        "th": "เขียนงาน (อีเมล/บันทึก)"
+      },
+      "signals": [
+        "write an email",
+        "draft an email",
+        "memo",
+        "cover letter",
+        "announcement",
+        "proposal",
+        "ร่างอีเมล",
+        "เขียนอีเมล",
+        "ร่างข้อความ",
+        "จดหมาย",
+        "บันทึกข้อความ",
+        "ประกาศ",
+        "ข้อเสนอ"
+      ],
+      "weight": 3,
+      "needs": [],
+      "prefer_tier": "low",
+      "default_rank": [
+        "gpt-4o-mini",
+        "gpt-4o",
+        "anthropic/claude-sonnet-4.5",
+        "google/gemini-2.5-flash"
+      ],
+      "group": "writing"
+    },
+    "marketing_copy": {
+      "label": {
+        "en": "Marketing copy",
+        "th": "คอนเทนต์การตลาด"
+      },
+      "signals": [
+        "caption",
+        "ad copy",
+        "slogan",
+        "tagline",
+        "social post",
+        "marketing",
+        "แคปชั่น",
+        "โฆษณา",
+        "สโลแกน",
+        "โพสต์",
+        "การตลาด",
+        "คอนเทนต์"
+      ],
+      "weight": 3,
+      "needs": [],
+      "prefer_tier": "medium",
+      "default_rank": [
+        "gpt-4o",
+        "anthropic/claude-sonnet-4.5",
+        "gpt-4o-mini",
+        "google/gemini-2.5-flash"
+      ],
+      "group": "writing"
+    },
+    "brainstorm_ideas": {
+      "label": {
+        "en": "Brainstorm ideas",
+        "th": "ระดมไอเดีย"
+      },
+      "signals": [
+        "brainstorm",
+        "ideas for",
+        "suggest some",
+        "come up with",
+        "name for",
+        "คิดชื่อ",
+        "ไอเดีย",
+        "เสนอ",
+        "ช่วยคิด",
+        "แนะนำชื่อ",
+        "หลาย ๆ แบบ"
+      ],
+      "weight": 2,
+      "needs": [],
+      "prefer_tier": "low",
+      "default_rank": [
+        "gpt-4o-mini",
+        "gpt-4o",
+        "anthropic/claude-sonnet-4.5",
+        "google/gemini-2.5-flash"
+      ],
+      "group": "writing"
+    },
+    "code_generate": {
+      "label": {
+        "en": "Write code",
+        "th": "เขียนโค้ด"
+      },
+      "signals": [
+        "write a function",
+        "write code",
+        "implement",
+        "script that",
+        "function that",
+        "class that",
+        "เขียนฟังก์ชัน",
+        "เขียนโค้ด",
+        "เขียนโปรแกรม",
+        "สคริปต์",
+        "ช่วยเขียน python",
+        "ช่วยเขียน sql",
+        "python function",
+        "javascript function",
+        "write a python",
+        "write a script",
+        "write me a function",
+        "เขียนฟังก์ชัน python",
+        "function in python"
+      ],
+      "weight": 3,
+      "needs": [
+        "code"
+      ],
+      "prefer_tier": "medium",
+      "default_rank": [
+        "claude-sonnet-4-20250514",
+        "claude-3-5-sonnet-20241022",
+        "anthropic/claude-sonnet-4.5",
+        "gpt-4o",
+        "openai/gpt-4o",
+        "deepseek/deepseek-chat",
+        "google/gemini-2.5-pro"
+      ],
+      "group": "code"
+    },
+    "code_debug": {
+      "label": {
+        "en": "Debug code",
+        "th": "หาบั๊ก / แก้โค้ด"
+      },
+      "signals": [
+        "debug",
+        "fix this bug",
+        "find the bug",
+        "stack trace",
+        "traceback",
+        "exception",
+        "error:",
+        "doesn't work",
+        "not working",
+        "หาจุดบกพร่อง",
+        "แก้บั๊ก",
+        "บั๊ก",
+        "error",
+        "รันไม่ผ่าน",
+        "ทำไมพัง"
+      ],
+      "weight": 4,
+      "needs": [
+        "code",
+        "reasoning_pref"
+      ],
+      "prefer_tier": "medium",
+      "default_rank": [
+        "claude-sonnet-4-20250514",
+        "claude-3-5-sonnet-20241022",
+        "anthropic/claude-sonnet-4.5",
+        "gpt-4o",
+        "deepseek/deepseek-r1",
+        "google/gemini-2.5-pro",
+        "openai/gpt-4o"
+      ],
+      "group": "code"
+    },
+    "code_review": {
+      "label": {
+        "en": "Review code",
+        "th": "รีวิวโค้ด"
+      },
+      "signals": [
+        "review this code",
+        "code review",
+        "review my",
+        "any issues with",
+        "is this idiomatic",
+        "รีวิวโค้ด",
+        "ตรวจโค้ด",
+        "ช่วยดูโค้ด",
+        "โค้ดนี้โอเคไหม"
+      ],
+      "weight": 4,
+      "needs": [
+        "code"
+      ],
+      "prefer_tier": "medium",
+      "default_rank": [
+        "claude-sonnet-4-20250514",
+        "claude-3-5-sonnet-20241022",
+        "anthropic/claude-sonnet-4.5",
+        "gpt-4o",
+        "google/gemini-2.5-pro",
+        "deepseek/deepseek-chat"
+      ],
+      "group": "code"
+    },
+    "code_explain": {
+      "label": {
+        "en": "Explain code",
+        "th": "อธิบายโค้ด"
+      },
+      "signals": [
+        "what does this code",
+        "explain this code",
+        "walk me through",
+        "line by line",
+        "โค้ดนี้ทำอะไร",
+        "อธิบายโค้ด",
+        "ทีละบรรทัด"
+      ],
+      "weight": 3,
+      "needs": [
+        "code"
+      ],
+      "prefer_tier": "low",
+      "default_rank": [
+        "gpt-4o-mini",
+        "gpt-4o",
+        "anthropic/claude-sonnet-4.5",
+        "deepseek/deepseek-chat"
+      ],
+      "group": "code"
+    },
+    "sql_query": {
+      "label": {
+        "en": "SQL / data query",
+        "th": "คำสั่ง SQL / คิวรีข้อมูล"
+      },
+      "signals": [
+        "sql",
+        "select ",
+        "join ",
+        "group by",
+        "query to",
+        "postgres",
+        "mysql",
+        "คิวรี",
+        "เขียน sql",
+        "ดึงจากตาราง"
+      ],
+      "weight": 3,
+      "needs": [
+        "code"
+      ],
+      "prefer_tier": "low",
+      "default_rank": [
+        "gpt-4o-mini",
+        "gpt-4o",
+        "anthropic/claude-sonnet-4.5",
+        "deepseek/deepseek-chat"
+      ],
+      "group": "code"
+    },
+    "math_calculation": {
+      "label": {
+        "en": "Math / calculation",
+        "th": "คณิตศาสตร์ / คำนวณ"
+      },
+      "signals": [
+        "calculate",
+        "solve",
+        "equation",
+        "integral",
+        "derivative",
+        "probability",
+        "how much is",
+        "คำนวณ",
+        "แก้สมการ",
+        "สมการ",
+        "เท่ากับเท่าไหร่",
+        "ความน่าจะเป็น",
+        "ร้อยละ",
+        "เปอร์เซ็นต์"
+      ],
+      "weight": 3,
+      "needs": [
+        "reasoning_pref"
+      ],
+      "prefer_tier": "medium",
+      "default_rank": [
+        "deepseek/deepseek-r1",
+        "gpt-4o",
+        "anthropic/claude-sonnet-4.5",
+        "google/gemini-2.5-pro",
+        "gpt-4o-mini"
+      ],
+      "group": "reasoning_math"
+    },
+    "logic_reasoning": {
+      "label": {
+        "en": "Logic / multi-step reasoning",
+        "th": "ตรรกะ / คิดหลายขั้น"
+      },
+      "signals": [
+        "step by step",
+        "think through",
+        "reason about",
+        "prove",
+        "derive",
+        "puzzle",
+        "riddle",
+        "คิดทีละขั้น",
+        "พิสูจน์",
+        "ปริศนา",
+        "ให้เหตุผล",
+        "วิเคราะห์เชิงตรรกะ"
+      ],
+      "weight": 4,
+      "needs": [
+        "reasoning_pref"
+      ],
+      "prefer_tier": "high",
+      "default_rank": [
+        "claude-sonnet-4-20250514",
+        "claude-3-5-sonnet-20241022",
+        "deepseek/deepseek-r1",
+        "anthropic/claude-sonnet-4.5",
+        "gpt-4o",
+        "google/gemini-2.5-pro",
+        "anthropic/claude-opus-4.1"
+      ],
+      "group": "reasoning_math"
+    },
+    "data_analysis": {
+      "label": {
+        "en": "Data analysis",
+        "th": "วิเคราะห์ข้อมูล"
+      },
+      "signals": [
+        "analyze",
+        "analyse",
+        "trend",
+        "statistics",
+        "correlation",
+        "dataset",
+        "spreadsheet",
+        "chart",
+        "วิเคราะห์",
+        "แนวโน้ม",
+        "สถิติ",
+        "ข้อมูลชุดนี้",
+        "ตารางข้อมูล",
+        "กราฟ"
+      ],
+      "weight": 3,
+      "needs": [
+        "reasoning_pref"
+      ],
+      "prefer_tier": "medium",
+      "default_rank": [
+        "gpt-4o",
+        "anthropic/claude-sonnet-4.5",
+        "google/gemini-2.5-pro",
+        "deepseek/deepseek-chat"
+      ],
+      "group": "reasoning_math"
+    },
+    "compare_evaluate": {
+      "label": {
+        "en": "Compare / evaluate options",
+        "th": "เปรียบเทียบ / ประเมินทางเลือก"
+      },
+      "signals": [
+        "compare",
+        "pros and cons",
+        "trade-off",
+        "tradeoff",
+        "which is better",
+        "evaluate",
+        "versus",
+        " vs ",
+        "เปรียบเทียบ",
+        "ข้อดีข้อเสีย",
+        "อันไหนดีกว่า",
+        "ประเมิน",
+        "เทียบกับ"
+      ],
+      "weight": 3,
+      "needs": [],
+      "prefer_tier": "medium",
+      "default_rank": [
+        "gpt-4o",
+        "anthropic/claude-sonnet-4.5",
+        "google/gemini-2.5-pro",
+        "gpt-4o-mini"
+      ],
+      "group": "knowledge"
+    },
+    "planning_strategy": {
+      "label": {
+        "en": "Planning / strategy",
+        "th": "วางแผน / กลยุทธ์"
+      },
+      "signals": [
+        "plan",
+        "roadmap",
+        "strategy",
+        "milestones",
+        "timeline",
+        "okr",
+        "วางแผน",
+        "แผนงาน",
+        "กลยุทธ์",
+        "โรดแมป",
+        "ขั้นตอนการทำ",
+        "เป้าหมาย"
+      ],
+      "weight": 3,
+      "needs": [],
+      "prefer_tier": "medium",
+      "default_rank": [
+        "gpt-4o",
+        "anthropic/claude-sonnet-4.5",
+        "google/gemini-2.5-pro",
+        "gpt-4o-mini"
+      ],
+      "group": "knowledge"
+    },
+    "agent_multistep": {
+      "label": {
+        "en": "Multi-step agent task (tools)",
+        "th": "งานหลายขั้นผ่านเครื่องมือ"
+      },
+      "signals": [
+        "then",
+        "after that",
+        "and then",
+        "search and",
+        "open the file",
+        "run the",
+        "create a file",
+        "แล้วก็",
+        "จากนั้น",
+        "ค้นหาแล้ว",
+        "เปิดไฟล์",
+        "รันคำสั่ง",
+        "สร้างไฟล์",
+        "ทำให้เสร็จ"
+      ],
+      "weight": 1,
+      "needs": [
+        "tools"
+      ],
+      "prefer_tier": "medium",
+      "default_rank": [
+        "gpt-4o",
+        "anthropic/claude-sonnet-4.5",
+        "openai/gpt-4o",
+        "google/gemini-2.5-pro"
+      ],
+      "group": "agent_tools"
+    },
+    "customer_support": {
+      "label": {
+        "en": "Customer support reply",
+        "th": "ตอบลูกค้า / ซัพพอร์ต"
+      },
+      "signals": [
+        "customer",
+        "complaint",
+        "refund",
+        "apologize",
+        "support ticket",
+        "reply to the customer",
+        "ลูกค้า",
+        "ร้องเรียน",
+        "คืนเงิน",
+        "ขอโทษลูกค้า",
+        "ตอบลูกค้า",
+        "ติดต่อฝ่าย"
+      ],
+      "weight": 3,
+      "needs": [],
+      "prefer_tier": "low",
+      "default_rank": [
+        "gpt-4o-mini",
+        "gpt-4o",
+        "anthropic/claude-3.5-haiku",
+        "google/gemini-2.5-flash"
+      ],
+      "group": "chat_light"
+    },
+    "legal_compliance": {
+      "label": {
+        "en": "Legal / compliance",
+        "th": "กฎหมาย / ข้อกำหนด"
+      },
+      "signals": [
+        "contract",
+        "clause",
+        "liability",
+        "gdpr",
+        "pdpa",
+        "compliance",
+        "terms of service",
+        "สัญญา",
+        "ข้อกฎหมาย",
+        "กฎหมาย",
+        "pdpa",
+        "ข้อกำหนด",
+        "ความรับผิด"
+      ],
+      "weight": 3,
+      "needs": [],
+      "prefer_tier": "high",
+      "default_rank": [
+        "anthropic/claude-sonnet-4.5",
+        "gpt-4o",
+        "google/gemini-2.5-pro",
+        "anthropic/claude-opus-4.1"
+      ],
+      "group": "knowledge"
+    },
+    "medical_health": {
+      "label": {
+        "en": "Medical / health",
+        "th": "สุขภาพ / การแพทย์"
+      },
+      "signals": [
+        "symptom",
+        "diagnosis",
+        "medication",
+        "dosage",
+        "doctor",
+        "อาการ",
+        "ยา",
+        "โรค",
+        "หมอ",
+        "รักษา",
+        "ปวด"
+      ],
+      "weight": 3,
+      "needs": [],
+      "prefer_tier": "high",
+      "default_rank": [
+        "anthropic/claude-sonnet-4.5",
+        "gpt-4o",
+        "google/gemini-2.5-pro"
+      ],
+      "group": "knowledge"
+    },
+    "finance_accounting": {
+      "label": {
+        "en": "Finance / accounting",
+        "th": "การเงิน / บัญชี"
+      },
+      "signals": [
+        "invoice",
+        "budget",
+        "cash flow",
+        "tax",
+        "vat",
+        "depreciation",
+        "roi",
+        "งบประมาณ",
+        "ภาษี",
+        "บัญชี",
+        "กระแสเงินสด",
+        "ใบแจ้งหนี้",
+        "ต้นทุน",
+        "กำไร"
+      ],
+      "weight": 3,
+      "needs": [],
+      "prefer_tier": "medium",
+      "default_rank": [
+        "gpt-4o",
+        "anthropic/claude-sonnet-4.5",
+        "google/gemini-2.5-pro",
+        "gpt-4o-mini"
+      ],
+      "group": "knowledge"
+    },
+    "education_tutoring": {
+      "label": {
+        "en": "Teaching / tutoring",
+        "th": "สอน / ติว"
+      },
+      "signals": [
+        "teach me",
+        "lesson",
+        "quiz me",
+        "practice problems",
+        "explain like",
+        "สอน",
+        "ติว",
+        "แบบฝึกหัด",
+        "บทเรียน",
+        "ทดสอบความเข้าใจ",
+        "อธิบายให้เด็ก"
+      ],
+      "weight": 3,
+      "needs": [],
+      "prefer_tier": "low",
+      "default_rank": [
+        "gpt-4o-mini",
+        "gpt-4o",
+        "anthropic/claude-sonnet-4.5",
+        "google/gemini-2.5-flash"
+      ],
+      "group": "chat_light"
+    },
+    "vision_image": {
+      "label": {
+        "en": "Image understanding",
+        "th": "อ่านรูป / วิเคราะห์ภาพ"
+      },
+      "signals": [
+        "in this image",
+        "in the picture",
+        "screenshot",
+        "what do you see",
+        "read this image",
+        "ในรูป",
+        "ในภาพ",
+        "ภาพนี้",
+        "สกรีนช็อต",
+        "อ่านจากรูป"
+      ],
+      "weight": 2,
+      "needs": [
+        "vision"
+      ],
+      "prefer_tier": "medium",
+      "default_rank": [
+        "gpt-4o",
+        "openai/gpt-4o",
+        "google/gemini-2.5-flash",
+        "anthropic/claude-sonnet-4.5"
+      ],
+      "group": "knowledge"
+    },
+    "roleplay_persona": {
+      "label": {
+        "en": "Role-play / persona",
+        "th": "สวมบทบาท"
+      },
+      "signals": [
+        "pretend you are",
+        "act as",
+        "role play",
+        "roleplay",
+        "you are a",
+        "สมมติว่าคุณเป็น",
+        "สวมบท",
+        "แกล้งเป็น",
+        "ทำตัวเป็น"
+      ],
+      "weight": 3,
+      "needs": [],
+      "prefer_tier": "low",
+      "default_rank": [
+        "gpt-4o-mini",
+        "gpt-4o",
+        "anthropic/claude-sonnet-4.5"
+      ],
+      "group": "chat_light"
+    }
+  },
+  "rank_groups": {
+    "chat_light": {
+      "label": {
+        "en": "Light chat / short answers",
+        "th": "สนทนาสั้น/ตอบเร็ว"
+      },
+      "prior": [
+        "gpt-4o-mini",
+        "openai/gpt-4o-mini",
+        "google/gemini-2.5-flash",
+        "anthropic/claude-3.5-haiku",
+        "deepseek/deepseek-chat",
+        "gpt-4o"
+      ]
+    },
+    "language": {
+      "label": {
+        "en": "Translate / edit / classify / extract",
+        "th": "แปล/เกลา/จัดหมวด/ดึงข้อมูล"
+      },
+      "prior": [
+        "gpt-4o-mini",
+        "google/gemini-2.5-flash",
+        "openai/gpt-4o-mini",
+        "anthropic/claude-3.5-haiku",
+        "gpt-4o",
+        "deepseek/deepseek-chat"
+      ]
+    },
+    "writing": {
+      "label": {
+        "en": "Writing / summarising",
+        "th": "เขียน/สรุป"
+      },
+      "prior": [
+        "gpt-4o-mini",
+        "google/gemini-2.5-flash",
+        "gpt-4o",
+        "anthropic/claude-sonnet-4.5",
+        "claude-sonnet-4-20250514",
+        "anthropic/claude-3.5-haiku"
+      ]
+    },
+    "knowledge": {
+      "label": {
+        "en": "Knowledge Q&A / explain / compare",
+        "th": "ถามความรู้/อธิบาย/เปรียบเทียบ"
+      },
+      "prior": [
+        "gpt-4o-mini",
+        "gpt-4o",
+        "google/gemini-2.5-flash",
+        "anthropic/claude-sonnet-4.5",
+        "google/gemini-2.5-pro"
+      ]
+    },
+    "code": {
+      "label": {
+        "en": "Code (generate / debug / review / SQL)",
+        "th": "โค้ด"
+      },
+      "prior": [
+        "anthropic/claude-sonnet-4.5",
+        "claude-sonnet-4-20250514",
+        "deepseek/deepseek-chat",
+        "gpt-4o",
+        "google/gemini-2.5-pro",
+        "gpt-4o-mini"
+      ]
+    },
+    "reasoning_math": {
+      "label": {
+        "en": "Reasoning / math / analysis",
+        "th": "คิดหลายขั้น/คณิต/วิเคราะห์"
+      },
+      "prior": [
+        "deepseek/deepseek-r1",
+        "anthropic/claude-sonnet-4.5",
+        "claude-sonnet-4-20250514",
+        "gpt-4o",
+        "google/gemini-2.5-pro"
+      ]
+    },
+    "agent_tools": {
+      "label": {
+        "en": "Agent / tool-use turns",
+        "th": "งานผ่านเครื่องมือ"
+      },
+      "prior": [
+        "gpt-4o",
+        "anthropic/claude-sonnet-4.5",
+        "claude-sonnet-4-20250514",
+        "openai/gpt-4o",
+        "google/gemini-2.5-pro"
+      ]
+    }
+  },
+  "exploration_rate": 0.07,
+  "prior_weight_samples": 20
+}

@@ -1,0 +1,3735 @@
+{
+ "schema": "agent.market.eval.v1",
+ "package": "sran.invoice-po-matching",
+ "note": "Files are in evals/fixtures, written by tools/make_po_fixtures.py. Every expected value comes from the scenario (what each invoice truly is) and plain arithmetic in that generator, never from this package. A case with rounds runs them first, in order; what each records is the history of the next. Answers: a key that is a card's code answers every card of that code; unanswered cards take their default, as a skipped card does. Checked on every case, whatever it says: every invoice line is linked, waiting, a cost nobody ordered or on no PO — one of the four; every link below the exact tier was confirmed by a person; every line says whether it was tested three-way or two-way and why, a three-way line names its receipts and a two-way line has none; an invoice that passes has no reason code and one that does not has one; nothing is marked approved or paid; every PO line's billed quantity is the sum of the lines counted on it; the working paper passed its own quality gate; the same input gives the the same figures, the same matches and the same questions (computed.json identical; a workbook's packaging is not compared).",
+ "defaults": {
+  "company": "บริษัท สยามตัวอย่างการค้า จำกัด"
+ },
+ "today": "2026-10-02",
+ "cases": [
+  {
+   "id": "clean_three_way",
+   "note": "Two invoices, five lines, a receipt for every line: all pass, every line three-way. Ten exact links: five receipt lines and five invoice lines, each by the PO number and the PO line.",
+   "files": [
+    "po_sep.xlsx",
+    "gr_sep.xlsx",
+    "inv_clean.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0101": {
+      "status": "pass",
+      "reasons": []
+     },
+     "BK6909-220": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 2,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 5,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "52804.50",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "depth_on_face": "ตรวจ 3 ทาง 5 บรรทัด · ตรวจ 2 ทาง 0 บรรทัด",
+    "two_way_warning": false
+   }
+  },
+  {
+   "id": "no_receipts_company_that_issues_none",
+   "note": "A company that does not issue goods receipts: the missing receipt is normal. Nobody is asked anything, the invoice passes — and every line, the summary and the face of the working paper say the test was two-way.",
+   "files": [
+    "po_sep.xlsx",
+    "inv_goods_one.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "no"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0101": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 0,
+     "two_way": 3,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "37771.00",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 3,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "depth_on_face": "ตรวจ 3 ทาง 0 บรรทัด · ตรวจ 2 ทาง 3 บรรทัด",
+    "two_way_warning": true,
+    "two_way_why": {
+     "บริษัทไม่ออกใบรับของ": 3
+    },
+    "offers": 3
+   }
+  },
+  {
+   "id": "no_receipts_company_that_issues_them",
+   "note": "The same two files at a company that issues goods receipts: the missing receipt is an exception worth chasing. Blocked, ยังไม่มีใบรับของ, on each of the three goods lines.",
+   "files": [
+    "po_sep.xlsx",
+    "inv_goods_one.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0101": {
+      "status": "blocked",
+      "reasons": [
+       "no_goods_receipt"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 0,
+     "two_way": 3,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "37771.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 3,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "two_way_warning": true,
+    "two_way_why": {
+     "ยังไม่มีใบรับของ จึงตรวจได้เพียง 2 ทาง": 3
+    },
+    "reason_lines": {
+     "no_goods_receipt": 3
+    }
+   }
+  },
+  {
+   "id": "practice_is_asked_once_with_a_guess",
+   "note": "No setting yet and a goods receipt file in the round: the question is asked once, recommends “ออกใบรับของ”, and its answer is remembered by the install.",
+   "files": [
+    "po_sep.xlsx",
+    "gr_sep.xlsx",
+    "inv_clean.xlsx"
+   ],
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "asked": [
+     "ap_gr_practice"
+    ],
+    "invoices": {
+     "IV6909-0101": {
+      "status": "pass",
+      "reasons": []
+     },
+     "BK6909-220": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 2,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 5,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "52804.50",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "recommended": {
+     "ap_gr_practice": "yes"
+    },
+    "practice": "yes"
+   }
+  },
+  {
+   "id": "practice_guess_without_a_receipt_file",
+   "note": "No setting yet and no goods receipt file: the question recommends “ไม่ออกใบรับของ”.",
+   "files": [
+    "po_sep.xlsx",
+    "inv_goods_one.xlsx"
+   ],
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "asked": [
+     "ap_gr_practice"
+    ],
+    "invoices": {
+     "IV6909-0101": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 0,
+     "two_way": 3,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "37771.00",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 3,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "recommended": {
+     "ap_gr_practice": "no"
+    },
+    "practice": "no"
+   }
+  },
+  {
+   "id": "partial_delivery_second_invoice_before_second_receipt",
+   "note": "100 ordered, 40 received so far. The first invoice bills 40 and passes. The second bills 60 before the second delivery: billed 100, received 40 — blocked, ปริมาณเกินที่รับจริง. Billed and not received: 60 × 32.00.",
+   "files": [
+    "po_partial.xlsx",
+    "gr_partial_first.xlsx",
+    "inv_partial.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "BK6909-301": {
+      "status": "pass",
+      "reasons": []
+     },
+     "BK6909-344": {
+      "status": "blocked",
+      "reasons": [
+       "qty_over_received"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 2,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 1
+    },
+    "value": {
+     "pass": "1369.60",
+     "blocked": "2054.40",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "1920.00"
+    },
+    "tiers": {
+     "exact": 3,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "lines": {
+     "BK6909-344#1": {
+      "ordered": "100",
+      "received": "40",
+      "billed_before": "40",
+      "billed_after": "100"
+     }
+    }
+   }
+  },
+  {
+   "id": "partial_delivery_both_receipts",
+   "note": "The same two invoices once both deliveries are in: two receipts against one PO line, both invoices pass.",
+   "files": [
+    "po_partial.xlsx",
+    "gr_partial_both.xlsx",
+    "inv_partial.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "BK6909-301": {
+      "status": "pass",
+      "reasons": []
+     },
+     "BK6909-344": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 2,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 2,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "3424.00",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "lines": {
+     "BK6909-344#1": {
+      "ordered": "100",
+      "received": "100",
+      "billed_before": "40",
+      "billed_after": "100"
+     }
+    }
+   }
+  },
+  {
+   "id": "over_billed_only_cumulatively",
+   "note": "100 ordered, 100 received. Two invoices of 60 each: either of them alone is within what was received (the eval runs each alone and both pass), together they bill 120. The second is blocked. Received and not billed: the ink and the folders (18,900.00 + 3,900.00); billed and not received: 20 reams × 125.00.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_over_both.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0150": {
+      "status": "pass",
+      "reasons": []
+     },
+     "IV6909-0177": {
+      "status": "blocked",
+      "reasons": [
+       "qty_over_received"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 2,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 1
+    },
+    "value": {
+     "pass": "8025.00",
+     "blocked": "8025.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "22800.00",
+     "billed_not_received": "2500.00"
+    },
+    "tiers": {
+     "exact": 5,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "lines": {
+     "IV6909-0150#1": {
+      "ordered": "100",
+      "received": "100",
+      "billed_before": "0",
+      "billed_after": "60"
+     },
+     "IV6909-0177#1": {
+      "ordered": "100",
+      "received": "100",
+      "billed_before": "60",
+      "billed_after": "120"
+     }
+    },
+    "alone_each_passes": [
+     "inv_over_first.xlsx",
+     "inv_over_second.xlsx"
+    ]
+   }
+  },
+  {
+   "id": "over_billed_by_an_invoice_of_an_earlier_round",
+   "note": "The first invoice was tested in an earlier round and passed. This round holds only the second: with the install's history it is blocked, exactly as when both are in one round.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_over_second.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0177": {
+      "status": "blocked",
+      "reasons": [
+       "qty_over_received"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 1
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "8025.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "22800.00",
+     "billed_not_received": "2500.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "lines": {
+     "IV6909-0177#1": {
+      "billed_before": "60",
+      "billed_after": "120"
+     }
+    }
+   },
+   "rounds": [
+    {
+     "files": [
+      "po_one.xlsx",
+      "gr_one.xlsx",
+      "inv_over_first.xlsx"
+     ],
+     "answers": {}
+    }
+   ]
+  },
+  {
+   "id": "service_po_is_two_way_and_says_so",
+   "note": "A company that issues goods receipts, and a service line (its unit is เดือน): no receipt is expected, the line is two-way and labelled so on the line, in the summary and on the face. The document is an invoice, not a tax invoice: input VAT cannot be claimed on it yet. The goods of the other two POs were received and are not billed in this round.",
+   "files": [
+    "po_sep.xlsx",
+    "gr_sep.xlsx",
+    "inv_service.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "NS6909-018": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 0,
+     "two_way": 1,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "53500.00",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "49350.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 6,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "two_way_warning": true,
+    "two_way_why": {
+     "เป็นบริการ ไม่มีใบรับของ": 1
+    },
+    "depth_on_face": "ตรวจ 3 ทาง 0 บรรทัด · ตรวจ 2 ทาง 1 บรรทัด",
+    "vat_claim": false
+   }
+  },
+  {
+   "id": "freight_nobody_ordered",
+   "note": "Pens as ordered and a freight line of 450.00 that is on no PO. The freight is its own flagged category and the invoice is blocked on it; the pens' price variance is 0.00 — the freight is not absorbed into it.",
+   "files": [
+    "po_pens.xlsx",
+    "gr_pens.xlsx",
+    "inv_freight.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0190": {
+      "status": "blocked",
+      "reasons": [
+       "unplanned_cost"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "4333.50",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 2,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "unplanned": [
+     {
+      "invoice": "IV6909-0190",
+      "kind": "freight",
+      "amount": "450.00"
+     }
+    ],
+    "price_variance_zero": [
+     "IV6909-0190#1"
+    ]
+   }
+  },
+  {
+   "id": "freight_within_the_installs_limit",
+   "note": "The same files at an install that accepts up to 500.00 of such costs per invoice: passes, the freight still listed.",
+   "files": [
+    "po_pens.xlsx",
+    "gr_pens.xlsx",
+    "inv_freight.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes",
+    "ap_unplanned_cost_limit": "500.00"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0190": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "4333.50",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 2,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "unplanned": [
+     {
+      "invoice": "IV6909-0190",
+      "kind": "freight",
+      "amount": "450.00"
+     }
+    ]
+   }
+  },
+  {
+   "id": "blanket_po_drawn_down_over_months",
+   "note": "A blanket order of 300,000.00 for the year. July and August were billed in an earlier round (120,000.00 each, both pass). September's 120,000.00 brings the total to 360,000.00: blocked, เกินวงเงินของ PO.",
+   "files": [
+    "po_blanket.xlsx",
+    "inv_blanket_sep.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "TL6909-0033": {
+      "status": "blocked",
+      "reasons": [
+       "blanket_limit_exceeded"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 0,
+     "two_way": 1,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "128400.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 1,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "lines": {
+     "TL6909-0033#1": {
+      "ordered": "300000.00",
+      "billed_before": "240000.00",
+      "billed_after": "360000.00"
+     }
+    }
+   },
+   "rounds": [
+    {
+     "files": [
+      "po_blanket.xlsx",
+      "inv_blanket_jul_aug.xlsx"
+     ],
+     "answers": {},
+     "expect": {
+      "invoices": {
+       "TL6907-0031": {
+        "status": "pass",
+        "reasons": []
+       },
+       "TL6908-0029": {
+        "status": "pass",
+        "reasons": []
+       }
+      },
+      "period": "2026-08"
+     }
+    }
+   ]
+  },
+  {
+   "id": "invoice_after_a_short_close",
+   "note": "100 ordered, 80 received, the PO closed on 25 August. The invoice for the 80 arrives on 2 September: blocked, PO ปิดแล้ว — and the line says the PO was closed short and that the 80 received had not been billed.",
+   "files": [
+    "po_closed.xlsx",
+    "gr_closed.xlsx",
+    "inv_after_close.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0044": {
+      "status": "blocked",
+      "reasons": [
+       "po_closed"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "128400.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 2,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "note_has": [
+     "IV6909-0044#1",
+     "ปิดก่อนรับของครบ"
+    ]
+   }
+  },
+  {
+   "id": "credit_note_against_a_matched_invoice",
+   "note": "A credit note for 10 reams names the invoice it corrects: billed on that line goes from 100 to 90, and 10 reams received are no longer billed (1,250.00).",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_with_credit_note.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0101": {
+      "status": "pass",
+      "reasons": []
+     },
+     "CN6909-0007": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 2,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 4,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "36433.50",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "1250.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 7,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "lines": {
+     "CN6909-0007#1": {
+      "billed_before": "100",
+      "billed_after": "90"
+     }
+    },
+    "notes": [
+     {
+      "number": "CN6909-0007",
+      "corrects": "IV6909-0101"
+     }
+    ]
+   }
+  },
+  {
+   "id": "debit_note_raises_the_price_past_tolerance",
+   "note": "A debit note adds 2,000.00 to the ink already billed at the PO's 18,900.00: 20,900.00 against 18,900.00 is 10.6% over, past the 2% and the 500.00 the install allows. Blocked, ราคาสูงกว่า PO.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_with_debit_note.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0101": {
+      "status": "pass",
+      "reasons": []
+     },
+     "DN6909-0002": {
+      "status": "blocked",
+      "reasons": [
+       "price_above_po"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 4,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "37771.00",
+     "blocked": "2140.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 7,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "notes": [
+     {
+      "number": "DN6909-0002",
+      "corrects": "IV6909-0101"
+     }
+    ]
+   }
+  },
+  {
+   "id": "credit_note_whose_invoice_is_unknown",
+   "note": "A credit note that names an invoice nobody has seen: for a person to decide.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_credit_note_lost.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0101": {
+      "status": "pass",
+      "reasons": []
+     },
+     "CN6909-0011": {
+      "status": "person",
+      "reasons": [
+       "note_without_invoice"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 1,
+     "three_way": 4,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "37771.00",
+     "blocked": "0.00",
+     "person": "-347.75"
+    },
+    "grir": {
+     "received_not_billed": "325.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 7,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "price_within_tolerance_and_below_po",
+   "note": "Paper at 127.00 against 125.00: 1.6% and 200.00 on the line, inside 2% and 500.00. Folders at 62.00 against 65.00: below the PO, noted. Both pass, and the line records the tolerances it was tested with.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_price_within.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0201": {
+      "status": "pass",
+      "reasons": []
+     },
+     "IV6909-0204": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 2,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 2,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "17569.40",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "18900.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 5,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "tolerance_recorded": [
+     "IV6909-0201#1"
+    ],
+    "variance": {
+     "IV6909-0201#1": {
+      "pct": "1.60",
+      "extended": "200.00"
+     }
+    }
+   }
+  },
+  {
+   "id": "price_above_the_percentage",
+   "note": "Ink at 1,990.00 against 1,890.00: 5.29%. Blocked, ราคาสูงกว่า PO.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_price_over_pct.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0202": {
+      "status": "blocked",
+      "reasons": [
+       "price_above_po"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "21293.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "16400.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "variance": {
+     "IV6909-0202#1": {
+      "pct": "5.29",
+      "extended": "1000.00"
+     }
+    }
+   }
+  },
+  {
+   "id": "price_inside_the_percentage_past_the_cap",
+   "note": "Ink at 1,925.00: 1.85% is inside 2%, the 350.00 on the line is past this install's cap of 300.00. Both limits hold; blocked.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_price_within_pct.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes",
+    "ap_price_tolerance_abs": "300.00"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0203": {
+      "status": "blocked",
+      "reasons": [
+       "price_above_po"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "20597.50",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "16400.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "variance": {
+     "IV6909-0203#1": {
+      "pct": "1.85",
+      "extended": "350.00"
+     }
+    }
+   }
+  },
+  {
+   "id": "the_same_line_at_the_default_cap",
+   "note": "The same invoice at the default cap of 500.00: passes. A tolerance is a setting, never a constant.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_price_within_pct.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0203": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "20597.50",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "16400.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "a_few_satang_of_rounding",
+   "note": "The line prints 9,250.40 for 500 × 18.50 = 9,250.00: 0.40 is inside the 1.00 the install accepts as rounding.",
+   "files": [
+    "po_b.xlsx",
+    "gr_b.xlsx",
+    "inv_rounding.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "BK6909-400": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "9897.93",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "4800.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 3,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "unit_converted_by_a_measure",
+   "note": "Ordered 20 โหล at 240.00, billed 240 ชิ้น at 20.00: a dozen is twelve everywhere. Converted, compared, passes.",
+   "files": [
+    "po_b.xlsx",
+    "gr_b.xlsx",
+    "inv_dozen.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "BK6909-410": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "5136.00",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "9250.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 3,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "lines": {
+     "BK6909-410#1": {
+      "ordered": "20",
+      "received": "20",
+      "billed_after": "20"
+     }
+    }
+   }
+  },
+  {
+   "id": "unit_converted_by_the_installs_setting",
+   "note": "Ordered 10 กล่อง at 360.00, billed 120 ด้าม at 30.00, and the install says a box holds twelve.",
+   "files": [
+    "po_pens.xlsx",
+    "gr_pens.xlsx",
+    "inv_pens_each.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes",
+    "ap_unit_conversions": "1 กล่อง = 12 ด้าม"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0210": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "3852.00",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 2,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "lines": {
+     "IV6909-0210#1": {
+      "ordered": "10",
+      "received": "10",
+      "billed_after": "10"
+     }
+    }
+   }
+  },
+  {
+   "id": "unit_nothing_converts_is_asked",
+   "note": "The same files without the setting: the units are not guessed. Asked; skipped, the line waits for a person and is not counted as billed.",
+   "files": [
+    "po_pens.xlsx",
+    "gr_pens.xlsx",
+    "inv_pens_each.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [
+     "pomatch_unit"
+    ],
+    "invoices": {
+     "IV6909-0210": {
+      "status": "person",
+      "reasons": [
+       "unit_unknown"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 0,
+     "person": 1,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "0.00",
+     "person": "3852.00"
+    },
+    "grir": {
+     "received_not_billed": "3600.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 2,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "unit_answered_by_a_person",
+   "note": "The person types 12: the same result as the setting, and the working paper says the conversion was their answer.",
+   "files": [
+    "po_pens.xlsx",
+    "gr_pens.xlsx",
+    "inv_pens_each.xlsx"
+   ],
+   "answers": {
+    "pomatch_unit": {
+     "typed": "12"
+    }
+   },
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [
+     "pomatch_unit"
+    ],
+    "invoices": {
+     "IV6909-0210": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "3852.00",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 2,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "foreign_currency_with_its_rate",
+   "note": "A PO and an invoice in USD (English headers, real date cells, no tax ID: the supplier is compared by name). 620.00 USD at the file's rate of 36.25 is 22,475.00 baht in the summary; the rate's source is on the invoice.",
+   "files": [
+    "po_usd.xlsx",
+    "gr_usd.xlsx",
+    "inv_usd.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "PP-2026-0918": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "22475.00",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 2,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "fx": {
+     "PP-2026-0918": "36.25"
+    }
+   }
+  },
+  {
+   "id": "currency_is_not_the_pos",
+   "note": "The PO is in USD, the invoice in baht: สกุลเงินไม่ตรง. The figures are not converted to make them comparable, so the price reads as above the PO as well.",
+   "files": [
+    "po_usd.xlsx",
+    "gr_usd.xlsx",
+    "inv_usd_billed_in_baht.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "PP-2026-0919": {
+      "status": "blocked",
+      "reasons": [
+       "currency_mismatch",
+       "price_above_po"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "22475.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 2,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "vat_is_not_the_rate_times_the_base",
+   "note": "VAT of 390.00 on a base of 3,900.00 is 10%, not 7% (273.00). Blocked, ภาษีคำนวณไม่ตรง.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_vat_wrong.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0220": {
+      "status": "blocked",
+      "reasons": [
+       "vat_mismatch"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "4290.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "31400.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "tax_invoice_without_the_sellers_tax_id",
+   "note": "A tax invoice with no seller tax ID. The supplier is still the PO's (the names agree), but the document cannot carry an input VAT claim: ใบกำกับภาษีไม่ครบองค์ประกอบ.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_no_tax_id.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0221": {
+      "status": "blocked",
+      "reasons": [
+       "tax_invoice_incomplete"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "4173.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "31400.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "vat_claim": false
+   }
+  },
+  {
+   "id": "supplier_name_written_another_way",
+   "note": "บจก.เอเชียออฟฟิศซัพพลาย on the invoice, บริษัท เอเชีย ออฟฟิศ ซัพพลาย จำกัด on the PO, one tax ID: the same supplier.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_name_variant.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0230": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "4173.00",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "31400.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "supplier_is_another_tax_id",
+   "note": "The invoice names PO6909-001 and comes from another tax ID. Blocked, ผู้ขายไม่ตรง.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_other_supplier.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0231": {
+      "status": "blocked",
+      "reasons": [
+       "supplier_mismatch"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "4173.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "31400.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "same_name_another_legal_form_is_asked",
+   "note": "หจก. เอเชีย ออฟฟิศ ซัพพลาย without a tax ID against บริษัท … จำกัด: the same name, another legal person. Asked; skipped, the supplier counts as another one.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_same_name_other_form.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [
+     "pomatch_supplier"
+    ],
+    "invoices": {
+     "IV6909-0232": {
+      "status": "person",
+      "reasons": [
+       "supplier_unsure",
+       "tax_invoice_incomplete"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 0,
+     "person": 1,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "0.00",
+     "person": "4173.00"
+    },
+    "grir": {
+     "received_not_billed": "31400.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "status_is": "blocked"
+   }
+  },
+  {
+   "id": "the_same_invoice_in_a_later_round",
+   "note": "An invoice that passed in an earlier round, sent again in another file: the supplier and the number are the same, blocked by rule as ใบแจ้งหนี้ซ้ำ, and its quantities are not counted a second time.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_clean_again.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0101": {
+      "status": "blocked",
+      "reasons": [
+       "duplicate_invoice"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 3,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "37771.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 7,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "lines": {
+     "IV6909-0101#1": {
+      "billed_before": "100",
+      "billed_after": "100"
+     }
+    }
+   },
+   "rounds": [
+    {
+     "files": [
+      "po_one.xlsx",
+      "gr_one.xlsx",
+      "inv_goods_one.xlsx"
+     ],
+     "answers": {}
+    }
+   ]
+  },
+  {
+   "id": "an_invoice_that_may_be_the_same_is_asked",
+   "note": "Another number, the same supplier and total, two days apart: proposed as the same invoice. The person confirms; the pair records that a person decided.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_near_copy.xlsx"
+   ],
+   "answers": {
+    "e3_candidate": "match"
+   },
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [
+     "e3_candidate"
+    ],
+    "invoices": {
+     "IV6909-0101A": {
+      "status": "blocked",
+      "reasons": [
+       "duplicate_invoice"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 3,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "37771.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 6,
+     "amount_date": 1,
+     "fuzzy": 0
+    },
+    "by_person": 1,
+    "period": "2026-09"
+   },
+   "rounds": [
+    {
+     "files": [
+      "po_one.xlsx",
+      "gr_one.xlsx",
+      "inv_goods_one.xlsx"
+     ],
+     "answers": {}
+    }
+   ]
+  },
+  {
+   "id": "an_invoice_that_may_be_the_same_is_not",
+   "note": "The person says it is another invoice: it is then tested like any other — and bills everything a second time.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_near_copy.xlsx"
+   ],
+   "answers": {
+    "e3_candidate": "separate"
+   },
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [
+     "e3_candidate"
+    ],
+    "invoices": {
+     "IV6909-0101A": {
+      "status": "blocked",
+      "reasons": [
+       "qty_over_received"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 3,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 3
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "37771.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "35300.00"
+    },
+    "tiers": {
+     "exact": 6,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   },
+   "rounds": [
+    {
+     "files": [
+      "po_one.xlsx",
+      "gr_one.xlsx",
+      "inv_goods_one.xlsx"
+     ],
+     "answers": {}
+    }
+   ]
+  },
+  {
+   "id": "an_item_that_is_on_no_po",
+   "note": "Paper as ordered and staples nobody ordered: สินค้าไม่อยู่ใน PO on the staples' line.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_extra_item.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0240": {
+      "status": "blocked",
+      "reasons": [
+       "item_not_on_po"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 1,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "14017.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "22800.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "a_po_that_is_not_in_the_files",
+   "note": "The invoice names PO6909-777; the PO file holds another supplier's order. Blocked, ไม่พบ PO ที่อ้างถึง.",
+   "files": [
+    "po_b_only.xlsx",
+    "inv_unknown_po.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0241": {
+      "status": "blocked",
+      "reasons": [
+       "item_not_on_po",
+       "po_not_found"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 0,
+     "two_way": 0,
+     "unlinked": 1,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "13375.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 0,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "a_link_is_proposed_and_confirmed",
+   "note": "The invoice names the PO but neither the line nor the item code, and words the item another way. The unit price is the PO line's: proposed, a person confirms, and the link records the pass, the tier and the person's name.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_no_line_reference.xlsx"
+   ],
+   "answers": {
+    "e3_candidate": "match"
+   },
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [
+     "e3_candidate"
+    ],
+    "invoices": {
+     "IV6909-0250": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "13375.00",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "22800.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 3,
+     "amount_date": 1,
+     "fuzzy": 0
+    },
+    "by_person": 1,
+    "period": "2026-09",
+    "confirmed_by": "สมหญิง ผู้ตรวจ"
+   }
+  },
+  {
+   "id": "a_proposed_link_nobody_confirms",
+   "note": "The same card skipped: no link is made by default. The invoice waits as ต้องให้คนตัดสิน, nothing of it is counted.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_no_line_reference.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [
+     "e3_candidate"
+    ],
+    "invoices": {
+     "IV6909-0250": {
+      "status": "person",
+      "reasons": [
+       "link_unconfirmed"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 0,
+     "person": 1,
+     "three_way": 0,
+     "two_way": 0,
+     "unlinked": 1,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "0.00",
+     "person": "13375.00"
+    },
+    "grir": {
+     "received_not_billed": "35300.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 3,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "waiting": 1
+   }
+  },
+  {
+   "id": "a_proposed_link_is_refused",
+   "note": "The person says it is another item. No other line of the PO has that price or resembles it: the line is on no PO.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_no_line_reference.xlsx"
+   ],
+   "answers": {
+    "e3_candidate": "separate"
+   },
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [
+     "e3_candidate"
+    ],
+    "invoices": {
+     "IV6909-0250": {
+      "status": "blocked",
+      "reasons": [
+       "item_not_on_po"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 0,
+     "two_way": 0,
+     "unlinked": 1,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "13375.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "35300.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 3,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "receipt_confirmed_in_the_system",
+   "note": "A company without goods receipts, and a person who tapped “ของมาครบ” on the paper's PO line: that line is now three-way, with the confirmation as its receipt; the other two stay two-way and are still offered.",
+   "files": [
+    "po_sep.xlsx",
+    "inv_goods_one.xlsx"
+   ],
+   "answers": {
+    "pomatch_receipt:PO6909001#l:10": "all"
+   },
+   "defaults": {
+    "ap_gr_practice": "no"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0101": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 2,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "37771.00",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 3,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "two_way_warning": true,
+    "offers": 2,
+    "receipts_in_system": [
+     "IV6909-0101#1"
+    ]
+   }
+  },
+  {
+   "id": "po_number_on_the_first_line_only",
+   "note": "The PO export prints the number, the supplier and the date on the first line of each order only.",
+   "files": [
+    "po_first_line_only.xlsx",
+    "gr_sep.xlsx",
+    "inv_clean.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0101": {
+      "status": "pass",
+      "reasons": []
+     },
+     "BK6909-220": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 2,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 5,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "52804.50",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "carried": true
+   }
+  },
+  {
+   "id": "three_documents_in_one_workbook",
+   "note": "One workbook, three sheets named PO, GR and INV.",
+   "files": [
+    "all_in_one.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0101": {
+      "status": "pass",
+      "reasons": []
+     },
+     "BK6909-220": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 2,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 5,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "52804.50",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "invoices_as_a_cp874_csv",
+   "note": "The invoice table saved as CSV by Excel on a Thai Windows.",
+   "files": [
+    "po_sep.xlsx",
+    "gr_sep.xlsx",
+    "inv_clean_cp874.csv"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0101": {
+      "status": "pass",
+      "reasons": []
+     },
+     "BK6909-220": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 2,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 5,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "52804.50",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "a_sheet_that_does_not_say_what_it_is",
+   "note": "Headers that fit an invoice table and a PO alike, a sheet called Sheet1, nothing above the table: asked.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "sheet_that_does_not_say.xlsx"
+   ],
+   "answers": {
+    "pomatch_kind": "invoice"
+   },
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [
+     "pomatch_kind"
+    ],
+    "invoices": {
+     "DOC-0001": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "22800.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "a_sheet_nobody_names_is_set_aside",
+   "note": "The same card skipped: the sheet is set aside, and with no invoice left the round asks for one and waits.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "sheet_that_does_not_say.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [
+     "pomatch_kind",
+     "missing_file"
+    ],
+    "stops_at": "missing_file"
+   }
+  },
+  {
+   "id": "an_invoice_without_lines",
+   "note": "A register row with a total and no lines. A total is never matched to a total: there is nothing to test line by line, so nothing is linked and nothing passes.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_header_only.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0260": {
+      "status": "person",
+      "reasons": [
+       "no_line_detail"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 0,
+     "person": 1,
+     "three_way": 0,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "0.00",
+     "person": "13375.00"
+    },
+    "grir": {
+     "received_not_billed": "35300.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 3,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "invoice_dated_before_the_po",
+   "note": "An invoice dated four days before its PO. Blocked at the default window of 0 days.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_before_the_po.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6908-0999": {
+      "status": "blocked",
+      "reasons": [
+       "date_outside_po"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "4173.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "31400.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-08"
+   }
+  },
+  {
+   "id": "invoice_dated_before_the_po_within_the_window",
+   "note": "The same invoice at an install whose window is 7 days.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_before_the_po.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes",
+    "ap_date_window_days": "7"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6908-0999": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "4173.00",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "31400.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-08"
+   }
+  },
+  {
+   "id": "delivered_more_than_ordered",
+   "note": "105 received and billed against 100 ordered, no over-delivery allowance: ปริมาณเกินที่สั่งซื้อ.",
+   "files": [
+    "po_one.xlsx",
+    "gr_over_delivery.xlsx",
+    "inv_over_delivery.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0270": {
+      "status": "blocked",
+      "reasons": [
+       "qty_over_po"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 1
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "14043.75",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 2,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "delivered_more_than_ordered_within_the_allowance",
+   "note": "The same files at an install that allows 5% over-delivery.",
+   "files": [
+    "po_one.xlsx",
+    "gr_over_delivery.xlsx",
+    "inv_over_delivery.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes",
+    "ap_over_delivery_pct": "5"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0270": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "14043.75",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 2,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "invoice_as_a_pdf",
+   "note": "A tax invoice as a PDF with a text layer. Its PO number is read from the page; its lines carry no PO line number, and each description is the PO line's own: linked by rule.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "ใบกำกับภาษี_IV6909-0301.pdf"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes",
+    "company": "บริษัท สยามตัวอย่างการค้า จำกัด",
+    "company_tax_id": "0105556000017",
+    "company_branch": "00000"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0301": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 2,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "24396.00",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "12500.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 5,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "vat_claim": true,
+    "po_read_from": "text"
+   }
+  },
+  {
+   "id": "invoice_as_an_etax_xml",
+   "note": "An e-Tax invoice as XML; the PO number is its BuyerOrderReferencedDocument.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "eTax_IV6909-0302.xml"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes",
+    "company": "บริษัท สยามตัวอย่างการค้า จำกัด",
+    "company_tax_id": "0105556000017",
+    "company_branch": "00000"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0302": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "13375.00",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "22800.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "vat_claim": true,
+    "po_read_from": "xml"
+   }
+  },
+  {
+   "id": "a_document_that_names_a_recipient",
+   "note": "The invoice's footer asks for a confirmation to be sent to an address and gives a link. It is data: the invoice is matched like any other, and neither the address nor the link is anywhere in what the round computes or writes.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "ใบกำกับภาษี_IV6909-0303.pdf"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes",
+    "company": "บริษัท สยามตัวอย่างการค้า จำกัด",
+    "company_tax_id": "0105556000017",
+    "company_branch": "00000"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0303": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "13375.00",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "22800.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "never_in_output": [
+     "collect-now.example",
+     "payments@",
+     "accounts@",
+     "https://"
+    ]
+   }
+  },
+  {
+   "id": "fuzzy_a_name_that_resembles_at_another_price",
+   "note": "The invoice names the PO, words the ink another way and bills it 5.29% dearer: the price is no clue, only the name resembles. Proposed in the fuzzy tier, confirmed by a person — and then blocked on its price like any other line.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_similar_name_other_price.xlsx"
+   ],
+   "answers": {
+    "e3_candidate": "match"
+   },
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [
+     "e3_candidate"
+    ],
+    "invoices": {
+     "IV6909-0401": {
+      "status": "blocked",
+      "reasons": [
+       "price_above_po"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "21293.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "16400.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 3,
+     "amount_date": 0,
+     "fuzzy": 1
+    },
+    "by_person": 1,
+    "period": "2026-09",
+    "passes": {
+     "po_similar": 1
+    }
+   }
+  },
+  {
+   "id": "no_po_named_the_item_code_is_the_clue",
+   "note": "No PO number on the invoice. The supplier has one open line with that item code: proposed, never linked by rule — the invoice did not say which order it bills.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_no_po_item_code.xlsx"
+   ],
+   "answers": {
+    "e3_candidate": "match"
+   },
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [
+     "e3_candidate"
+    ],
+    "invoices": {
+     "IV6909-0402": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "4173.00",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "31400.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 3,
+     "amount_date": 1,
+     "fuzzy": 0
+    },
+    "by_person": 1,
+    "period": "2026-09",
+    "passes": {
+     "supplier_item": 1
+    }
+   }
+  },
+  {
+   "id": "no_po_named_only_the_name_resembles",
+   "note": "No PO number and no item code: the supplier and a name that resembles a line of its order. Fuzzy tier, a person.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_no_po_no_code.xlsx"
+   ],
+   "answers": {
+    "e3_candidate": "match"
+   },
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [
+     "e3_candidate"
+    ],
+    "invoices": {
+     "IV6909-0403": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "13375.00",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "22800.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 3,
+     "amount_date": 0,
+     "fuzzy": 1
+    },
+    "by_person": 1,
+    "period": "2026-09",
+    "passes": {
+     "supplier_similar": 1
+    }
+   }
+  },
+  {
+   "id": "no_po_named_and_nobody_confirms",
+   "note": "The same card skipped: a fuzzy proposal is never a link by default.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_no_po_no_code.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [
+     "e3_candidate"
+    ],
+    "invoices": {
+     "IV6909-0403": {
+      "status": "person",
+      "reasons": [
+       "link_unconfirmed"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 0,
+     "person": 1,
+     "three_way": 0,
+     "two_way": 0,
+     "unlinked": 1,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "0.00",
+     "person": "13375.00"
+    },
+    "grir": {
+     "received_not_billed": "35300.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 3,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "waiting": 1
+   }
+  },
+  {
+   "id": "duplicate_by_a_number_that_resembles",
+   "note": "IV6909-0110 three weeks after IV6909-0101, the same supplier, the same total: the date is outside the window, the number resembles. Proposed in the fuzzy tier; the person says it is the same invoice keyed again.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_number_that_resembles.xlsx"
+   ],
+   "answers": {
+    "e3_candidate": "match"
+   },
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [
+     "e3_candidate"
+    ],
+    "invoices": {
+     "IV6909-0110": {
+      "status": "blocked",
+      "reasons": [
+       "duplicate_invoice"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 3,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "37771.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 6,
+     "amount_date": 0,
+     "fuzzy": 1
+    },
+    "by_person": 1,
+    "period": "2026-09",
+    "passes": {
+     "similar_number": 1
+    }
+   },
+   "rounds": [
+    {
+     "files": [
+      "po_one.xlsx",
+      "gr_one.xlsx",
+      "inv_goods_one.xlsx"
+     ],
+     "answers": {}
+    }
+   ]
+  },
+  {
+   "id": "a_possible_duplicate_nobody_decides",
+   "note": "The same card skipped: the invoice is not called a duplicate by default. It is tested like any other — and says both that it may be a duplicate and that it bills everything a second time.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_number_that_resembles.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [
+     "e3_candidate"
+    ],
+    "invoices": {
+     "IV6909-0110": {
+      "status": "person",
+      "reasons": [
+       "duplicate_unconfirmed",
+       "qty_over_received"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 0,
+     "person": 1,
+     "three_way": 3,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 3
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "0.00",
+     "person": "37771.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "35300.00"
+    },
+    "tiers": {
+     "exact": 6,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "waiting": 1,
+    "status_is": "blocked"
+   },
+   "rounds": [
+    {
+     "files": [
+      "po_one.xlsx",
+      "gr_one.xlsx",
+      "inv_goods_one.xlsx"
+     ],
+     "answers": {}
+    }
+   ]
+  },
+  {
+   "id": "the_same_number_with_another_total",
+   "note": "The number of an invoice that passed, with another total: not the same document by rule. Asked; the person says it is another invoice, and it is tested: six more folders than were received.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_same_number_other_total.xlsx"
+   ],
+   "answers": {
+    "e3_candidate": "separate"
+   },
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [
+     "e3_candidate"
+    ],
+    "invoices": {
+     "IV6909-0101": {
+      "status": "blocked",
+      "reasons": [
+       "qty_over_received"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 1
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "417.30",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "390.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "passes": {
+     "same_number": 0
+    }
+   },
+   "rounds": [
+    {
+     "files": [
+      "po_one.xlsx",
+      "gr_one.xlsx",
+      "inv_goods_one.xlsx"
+     ],
+     "answers": {}
+    }
+   ]
+  },
+  {
+   "id": "the_same_number_with_a_corrected_total",
+   "note": "The same files; the person says it is the same invoice, issued again with another total. It is a duplicate by their decision and is not counted.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_same_number_other_total.xlsx"
+   ],
+   "answers": {
+    "e3_candidate": "match"
+   },
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [
+     "e3_candidate"
+    ],
+    "invoices": {
+     "IV6909-0101": {
+      "status": "blocked",
+      "reasons": [
+       "duplicate_invoice"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "417.30",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 1
+    },
+    "by_person": 1,
+    "period": "2026-09",
+    "passes": {
+     "same_number_other_total": 1
+    }
+   },
+   "rounds": [
+    {
+     "files": [
+      "po_one.xlsx",
+      "gr_one.xlsx",
+      "inv_goods_one.xlsx"
+     ],
+     "answers": {}
+    }
+   ]
+  },
+  {
+   "id": "a_receipt_that_names_only_the_po",
+   "note": "The goods receipt names the PO, no line and no item code, and the PO has a single line: it is a receipt of that line.",
+   "files": [
+    "po_pens.xlsx",
+    "gr_names_only_the_po.xlsx",
+    "inv_pens.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0420": {
+      "status": "pass",
+      "reasons": []
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 0,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "3852.00",
+     "blocked": "0.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "0.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 2,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "passes": {
+     "po_only_line": 1
+    }
+   }
+  },
+  {
+   "id": "a_line_that_is_not_quantity_times_price",
+   "note": "60 × 65.00 printed as 3,990.00: 90.00 more than the product, far past rounding.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_line_amount_wrong.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0410": {
+      "status": "blocked",
+      "reasons": [
+       "line_amount_mismatch"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "4269.30",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "31400.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "a_total_that_is_not_base_plus_vat",
+   "note": "3,900.00 + 273.00 printed as 4,300.00.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_total_wrong.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0411": {
+      "status": "blocked",
+      "reasons": [
+       "total_mismatch"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "4300.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "31400.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "credit_note_larger_than_its_invoice",
+   "note": "A credit note for 80 folders against an invoice that billed 60. Blocked, ใบลดหนี้เกินยอดของใบแจ้งหนี้เดิม.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_credit_note_too_large.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0101": {
+      "status": "pass",
+      "reasons": []
+     },
+     "CN6909-0020": {
+      "status": "blocked",
+      "reasons": [
+       "credit_over_invoice"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 1,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 4,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "37771.00",
+     "blocked": "-5564.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "5200.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 7,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "a_line_without_quantity_or_amount",
+   "note": "A line that names the PO line and states neither a quantity nor an amount; the 50,000.00 is only in the total. A total is not tested in a line's place: the line is for a person, and nothing of it is counted as billed.",
+   "files": [
+    "po_sep.xlsx",
+    "gr_sep.xlsx",
+    "inv_line_without_figures.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "NS6909-019": {
+      "status": "person",
+      "reasons": [
+       "cannot_test"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 0,
+     "person": 1,
+     "three_way": 0,
+     "two_way": 1,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "0.00",
+     "person": "53500.00"
+    },
+    "grir": {
+     "received_not_billed": "49350.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 6,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "made_out_to_another_company",
+   "note": "A tax invoice in another company's tax ID: not this company's to claim or to pay without a look.",
+   "files": [
+    "po_one.xlsx",
+    "gr_one.xlsx",
+    "inv_other_buyer.xlsx"
+   ],
+   "answers": {},
+   "defaults": {
+    "ap_gr_practice": "yes",
+    "company_tax_id": "0105556000017",
+    "company_branch": "00000"
+   },
+   "expect": {
+    "asked": [],
+    "invoices": {
+     "IV6909-0412": {
+      "status": "blocked",
+      "reasons": [
+       "buyer_mismatch"
+      ]
+     }
+    },
+    "totals": {
+     "passed": 0,
+     "blocked": 1,
+     "person": 0,
+     "three_way": 1,
+     "two_way": 0,
+     "unlinked": 0,
+     "over_billed": 0
+    },
+    "value": {
+     "pass": "0.00",
+     "blocked": "4173.00",
+     "person": "0.00"
+    },
+    "grir": {
+     "received_not_billed": "31400.00",
+     "billed_not_received": "0.00"
+    },
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "period": "2026-09",
+    "vat_claim": false
+   }
+  }
+ ]
+}

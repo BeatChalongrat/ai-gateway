@@ -1,0 +1,10 @@
+{
+  "profile_id": "internal-only",
+  "name": "Internal Only",
+  "category_actions": {
+    "pii": "ALLOW",
+    "secret": "BLOCK"
+  },
+  "severity_threshold_block": null,
+  "scan_responses": false
+}

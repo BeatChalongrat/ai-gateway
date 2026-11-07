@@ -1,0 +1,74 @@
+{
+  "detector": "ssn",
+  "entity_type": "us_ssn",
+  "category": "pii",
+  "severity": 3,
+  "cases": [
+    {
+      "id": "valid_dashed",
+      "input": "SSN: 123-45-6789 thanks",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 16
+        }
+      ]
+    },
+    {
+      "id": "valid_low_serial",
+      "input": "002-23-0001 is valid",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 11
+        }
+      ]
+    },
+    {
+      "id": "invalid_area_000",
+      "input": "000-12-3456 invalid area",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "invalid_area_666",
+      "input": "666-12-3456 invalid area",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "invalid_area_9xx",
+      "input": "900-12-3456 invalid area",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "invalid_group_00",
+      "input": "123-00-6789 invalid group",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "invalid_serial_0000",
+      "input": "123-45-0000 invalid serial",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "no_dashes_no_match",
+      "input": "123456789 should not match",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

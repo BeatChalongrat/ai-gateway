@@ -1,0 +1,65 @@
+{
+  "detector": "mac_address",
+  "entity_type": "mac_address",
+  "category": "network",
+  "severity": 1,
+  "cases": [
+    {
+      "id": "mac_colon",
+      "input": "device aa:bb:cc:dd:ee:ff present",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 7,
+          "end": 24
+        }
+      ]
+    },
+    {
+      "id": "mac_dash",
+      "input": "device AA-BB-CC-DD-EE-FF present",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 7,
+          "end": 24
+        }
+      ]
+    },
+    {
+      "id": "mac_mixed_case",
+      "input": "MAC 0A:1b:2C:3d:4E:5f detected",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 4,
+          "end": 21
+        }
+      ]
+    },
+    {
+      "id": "broadcast_skipped",
+      "input": "FF:FF:FF:FF:FF:FF is broadcast",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "all_zeros_skipped",
+      "input": "00:00:00:00:00:00 placeholder",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "not_a_mac",
+      "input": "no mac in this text",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

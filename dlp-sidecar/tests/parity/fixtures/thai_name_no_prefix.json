@@ -1,0 +1,268 @@
+{
+  "detector": "thai_name_no_prefix",
+  "entity_type": "thai_name",
+  "category": "pii",
+  "severity": 2,
+  "cases": [
+    {
+      "id": "two_word_with_context_kw",
+      "input": "ลูกค้า สมชาย ใจดี ลงทะเบียน",
+      "should_match": true,
+      "expected_count": 2,
+      "expected_spans": [
+        {
+          "start": 7,
+          "end": 17
+        },
+        {
+          "start": 7,
+          "end": 12
+        }
+      ]
+    },
+    {
+      "id": "song_word_chue",
+      "input": "ชื่อ สมหญิง สมบูรณ์ ครับ",
+      "should_match": true,
+      "expected_count": 2,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 19
+        },
+        {
+          "start": 5,
+          "end": 11
+        }
+      ]
+    },
+    {
+      "id": "no_context_kw",
+      "input": "สมชาย ใจดี ไปทำงาน",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 5
+        }
+      ]
+    },
+    {
+      "id": "plain_thai_prose",
+      "input": "วันนี้ฝนตกหนัก",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "english_prose",
+      "input": "no thai content here",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_kind_answer_briefly_no_mask",
+      "input": "บอกชื่อสัตว์มา 1 ชนิด ตอบสั้นๆ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_label_pair_no_mask",
+      "input": "ลูกค้าชื่อ เบอร์ เลขบัตร ต้องเก็บ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_phrase_pairs_no_mask",
+      "input": "พนักงาน ทุกคน ต้องส่ง รายงาน ก่อนศุกร์",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_question_pair_no_mask",
+      "input": "ชื่อไฟล์ ควรตั้ง ยังไง ให้หาง่าย",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_asked_pair_no_mask",
+      "input": "ลูกค้า ถามมา ว่าสินค้า จะเข้าเมื่อไหร่",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_label_trim_keeps_name",
+      "input": "ชื่อ สมชาย เบอร์ ติดต่อกลับ",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 10
+        }
+      ]
+    },
+    {
+      "id": "fix26_label_trim_no_label_before_no_mask",
+      "input": "ลูกค้า ปิยะพงศ์ เบอร์ ติดต่อกลับ",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix26_real_pair_still_masks",
+      "input": "ลูกค้าชื่อ ปิยะพงศ์ วงศ์สุวรรณ ลงทะเบียน",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 11,
+          "end": 30
+        }
+      ]
+    },
+    {
+      "id": "fix26_real_pair_after_name_label",
+      "input": "name: อรอนงค์ ศรีสุข",
+      "should_match": true,
+      "expected_count": 2,
+      "expected_spans": [
+        {
+          "start": 6,
+          "end": 20
+        },
+        {
+          "start": 6,
+          "end": 13
+        }
+      ]
+    },
+    {
+      "id": "fix27_gazetteer_with_sensitive_context",
+      "input": "อัญชลี บุญรอด ลาออกแล้ว",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 6
+        }
+      ]
+    },
+    {
+      "id": "fix27_gazetteer_with_money_context",
+      "input": "ภาณุ ทรัพย์มาก ผ่อนบ้านอยู่",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 4
+        }
+      ]
+    },
+    {
+      "id": "fix27_gazetteer_bare_no_context_no_mask",
+      "input": "อัญชลี มาถึงแล้ว",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix27_list_prefixed_items",
+      "input": "รายชื่อผู้เข้าร่วม: คุณสมชาย, คุณสมหญิง",
+      "should_match": true,
+      "expected_count": 2,
+      "expected_spans": [
+        {
+          "start": 20,
+          "end": 28
+        },
+        {
+          "start": 30,
+          "end": 39
+        }
+      ]
+    },
+    {
+      "id": "fix27_list_gazetteer_item",
+      "input": "รายชื่อพนักงาน: อัญชลี, ภาณุ",
+      "should_match": true,
+      "expected_count": 2,
+      "expected_spans": [
+        {
+          "start": 16,
+          "end": 22
+        },
+        {
+          "start": 24,
+          "end": 28
+        }
+      ]
+    },
+    {
+      "id": "fix27_list_products_no_mask",
+      "input": "รายชื่อสินค้า: กล้วย, มะม่วง, ส้ม",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix29_glued_given_name",
+      "input": "ณัฐพลบอกว่าจะมาสาย",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 5
+        }
+      ]
+    },
+    {
+      "id": "fix29_glued_given_name_mid",
+      "input": "ฝากบอกอนุชาด้วยว่าประชุมเลื่อน",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix29_dictionary_word_not_a_name",
+      "input": "ประชุมเลื่อนไปพรุ่งนี้",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix29_two_word_no_title",
+      "input": "สุรชัย มั่นคง โทรมาเมื่อเช้า",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 6
+        }
+      ]
+    },
+    {
+      "id": "fix29_label_glued_name",
+      "input": "ช่วยเขียนอีเมลแจ้งลูกค้าหน่อย ลูกค้าชื่อสมชาย เบอร์ 081-234-5678",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 40,
+          "end": 45
+        }
+      ]
+    }
+  ]
+}

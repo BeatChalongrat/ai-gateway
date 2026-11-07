@@ -1,0 +1,118 @@
+{
+ "schema": "web.capture.v1",
+ "fetcher_version": "1.0.0",
+ "requested_url": "http://www.trapstore.test/inject/links",
+ "started_at": "2026-10-06T11:42:27.610Z",
+ "clock": "UTC",
+ "outcome": "captured",
+ "final_url": "http://www.trapstore.test/inject/links",
+ "http": {
+  "status": 200,
+  "content_type": "text/html; charset=utf-8",
+  "content_length": 2131,
+  "headers": {
+   "connection": "close",
+   "content-type": "text/html; charset=utf-8",
+   "date": "Tue, 06 Oct 2026 11:42:27 GMT",
+   "transfer-encoding": "chunked"
+  }
+ },
+ "body_sha256": "bf9511cf7155ebf25d3751b345cd1b0ab4c84a68532bb7c9c641017156432065",
+ "snapshot_sha256": "3878bfa75775cde8dc0211509a3cd2392a822d28ec3f87aacb736ff9ba35a49e",
+ "robots": {
+  "url": "http://www.trapstore.test/robots.txt",
+  "status": 200,
+  "allowed": true,
+  "rule": "Allow: /",
+  "group": "*",
+  "sha256": "16ceb5ee3e0dc13aa9adf31a3ebbe45a1d965b8c2b9f72eaf84e5911e140ed95"
+ },
+ "page_rules": [],
+ "hosts": {
+  "named": "www.trapstore.test",
+  "address": "93.184.215.14",
+  "reached": [
+   "www.trapstore.test"
+  ],
+  "not_opened": [
+   {
+    "host": "169.254.169.254",
+    "count": 3
+   },
+   {
+    "host": "assets.other-host.test",
+    "count": 1
+   },
+   {
+    "host": "10.0.0.1",
+    "count": 1
+   },
+   {
+    "host": "track.other-host.test",
+    "count": 1
+   },
+   {
+    "host": "frames.other-host.test",
+    "count": 1
+   },
+   {
+    "host": "localhost",
+    "count": 1
+   },
+   {
+    "host": "api.other-host.test",
+    "count": 1
+   },
+   {
+    "host": "192.168.65.254",
+    "count": 1
+   },
+   {
+    "host": "beacon.other-host.test",
+    "count": 1
+   }
+  ]
+ },
+ "bytes": {
+  "document": 2131,
+  "transfer": 2131,
+  "transfer_capped": false
+ },
+ "page": {
+  "width": 1280,
+  "height": 900,
+  "screenshot_height": 900,
+  "lang": "th",
+  "markup_truncated": false,
+  "text_truncated": false
+ },
+ "counts": {
+  "shown_blocks": 5,
+  "shown_characters": 137,
+  "struck_blocks": 0,
+  "hidden_pieces": 0,
+  "attributes": 0,
+  "comments": 0,
+  "structured": 0,
+  "meta": 1
+ },
+ "files": {
+  "hidden.json": {
+   "sha256": "8bee15a999488fe9cfd8aef4a3fbd577be22fee8f339a38a52f06a4e2a45cf03",
+   "bytes": 223
+  },
+  "page.html": {
+   "sha256": "021cfcfd8b97fe115b77ffe9ee27a95dade1335808a6388cc734b1006faa609e",
+   "bytes": 1478
+  },
+  "screenshot.jpg": {
+   "sha256": "c11cacbbb3f4479da9b7519c6cc67beb9943e1a88cfbcc501c93bfb7214c406e",
+   "bytes": 24345
+  },
+  "text.json": {
+   "sha256": "ecf3d7d92be127b2705a732aa0f78cdb5152cb8fc7644a014c25ef763b003a8e",
+   "bytes": 780
+  }
+ },
+ "finished_at": "2026-10-06T11:42:28.507Z"
+}

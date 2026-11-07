@@ -1,0 +1,81 @@
+{
+ "schema": "web.capture.v1",
+ "fetcher_version": "1.0.0",
+ "requested_url": "http://shop.talad-klang.test/item/airback-pro",
+ "started_at": "2026-10-06T11:42:29.447Z",
+ "clock": "UTC",
+ "outcome": "captured",
+ "final_url": "http://shop.talad-klang.test/item/airback-pro",
+ "http": {
+  "status": 200,
+  "content_type": "text/html; charset=utf-8",
+  "content_length": 1881,
+  "headers": {
+   "connection": "close",
+   "content-type": "text/html; charset=utf-8",
+   "date": "Tue, 06 Oct 2026 11:42:29 GMT",
+   "transfer-encoding": "chunked"
+  }
+ },
+ "body_sha256": "63ee7c703cdd75677af8d0e84979e66cd7197f823f46a0cecd31b369d2aba694",
+ "snapshot_sha256": "93692db78422f4a57c14b5f612d289180b294b1f9579c816825d2ce63d8ab8f5",
+ "robots": {
+  "url": "http://shop.talad-klang.test/robots.txt",
+  "status": 200,
+  "allowed": true,
+  "rule": "Allow: /item/",
+  "group": "*",
+  "sha256": "79f724e44f34d0f156c29531c8d66ccae8f715fadb7bcc218151972f7d0a8057"
+ },
+ "page_rules": [],
+ "hosts": {
+  "named": "shop.talad-klang.test",
+  "address": "93.184.215.14",
+  "reached": [
+   "shop.talad-klang.test"
+  ],
+  "not_opened": []
+ },
+ "bytes": {
+  "document": 1881,
+  "transfer": 1881,
+  "transfer_capped": false
+ },
+ "page": {
+  "width": 1280,
+  "height": 900,
+  "screenshot_height": 900,
+  "lang": "th",
+  "markup_truncated": false,
+  "text_truncated": false
+ },
+ "counts": {
+  "shown_blocks": 12,
+  "shown_characters": 311,
+  "struck_blocks": 1,
+  "hidden_pieces": 0,
+  "attributes": 0,
+  "comments": 0,
+  "structured": 0,
+  "meta": 1
+ },
+ "files": {
+  "hidden.json": {
+   "sha256": "fef0f3ef75dc004f4b8eba87960e396070a2db0469fe20b7d449a4d46aabfde2",
+   "bytes": 252
+  },
+  "page.html": {
+   "sha256": "1b631db956e87dd592585dd90d5c990e42fa1ba5a21ec70e6698e93fdd1e6a05",
+   "bytes": 1880
+  },
+  "screenshot.jpg": {
+   "sha256": "61ce28ccb7505e4eccc663e3c9c331919febb004b0548adfde795ff439e226a9",
+   "bytes": 41454
+  },
+  "text.json": {
+   "sha256": "2c356db38ff17b8a4e865310992e9bffbb036f5cfcd928711a51eaac817a33bc",
+   "bytes": 1863
+  }
+ },
+ "finished_at": "2026-10-06T11:42:30.220Z"
+}

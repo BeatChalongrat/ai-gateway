@@ -1,0 +1,352 @@
+"""Tests for DLP system-prompt injection (mask-token explanation)."""
+
+from app.schemas.common import Message
+from app.services.dlp.detectors.registry import get_default_registry
+from app.services.dlp.transformer import DLPTransformer
+from app.services.dlp_prompt import (
+    DLP_PLACEHOLDER_PROMPT,
+    has_mask_tokens,
+    inject_dlp_system_prompt,
+)
+
+
+class TestHasMaskTokens:
+    def test_detects_single_token(self):
+        msgs = [Message(role="user", content="Hello <r0>")]
+        assert has_mask_tokens(msgs) is True
+
+    def test_detects_multiple_tokens(self):
+        msgs = [Message(role="user", content="<r0> email <r1> phone <r2>")]
+        assert has_mask_tokens(msgs) is True
+
+    def test_clean_text_returns_false(self):
+        msgs = [Message(role="user", content="What is the capital of Thailand?")]
+        assert has_mask_tokens(msgs) is False
+
+    def test_empty_messages(self):
+        assert has_mask_tokens([]) is False
+
+    def test_system_message_with_token(self):
+        msgs = [
+            Message(role="system", content="You are helpful."),
+            Message(role="user", content="Help <r0> with their order"),
+        ]
+        assert has_mask_tokens(msgs) is True
+
+    def test_bracket_text_without_index_ignored(self):
+        msgs = [Message(role="user", content="Use [PLACEHOLDER] in your code")]
+        assert has_mask_tokens(msgs) is False
+
+
+class TestInjectDlpSystemPrompt:
+    def test_injected_when_masked(self):
+        msgs = [Message(role="user", content="Hello <r0>")]
+        result = inject_dlp_system_prompt(msgs)
+        assert len(result) == 2
+        assert result[0].role == "system"
+        assert DLP_PLACEHOLDER_PROMPT in result[0].content
+        assert result[1].content == "Hello <r0>"
+
+    def test_not_injected_when_clean(self):
+        msgs = [Message(role="user", content="Hello world")]
+        result = inject_dlp_system_prompt(msgs)
+        assert result is msgs
+        assert len(result) == 1
+
+    def test_existing_system_prompt_preserved(self):
+        msgs = [
+            Message(role="system", content="You are a helpful assistant."),
+            Message(role="user", content="Help <r0>"),
+        ]
+        result = inject_dlp_system_prompt(msgs)
+        assert len(result) == 2
+        assert result[0].role == "system"
+        assert result[0].content.startswith(DLP_PLACEHOLDER_PROMPT)
+        assert "You are a helpful assistant." in result[0].content
+
+    def test_multiple_tokens_single_injection(self):
+        msgs = [
+            Message(role="user", content="<r0> email <r1> phone <r2>"),
+        ]
+        result = inject_dlp_system_prompt(msgs)
+        assert len(result) == 2
+        system_count = sum(1 for m in result if m.role == "system")
+        assert system_count == 1
+
+    def test_original_list_not_mutated(self):
+        msgs = [Message(role="user", content="Hello <r0>")]
+        original_len = len(msgs)
+        inject_dlp_system_prompt(msgs)
+        assert len(msgs) == original_len
+
+    def test_no_mutation_when_clean(self):
+        msgs = [Message(role="user", content="Hello")]
+        result = inject_dlp_system_prompt(msgs)
+        assert result is msgs
+
+
+class TestRedactedRuleInPrompt:
+    """Verify the prompt does NOT instruct the model to write [REDACTED].
+
+    Earlier wording told the model to substitute ``[REDACTED]`` for any
+    sensitive content it noticed; the model dutifully obeyed and emitted
+    literal ``[REDACTED]`` strings throughout its replies. The outbound
+    DLP scan already catches any fresh PII the model produces, so the
+    instruction was redundant — and the literal ``[REDACTED]`` reaching
+    the user was confusing UX. The negation locks the prompt down so a
+    future tweak doesn't quietly re-introduce the sentinel.
+    """
+
+    def test_redacted_substitute_absent(self):
+        assert "[REDACTED]" not in DLP_PLACEHOLDER_PROMPT
+
+    def test_explicitly_forbids_new_tokens(self):
+        # Must instruct the model NOT to invent placeholder tokens.
+        # Phrasing can change; the negation must remain.
+        lower = DLP_PLACEHOLDER_PROMPT.lower()
+        assert (
+            "do not invent" in lower
+            or "do not echo" in lower
+            or "never create new tokens" in lower
+            or "never invent" in lower
+        )
+
+    def test_no_concrete_token_examples(self):
+        # The prior version listed [NAME_0], [EMAIL_0], [DATE_OF_BIRTH_0],
+        # [SSN_0], [RELIGION_0], [HEALTH_CONDITION_0] as examples.
+        # The model picked those up as "valid token names" and invented
+        # them in replies even when the gateway never minted them.
+        # Under the neutral ``<rN>`` shape the prompt no longer needs
+        # category examples at all.
+        forbidden = [
+            "[NAME_0]",
+            "[EMAIL_0]",
+            "[DATE_OF_BIRTH_0]",
+            "[SSN_0]",
+            "[RELIGION_0]",
+            "[HEALTH_CONDITION_0]",
+            "[PHONE_NUMBER_0]",
+            "[CATEGORY_NUMBER]",
+        ]
+        for ex in forbidden:
+            assert ex not in DLP_PLACEHOLDER_PROMPT, (
+                f"prompt must not seed concrete token names: found {ex}"
+            )
+
+    def test_no_literal_token_in_prompt(self):
+        # The prompt must describe the placeholder shape WITHOUT
+        # showing a literal example like ``<r0>``. Showing the literal
+        # taught the model the grammar and it invented ``<rN>`` tokens
+        # in replies even when no PII had been masked, producing
+        # orphan tokens visible to the end user (May 2026 E2E audit
+        # T09 / T34 / T45 / T46 / T48 / T49). The new contract is
+        # "describe by shape, never by example."
+        import re as _re
+        assert _re.search(r"<r\d", DLP_PLACEHOLDER_PROMPT) is None, (
+            "preamble must not contain a literal <rN> token: "
+            f"{DLP_PLACEHOLDER_PROMPT!r}"
+        )
+        # Still must tell the model what to do with placeholders.
+        lower = DLP_PLACEHOLDER_PROMPT.lower()
+        assert "placeholder" in lower or "angle-bracket" in lower
+
+
+class TestPromptRules:
+    """Pin the two contract rules of the v3+ DLP system prompt.
+
+    Wording can evolve, but the prompt MUST carry (a) a clear
+    instruction to preserve existing placeholders verbatim and (b) a
+    clear instruction not to invent new placeholder tokens. These
+    rules together fix the May 2026 real-LLM E2E regressions where
+    GPT-4o-mini hallucinated ``<<ADDRESS_1>>`` / ``<r2>`` tokens in
+    its replies and the orphan-redact pass left empty gaps in the
+    user-visible text.
+    """
+
+    def test_prompt_forbids_inventing_tokens(self):
+        lower = DLP_PLACEHOLDER_PROMPT.lower()
+        # Must include both the negation and the "new" keyword so the
+        # model treats both shapes (``<<...>>`` and ``<r...>``) as
+        # closed sets it must not extend.
+        assert "do not invent" in lower or "never invent" in lower
+        assert "new" in lower
+
+    def test_prompt_requires_preserving_placeholders(self):
+        lower = DLP_PLACEHOLDER_PROMPT.lower()
+        # Must instruct preservation. The verb can vary
+        # ("preserve" / "keep" / "leave"); the key requirement is
+        # presence of an instruction to NOT change the tokens.
+        assert any(
+            verb in lower
+            for verb in ("preserve", "keep them", "leave them", "do not modify")
+        )
+
+    def test_prompt_mentions_both_token_shapes(self):
+        # The new copy explicitly names both shapes so the model knows
+        # the closed set covers ``<<...>>`` (identity-class pseudonym)
+        # AND ``<r...>`` (legacy secret-class). Earlier wording only
+        # said "angle-bracket placeholders" generically, which let the
+        # model think it was free to mint new ones of either form.
+        assert "<<" in DLP_PLACEHOLDER_PROMPT
+        assert "<r" in DLP_PLACEHOLDER_PROMPT
+
+    def test_prompt_not_injected_when_no_masking(self):
+        # No mask tokens in the messages → no system prompt added.
+        # Belt-and-suspenders with TestInjectDlpSystemPrompt.test_not_injected_when_clean;
+        # this one also verifies the function is a no-op (no allocation
+        # of a new list when the input is clean).
+        msgs = [Message(role="user", content="Just a plain question")]
+        result = inject_dlp_system_prompt(msgs)
+        assert result is msgs
+        assert not any(m.role == "system" for m in result)
+
+
+class TestPlaceholderAllowlist:
+    """``inject_dlp_system_prompt`` enumerates the request's pseudonym
+    tokens into the prompt as a closed allowlist.
+
+    Surfaced by the May-2026 real-LLM E2E Case 2 trace where the LLM
+    learnt the ``<<PERSON_A>>`` / ``<<EMAIL_1>>`` grammar from the
+    input and hallucinated ``<<ADDRESS_1>>`` in its reply for an
+    entity the user hadn't provided. Explicitly enumerating the
+    valid set + offering "plain text" as an escape hatch cuts the
+    hallucination rate sharply.
+    """
+
+    def test_prompt_lists_valid_placeholders(self):
+        span_map = {
+            "<<PERSON_A>>": "สมชาย",
+            "<<EMAIL_1>>": "test@test.com",
+            "<r0>": "sk-key-do-not-list",  # secret — must not appear
+        }
+        msgs = [Message(role="user", content="Help <<PERSON_A>> at <<EMAIL_1>>")]
+        result = inject_dlp_system_prompt(msgs, span_map=span_map)
+
+        # System prompt was injected (mask tokens present in input).
+        assert result[0].role == "system"
+        system_content = result[0].content
+
+        # Allow-list mentions both pseudonyms.
+        assert "<<PERSON_A>>" in system_content
+        assert "<<EMAIL_1>>" in system_content
+        # Secret token (``<rN>``) must NOT appear — listing it as a
+        # valid placeholder would teach the model to echo it back.
+        assert "<r0>" not in system_content
+        # Allow-list clause has the explicit "ONLY" framing.
+        assert "ONLY" in system_content or "only" in system_content
+
+    def test_prompt_no_allowlist_when_no_pseudonyms(self):
+        # Only a secret-class token in span_map; no pseudonyms to list.
+        span_map = {"<r0>": "sk-key"}
+        msgs = [Message(role="user", content="The key is <r0>")]
+        result = inject_dlp_system_prompt(msgs, span_map=span_map)
+
+        # System prompt still injected (because mask tokens are in the input).
+        assert result[0].role == "system"
+        system_content = result[0].content
+
+        # The base prompt text is present...
+        assert DLP_PLACEHOLDER_PROMPT in system_content
+        # ...but no allow-list clause (no pseudonyms to enumerate).
+        # The marker "ONLY pseudonym placeholders" is the lead-in for
+        # the dynamic allow-list. Its absence means the clause is gone.
+        assert "ONLY pseudonym placeholders" not in system_content
+
+    def test_prompt_allowlist_omitted_when_span_map_none(self):
+        # Backwards-compat — pre-existing callers that don't pass
+        # span_map still get the base prompt with no allow-list.
+        msgs = [Message(role="user", content="Help <<PERSON_A>>")]
+        result = inject_dlp_system_prompt(msgs)  # no span_map kwarg
+        assert result[0].role == "system"
+        assert DLP_PLACEHOLDER_PROMPT in result[0].content
+        assert "ONLY pseudonym placeholders" not in result[0].content
+
+
+class TestOrphanTokenPassthrough:
+    """Document current behavior: hallucinated tokens reach user as literal.
+
+    ``restore()`` only replaces tokens that are in ``span_map``. Anything
+    else (orphans / hallucinated tokens) passes through unchanged and
+    triggers the ``dlp_orphan_mask_tokens`` warning. A future "strip
+    orphans" change would break this test on purpose — that's the
+    point of the assertion.
+    """
+
+    def test_orphan_token_passes_through_unchanged(self):
+        transformer = DLPTransformer()
+        span_map = {"<r0>": "alice@example.com"}
+        text_from_provider = "Sent to <r0> and also <r99>"
+        result = transformer.restore(text_from_provider, span_map)
+        # Mapped token restored.
+        assert "alice@example.com" in result
+        assert "<r0>" not in result
+        # Orphan token survives as a literal.
+        assert "<r99>" in result
+
+    def test_orphan_warning_fires_in_logs(self, caplog):
+        # The orphan path emits ``dlp_orphan_mask_tokens`` at WARNING
+        # level. Operators rely on this log line to spot stale-history
+        # replays and provider-side hallucinations.
+        import logging
+        transformer = DLPTransformer()
+        with caplog.at_level(logging.WARNING):
+            transformer.restore(
+                "<r0> and <r99>",
+                {"<r0>": "x@y.z"},
+            )
+        assert any("dlp_orphan_mask_tokens" in r.message for r in caplog.records)
+
+
+class TestSystemMessageScanGate:
+    """``scan_system_messages`` flag on DetectorRegistry.scan_messages.
+
+    Default False — system prompts (operator-authored, e.g. "Reply in
+    Thai.") should NOT be scanned. NER on en_core_web_sm classifies
+    "Thai" as a PERSON / NRP entity, which used to bind ``[NAME_0]``
+    to the literal "Thai" and pollute every reply with "Dear Thai,".
+    Tenants with PII in system prompts can opt back in.
+    """
+
+    def test_system_message_not_scanned_by_default(self):
+        registry = get_default_registry()
+        messages = [
+            Message(role="system", content="You are a helpful assistant. Reply in Thai."),
+            Message(role="user", content="Email me at alice@example.com"),
+        ]
+        result = registry.scan_messages(messages, direction="input")
+        # Only the user message should produce findings — the email
+        # in scenario 5 / 2 reproduction. The literal "Thai" from the
+        # system prompt must NOT show up as a NAME / NRP finding.
+        emails = [m for m in result.matches if m.detector_name == "email"]
+        assert len(emails) >= 1, "expected email detector to fire on user message"
+        # No finding may originate from the system message — every
+        # match's start offset must be valid against the user message,
+        # not the system one. Easiest invariant: no matched_text equals
+        # the literal "Thai" (the historical pollution path).
+        thai_name_hits = [m for m in result.matches if m.matched_text == "Thai"]
+        assert thai_name_hits == [], (
+            "system-prompt 'Thai' leaked into matches: "
+            f"{[(m.detector_name, m.matched_text) for m in thai_name_hits]}"
+        )
+
+    def test_system_message_scanned_when_enabled(self):
+        # Opt-in: a tenant whose system prompt legitimately contains
+        # PII can flip the flag on their PolicyProfile and recover the
+        # pre-fix behavior.
+        registry = get_default_registry()
+        messages = [
+            Message(role="system", content="The customer is contactable at john@acme.com."),
+            Message(role="user", content="What's my account status?"),
+        ]
+        result_off = registry.scan_messages(
+            messages, direction="input", scan_system_messages=False,
+        )
+        result_on = registry.scan_messages(
+            messages, direction="input", scan_system_messages=True,
+        )
+        # Off: no findings (user message has no PII).
+        emails_off = [m for m in result_off.matches if m.detector_name == "email"]
+        assert emails_off == []
+        # On: the system-prompt email is detected.
+        emails_on = [m for m in result_on.matches if m.detector_name == "email"]
+        assert any(m.matched_text == "john@acme.com" for m in emails_on)

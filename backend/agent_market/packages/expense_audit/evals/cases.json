@@ -1,0 +1,100 @@
+{
+ "schema": "agent.market.eval.v1",
+ "package": "sran.expense-audit",
+ "note": "Files are the Phase A expense pack (fixtures/expense), paths relative to it. Every expected value comes from its golden output (expected.json, written from the spec), never from this package: 'golden' checks every claim's outcome, facts and reason codes against it ('golden_except' lists the claims a case changes on purpose, with their new expectations). Cards: unanswered ones take their default, as a skipped card does. 'defaults' is the install: the stored policy table and holiday calendar ('company:holidays.json' = that list as the company's own calendar, confirmed by a person — AM3: the holiday check reads nothing else; 'defaults_set' replaces a default for one case); 'policy_patch' edits the table for one case (null deletes a key). Checked on every case, whatever it says: no outcome but pass / exception / question, every run exception open for a person with its choices, every limit a fact used equal to the table's, the KB document never a limit, the workbook's own quality gate.",
+ "defaults": {"company": "บริษัท สยามตัวอย่างการค้า จำกัด", "policy": "fixture:policy.json", "holidays": "company:holidays.json"},
+ "cases": [
+  {
+   "id": "golden_month_cards_skipped",
+   "note": "The October 2569 claims, all 13 receipts and the KB policy document. Judgement is asked for exactly the three golden question claims (C07 Saturday, C08 วันนวมินทรมหาราช, C14 'ค่าอาหาร'); nothing about the receipts (their totals are read with certainty); every rule failure is an exception with its golden reason code. The cards are skipped, so each question claim goes to a person as a review exception. The KB says meals 'ประมาณ 2,000'; the table's 1,500 decides C02, and the KB paragraph is quoted next to it as context.",
+   "files": ["claims_2569-10.xlsx", "receipts/*.pdf", "policy_kb.docx"],
+   "expect": {"first_cards": {"C07": ["expense_weekend_holiday"], "C08": ["expense_weekend_holiday"], "C14": ["expense_vague_purpose"]},
+              "golden": true, "kb_quoted": true, "assumptions": ["company_holiday_calendar"], "not_assumptions": ["holiday_check_off"],
+              "info_codes": {"C07": [], "C08": [], "C14": []}}
+  },
+  {
+   "id": "golden_month_cards_answered",
+   "note": "The same month; the person answers the three cards: C07 is company work (accepted: recorded, nobody else has to decide), C08 'ask the employee' (a review exception), C14's purpose typed from the employee (recorded word for word as the claim's purpose). The outcomes stay the golden ones: what the audit found does not change because a person decided it.",
+   "files": ["claims_2569-10.xlsx", "receipts/*.pdf", "policy_kb.docx"],
+   "answers": {"expense_weekend_holiday:C07": "accept", "expense_weekend_holiday:C08": "ask_employee",
+               "expense_vague_purpose:C14": {"typed": "เลี้ยงอาหารกลางวันลูกค้าบริษัท ก. หลังประชุมเสนอราคา"}},
+   "expect": {"first_cards": {"C07": ["expense_weekend_holiday"], "C08": ["expense_weekend_holiday"], "C14": ["expense_vague_purpose"]},
+              "golden": true,
+              "review_codes": {"C07": [], "C08": ["weekend_or_holiday"], "C14": []},
+              "info_codes": {"C07": ["weekend_or_holiday"], "C08": [], "C14": ["vague_purpose"]},
+              "purpose": {"C14": "เลี้ยงอาหารกลางวันลูกค้าบริษัท ก. หลังประชุมเสนอราคา"}}
+  },
+  {
+   "id": "kb_is_never_a_limit",
+   "note": "The table's per-claim meals limit is removed. The KB document still says 'ประมาณ 2,000': it must not become the limit — C02 (1,980) has no per-claim limit to fail (skip) and passes, and the per-claim fact of every other meals claim (C01, C14) is skip too, never 'pass under 2,000'; the difference between the document and the table is reported. Everything else is golden (C16 still crosses the monthly limit, which the table keeps).",
+   "files": ["claims_2569-10.xlsx", "receipts/*.pdf", "policy_kb.docx"],
+   "policy_patch": {"categories.meals.per_claim": null},
+   "expect": {"first_cards": {"C07": ["expense_weekend_holiday"], "C08": ["expense_weekend_holiday"], "C14": ["expense_vague_purpose"]},
+              "golden": true, "golden_except": ["C01", "C02", "C14"],
+              "outcomes": {"C01": "pass", "C02": "pass", "C14": "question"},
+              "facts": {"C01": {"within_claim_limit": "skip", "receipt": "pass"},
+                        "C02": {"within_claim_limit": "skip", "within_period_limit": "pass"},
+                        "C14": {"within_claim_limit": "skip"}},
+              "review_codes": {"C01": [], "C02": [], "C14": ["vague_purpose"]}}
+  },
+  {
+   "id": "weekend_rule_is_exception",
+   "note": "The owner's policy says weekend and holiday claims are exceptions rather than questions: C07 and C08 are asked nothing and go to a person as exceptions; C14 is still a judgement card.",
+   "files": ["claims_2569-10.xlsx", "receipts/*.pdf"],
+   "policy_patch": {"weekend_holiday": "exception"},
+   "expect": {"first_cards": {"C14": ["expense_vague_purpose"]},
+              "golden": true, "golden_except": ["C07", "C08"],
+              "outcomes": {"C07": "exception", "C08": "exception"},
+              "facts": {"C07": {"weekend_holiday": "fail"}, "C08": {"weekend_holiday": "fail"}},
+              "review_codes": {"C07": ["weekend_or_holiday"], "C08": ["weekend_or_holiday"]}}
+  },
+  {
+   "id": "receipt_claimed_in_an_earlier_run",
+   "note": "The install's duplicate index already holds r_c01.pdf (claimed last month): C01 is a duplicate claim for a person to decide, even though nothing in this month's sheet repeats it.",
+   "files": ["claims_2569-10.xlsx", "receipts/*.pdf"],
+   "history": ["receipts/r_c01.pdf"],
+   "expect": {"first_cards": {"C07": ["expense_weekend_holiday"], "C08": ["expense_weekend_holiday"], "C14": ["expense_vague_purpose"]},
+              "golden": true, "golden_except": ["C01"],
+              "outcomes": {"C01": "exception"}, "facts": {"C01": {"duplicate": "fail", "within_claim_limit": "pass"}},
+              "review_codes": {"C01": ["duplicate_claim"]}}
+  },
+  {
+   "id": "receipt_not_uploaded",
+   "note": "r_c15.pdf is named by C15 (780.00, over the 500.00 threshold) but not uploaded: C15 has no receipt — an exception, never a guess.",
+   "files": ["claims_2569-10.xlsx", "receipts/*.pdf"],
+   "leave_out": ["r_c15.pdf"],
+   "expect": {"first_cards": {"C07": ["expense_weekend_holiday"], "C08": ["expense_weekend_holiday"], "C14": ["expense_vague_purpose"]},
+              "golden": true, "golden_except": ["C15"],
+              "outcomes": {"C15": "exception"}, "facts": {"C15": {"receipt": "fail", "within_claim_limit": "pass"}},
+              "review_codes": {"C15": ["missing_receipt"]}}
+  },
+  {
+   "id": "vision_never_reads_a_digital_receipt",
+   "note": "A model's reading of r_c01.pdf says 999.00. The receipt is a digital PDF, read exactly from its text: the proposal is ignored, no model is recorded as having seen a receipt, C01 passes.",
+   "files": ["claims_2569-10.xlsx", "receipts/*.pdf"],
+   "proposals": {"r_c01.pdf": {"total": "999.00"}},
+   "expect": {"first_cards": {"C07": ["expense_weekend_holiday"], "C08": ["expense_weekend_holiday"], "C14": ["expense_vague_purpose"]},
+              "golden": true, "model_documents": 0}
+  },
+  {
+   "id": "holiday_calendar_not_confirmed_is_off",
+   "note": "AM3: the install holds the October holidays as a plain list (AM2's shape) that nobody confirmed as the company's calendar. The holiday check is off: C08 (Tuesday 13 Oct, วันนวมินทรมหาราช) is asked nothing and passes; C07 (a Saturday) is still asked — weekends need no calendar; the output says the holiday check was off.",
+   "files": ["claims_2569-10.xlsx", "receipts/*.pdf"],
+   "defaults_set": {"holidays": "fixture:holidays.json"},
+   "expect": {"first_cards": {"C07": ["expense_weekend_holiday"], "C14": ["expense_vague_purpose"]},
+              "golden": true, "golden_except": ["C08"],
+              "outcomes": {"C08": "pass"}, "facts": {"C08": {"weekend_holiday": "pass"}}, "review_codes": {"C08": []},
+              "assumptions": ["holiday_check_off"], "not_assumptions": ["company_holiday_calendar"]}
+  },
+  {
+   "id": "no_holiday_calendar_weekends_still_checked",
+   "note": "AM3: no holiday calendar at all. Same as above: the government calendar the package ships is never used by the rule.",
+   "files": ["claims_2569-10.xlsx", "receipts/*.pdf"],
+   "defaults_set": {"holidays": null},
+   "expect": {"first_cards": {"C07": ["expense_weekend_holiday"], "C14": ["expense_vague_purpose"]},
+              "golden": true, "golden_except": ["C08"],
+              "outcomes": {"C08": "pass"}, "facts": {"C08": {"weekend_holiday": "pass"}}, "review_codes": {"C08": []},
+              "assumptions": ["holiday_check_off"]}
+  }
+ ]
+}

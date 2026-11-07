@@ -1,0 +1,110 @@
+# promtool test rules infra/prometheus/tests/agent_market_test.yml  (AM1b §0.4)
+rule_files:
+  - ../agent_market.yml
+evaluation_interval: 1m
+tests:
+  # 20 runs ended in 6 h, 1 failed: budget partly used, nothing firing.
+  - interval: 1h
+    input_series:
+      - series: 'agent_market_runs_finished_total{status="succeeded"}'
+        values: '0 4 8 12 16 19'
+      - series: 'agent_market_runs_finished_total{status="failed"}'
+        values: '0 0 0 1 1 1'
+    promql_expr_test:
+      - expr: agent_market:error_budget_remaining:ratio14d
+        eval_time: 5h
+        exp_samples:
+          - labels: 'agent_market:error_budget_remaining:ratio14d'
+            value: 0
+    alert_rule_test:
+      - eval_time: 5h
+        alertname: AgentMarketErrorBudgetBurning
+        exp_alerts: []
+  # 4 of 6 runs failed in the last hours: the burn alert fires on its own channel.
+  - interval: 1h
+    input_series:
+      - series: 'agent_market_runs_finished_total{status="succeeded"}'
+        values: '0 1 2 2 2 2'
+      - series: 'agent_market_runs_finished_total{status="failed"}'
+        values: '0 0 1 2 3 4'
+    alert_rule_test:
+      - eval_time: 5h
+        alertname: AgentMarketErrorBudgetBurning
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              channel: agent-market
+            exp_annotations:
+              summary: "Agent Market: a quarter of recent runs failed — the 14-day error budget is burning"
+  # AM6: a round that finished open (its draft delivered, the reconciliation does not tie) is work
+  # delivered, not a failure: 3 failed of 16 that ended is not a quarter, nothing fires.
+  - interval: 1h
+    input_series:
+      - series: 'agent_market_runs_finished_total{status="succeeded"}'
+        values: '0 1 2 3 3 3'
+      - series: 'agent_market_runs_finished_total{status="completed_open"}'
+        values: '0 2 4 6 8 10'
+      - series: 'agent_market_runs_finished_total{status="failed"}'
+        values: '0 1 2 3 3 3'
+    alert_rule_test:
+      - eval_time: 5h
+        alertname: AgentMarketErrorBudgetBurning
+        exp_alerts: []
+  # AM3: a problem report pages at once and stops when it is closed.
+  - interval: 1m
+    input_series:
+      - series: 'agent_market_problem_reports_open'
+        values: '0 0 1 1 0'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: AgentMarketProblemReported
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: AgentMarketProblemReported
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              channel: agent-market
+            exp_annotations:
+              summary: "Agent Market: someone reported a problem with a run — read it on the admins' page (จัดการ Agent Market → ปัญหาที่แจ้ง)"
+      - eval_time: 4m
+        alertname: AgentMarketProblemReported
+        exp_alerts: []
+  # AM3: a run waiting for budget pages only after an hour.
+  - interval: 1m
+    input_series:
+      - series: 'agent_market_runs_waiting_budget'
+        values: '1x90'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: AgentMarketRunsWaitingForBudget
+        exp_alerts: []
+      - eval_time: 80m
+        alertname: AgentMarketRunsWaitingForBudget
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              channel: agent-market
+            exp_annotations:
+              summary: "Agent Market: runs have waited over an hour for budget — raise a person's or department's budget, or tell them"
+  # AM15: a run waiting for its model pages after ten minutes — not at once (the runner asks the model
+  # a word every two minutes and puts the run back when it answers), and not never.
+  - interval: 1m
+    input_series:
+      - series: 'agent_market_runs_waiting_model'
+        values: '0x5 2x30 0x10'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: AgentMarketRunsWaitingForModel
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: AgentMarketRunsWaitingForModel
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              channel: agent-market
+            exp_annotations:
+              summary: "Agent Market: runs are waiting because the model the agents use cannot be reached — they go on by themselves when it answers; nothing was delivered meanwhile"
+      - eval_time: 45m
+        alertname: AgentMarketRunsWaitingForModel
+        exp_alerts: []

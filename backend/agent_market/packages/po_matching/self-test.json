@@ -1,0 +1,15 @@
+{
+  "schema": "agent.market.selftest.v1",
+  "note": "Runs the whole agent on a bundled month (September 2569): three purchase orders, two goods receipts and three invoices. Five goods lines are tested three-way against their receipts, the consultancy line is a service and is tested two-way — and the working paper says so on the line, in the summary and on its face. Every link is made by rule (the PO number and the PO line), nothing is asked, all three invoices pass, and the real working paper is shown before the user trusts the agent with their own files.",
+  "files": ["sample-data/ใบสั่งซื้อ_2569-09.xlsx", "sample-data/ใบรับของ_2569-09.xlsx", "sample-data/ใบกำกับภาษี_2569-09.xlsx"],
+  "message": "ตรวจใบแจ้งหนี้กับใบสั่งซื้อจากไฟล์ตัวอย่าง",
+  "settings_note": "What the sample files were made for: the sample buyer's name, and a company that issues goods receipts. A self-test run lays these over the install's own settings, so the sample is shown the same way whatever the person set; a real run never uses them.",
+  "settings": {"company": "บริษัท สยามตัวอย่างการค้า จำกัด", "ap_gr_practice": "yes"},
+  "formats": ["xlsx"],
+  "expect": {
+    "findings": [],
+    "period": "2026-09",
+    "totals": {"invoices": 3, "passed": 3, "blocked": 0, "person": 0, "three_way": 5, "two_way": 1, "unlinked": 0, "over_billed": 0,
+               "value_passed": "106304.50", "received_not_billed": "0.00", "billed_not_received": "0.00"}
+  }
+}

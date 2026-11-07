@@ -1,0 +1,67 @@
+{
+ "what": "A number that only looks like the amount. 3,600.00 is inside 13,600.00 and beside 3,606.00, and 45,000.00 is printed where the row's amount is (45,000.00): matching the printed text found all three; none of them is the number.",
+ "ok": false,
+ "bad": [
+  2,
+  3,
+  4
+ ],
+ "pages": [
+  "สรุปยอด หน้า 1 / 1\n1 ค่าเช่าสำนักงาน 13,600.00\n2 ค่าไฟฟ้า 3,606.00\n3 คืนเงินมัดจำ 45,000.00\n4 ค่าบริการ 980.00\n"
+ ],
+ "rows": [
+  {
+   "sheet": "สรุปยอด",
+   "row": 2,
+   "identity": [
+    "1",
+    "ค่าเช่าสำนักงาน"
+   ],
+   "amounts": [
+    "3,600.00"
+   ],
+   "values": [
+    "3600.00"
+   ]
+  },
+  {
+   "sheet": "สรุปยอด",
+   "row": 3,
+   "identity": [
+    "2",
+    "ค่าไฟฟ้า"
+   ],
+   "amounts": [
+    "3,600.00"
+   ]
+  },
+  {
+   "sheet": "สรุปยอด",
+   "row": 4,
+   "identity": [
+    "3",
+    "คืนเงินมัดจำ"
+   ],
+   "amounts": [
+    "(45,000.00)"
+   ],
+   "values": [
+    "-45000.00"
+   ]
+  },
+  {
+   "sheet": "สรุปยอด",
+   "row": 5,
+   "identity": [
+    "4",
+    "ค่าบริการ"
+   ],
+   "amounts": [
+    "980.00"
+   ],
+   "values": [
+    "980.00"
+   ]
+  }
+ ]
+}

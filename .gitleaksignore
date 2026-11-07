@@ -1,0 +1,15 @@
+# gitleaks false positives, by fingerprint (commit:file:rule:line).
+# FIX129: the request-id literal "req-fix129-slow" in a unit test is not a key.
+86b1905b7d475e7215c03d323ce0430af6358040:backend/tests/test_fix129_credit_deduction_instrumentation.py:generic-api-key:90
+# FIX130: deliberately fake secrets in the alert-redaction tests (a made-up JWT, an sk-live-… and a re_… dummy key) — the tests prove these never reach an alert.
+c44a6c480994c495791fac4fec842363058dfee7:infra/backup/tests/test_notify.sh:jwt:34
+c44a6c480994c495791fac4fec842363058dfee7:infra/backup/tests/test_notify.sh:generic-api-key:35
+c44a6c480994c495791fac4fec842363058dfee7:infra/backup/tests/test_notify.sh:generic-api-key:91
+9caa2cbc850eaf48a9a2deae7ee7b4c65d47b64c:backend/tests/test_fix130_alert_redaction.py:generic-api-key:53
+# FIX131: the deliberately fake Resend key in the [TEST]-routing test — it proves a test alert never uses the owner's channels.
+68aaab1a24203a160d59921b4d8cfc21d2868887:infra/backup/tests/test_notify.sh:generic-api-key:110
+# FIX133: the literals "key_a"/"key_b" + "turn-12345678" in the chat-idempotency key-shape test are not keys.
+ba8332f7701f5e2090dd78b21734aef4ef587665:backend/tests/test_fix133_idempotency.py:generic-api-key:31
+ba8332f7701f5e2090dd78b21734aef4ef587665:backend/tests/test_fix133_idempotency.py:generic-api-key:32
+# AM2: the idempotency key literal "am2-bad-policy" in the install-refusal test is a made-up request key, not a secret.
+b9544a1a37b7c9d380fddd16844d96c6c2b5d906:services/chat-edge-api/internal/agentmarket/am2_test.go:generic-api-key:214

@@ -1,0 +1,25 @@
+{
+  "name": "sran-desktop",
+  "private": true,
+  "version": "0.1.0-e68",
+  "description": "SRAN Desktop — the desktop client of SRAN AI Gateway",
+  "author": "SRAN",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "npm run build && electron .",
+    "dev": "npm run build && electron . --devtools",
+    "probe": "npm run build && electron . --e1-probe",
+    "measure": "npm run build && electron . --measure",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dist": "npm run build && node scripts/dist.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "electron": "44.0.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.11"
+  }
+}

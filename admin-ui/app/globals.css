@@ -1,0 +1,1619 @@
+/* ═══════════════════════════════════════════════════════════════════
+   SRAN AI Gateway — Design System
+
+   Brand: Deep royal blue, premium, enterprise, secure, modern
+   Palette derived from SRAN brand identity
+   ═══════════════════════════════════════════════════════════════════ */
+
+@import "tailwindcss";
+
+/* ─── SRAN Theme Tokens ─────────────────────────────────────────── */
+
+@theme {
+  /* Dual-theme semantic tokens (v4 auto-generates bg-bg-base, text-text-primary, etc.).
+     Values are wired to underlying --bg-*, --text-* vars defined in the :root /
+     [data-theme="dark"] blocks below so they swap with data-theme. */
+  --color-bg-base: var(--bg-base);
+  --color-bg-surface: var(--bg-surface);
+  --color-bg-surface-2: var(--bg-surface-2);
+  --color-bg-sidebar: var(--bg-sidebar);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-border-default: var(--border-default);
+  --color-border-subtle: var(--border-subtle);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
+  --color-text-muted: var(--text-muted);
+  --color-accent-primary: var(--accent-primary);
+  --color-accent-success: var(--accent-success);
+  --color-accent-warning: var(--accent-warning);
+  --color-accent-danger: var(--accent-danger);
+  --color-accent-violet: var(--accent-violet);
+  --color-accent-cyan: var(--accent-cyan);
+
+  /* Primary: Deep Royal Blue */
+  --color-sran-50: #e8edf5;
+  --color-sran-100: #c5d0e6;
+  --color-sran-200: #9eb3d4;
+  --color-sran-300: #7796c2;
+  --color-sran-400: #5a81b5;
+  --color-sran-500: #3d6ca8;
+  --color-sran-600: #2d5a91;
+  --color-sran-700: #1e3a5f;
+  --color-sran-800: #162c49;
+  --color-sran-900: #0f1f38;
+  --color-sran-950: #091526;
+
+  /* Accent: Electric Blue */
+  --color-accent-400: #60a5fa;
+  --color-accent-500: #3b82f6;
+  --color-accent-600: #2563eb;
+
+  /* Surface colors */
+  --color-surface-primary: #ffffff;
+  --color-surface-secondary: #f8f9fb;
+  --color-surface-tertiary: #f1f4f8;
+  --color-surface-dark: #0f1f38;
+  --color-surface-darker: #091526;
+
+  /* Text */
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #475569;
+  --color-text-muted: #7c8ca1;
+  --color-text-inverse: #f8fafc;
+  --color-text-accent: #2563eb;
+
+  /* Borders */
+  --color-border-default: #e5e9f0;
+  --color-border-strong: #c8d1de;
+  --color-border-accent: #3b82f6;
+
+  /* Status */
+  --color-status-success: #059669;
+  --color-status-success-bg: #ecfdf5;
+  --color-status-warning: #d97706;
+  --color-status-warning-bg: #fffbeb;
+  --color-status-error: #dc2626;
+  --color-status-error-bg: #fef2f2;
+  --color-status-info: #2563eb;
+  --color-status-info-bg: #eff6ff;
+
+  /* Shadows — slightly warmer, more grounded */
+  --shadow-sm: 0 1px 2px rgba(15, 31, 56, 0.04);
+  --shadow-md: 0 2px 8px -2px rgba(15, 31, 56, 0.08), 0 1px 2px rgba(15, 31, 56, 0.04);
+  --shadow-lg: 0 8px 24px -4px rgba(15, 31, 56, 0.10), 0 2px 6px -2px rgba(15, 31, 56, 0.06);
+  --shadow-card: 0 1px 3px rgba(15, 31, 56, 0.04), 0 0 0 1px rgba(15, 31, 56, 0.02);
+
+  /* Radius */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.625rem;
+  --radius-xl: 0.75rem;
+
+  /* Typography scale — tighter, more intentional steps */
+  --font-size-xs: 0.6875rem;
+  --font-size-sm: 0.8125rem;
+  --font-size-base: 0.875rem;
+  --font-size-lg: 1rem;
+  --font-size-xl: 1.125rem;
+  --font-size-2xl: 1.25rem;
+  --font-size-3xl: 1.625rem;
+  --font-size-4xl: 2rem;
+}
+
+/* ─── Theme-reactive tokens (data-theme="light" | "dark") ─────────
+   All semantic colors live here so they swap with <html data-theme>.
+   Legacy --color-surface-* / --color-text-* / --color-border-* are re-
+   declared below as aliases pointing to the new tokens so existing
+   .sran-* class references continue to work in both themes (B2 strategy). */
+
+:root,
+[data-theme="light"] {
+  /* Canvas */
+  --bg-base: #F7F8FC;
+  --bg-surface: #FFFFFF;
+  --bg-surface-2: #FAFAFA;
+  --bg-sidebar: #0A1230;   /* navy both themes, brand identity */
+  --bg-elevated: #F0F1F4;
+
+  /* Borders */
+  --border-default: #E8E9ED;
+  --border-subtle: #F2F3F5;
+
+  /* Text */
+  --text-primary: #1A1C23;
+  --text-secondary: #4B5673;
+  --text-tertiary: #6B6F7E;
+  /* FIX87 Part C — muted text is still text: 4.5:1 on the canvas and on
+     cards (was #8B92A5, 2.9:1 — table headers, placeholders, pagination
+     at 10–13 px). */
+  --text-muted: #6B7185;
+
+  /* Accents */
+  --accent-primary: #6366F1;
+  --accent-success: #059669;
+  --accent-warning: #D97706;
+  --accent-danger: #DC2626;
+  --accent-violet: #7C3AED;
+  --accent-cyan: #0891B2;
+
+  /* B2 compat: re-point legacy names to new tokens so .sran-* classes
+     that reference --color-surface-primary, --color-text-primary, etc.
+     remain theme-aware in both modes. */
+  --color-surface-primary: var(--bg-surface);
+  --color-surface-secondary: var(--bg-base);
+  --color-surface-tertiary: var(--bg-elevated);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-text-inverse: #F8FAFC;
+  --color-border-default: var(--border-default);
+  --color-border-strong: #C8D1DE;
+}
+
+[data-theme="dark"] {
+  --bg-base: #0A1230;
+  --bg-surface: #0F1835;
+  --bg-surface-2: #0C1530;
+  --bg-sidebar: #060A1D;
+  --bg-elevated: #1A2450;
+
+  --border-default: #1F2A55;
+  --border-subtle: #141D3F;
+
+  --text-primary: #FFFFFF;
+  --text-secondary: #8B96BA;
+  /* FIX87 Part C — 4.5:1 on the dark canvas and cards (was #6B7699 4.1:1
+     and #4B5885 2.7:1). */
+  --text-tertiary: #808AB0;
+  --text-muted: #7C87AE;
+
+  --accent-primary: #6366F1;
+  --accent-success: #10B981;
+  --accent-warning: #F59E0B;
+  --accent-danger: #F87171;
+  --accent-violet: #8B5CF6;
+  --accent-cyan: #06B6D4;
+
+  /* B2 compat — legacy aliases (inverse stays light so code blocks on
+     dark backgrounds still read correctly). */
+  --color-surface-primary: var(--bg-surface);
+  --color-surface-secondary: var(--bg-base);
+  --color-surface-tertiary: var(--bg-elevated);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-text-inverse: #F8FAFC;
+  --color-border-default: var(--border-default);
+  --color-border-strong: #3B4670;
+}
+
+/* ─── Base Styles ────────────────────────────────────────────────── */
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+      Roboto, "Helvetica Neue", Arial, sans-serif;
+    background-color: var(--bg-base);
+    color: var(--text-primary);
+    font-size: var(--font-size-base);
+    line-height: 1.55;
+    margin: 0;
+    transition: background-color 150ms ease, color 150ms ease;
+  }
+
+  code, pre {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  }
+}
+
+/* ─── Component Patterns ─────────────────────────────────────────── */
+
+@layer components {
+
+  /* Card — clean, restrained */
+  .sran-card {
+    background: var(--color-surface-primary);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    padding: 1.25rem 1.5rem;
+  }
+
+  /* Page header — stronger hierarchy */
+  .sran-page-header {
+    margin-bottom: 1.75rem;
+  }
+
+  .sran-page-title {
+    font-family: var(--font-outfit), "Outfit", ui-sans-serif, system-ui, sans-serif;
+    font-size: 1.875rem; /* 30px */
+    font-weight: 800;
+    color: var(--color-text-primary);
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+    margin: 0;
+  }
+
+  .sran-page-subtitle {
+    font-family: var(--font-outfit), "Outfit", ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.9375rem; /* 15px */
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    margin: 0.25rem 0 0;
+    letter-spacing: 0.005em;
+  }
+
+  /* Section title — used within cards */
+  .sran-section-title {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 0 0 1rem;
+  }
+
+  /* ─── Buttons ─── */
+
+  .sran-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    padding: 0.4375rem 0.875rem;
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 120ms ease;
+    line-height: 1.25rem;
+    white-space: nowrap;
+  }
+
+  .sran-btn:focus-visible {
+    outline: 2px solid var(--color-accent-500);
+    outline-offset: 1px;
+  }
+
+  .sran-btn-primary {
+    background: var(--color-sran-700);
+    color: white;
+    border-color: var(--color-sran-800);
+    box-shadow: 0 1px 2px rgba(15, 31, 56, 0.12);
+  }
+
+  .sran-btn-primary:hover {
+    background: var(--color-sran-600);
+    border-color: var(--color-sran-700);
+  }
+
+  .sran-btn-primary:active {
+    background: var(--color-sran-800);
+  }
+
+  .sran-btn-secondary {
+    background: var(--bg-surface);
+    color: var(--color-text-primary);
+    border-color: var(--color-border-strong);
+    box-shadow: 0 1px 2px rgba(15, 31, 56, 0.04);
+  }
+
+  .sran-btn-secondary:hover {
+    background: var(--bg-elevated);
+    border-color: var(--color-border-strong);
+  }
+
+  .sran-btn-secondary:active {
+    background: var(--color-surface-secondary);
+  }
+
+  .sran-btn-danger {
+    background: var(--color-status-error);
+    color: white;
+    border-color: #b91c1c;
+    box-shadow: 0 1px 2px rgba(220, 38, 38, 0.15);
+  }
+
+  .sran-btn-danger:hover {
+    background: #b91c1c;
+  }
+
+  .sran-btn-danger:active {
+    background: #991b1b;
+  }
+
+  .sran-btn-sm {
+    padding: 0.25rem 0.625rem;
+    font-size: var(--font-size-xs);
+  }
+
+  .sran-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
+
+  /* ─── Badges — with subtle border for definition ─── */
+
+  .sran-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.0625rem 0.5rem;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    border-radius: 9999px;
+    line-height: 1.375rem;
+    letter-spacing: 0.01em;
+    border: 1px solid transparent;
+  }
+
+  .sran-badge-success {
+    background: var(--color-status-success-bg);
+    color: var(--color-status-success);
+    border-color: rgba(5, 150, 105, 0.15);
+  }
+
+  .sran-badge-warning {
+    background: var(--color-status-warning-bg);
+    color: var(--color-status-warning);
+    border-color: rgba(217, 119, 6, 0.15);
+  }
+
+  .sran-badge-error {
+    background: var(--color-status-error-bg);
+    color: var(--color-status-error);
+    border-color: rgba(220, 38, 38, 0.15);
+  }
+
+  .sran-badge-info {
+    background: var(--color-status-info-bg);
+    color: var(--color-status-info);
+    border-color: rgba(37, 99, 235, 0.12);
+  }
+
+  .sran-badge-neutral {
+    background: var(--color-surface-tertiary);
+    color: var(--color-text-secondary);
+    border-color: var(--color-border-default);
+  }
+
+  /* ─── Tables — tighter, more professional ─── */
+
+  .sran-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--font-size-sm);
+  }
+
+  .sran-table th {
+    text-align: left;
+    padding: 0.625rem 1rem;
+    font-weight: 600;
+    font-size: var(--font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-muted);
+    border-bottom: 1px solid var(--color-border-default);
+    background: var(--color-surface-secondary);
+    white-space: nowrap;
+  }
+
+  .sran-table td {
+    padding: 0.5625rem 1rem;
+    border-bottom: 1px solid var(--color-border-default);
+    color: var(--color-text-primary);
+    vertical-align: middle;
+  }
+
+  .sran-table tbody tr {
+    transition: background 80ms ease;
+  }
+
+  /* Row hover — theme-aware. The old value (rgba(241,244,248,0.6))
+     was a near-white tint that lit up wrong on dark mode. Use the
+     elevated-surface token for both themes; the small alpha keeps
+     the effect subtle so single-row focus still reads. */
+  .sran-table tbody tr:hover {
+    background: color-mix(in srgb, var(--bg-elevated) 65%, transparent);
+  }
+
+  .sran-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  /* ─── Inputs ─── */
+
+  .sran-input {
+    width: 100%;
+    padding: 0.4375rem 0.75rem;
+    font-size: var(--font-size-sm);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+    color: var(--color-text-primary);
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+    outline: none;
+    line-height: 1.4;
+  }
+
+  .sran-input:focus {
+    border-color: var(--color-accent-500);
+    box-shadow: 0 0 0 2.5px rgba(59, 130, 246, 0.1);
+  }
+
+  .sran-input::placeholder {
+    color: var(--color-text-muted);
+  }
+
+  /* Label */
+  .sran-label {
+    display: block;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    margin-bottom: 0.3125rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  /* Empty state */
+  .sran-empty {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+  }
+
+  /* ─── Stat card ─── */
+
+  .sran-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+
+  .sran-stat-label {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-text-muted);
+  }
+
+  .sran-stat-value {
+    font-size: var(--font-size-4xl);
+    font-weight: 700;
+    color: var(--color-text-primary);
+    letter-spacing: -0.035em;
+    line-height: 1.15;
+  }
+
+  /* ============================================
+     SRAN SIDEBAR — Cybersecurity Theme
+     ============================================ */
+
+  .sran-sidebar {
+    background: var(--bg-sidebar);
+    color: #e2e8f0;
+    width: 15.5rem;
+    flex-shrink: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid rgba(80, 130, 220, 0.12);
+    position: sticky;
+    top: 0;
+    overflow: hidden;
+    transition: width 0.2s ease;
+  }
+
+  .sran-sidebar::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(80, 130, 255, 0.008) 2px,
+      rgba(80, 130, 255, 0.008) 4px
+    );
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .sran-sidebar > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .sran-sidebar-brand {
+    padding: 1rem 1.125rem;
+    border-bottom: 1px solid rgba(80, 130, 220, 0.10);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .sran-sidebar-brand-name {
+    font-size: 0.9375rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    color: #ffffff;
+    text-transform: uppercase;
+    font-family: Inter, -apple-system, sans-serif;
+  }
+
+  .sran-sidebar-brand-sub {
+    font-size: 0.5625rem;
+    color: rgba(150, 178, 235, 0.5);
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-family: Inter, -apple-system, sans-serif;
+    margin-top: 1px;
+  }
+
+  .sran-sidebar-nav {
+    padding: 0.5rem 0;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(100, 140, 220, 0.2) transparent;
+  }
+
+  .sran-sidebar-nav::-webkit-scrollbar {
+    width: 3px;
+  }
+
+  .sran-sidebar-nav::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .sran-sidebar-nav::-webkit-scrollbar-thumb {
+    background: rgba(100, 140, 220, 0.25);
+    border-radius: 2px;
+  }
+
+  .sran-sidebar-nav::-webkit-scrollbar-thumb:hover {
+    background: rgba(100, 140, 220, 0.45);
+  }
+
+  .sran-sidebar-section {
+    padding: 0 0.5rem;
+    margin-bottom: 0.0625rem;
+  }
+
+  .sran-sidebar-section-title {
+    font-size: 0.5625rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: rgba(130, 165, 225, 0.58);
+    padding: 0.875rem 0.625rem 0.25rem;
+    font-family: Inter, -apple-system, sans-serif;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .sran-sidebar-section-title::before {
+    content: '';
+    display: inline-block;
+    width: 10px;
+    height: 1px;
+    background: rgba(110, 150, 225, 0.3);
+    flex-shrink: 0;
+  }
+
+  .sran-sidebar-link {
+    display: flex;
+    align-items: center;
+    gap: 0.5625rem;
+    padding: 0.4375rem 0.625rem;
+    border-radius: 5px;
+    color: rgba(190, 210, 240, 0.72);
+    text-decoration: none;
+    font-size: 0.8125rem;
+    font-weight: 400;
+    letter-spacing: 0.005em;
+    margin-bottom: 1px;
+    transition: all 0.1s ease;
+    border: 1px solid transparent;
+    position: relative;
+    font-family: Inter, -apple-system, sans-serif;
+  }
+
+  .sran-sidebar-link:hover {
+    color: rgba(230, 240, 255, 0.95);
+    background: rgba(90, 140, 240, 0.07);
+    border-color: rgba(90, 140, 240, 0.15);
+  }
+
+  .sran-sidebar-link-active {
+    color: #ffffff !important;
+    background: rgba(90, 140, 240, 0.12) !important;
+    border-color: rgba(90, 140, 240, 0.28) !important;
+    font-weight: 500;
+  }
+
+  .sran-sidebar-link-active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 22%;
+    height: 56%;
+    width: 2px;
+    background: #6aa0ff;
+    border-radius: 0 2px 2px 0;
+    box-shadow: 0 0 6px rgba(100, 160, 255, 0.4);
+  }
+
+  /* ─── Search bar ─── */
+
+  .sran-search-bar {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .sran-search-icon {
+    position: absolute;
+    left: 0.75rem;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+    pointer-events: none;
+  }
+
+  .sran-search-input {
+    width: 100%;
+    padding: 0.4375rem 2rem 0.4375rem 2.125rem;
+    font-size: var(--font-size-sm);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-primary);
+    color: var(--color-text-primary);
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+    outline: none;
+  }
+
+  .sran-search-input:focus {
+    border-color: var(--color-accent-500);
+    box-shadow: 0 0 0 2.5px rgba(59, 130, 246, 0.1);
+  }
+
+  .sran-search-input::placeholder {
+    color: var(--color-text-muted);
+  }
+
+  .sran-search-clear {
+    position: absolute;
+    right: 0.5rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+    padding: 0.25rem;
+    line-height: 1;
+  }
+
+  .sran-search-clear:hover {
+    color: var(--color-text-primary);
+  }
+
+  /* ─── Pagination ─── */
+
+  .sran-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.625rem 1rem;
+    border-top: 1px solid var(--color-border-default);
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+  }
+
+  .sran-pagination-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .sran-pagination-page {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    min-width: 2.5rem;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ─── Skeleton ─── */
+
+  .sran-skeleton {
+    height: 0.875rem;
+    background: linear-gradient(90deg, var(--color-surface-tertiary) 25%, #eef1f6 50%, var(--color-surface-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+    border-radius: var(--radius-sm);
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* ─── Error state ─── */
+
+  .sran-error-state {
+    text-align: center;
+    padding: 3rem 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .sran-error-state-icon {
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 50%;
+    background: var(--color-status-error-bg);
+    color: var(--color-status-error);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: var(--font-size-lg);
+  }
+
+  .sran-error-state-message {
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-sm);
+    margin: 0;
+  }
+
+  /* ─── Toast ─── */
+
+  .sran-toast-container {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    pointer-events: none;
+  }
+
+  .sran-toast {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1rem;
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    box-shadow: var(--shadow-lg);
+    pointer-events: auto;
+    animation: toast-in 250ms ease-out;
+    min-width: 14rem;
+    max-width: 22rem;
+  }
+
+  .sran-toast-success {
+    background: var(--color-status-success);
+    color: white;
+  }
+
+  .sran-toast-error {
+    background: var(--color-status-error);
+    color: white;
+  }
+
+  .sran-toast-info {
+    background: var(--color-status-info);
+    color: white;
+  }
+
+  .sran-toast-icon {
+    font-size: var(--font-size-base);
+    flex-shrink: 0;
+  }
+
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateX(1rem); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  /* ─── Empty state ─── */
+
+  .sran-empty-icon {
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 50%;
+    background: var(--color-surface-tertiary);
+    color: var(--color-text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.125rem;
+    margin: 0 auto 0.75rem;
+  }
+
+  /* ─── Detail drawer ─── */
+
+  .sran-detail-field {
+    margin-bottom: 0.75rem;
+  }
+
+  .sran-detail-label {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.125rem;
+    font-weight: 500;
+  }
+
+  .sran-detail-value {
+    font-weight: 500;
+    font-size: var(--font-size-sm);
+  }
+
+  /* ─── Collapsible JSON ─── */
+
+  .sran-collapsible-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    background: var(--color-surface-secondary);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    color: var(--color-text-primary);
+    transition: background 120ms;
+  }
+
+  .sran-collapsible-toggle:hover {
+    background: var(--color-surface-tertiary);
+  }
+
+  .sran-code-block {
+    background: var(--color-surface-dark);
+    color: var(--color-text-inverse);
+    padding: 1rem;
+    border-radius: var(--radius-md);
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: var(--font-size-xs);
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 16rem;
+    overflow-y: auto;
+    margin-top: 0.5rem;
+  }
+
+  /* ─── Form validation ─── */
+
+  .sran-field-error {
+    font-size: var(--font-size-xs);
+    color: var(--color-status-error);
+    margin-top: 0.25rem;
+  }
+
+  .sran-input-error {
+    border-color: var(--color-status-error);
+  }
+
+  .sran-input-error:focus {
+    box-shadow: 0 0 0 2.5px rgba(220, 38, 38, 0.1);
+  }
+
+  .sran-char-count {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    text-align: right;
+    margin-top: 0.125rem;
+  }
+
+  /* ─── Responsive sidebar ─── */
+
+  /* Tablet band only (768–1280px): collapse to an icon rail. Below 768px the
+     sidebar becomes an off-canvas drawer (see the max-width:767px block), so
+     this rule must NOT apply there — otherwise the drawer would show as an
+     icon-only rail with hidden labels. */
+  @media (min-width: 768px) and (max-width: 1280px) {
+    .sran-sidebar {
+      width: 4rem;
+    }
+
+    .sran-sidebar-brand-name,
+    .sran-sidebar-brand-sub,
+    .sran-sidebar-section-title,
+    .sran-sidebar-link span:last-child,
+    .sran-sidebar-footer-text,
+    .sran-badge-role {
+      display: none;
+    }
+
+    .sran-sidebar-brand {
+      justify-content: center;
+      padding: 0.875rem 0.5rem;
+    }
+
+    .sran-sidebar-brand img {
+      width: 32px !important;
+      height: 32px !important;
+    }
+
+    .sran-sidebar-section {
+      padding: 0 0.375rem;
+    }
+
+    .sran-sidebar-link {
+      justify-content: center;
+      padding: 0.5rem;
+      border: none;
+    }
+
+    .sran-sidebar-icon {
+      width: auto;
+    }
+
+    .sran-sidebar-footer {
+      justify-content: center;
+      padding: 0.625rem 0.5rem;
+    }
+
+    .sran-sidebar-footer > div:first-child {
+      display: none;
+    }
+  }
+
+  /* Mobile (<768px): off-canvas drawer. Slides in from the left over a
+     backdrop (rendered by AppShell); full labels/section titles are shown
+     because the icon-rail rule above is gated to >=768px. */
+  @media (max-width: 767px) {
+    .sran-sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 100vh;
+      height: 100dvh;
+      width: 85vw;
+      max-width: 280px;
+      z-index: 50;
+      transform: translateX(-100%);
+      transition: transform 0.3s ease;
+    }
+
+    .sran-sidebar-open {
+      transform: translateX(0);
+    }
+  }
+
+  /* Close (✕) button inside the drawer brand row — mobile only. */
+  .sran-sidebar-close {
+    display: none;
+    margin-left: auto;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: 1px solid rgba(100, 140, 220, 0.2);
+    border-radius: 8px;
+    color: rgba(200, 220, 255, 0.85);
+    cursor: pointer;
+    flex-shrink: 0;
+    padding: 0.375rem;
+  }
+
+  @media (max-width: 767px) {
+    .sran-sidebar-close {
+      display: flex;
+    }
+  }
+
+  /* Mobile tap-target helper (mirrors web-chat). Expands small icon buttons
+     to a 44×44 hit area on touch devices without affecting visual size. */
+  @media (pointer: coarse) {
+    .tap-44 {
+      min-width: 44px;
+      min-height: 44px;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .sran-table th,
+    .sran-table td {
+      padding: 0.5rem 0.625rem;
+    }
+  }
+
+  /* Mobile readability floor (<=640px): the desktop design leans on 10–12px
+     labels/cells which are hard to read on a phone. Raise the smallest text
+     to ~13px without touching desktop. */
+  @media (max-width: 640px) {
+    .sran-table td,
+    .sran-table th,
+    .sran-badge,
+    .sran-badge-role,
+    .sran-stat-label {
+      font-size: max(var(--font-size-xs), 0.8125rem);
+    }
+  }
+
+  /* ─── Copy button ─── */
+
+  .sran-copy-btn {
+    background: none;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-sm);
+    padding: 0.125rem 0.375rem;
+    font-size: var(--font-size-xs);
+    cursor: pointer;
+    color: var(--color-text-muted);
+    transition: all 120ms;
+  }
+
+  .sran-copy-btn:hover {
+    background: var(--color-surface-tertiary);
+    color: var(--color-text-primary);
+    border-color: var(--color-border-strong);
+  }
+
+  /* ─── Trend indicators ─── */
+
+  .sran-trend-up {
+    color: var(--color-status-success);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+  }
+
+  .sran-trend-neutral {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+  }
+
+  /* ─── Sidebar footer ─── */
+
+  .sran-sidebar-footer {
+    padding: 12px 16px;
+    border-top: 1px solid rgba(80, 130, 220, 0.10);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    background: rgba(0, 0, 0, 0.12);
+  }
+
+  .sran-sidebar-footer-text {
+    font-size: 0.625rem;
+    color: rgba(170, 198, 245, 0.7);
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    letter-spacing: 0.05em;
+  }
+
+  .sran-badge-role {
+    font-size: 0.5rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid rgba(100, 160, 255, 0.3);
+    color: #95b8e8;
+    background: rgba(100, 160, 255, 0.08);
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    display: inline-block;
+  }
+
+  /* Sidebar user profile — gradient avatar (click to change, stored as a
+     base64 data URL in localStorage) + name/email stack. */
+  .sran-sidebar-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #3B82F6, #1E3A5F);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 600;
+    color: #FFFFFF;
+    position: relative;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: opacity 0.2s;
+  }
+
+  .sran-sidebar-avatar:hover {
+    opacity: 0.85;
+  }
+
+  .sran-sidebar-avatar img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+
+  .sran-sidebar-avatar-cam {
+    position: absolute;
+    bottom: -2px;
+    right: -2px;
+    width: 16px;
+    height: 16px;
+    background: #1E3A5F;
+    border: 2px solid var(--bg-sidebar, #0A1230);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .sran-sidebar-username {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(215, 228, 250, 0.9);
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.3;
+  }
+
+  .sran-sidebar-email {
+    font-size: 10px;
+    color: rgba(140, 160, 200, 0.5);
+    margin-top: 1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.3;
+  }
+
+  /* ─── Sidebar nav icon ─── */
+
+  .sran-sidebar-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1rem;
+    flex-shrink: 0;
+    opacity: 0.55;
+    transition: opacity 0.1s ease;
+  }
+
+  .sran-sidebar-link-active .sran-sidebar-icon,
+  .sran-sidebar-link:hover .sran-sidebar-icon {
+    opacity: 1;
+  }
+}
+
+/* ─── DLP Policies page styles ───────────────────────────────────
+   Moved out of admin-ui/app/policies/page.tsx to avoid a React hydration
+   mismatch in dev mode. The inline <style> block injected on the client
+   didn't match the server-rendered HTML when Next's Fast Refresh remounted
+   the component; a real stylesheet sidesteps that entirely.
+   Color literals are inlined (previously read from the page-local `C`
+   design-token constant) so there's no runtime templating. */
+
+@keyframes dlpFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes dlpTabIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes dlpPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+@keyframes dlpSwing { 0%, 100% { transform: rotate(0deg); } 25% { transform: rotate(8deg); } 75% { transform: rotate(-8deg); } }
+@keyframes dlpGlow { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+@keyframes dotGlow { 0%, 100% { box-shadow: 0 0 4px rgba(16, 185, 129, 0.3); } 50% { box-shadow: 0 0 10px rgba(16, 185, 129, 0.6); } }
+
+.dlp-stat { animation: dlpFadeUp 0.4s ease-out both; }
+.dlp-row { animation: dlpFadeUp 0.35s ease-out both; }
+.dlp-card-anim { animation: dlpFadeUp 0.4s ease-out both; }
+.dlp-tab-content { animation: dlpTabIn 0.25s ease-out both; }
+/* One-shot on mount (was infinite) — single attention cue, not perpetual. */
+.dlp-icon-pulse svg { animation: dlpPulse 2.5s ease-in-out; }
+.dlp-icon-swing svg { animation: dlpSwing 3s ease-in-out; }
+.dlp-icon-glow svg { animation: dlpGlow 2s ease-in-out; }
+
+.dlp-table { width: 100%; border-collapse: collapse; }
+.dlp-table th {
+  text-align: left;
+  padding: 0 0.875rem;
+  height: 36px;
+  font-weight: 600;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-surface-2);
+  white-space: nowrap;
+}
+.dlp-table td { padding: 14px 0.875rem; border-bottom: 1px solid var(--border-subtle); vertical-align: middle; color: var(--text-primary); }
+.dlp-table tbody tr { transition: background 100ms ease; }
+.dlp-table tbody tr:hover { background: rgba(99, 102, 241, 0.05); }
+.dlp-table tbody tr:last-child td { border-bottom: none; }
+
+.dlp-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--bg-surface) url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239ca3af' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 8px center;
+  color: var(--text-primary);
+  border: 1.5px solid var(--border-default);
+  border-radius: 6px;
+  padding: 5px 26px 5px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 120ms, box-shadow 120ms;
+  font-family: inherit;
+}
+.dlp-select:focus { border-color: var(--accent-primary); box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15); }
+.dlp-select:disabled { background: var(--bg-elevated); color: var(--text-muted); cursor: not-allowed; }
+
+/* ─── Global scrollbar theming ───────────────────────────────────
+   The default browser scrollbar reads as bright white/gray on top
+   of the dark navy request-detail panel (and any other scrollable
+   region on a dark surface). These rules give every scrollable
+   element a subtle thumb that picks up the active theme via
+   data-theme; the sidebar's own .sran-sidebar-nav rules above
+   override these where they apply, so its tighter blue-tinted
+   look stays untouched. */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.18) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.18);
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.30);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+[data-theme="dark"] * {
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
+[data-theme="dark"] *::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+[data-theme="dark"] *::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+/* ─── Google Fonts import ────────────────────────────────────────── */
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+
+/* ─── AI review page ────────────────────────────────────────────────
+   Table cell — moved out of the page's former <style> tag. */
+.air-td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+/* ─── Redesigned-page theme tokens ──────────────────────────────────
+   Card / subtle-bg / border tokens for the redesigned pages (Routing,
+   Usage & Cost, Admin actions, AI review). Light values live on :root
+   so they exist pre-theme; [data-theme="dark"] overrides win via the
+   attribute selector. */
+:root {
+  --bg-card: #FFFFFF;
+  --bg-subtle: #F8F9FB;
+  --border-color: #ECEDF2;
+  /* Stat-card icon-container fills: pastel in light, semi-transparent
+     accent in dark. Icon FOREGROUND colors stay hardcoded (vivid on
+     both backgrounds). */
+  --icon-bg-blue: #EEF4FF;
+  --icon-bg-green: #ECFDF5;
+  --icon-bg-red: #FEF2F2;
+  --icon-bg-amber: #FFFBEB;
+}
+
+[data-theme="dark"] {
+  --bg-card: #0F1835;
+  --bg-subtle: #111B3A;
+  --border-color: #1F2A55;
+  --icon-bg-blue: rgba(59, 130, 246, 0.15);
+  --icon-bg-green: rgba(16, 185, 129, 0.15);
+  --icon-bg-red: rgba(239, 68, 68, 0.15);
+  --icon-bg-amber: rgba(245, 158, 11, 0.15);
+}
+
+/* Tinted badge/icon chips on the redesigned stat cards + quick pills.
+   Light mode = pastel fill; dark mode = semi-transparent accent fill
+   with a lightened text tone so they don't glare on dark cards. */
+.chip-blue { background: #EEF4FF; color: #3B82F6; }
+.chip-green { background: #ECFDF5; color: #10B981; }
+.chip-navy { background: #EDF2F8; color: #1E3A5F; }
+.chip-danger { background: #FEF2F2; color: #DC2626; }
+.chip-warning { background: #FFFBEB; color: #92600A; }
+.chip-neutral { background: #F0F1F5; color: #6B6D78; }
+
+[data-theme="dark"] .chip-blue { background: rgba(59, 130, 246, 0.15); color: #93C5FD; }
+[data-theme="dark"] .chip-green { background: rgba(16, 185, 129, 0.15); color: #6EE7B7; }
+[data-theme="dark"] .chip-navy { background: rgba(59, 130, 246, 0.12); color: #8B96BA; }
+[data-theme="dark"] .chip-danger { background: rgba(239, 68, 68, 0.15); color: #FCA5A5; }
+[data-theme="dark"] .chip-warning { background: rgba(245, 158, 11, 0.15); color: #FCD34D; }
+[data-theme="dark"] .chip-neutral { background: var(--bg-subtle); color: var(--text-secondary); }
+
+/* ─── Routing page ──────────────────────────────────────────────────
+   Layout grids + the stat-card top accent line (a ::before pseudo-
+   element, which inline styles cannot express). Each card sets its own
+   --stat-accent inline; moved here from the page's former <style> tag. */
+.routing-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+.routing-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+.routing-stat-card {
+  position: relative;
+  overflow: hidden;
+  padding: 18px 20px;
+  background: var(--color-bg-surface);
+  border: 0.5px solid var(--color-border-default);
+  border-radius: 12px;
+}
+
+.routing-stat-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--stat-accent, #3B82F6), transparent);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Audit-log (Admin actions) stat cards — clickable <button> cards with
+   an inset top accent line. Active card = the current table subset. */
+.audit-stat-card {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+
+.audit-stat-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, var(--stat-accent, #3B82F6), transparent);
+}
+
+.audit-stat-card.active {
+  border-color: #3B82F6;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.12);
+}
+
+/* Usage & Cost stat cards — same top accent-line treatment as
+   .routing-stat-card but tighter (10px radius, 14/16 padding). */
+.usage-stat-card {
+  position: relative;
+  overflow: hidden;
+  padding: 14px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+}
+
+.usage-stat-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--stat-accent, #3B82F6), transparent);
+}
+
+@media (max-width: 1024px) {
+  .routing-metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .routing-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+  .routing-charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ─── Token packs page ──────────────────────────────────────────────
+   Stat cards (inset 3px accent line via --stat-accent), modal inputs
+   (near-transparent dark fill in dark mode), navy modal button, and
+   theme-aware status badges. */
+.pack-stat-card {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 16px 20px;
+}
+
+.pack-stat-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 16px;
+  right: 16px;
+  height: 3px;
+  border-radius: 1.5px;
+  background: linear-gradient(90deg, var(--stat-accent, #3B82F6), transparent);
+}
+
+.pack-input {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.pack-input::placeholder {
+  color: var(--text-muted);
+}
+
+.pack-input:focus {
+  border-color: #3B82F6;
+  outline: none;
+}
+
+[data-theme="dark"] .pack-input {
+  background: rgba(10, 18, 48, 0.8);
+}
+
+.pack-btn-navy {
+  background: #1E3A5F;
+  border: none;
+  color: #fff;
+  padding: 8px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.pack-btn-navy:hover:not(:disabled) {
+  background: #254A78;
+}
+
+.pack-badge-active {
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+
+[data-theme="dark"] .pack-badge-active {
+  color: #6EE7B7;
+}
+
+.pack-badge-draft {
+  background: rgba(245, 158, 11, 0.1);
+  color: #D97706;
+}
+
+[data-theme="dark"] .pack-badge-draft {
+  color: #FCD34D;
+}
+
+/* ─── Login input + Chrome autofill override ───────────────────────
+   The /login page is always dark-navy. Chrome paints autofilled inputs
+   with its own light background; the only reliable override is an inset
+   box-shadow in a SOLID color (rgba is ignored by the autofill painter)
+   plus a very long background-color transition to stall its repaint.
+   Lives here (not inline) because inline styles lose to the UA autofill
+   rules — these !important declarations also intentionally beat the
+   component's inline border/color. */
+.login-input {
+  background-color: rgba(10, 18, 48, 0.8);
+  color: #E2E8F0;
+  border: 1px solid #1F2A55;
+  border-radius: 7px;
+  caret-color: #E2E8F0;
+}
+
+.login-input::placeholder {
+  color: #4B5885;
+}
+
+.login-input:focus {
+  border-color: #3B82F6;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* Chrome paints autofilled inputs light blue; the only reliable override
+   is a big inset box-shadow in a SOLID hex (rgba is ignored by the
+   autofill painter) plus a very long background transition. */
+.login-input:-webkit-autofill,
+.login-input:-webkit-autofill:hover,
+.login-input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0px 1000px #0a1230 inset !important;
+  -webkit-text-fill-color: #E2E8F0 !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+.login-submit:hover:not(:disabled) {
+  background: #254A78 !important;
+}
+
+/* ─── Reduced-motion ───────────────────────────────────────────────
+   Honor the OS accessibility preference across the whole admin app
+   (portal/app/globals.css already ships the equivalent). Near-instantly
+   kills keyframe animations + transitions — this also guards the routing
+   refresh spin and any other admin motion under prefers-reduced-motion.
+   Kept LAST so it overrides earlier-declared animations/transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

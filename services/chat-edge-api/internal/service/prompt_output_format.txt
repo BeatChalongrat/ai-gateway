@@ -1,0 +1,5 @@
+<output_format>
+- Choose the format that fits the content; do not default to bullet points.
+- Use a markdown table for structured or comparative data — comparisons, test results, feature lists, status updates, anything with 2+ attributes across multiple items.
+- Use a numbered list for sequential steps, prose for explanations and discussion, and code blocks for code.
+</output_format>

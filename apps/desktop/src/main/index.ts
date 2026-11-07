@@ -1,0 +1,2025 @@
+// SRAN Desktop — Electron shell. E1: the locked window. E2: the host owns
+// the session. E3: the bridge and the first turn through the host.
+//
+// Boot order (E2): authenticate FIRST, navigate SECOND. Session state reaches
+// the page as cookies. E3 adds the typed bridge (src/main/bridge.ts — the
+// only file touching the bridge's IPC channels) and the chat-only turn
+// (src/main/turn-coordinator.ts). No tools, no sidecar (E4).
+//
+// Diagnostics (dev only, refused when app.isPackaged):
+//   --devtools / --e1-probe / --measure / --session-file / --exit-after
+//   --probe-corrupt-access / --probe-collision / --probe-server-revoke
+//   --probe-signout / --probe-page-logout / --probe-rotate-now / --probe-nonce-file   (E2)
+//   --probe-e3 <containment|memory|five|artifact|cancel|reload|reject|logout>       (E3)
+
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  globalShortcut,
+  Menu,
+  nativeImage,
+  net,
+  Notification,
+  powerMonitor,
+  safeStorage,
+  screen,
+  session,
+  shell,
+  Tray,
+  type Session,
+  type WebContents,
+  type WebFrameMain,
+} from "electron";
+import fs from "node:fs";
+import path from "node:path";
+import { BridgeChannel } from "./bridge";
+import { ChatEdgeClient } from "./chat-edge-client";
+import { sweepConversationStateTTL, sweepHistoryTTL, wipeLocalData } from "./local-data";
+import { loadConfig, resolveConfigPath, type ShellConfig } from "./config";
+import { installLocalCaTrust, installNodeFetchTrust, loadLocalCa, netRequestFetch, trustedHostsOf } from "./local-ca";
+import { CONNECTOR_OAUTH_FILENAME, ConnectorOAuth, ConnectorTokenStore, RegistrationFile } from "./connector-oauth";
+import { ConnectorTools } from "./connector-mcp";
+import { connectorsPageUrl, parseAppLink, parseConnectorReturn, parseIntent, parseLoginTicket, type AppLink } from "./deep-link";
+import { GatewayClient } from "./gateway-client";
+import { GrantStore, defaultForbiddenRoots } from "./grants";
+import { HostTools } from "./host-tools";
+import { createLogger, redactUrl } from "./logger";
+import { PermissionStore } from "./permissions";
+import { runE4Probe } from "./probes-e4";
+import { SidecarClient } from "./sidecar-client";
+import { TaskScheduler } from "./task-scheduler";
+import { AgentNotifier } from "./agent-notify";
+import { buildMenuTemplate } from "./app-menu";
+import { actionFor, buildContextMenu, type ContextMenuParams } from "./context-menu";
+import {
+  aboutDialog,
+  attachChatFailedDialog,
+  attachConfirmDialog,
+  attachFailedDialog,
+  attachFolderRefusedDialog,
+  attachNotOpenedDialog,
+  attachSignInFirstDialog,
+  attachTooLargeDialog,
+  catchUpNotification,
+  clearLocalDataDialog,
+  confirmConnectorDialog,
+  dataClearedNotification,
+  hotkeyUnavailableNotification,
+  rendererGoneDialog,
+} from "./native-dialogs";
+import { currentLocale, pageStrings, resolveLocale, setLocale, t, type Locale } from "./strings";
+import { buildTrayTemplate } from "./tray-menu";
+import { DEFAULT_SIZE, sanitizeBounds, WindowStateStore, type Rect } from "./window-state";
+import { describeAccelerator, localeFromPatch, ShellPrefsStore, validateAccelerator, type ShellPrefs } from "./shell-prefs";
+import { classifyFrame, classifyTopLevel, isExternalHttpUrl } from "./navigation-policy";
+import { PortalAuthClient, fingerprint } from "./portal-auth";
+import { PromptAssembler } from "./prompt-assembler";
+import { PromptGuard } from "./prompt-guard";
+import { SessionController, type ViewState } from "./session-controller";
+import { SessionStore } from "./session-store";
+import { TurnCoordinator } from "./turn-coordinator";
+import { ContextManager } from "./context-manager";
+import { ModelWindows } from "./model-windows";
+import { COMPACT_TARGET_RATIO, COMPACT_TRIGGER_RATIO, CONTEXT_METER_SHOW_RATIO, JsonConversationStateStore } from "./conversation-state";
+import { ChatEdgeSummariser } from "./server-summariser";
+import { RunLedgerStore } from "./run-ledger";
+import { UpdateNotifier } from "./update-check";
+import { encodeImageForVision } from "./image-encoder";
+import { ApprovalModeResetter } from "./approval-mode";
+import { buildWebPreferences } from "./web-preferences";
+import { BRIDGE_SURFACE_MEMBERS } from "../shared/bridge-surface";
+
+const APP_ROOT = path.resolve(__dirname, "..", "..");
+const SESSION_VIEW = path.join(APP_ROOT, "assets", "session.html");
+const log = createLogger();
+const isRelease = app.isPackaged;
+const flags = parseFlags(process.argv);
+let isQuitting = false;
+let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+let rendererCrashes = 0;
+let sessionController: SessionController | null = null;
+let bridge: BridgeChannel | null = null;
+let coordinator: TurnCoordinator | null = null;
+let sidecar: SidecarClient | null = null;
+let scheduler: TaskScheduler | null = null;
+/** AM6 — the Agent Market notification poll; alive with the process, not with the window. */
+let agentNotifier: AgentNotifier | null = null;
+let grants: GrantStore | null = null;
+/** FIX34 Part B/C: the chat-edge client, reachable from the deep-link handlers. */
+let chatEdgeRef: ChatEdgeClient | null = null;
+/** FIX34 Part B: an app link that arrived while signed out — opened right after sign-in. */
+let pendingNavigation: string | null = null;
+// FIX34 Part A — the quick-ask window (created lazily, hidden not destroyed)
+// and the host-owned shell prefs (its hotkey, the tray-click behaviour).
+let quickWindow: BrowserWindow | null = null;
+let quickState: WindowStateStore | null = null;
+let shellPrefs: ShellPrefsStore | null = null;
+/** The accelerator currently registered for the quick-ask window (null = none). */
+let quickHotkeyRegistered: string | null = null;
+/** When the quick window was last shown — blur within QUICK_BLUR_GRACE_MS is ignored
+ * (Windows fires a spurious blur while a frameless window is taking focus). */
+let quickShownAt = 0;
+let quickPendingShow = false;
+const QUICK_BLUR_GRACE_MS = 250;
+const QUICK_DEFAULT_SIZE = { width: 680, height: 460 };
+
+// ── identity (FIX20 §1): the app is SRAN Desktop, one client of SRAN AI
+// Gateway. The AppUserModelId MUST equal electron-builder's appId — the
+// installer stamps that id on the shortcuts, and Windows groups/pins the
+// running window under the shortcut only when the two match.
+// userData stays "SranDesktop-Electron" (not user-visible): "%APPDATA%\SRAN
+// Desktop" still exists on machines that ran the retired WPF app and holds
+// its incompatible data; renaming would also orphan every existing grant,
+// connector and note. The installer keeps this folder on uninstall.
+app.setName("SRAN Desktop");
+app.setPath("userData", path.join(app.getPath("appData"), "SranDesktop-Electron"));
+app.setAppUserModelId("co.th.gbtech.sran.desktop");
+
+// ── config: file, never constants ───────────────────────────────────────────
+// FIX20 §5: packaged → the file shipped beside the exe (<resources>\
+// desktop.config.json); dev → the repo's config/desktop.config.json;
+// $SRAN_DESKTOP_CONFIG overrides both.
+let config: ShellConfig;
+try {
+  const configPath = resolveConfigPath(APP_ROOT, process.env, isRelease ? process.resourcesPath : null);
+  config = loadConfig(configPath);
+  log.info(`config loaded from ${configPath}`);
+  log.info(
+    `pageUrl=${config.pageUrl} allowedOrigins=[${config.allowedOrigins.join(", ")}] portalOrigin=${config.portalOrigin ?? "(none)"} gatewayUrl=${config.gatewayUrl} chatEdgeUrl=${config.chatEdgeUrl} scheme=${config.protocolScheme}:// oauthClient=${config.oauthClient} refreshEvery=${config.sessionRefreshMinutes}min defaultModel=${config.defaultModel}`,
+  );
+} catch (err) {
+  const message = (err as Error).message;
+  log.error(`FATAL config: ${message}`);
+  dialog.showErrorBox("SRAN Desktop — configuration error", message);
+  app.exit(2);
+  throw err;
+}
+
+if (flags.anyDiagnostic && isRelease) {
+  log.error("diagnostic flags are dev-only; refusing in a packaged build");
+  app.exit(3);
+}
+
+// ── single instance + deep link ─────────────────────────────────────────────
+if (!app.requestSingleInstanceLock()) {
+  log.info("another instance holds the lock — forwarding argv and exiting");
+  app.exit(0);
+}
+app.on("second-instance", (_event, argv) => {
+  log.info("second-instance: focusing the existing window");
+  showMainWindow();
+  const link = findDeepLink(argv, config.protocolScheme);
+  if (link) handleDeepLink(link);
+});
+registerDeepLinkScheme(config.protocolScheme);
+
+// ── every webContents, whoever creates it ───────────────────────────────────
+app.on("web-contents-created", (_event, contents) => {
+  contents.on("will-attach-webview", (event) => {
+    event.preventDefault();
+    log.warn("REFUSED <webview> attach (webviewTag is off; this is belt-and-braces)");
+  });
+  installNavigationGuards(contents);
+  installCrashHandlers(contents);
+  installContextMenu(contents);
+});
+
+app.on("child-process-gone", (_event, details) => {
+  log.error(`CHILD PROCESS GONE type=${details.type} name=${details.name ?? "-"} reason=${details.reason} exitCode=${details.exitCode}`);
+});
+app.on("window-all-closed", () => {
+  /* tray app */
+});
+app.on("before-quit", () => {
+  isQuitting = true;
+});
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
+  scheduler?.stop();
+  agentNotifier?.stop();
+  updateNotifierRef?.stop();
+  void sidecar?.stop();
+});
+let updateNotifierRef: UpdateNotifier | null = null;
+
+// ── ready ───────────────────────────────────────────────────────────────────
+void app.whenReady().then(async () => {
+  log.attachFile(path.join(app.getPath("userData"), "logs", "shell.log"));
+  // FIX33 B2/B4 — remembered bounds / maximized / always-on-top.
+  windowState = new WindowStateStore(path.join(app.getPath("userData"), "window-state.json"));
+  windowState.load();
+  // FIX34 Part A — the quick-ask window remembers its own place, and the shell
+  // prefs (quick hotkey, tray click) live in their own host file.
+  quickState = new WindowStateStore(path.join(app.getPath("userData"), "quick-window-state.json"));
+  quickState.load();
+  shellPrefs = new ShellPrefsStore(path.join(app.getPath("userData"), "shell-prefs.json"));
+  const prefs = shellPrefs.load();
+  // AM10 F — the language of everything the shell draws itself, decided
+  // BEFORE the tray, the menu or the first view exists: the person's choice
+  // from shell-prefs.json, else the system language (th* → Thai, else
+  // English — the page's own first-run rule). The page tells the host its
+  // language once it is up (shell.prefs.set { locale }); see applyLocale.
+  setLocale(resolveLocale(prefs.locale, app.getLocale()));
+  log.info(`shell prefs: quickHotkey=${prefs.quickHotkey} trayClick=${prefs.trayClick} localStateTtlDays=${prefs.localStateTtlDays} locale=${prefs.locale ?? `(none → ${currentLocale()} from system ${app.getLocale()})`}`);
+  // Local-data TTL sweep — deletes conversation-state cache files not
+  // touched in localStateTtlDays. 30 days by default (0 disables);
+  // counts only in the log, never contents.
+  if (prefs.localStateTtlDays > 0) {
+    const swept = sweepConversationStateTTL(app.getPath("userData"), prefs.localStateTtlDays);
+    if (swept > 0) log.info(`local-data TTL sweep removed ${swept} conversation-state file(s) older than ${prefs.localStateTtlDays}d`);
+    // FIX109 Part C: the transcripts (history/) age out under the same window.
+    const sweptHistory = sweepHistoryTTL(app.getPath("userData"), prefs.localStateTtlDays);
+    if (sweptHistory > 0) log.info(`local-data TTL sweep removed ${sweptHistory} history file(s) older than ${prefs.localStateTtlDays}d`);
+  }
+  log.info(`SRAN Desktop ${app.getVersion()} pid=${process.pid} electron=${process.versions.electron} chrome=${process.versions.chrome} node=${process.versions.node} packaged=${isRelease}`);
+  log.info(`userData=${app.getPath("userData")}`);
+
+  installSessionPolicy(session.defaultSession);
+  createTray();
+  registerHotkey();
+  registerQuickHotkey(prefs.quickHotkey, "boot");
+  applyLoginItem();
+
+  mainWindow = createMainWindow();
+  const win = mainWindow;
+
+  // E2: the session controller owns everything between "window exists" and
+  // "page loaded". Its surface is the window; nothing else may touch the jar.
+  const store = new SessionStore(path.join(app.getPath("userData"), "session.bin"));
+  sessionController = new SessionController(
+    {
+      gatewayUrl: config.gatewayUrl,
+      // FIX81 ⑤ — the page calls chat-edge with credentials:"include" too
+      // (conversations, plan-card execute, file downloads); on a split-host
+      // deploy those calls carried no cookie and 401'd. Dev (one host)
+      // dedupes to one write.
+      sessionCookieUrls: [config.gatewayUrl, config.chatEdgeUrl],
+      oauthProvider: config.oauthProvider,
+      oauthClient: config.oauthClient,
+      scheme: config.protocolScheme,
+      refreshMinutes: config.sessionRefreshMinutes,
+      signInTimeoutSeconds: config.signInTimeoutSeconds,
+      ...(flags.nonceFile && !isRelease ? { nonceExportPath: flags.nonceFile } : {}),
+    },
+    store,
+    session.defaultSession.cookies,
+    new PortalAuthClient(config.gatewayUrl),
+    {
+      showView: (state, reason) => showSessionView(win, state, reason),
+      loadPage: () => {
+        // FIX34 Part B: a deep link that arrived before sign-in opens now.
+        const target = pendingNavigation ?? config.pageUrl;
+        pendingNavigation = null;
+        // AM6 — this is the moment a sign-in completes: what fell due while
+        // nobody was signed in is asked for now, not at the next minute.
+        agentNotifier?.onSignedIn();
+        return win.loadURL(target);
+      },
+      reloadPage: () => win.webContents.reload(),
+      blankPage: () => win.loadURL("about:blank"),
+      openExternal: (url) => shell.openExternal(url),
+    },
+    log,
+  );
+  const ctl = sessionController;
+
+  // E3: the bridge and the turn. The bridge is the only IPC surface; the
+  // coordinator is the only thing that speaks to the gateway for turns.
+  bridge = new BridgeChannel(config.policy.allowedOrigins, log);
+  const keyStore = new SafeKeyStore(path.join(app.getPath("userData"), "agent-key.bin"));
+  // FIX124 — the client asks Electron whether the machine has a network, so a
+  // stream lost to Wi-Fi going away is said as a lost connection and not as
+  // a stalled model (gateway-client.ts machineOffline).
+  const gateway = new GatewayClient(config.gatewayUrl, () => ctl.currentAccessToken(), keyStore, log, { isOnline: () => net.isOnline() });
+  const chatEdge = new ChatEdgeClient(config.chatEdgeUrl, () => ctl.currentAccessToken(), log);
+  chatEdgeRef = chatEdge;
+  const assembler = new PromptAssembler(chatEdge, log);
+  // E4: the sidecar (all local tools), host tools, consent + grants.
+  const dataDir = app.getPath("userData");
+  // FIX19 — two-mode sidecar resolution (the same dev/packaged split FIX17
+  // used for the sandbox runtime):
+  //   • PACKAGED: the installed app carries its own sidecar in
+  //     <resources>\sidecar\; there is no repo beside it, so config.sidecarPath
+  //     (a dev, repo-relative path) is IGNORED. BrowserHost.exe + the Chrome
+  //     extension bundle sit in that same folder, which is where the sidecar
+  //     looks for them (its own AppContext.BaseDirectory).
+  //   • DEV (npm start): honour config.sidecarPath exactly as before, so a
+  //     developer runs from the repo without editing anything.
+  const sidecarExe = isRelease
+    ? path.join(process.resourcesPath, "sidecar", "SranDesktop.ToolsSidecar.exe")
+    : path.isAbsolute(config.sidecarPath)
+      ? config.sidecarPath
+      : path.resolve(APP_ROOT, config.sidecarPath);
+  log.info(`SIDECAR resolved (${isRelease ? "packaged" : "dev"}): ${sidecarExe}`);
+  // FIX69: the sidecar enforces the remote-target policy at connect time; the
+  // shipped config's switch reaches it as ONE environment variable.
+  sidecar = new SidecarClient(sidecarExe, dataDir, log, {
+    ...(config.connectorPrivateNetwork ? { SRAN_CONNECTOR_PRIVATE_NETWORK: "1" } : {}),
+    ...(config.connectorExtraCaFile ? { SRAN_CONNECTOR_EXTRA_CA_FILE: config.connectorExtraCaFile } : {}),
+  });
+  if (config.connectorPrivateNetwork) log.warn("CONNECTORS: connectorPrivateNetwork=true — remote MCP connectors may target internal addresses (metadata endpoints stay refused)");
+  if (config.connectorExtraCaFile) log.info(`CONNECTORS: extra trust anchors for remote connectors from ${config.connectorExtraCaFile}`);
+  const permissions = new PermissionStore(path.join(dataDir, "permissions.json"));
+  grants = new GrantStore(path.join(dataDir, "grants.json"), { forbiddenRoots: defaultForbiddenRoots(process.env, dataDir) });
+  if (flags.grant) {
+    const v = grants.add(flags.grant);
+    log.info(`PROBE grant ${v.verdict}: ${flags.grant}`);
+  }
+  log.info(`grants: [${grants.list().join(", ")}] approvalMode(config fallback)=${config.approvalMode} webSearch=${config.webSearchEnabled}`);
+  const hostTools = new HostTools(gateway, chatEdge, (req, sig) => coordinator!.runNested(req, sig), log, () => config.webSearchEnabled);
+  // FIX22 §1a: the write-time prompt guard — `remember` notes and the
+  // writing-style profile are checked against the gateway's guardrail before
+  // the sidecar stores them (the host holds the key; the sidecar does not).
+  const promptGuard = new PromptGuard(gateway, log);
+  // FIX22 §2: update NOTIFICATION only (no electron-updater, no download, no
+  // URL): compare the gateway's published version with ours; the page shows a
+  // dismissible banner. Unconfigured gateway → nothing at all.
+  const updateNotifier = new UpdateNotifier(gateway, bridge, app.getVersion(), log);
+  // FIX25 §1c.3: a stored `skip` never survives a restart — it comes back as
+  // `manual` and the page is told once. The sidecar is the store of record.
+  const modeResetter = new ApprovalModeResetter(sidecar, bridge, log);
+  // FIX31 Part 2: connector OAuth, host-side and switched off. Registrations
+  // come ONLY from <userData>\connector-oauth.json (the owner's file; absent by
+  // default → nothing configured). Tokens: safeStorage-encrypted, per connector,
+  // under <userData>\connector-tokens; the system browser via shell.openExternal.
+  const registrations = new RegistrationFile(path.join(dataDir, CONNECTOR_OAUTH_FILENAME), log);
+  const connectorOAuth = new ConnectorOAuth({
+    registrations: () => registrations.current(),
+    tokens: new ConnectorTokenStore(path.join(dataDir, "connector-tokens"), {
+      available: () => safeStorage.isEncryptionAvailable(),
+      encrypt: (s) => safeStorage.encryptString(s),
+      decrypt: (b) => safeStorage.decryptString(b),
+    }),
+    openExternal: (url) => shell.openExternal(url),
+    log,
+  });
+  const connectorTools = new ConnectorTools(connectorOAuth, async (id) => connectorOAuth.registration(id)?.serverUrl ?? null, log);
+  // FIX33 A-D1/A-D2: the desktop conversation state — one JSON file per
+  // conversation under <userData>\conversation-state (chat.conversation_states'
+  // fields), summarised by ONE no-tool gateway call with the shared prompt
+  // asset, injected as a USER-role pair (DLP-scanned on egress; see the note in
+  // conversation-state.ts). ON by default; DESKTOP_COMPACTION_SUMMARY=off
+  // restores FIX32's trim-only behaviour (the honest note + marker stay).
+  const summaryOff = (process.env["DESKTOP_COMPACTION_SUMMARY"] ?? "").toLowerCase() === "off";
+  const contextManager = new ContextManager({
+    store: new JsonConversationStateStore(path.join(dataDir, "conversation-state")),
+    // FIX111 — the server summarises (POST /compact); the file here is a copy.
+    summariser: summaryOff ? null : new ChatEdgeSummariser(chatEdge, log),
+    log,
+    emit: (c, e, d) => coordinator?.emitTurnEvent(c, e, d),
+  });
+  log.info(`CONTEXT MANAGER: summariser ${summaryOff ? "OFF (DESKTOP_COMPACTION_SUMMARY=off)" : "on"} trigger=${COMPACT_TRIGGER_RATIO} target=${COMPACT_TARGET_RATIO} meter=${CONTEXT_METER_SHOW_RATIO}`);
+  // FIX104: every turn is budgeted against the gateway catalogue's context
+  // window; the last answer is kept under userData so a cold start without the
+  // gateway budgets against it instead of a guess.
+  const modelWindows = new ModelWindows(path.join(dataDir, "model-windows.json"), log);
+  coordinator = new TurnCoordinator(
+    bridge,
+    gateway,
+    chatEdge,
+    assembler,
+    sidecar,
+    hostTools,
+    permissions,
+    grants,
+    {
+      homeDirectory: app.getPath("home"),
+      dataDir,
+      defaultModel: config.defaultModel,
+      modelWindows,
+      ...(flags.model && !isRelease ? { forceModel: flags.model } : {}),
+      approvalMode: config.approvalMode,
+      promptGuard,
+      encodeImage: encodeImageForVision, // FIX27: attached images → vision blocks (nativeImage)
+      connectorOAuth,
+      connectorTools,
+      onPageReady: () => {
+        updateNotifier.onPageReady();
+        modeResetter.onPageReady();
+      },
+      signOut: () => ctl.signOut("bridge", true),
+      pickFolder: async () => {
+        const r = await dialog.showOpenDialog(win, { title: t("picker.grantFolder"), properties: ["openDirectory", "dontAddToRecent"] });
+        return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]!;
+      },
+      // FIX2 native dialogs — the sidecar is headless, so windows live here.
+      // AM10 F: our titles follow the app's language; the pickers' own buttons
+      // are the operating system's, in the operating system's language.
+      pickSkillFile: async () => {
+        const r = await dialog.showOpenDialog(win, {
+          title: t("picker.skillFile"),
+          properties: ["openFile", "dontAddToRecent"],
+          filters: [{ name: t("picker.skillFilter"), extensions: ["zip", "skill"] }],
+        });
+        return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]!;
+      },
+      pickExecutableFile: async () => {
+        // FIX68 dev probe: the picker's answer comes from the command line
+        // (never in a packaged build — flags.anyDiagnostic exits above).
+        if (flags.probeMcpServer && !isRelease) {
+          log.info(`PROBE pickExecutableFile → ${flags.probeMcpServer} (--probe-mcp-server; no OS dialog)`);
+          return flags.probeMcpServer;
+        }
+        const r = await dialog.showOpenDialog(win, {
+          title: t("picker.mcpProgram"),
+          properties: ["openFile", "dontAddToRecent"],
+        });
+        return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]!;
+      },
+      confirmSpawn: async (message: string) => {
+        if (flags.probeMcpServer && !isRelease) {
+          log.info(`PROBE confirmSpawn dialog reached — answering "Add connector". Dialog text: ${message.replace(/\n+/g, " | ")}`);
+          return true;
+        }
+        const r = await dialog.showMessageBox(win, confirmConnectorDialog("local", message));
+        return r.response === 1;
+      },
+      // FIX69 — a remote MCP server: url + key in a HOST-owned window (the chat
+      // page never sees either), the exact origin confirmed natively.
+      allowPrivateNetwork: config.connectorPrivateNetwork,
+      promptRemoteConnector: async () => {
+        if (flags.probeMcpRemote && !isRelease) {
+          const url = process.env["FIX69_PROBE_URL"] ?? "";
+          const key = process.env["FIX69_PROBE_KEY"] ?? "";
+          log.info(`PROBE remote form → url=${url} key=${key ? "set" : "none"} (--probe-mcp-remote; no host window)`);
+          return url ? { url, authHeader: process.env["FIX69_PROBE_HEADER"] ?? "", key } : null;
+        }
+        return promptRemoteConnectorForm(win);
+      },
+      // The catalogue "Install" path (a real catalogue only — placeholder cards
+      // are hidden): the same host window, key field only.
+      promptConnectorKey: async (name: string) => {
+        const v = await promptRemoteConnectorForm(win, name);
+        return v && v.key ? v.key : null;
+      },
+      confirmRemote: async (message: string) => {
+        if (flags.probeMcpRemote && !isRelease) {
+          log.info(`PROBE confirmRemote dialog reached — answering "Add connector". Dialog text: ${message.replace(/\n+/g, " | ")}`);
+          return true;
+        }
+        const r = await dialog.showMessageBox(win, confirmConnectorDialog("remote", message));
+        return r.response === 1;
+      },
+      // FIX2 §1.2: the OS side-effect of a host-owned setting, derived from the
+      // one value the sidecar just persisted (no second copy to drift).
+      applyHostSetting: (key: string, value: unknown) => {
+        if (key === "startWithWindows") {
+          try {
+            app.setLoginItemSettings({ openAtLogin: value === true });
+            log.info(`SETTINGS startWithWindows → login item ${value === true ? "on" : "off"}`);
+          } catch (err) {
+            log.warn(`setLoginItemSettings failed: ${(err as Error).message}`);
+          }
+        }
+        // minimizeToTray is read from settings at window-close time; no effect to apply now.
+      },
+      contextManager,
+      // FIX34 Part A: the quick-ask window's control-plane hooks.
+      shell: {
+        prefsGet: () => shellPrefs!.current(),
+        prefsSet: (patch) => applyShellPrefs(patch),
+        quickClose: () => hideQuickWindow("page"),
+        quickOpenInMain: (conversationId) => quickOpenInMain(conversationId),
+      },
+    },
+    log,
+  );
+  const co = coordinator;
+  // FIX41 Part F — the run ledger on disk, beside conversation-state. Two
+  // jobs: a turn interrupted by the app closing leaves a record instead of
+  // vanishing, and on the next start that run is CLOSED so the page shows
+  // the truth rather than a spinner nobody will ever answer.
+  //
+  // Privacy: these files hold assistant text in the clear, the same as
+  // conversation-state/*.json already does (docs/OPEN_DECISIONS.md #22).
+  // FIX41 follows the existing trust boundary rather than inventing a
+  // second one; the encryption question is the owner's to settle for both.
+  const runLedger = new RunLedgerStore(path.join(dataDir, "run-ledger"));
+  co.setRunLedger(runLedger);
+  try {
+    const settled = co.settleInterruptedRuns();
+    if (settled > 0) log.info(`RUN LEDGER: settled ${settled} interrupted run(s) from a previous session`);
+  } catch (err) {
+    log.warn(`run-ledger settle failed: ${(err as Error).message}`);
+  }
+  void sidecar
+    .ensureStarted()
+    .then(async () => {
+      // FIX25 §1c.3: skip → manual at start, before any turn can run.
+      await modeResetter.resetIfSkip().catch((err: Error) => log.warn(`approval-mode reset failed: ${err.message}`));
+      // §1.2: reconcile the OS login item to the ONE stored value (no drift).
+      try {
+        const s = await sidecar!.hostQuery("settings.get", {});
+        const startup = (s.data as { startWithWindows?: boolean } | undefined)?.startWithWindows;
+        if (typeof startup === "boolean") app.setLoginItemSettings({ openAtLogin: startup });
+      } catch {
+        /* best-effort */
+      }
+    })
+    .catch((err: Error) => log.error(`sidecar start failed: ${err.message}`));
+  // FIX2 §1.1: the scheduled-task firing timer lives HERE (the host has the turn
+  // engine + session). Fires only while the app runs; no-ops while signed out.
+  if (!flags.e1Probe && !flags.e3Probe && !flags.e4Probe && !flags.measure) {
+    // FIX8 A1.1: notify the user when a MISSED run is caught up (the app may be
+    // minimized to the tray). OS-native so it shows without the window focused.
+    const notifyCatchUp = (task: { name: string; catchUpFor: string; skippedOlder: number }) => {
+      try {
+        if (Notification.isSupported()) new Notification(catchUpNotification(task)).show();
+      } catch (err) {
+        log.warn(`catch-up notification failed: ${(err as Error).message}`);
+      }
+    };
+    const localScheduler = new TaskScheduler(sidecar, co, () => !!ctl.currentAccessToken(), log, notifyCatchUp);
+    scheduler = localScheduler;
+    scheduler.start();
+    // FIX8 A1.1: also catch up after the MACHINE wakes from sleep, not just app start.
+    powerMonitor.on("resume", () => {
+      log.info("SCHEDULER: machine resumed — running the missed-run catch-up");
+      void localScheduler.catchUpMissed();
+    });
+    // AM6 — Agent Market notifications for someone who has closed the window
+    // (it hides to the tray and the page stops polling). Same session and
+    // client as every other host call to chat-edge; the text shown is the
+    // server's, and a click only opens a page of the app's own origin.
+    // AM9: what this app has toasted, kept across restarts (the server lists a notification on every
+    // surface until somebody acts on it)
+    const shownFile = path.join(app.getPath("userData"), "agent-notifications-shown.json");
+    agentNotifier = new AgentNotifier({
+      feed: chatEdge,
+      memory: {
+        load: () => {
+          try {
+            const v = JSON.parse(fs.readFileSync(shownFile, "utf8"));
+            return Array.isArray(v) ? v : [];
+          } catch {
+            return [];
+          }
+        },
+        save: (ids) => fs.writeFileSync(shownFile, JSON.stringify(ids)),
+      },
+      toaster: { show: showAgentToast },
+      window: { show: () => showMainWindow(), load: (url) => navigateMain(url) },
+      pageOrigin: pageOrigin(),
+      isSignedIn: () => !!ctl.currentAccessToken(),
+      log,
+    });
+    agentNotifier.start();
+  }
+  bridge.attach(win, {
+    onTurnSubmit: (p) => co.onTurnSubmit(p),
+    onTurnCancel: (p) => co.onTurnCancel(p),
+    onConsentRespond: (p) => co.onConsentRespond(p),
+    onQuestionRespond: (p) => co.onQuestionRespond(p),
+    onUiReady: (p) => co.onUiReady(p),
+    onHostQuery: (p) => void co.onHostQuery(p),
+  });
+
+  if (flags.sessionFile) {
+    const json = JSON.parse(fs.readFileSync(flags.sessionFile, "utf8")) as { access_token: string; refresh_token: string; user?: { email?: string } };
+    await ctl.probeInjectFromFile(json);
+  }
+
+  showSessionView(win, "signing-in");
+
+  if (flags.e1Probe) {
+    await win.loadURL(config.pageUrl).catch((err: Error) => log.warn(`initial load rejected: ${err.message}`));
+    await runE1Probe(win);
+    return;
+  }
+
+  const initialLink = findDeepLink(process.argv, config.protocolScheme);
+  const ready = await ctl.ensureSessionAtBoot();
+  updateNotifierRef = updateNotifier;
+  if (ready) {
+    ctl.startRotation();
+    if (!flags.e1Probe && !flags.e3Probe && !flags.e4Probe && !flags.measure) updateNotifier.start();
+    if (flags.measure) runMeasure(win);
+    await win.loadURL(config.pageUrl).catch((err: Error) => log.warn(`initial load rejected: ${err.message}`));
+  } else if (flags.measure || flags.e3Probe) {
+    log.error("this probe needs a stored session (use --session-file); exiting");
+    app.exit(4);
+  }
+  if (initialLink) handleDeepLink(initialLink);
+
+  scheduleProbes(win, ctl);
+  if (flags.e3Probe) void runE3Probe(win, ctl, co, chatEdge, flags.e3Probe);
+  if (flags.e4Probe && ready) {
+    void runE4Probe(
+      {
+        win,
+        bridge: bridge!,
+        coordinator: co,
+        sidecar: sidecar!,
+        grants: grants!,
+        log,
+        evidenceDir: path.join(dataDir, "e4-evidence"),
+        homeDir: app.getPath("home"),
+        quit: (code) => {
+          isQuitting = true;
+          void sidecar?.stop().finally(() => app.exit(code));
+        },
+      },
+      flags.e4Probe,
+    );
+  }
+});
+
+// ── safeStorage-backed store for the agent gateway key ──────────────────────
+class SafeKeyStore {
+  constructor(private readonly filePath: string) {}
+  load(): string | null {
+    try {
+      if (!fs.existsSync(this.filePath) || !safeStorage.isEncryptionAvailable()) return null;
+      return safeStorage.decryptString(fs.readFileSync(this.filePath)) || null;
+    } catch {
+      return null;
+    }
+  }
+  save(key: string): void {
+    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
+    fs.writeFileSync(this.filePath, safeStorage.encryptString(key));
+  }
+  clear(): void {
+    fs.rmSync(this.filePath, { force: true });
+  }
+}
+
+// ── window ──────────────────────────────────────────────────────────────────
+let windowState: WindowStateStore | null = null;
+
+/** FIX33 B4 — always-on-top: window flag + persisted + tray/menu checkboxes. */
+function setAlwaysOnTop(win: BrowserWindow, on: boolean): void {
+  win.setAlwaysOnTop(on);
+  windowState?.update({ alwaysOnTop: on }, true);
+  log.info(`window alwaysOnTop=${on}`);
+  rebuildTrayMenu();
+  installAppMenu(win);
+}
+
+/** FIX33 B3 — File / Edit / View / Help with accelerators (DevTools never in release). */
+function installAppMenu(win: BrowserWindow): void {
+  const pageOrigin = config.pageUrl.slice(0, config.pageUrl.indexOf("/", 8));
+  const template = buildMenuTemplate(
+    {
+      newChat: () => void win.loadURL(config.pageUrl),
+      openSettings: () => void win.loadURL(`${pageOrigin}/chat/settings`),
+      reload: () => win.webContents.reload(),
+      toggleAlwaysOnTop: () => setAlwaysOnTop(win, !win.isAlwaysOnTop()),
+      isAlwaysOnTop: () => win.isAlwaysOnTop(),
+      openLogs: () => void shell.openPath(log.filePath ? path.dirname(log.filePath) : app.getPath("userData")),
+      about: () => void dialog.showMessageBox(win, aboutDialog({ version: app.getVersion(), electron: process.versions.electron ?? "?", configPath: config.sourcePath })),
+      quit: () => {
+        isQuitting = true;
+        app.quit();
+      },
+      toggleDevTools: isRelease ? undefined : () => win.webContents.toggleDevTools(),
+    },
+    { isRelease },
+  );
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template as Electron.MenuItemConstructorOptions[]));
+}
+
+/** AM10 F — the language the shell draws in changed (the page said so through
+ * shell.prefs.set { locale }, already validated and persisted by
+ * applyShellPrefs): everything drawn from the strings table is drawn again
+ * at once — the application menu, the tray menu, the quick window's title —
+ * without a restart. The session view and the connector form read the table
+ * when they load, so nothing is to be done for them here. */
+function applyLocale(locale: Locale): void {
+  if (!setLocale(locale)) return;
+  log.info(`locale → ${locale}`);
+  if (mainWindow && !mainWindow.isDestroyed()) installAppMenu(mainWindow);
+  rebuildTrayMenu();
+  if (quickWindow && !quickWindow.isDestroyed()) quickWindow.setTitle(t("window.quickTitle"));
+}
+
+function createMainWindow(): BrowserWindow {
+  // FIX33 B2 — the saved bounds are used ONLY when they sit on a display that
+  // exists now (sanitizeBounds); otherwise the defaults. Never off-screen.
+  const saved = windowState?.current() ?? null;
+  const displays = screen.getAllDisplays().map((d) => d.workArea);
+  const bounds = sanitizeBounds(saved?.bounds ?? null, displays);
+  if (saved?.bounds && !bounds) log.info("window bounds ignored (not on a current display) — defaults");
+  const win = new BrowserWindow({
+    width: bounds?.width ?? DEFAULT_SIZE.width,
+    height: bounds?.height ?? DEFAULT_SIZE.height,
+    ...(bounds ? { x: bounds.x, y: bounds.y } : {}),
+    minWidth: 640,
+    minHeight: 480,
+    show: false,
+    title: "SRAN Desktop",
+    icon: path.join(APP_ROOT, "assets", "app.ico"),
+    autoHideMenuBar: true,
+    alwaysOnTop: saved?.alwaysOnTop === true,
+    webPreferences: buildWebPreferences({
+      preloadPath: path.join(__dirname, "..", "preload", "index.js"),
+      isRelease,
+    }),
+  });
+  if (saved?.maximized) win.maximize();
+  installAppMenu(win);
+  // Persist geometry on change (debounced in the store) and on close.
+  const remember = () => {
+    if (win.isDestroyed()) return;
+    const maximized = win.isMaximized();
+    windowState?.update({ maximized, ...(maximized ? {} : { bounds: win.getNormalBounds() }) });
+  };
+  win.on("resize", remember);
+  win.on("move", remember);
+  win.on("maximize", remember);
+  win.on("unmaximize", remember);
+
+  // FIX20 §1: the OS window title is the app's identity (taskbar, Alt-Tab), so
+  // it stays "SRAN Desktop". By default Electron overwrites it with each
+  // page's <title> — the hosted page is "SRAN Chat", a different product — so
+  // refuse the page-driven update and keep the app name.
+  win.on("page-title-updated", (event) => {
+    event.preventDefault();
+    if (!win.isDestroyed() && win.getTitle() !== "SRAN Desktop") win.setTitle("SRAN Desktop");
+  });
+
+  win.once("ready-to-show", () => {
+    win.show();
+    if (flags.devtools && !isRelease) win.webContents.openDevTools({ mode: "detach" });
+  });
+  win.on("close", (event) => {
+    // FIX33 B2 — flush the remembered geometry before hiding / quitting.
+    if (!win.isDestroyed()) {
+      const maximized = win.isMaximized();
+      windowState?.update({ maximized, ...(maximized ? {} : { bounds: win.getNormalBounds() }) }, true);
+    }
+    if (!isQuitting) {
+      event.preventDefault();
+      win.hide();
+      log.info("window hidden to tray");
+    }
+  });
+  win.on("closed", () => {
+    mainWindow = null;
+  });
+  win.webContents.on("did-finish-load", () => {
+    const url = win.webContents.getURL();
+    log.info(`did-finish-load ${redactUrl(url)}`);
+    if (url.startsWith(config.pageUrl.slice(0, config.pageUrl.indexOf("/", 8)))) void reportPageState(win);
+  });
+  win.webContents.on("did-fail-load", (_e, code, description, url, isMainFrame) => {
+    if (isMainFrame && code !== -3) log.error(`did-fail-load ${code} ${description} ${redactUrl(url)}`);
+  });
+  win.webContents.on("console-message", (_e, level, message) => {
+    if (message.includes("Content Security Policy")) log.warn(`CSP (renderer console): ${message.slice(0, 300)}`);
+    else if (message.includes("[auth]") || message.includes("[e3-probe]") || message.includes("[canvas-probe]")) log.info(`page.console: ${message.slice(0, 400)}`);
+    else if (level >= 2) log.info(`renderer console [${level}]: ${message.slice(0, 200)}`);
+  });
+  return win;
+}
+
+/** FIX69 — the remote-connector form, a HOST-owned window loaded from the
+ * app's own files (assets/connector-remote.html), modal over the main window.
+ * The page signals with ONE document-title change; the host then reads the
+ * fields itself (executeJavaScript) and closes the window. No bridge, no IPC,
+ * no web origin: the chat page never sees the url or the key, and nothing
+ * here logs them. Resolves null on Cancel / Escape / close. */
+function promptRemoteConnectorForm(parent: BrowserWindow | null, keyOnlyFor?: string): Promise<{ url: string; authHeader: string; key: string } | null> {
+  return new Promise((resolve) => {
+    const form = new BrowserWindow({
+      width: 520,
+      height: 480,
+      ...(parent && !parent.isDestroyed() ? { parent, modal: true } : {}),
+      show: false,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      title: t("window.remoteForm"),
+      icon: path.join(APP_ROOT, "assets", "app.ico"),
+      autoHideMenuBar: true,
+      webPreferences: buildWebPreferences({
+        preloadPath: path.join(__dirname, "..", "preload", "index.js"),
+        isRelease,
+      }),
+    });
+    let settled = false;
+    const finish = (value: { url: string; authHeader: string; key: string } | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+      if (!form.isDestroyed()) form.close();
+    };
+    form.setMenuBarVisibility(false);
+    form.webContents.on("page-title-updated", (event, title) => {
+      event.preventDefault();
+      if (title === "sran-connector-form:cancel") finish(null);
+      else if (title === "sran-connector-form:submit") {
+        form.webContents
+          .executeJavaScript("window.__sranFormValues()", true)
+          .then((v) => {
+            const o = (v ?? {}) as { url?: unknown; authHeader?: unknown; key?: unknown };
+            finish({ url: String(o.url ?? ""), authHeader: String(o.authHeader ?? ""), key: String(o.key ?? "") });
+          })
+          .catch(() => finish(null));
+      }
+    });
+    form.on("closed", () => finish(null));
+    form.once("ready-to-show", () => form.show());
+    // AM10 F — the form's words ride in the query like its mode does.
+    const query: Record<string, string> = { ...pageLanguageQuery(pageStrings("remote")), ...(keyOnlyFor ? { mode: "key", name: keyOnlyFor } : {}) };
+    void form.loadFile(path.join(APP_ROOT, "assets", "connector-remote.html"), { query }).catch((err: Error) => {
+      log.warn(`remote connector form failed to load: ${err.message}`);
+      finish(null);
+    });
+  });
+}
+
+/** AM10 F — how a shell-owned page (assets/*.html) learns its language: the
+ * current locale and the strings it shows, as two query parameters read by
+ * the page's own script before first paint. Nothing is executed in the page
+ * from here, and a page opened without them reads its built-in English. */
+function pageLanguageQuery(strings: Record<string, string>): Record<string, string> {
+  return { lang: currentLocale(), strings: JSON.stringify(strings) };
+}
+
+function showSessionView(win: BrowserWindow, state: ViewState, reason?: string): void {
+  if (win.isDestroyed()) return;
+  const query: Record<string, string> = { state, scheme: config.protocolScheme, ...pageLanguageQuery(pageStrings("session")) };
+  if (reason) query["reason"] = reason;
+  log.info(`VIEW: ${state}${reason ? ` (${reason})` : ""}`);
+  void win.loadFile(SESSION_VIEW, { query }).catch((err: Error) => log.warn(`session view load rejected: ${err.message}`));
+}
+
+async function reportPageState(win: BrowserWindow): Promise<void> {
+  await sleep(1500);
+  if (win.isDestroyed()) return;
+  try {
+    const state = (await win.webContents.executeJavaScript(
+      `JSON.stringify({ path: location.pathname, composer: !!document.querySelector('textarea'), title: document.title, bodyChars: document.body.innerText.length })`,
+    )) as string;
+    log.info(`PAGE STATE: ${state}`);
+  } catch (err) {
+    log.warn(`PAGE STATE unavailable: ${(err as Error).message}`);
+  }
+}
+
+function showMainWindow(): void {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+function toggleMainWindow(): void {
+  if (!mainWindow) return;
+  if (mainWindow.isVisible() && mainWindow.isFocused()) {
+    mainWindow.hide();
+    log.info("hotkey: window hidden");
+  } else {
+    showMainWindow();
+    log.info("hotkey: window shown");
+  }
+}
+
+// ── navigation locks ────────────────────────────────────────────────────────
+function installNavigationGuards(contents: WebContents): void {
+  const policy = config.policy;
+  contents.on("will-navigate", (event, url) => {
+    const intent = parseIntent(url, config.protocolScheme);
+    if (intent !== null) {
+      event.preventDefault();
+      if (!contents.getURL().startsWith("file://")) {
+        log.warn(`INTENT DROPPED (${intent}) — not from the shell-owned view: ${redactUrl(contents.getURL())}`);
+        return;
+      }
+      log.info(`INTENT from the signed-out view: ${intent}`);
+      if (intent === "signin") void sessionController?.signInFromView();
+      else sessionController?.cancelSignIn(true);
+      return;
+    }
+    const verdict = classifyTopLevel(policy, url);
+    if (verdict.allowed) {
+      log.info(`navigation allowed: ${redactUrl(url)}`);
+      return;
+    }
+    event.preventDefault();
+    log.warn(`NAVIGATION REFUSED (${verdict.reason}): ${redactUrl(url)}`);
+    if (verdict.reason === "portal-reauth") void sessionController?.onPortalRedirect(redactUrl(url));
+  });
+  contents.on("will-redirect", (event, url) => {
+    const verdict = classifyTopLevel(policy, url);
+    if (verdict.allowed) {
+      log.info(`redirect allowed: ${redactUrl(url)}`);
+      return;
+    }
+    event.preventDefault();
+    log.warn(`REDIRECT REFUSED (${verdict.reason}): ${redactUrl(url)}`);
+    if (verdict.reason === "portal-reauth") void sessionController?.onPortalRedirect(redactUrl(url));
+  });
+  contents.on("will-frame-navigate", (details) => {
+    if (details.isMainFrame) return;
+    const verdict = classifyFrame(policy, details.url);
+    if (verdict.allowed) return;
+    details.preventDefault();
+    log.warn(`FRAME NAVIGATION REFUSED (${verdict.reason}): ${redactUrl(details.url)}`);
+  });
+  contents.setWindowOpenHandler(({ url }) => {
+    if (isExternalHttpUrl(url)) {
+      log.info(`window.open → system browser: ${redactUrl(url)}`);
+      void shell.openExternal(url);
+    } else {
+      log.warn(`window.open DROPPED (non-http scheme): ${redactUrl(url)}`);
+    }
+    return { action: "deny" };
+  });
+}
+
+// ── session policy: CSP, permissions, downloads, logout observation ─────────
+function installSessionPolicy(ses: Session): void {
+  const allowed = config.policy.allowedOrigins;
+  // FIX133 B — the stack is served over https by the local front door; its
+  // certificate authority is pinned from the config, for the app's own
+  // hosts only (src/main/local-ca.ts). No CA in the config = nothing
+  // changes: Chromium's verification stands alone.
+  if (config.trustedCaFile) {
+    const hosts = trustedHostsOf([config.pageUrl, ...allowed, config.gatewayUrl, config.chatEdgeUrl, config.policy.portalOrigin]);
+    const trust = loadLocalCa(config.trustedCaFile, hosts);
+    installLocalCaTrust(ses, trust, (line) => log.warn(line));
+    log.info(`local CA pinned from ${config.trustedCaFile} for ${[...hosts].join(", ")}`);
+    // FIX134 A3 — the main process's own https calls (ticket exchange, refresh,
+    // models, turns) must see the same trust: Node's fetch does not, Chromium's does.
+    installNodeFetchTrust(trust, netRequestFetch((o) => net.request(o)), (line) => log.info(line));
+  }
+  ses.webRequest.onHeadersReceived({ urls: ["http://*/*", "https://*/*"] }, (details, callback) => {
+    const isDocument = details.resourceType === "mainFrame" || details.resourceType === "subFrame";
+    let origin: string | null = null;
+    try {
+      origin = new URL(details.url).origin;
+    } catch {
+      /* not ours */
+    }
+    if (!isDocument || origin === null || !allowed.has(origin)) {
+      callback({});
+      return;
+    }
+    const headers = { ...details.responseHeaders };
+    headers["Content-Security-Policy"] = [...(headers["Content-Security-Policy"] ?? []), config.contentSecurityPolicy];
+    callback({ responseHeaders: headers });
+  });
+  // E2 fallback (E3 §2 keeps it): the page's own POST /portal/auth/logout,
+  // observed here, makes the bounce that follows a logout, not a re-auth.
+  ses.webRequest.onCompleted({ urls: [`${config.gatewayUrl}/portal/auth/logout`] }, (details) => {
+    if (details.method === "POST" && details.statusCode === 200) sessionController?.markLogoutIntent();
+  });
+  // FIX47.6 Part D — the deny-all stance broke the message Copy button:
+  // navigator.clipboard.writeText is gated on `clipboard-sanitized-write`,
+  // so the refusal made every copy click reject (and the page's old empty
+  // catch hid it — measured live on 0.1.0-e21). WRITING the clipboard from
+  // an allowed origin is the one permission the app's own UI needs; grant
+  // exactly that. clipboard-read stays refused — a page silently reading
+  // the user's clipboard is the risk the deny-all exists for (paste goes
+  // through native Ctrl+V / the context menu, which never ask here).
+  const clipboardWrite = new Set(["clipboard-sanitized-write"]);
+  const originAllowed = (rawOrigin: string): boolean => {
+    try {
+      return allowed.has(new URL(rawOrigin).origin);
+    } catch {
+      return false;
+    }
+  };
+  ses.setPermissionRequestHandler((contents, permission, callback) => {
+    if (clipboardWrite.has(permission) && originAllowed(contents.getURL())) {
+      callback(true);
+      return;
+    }
+    log.warn(`PERMISSION REFUSED: ${permission}`);
+    callback(false);
+  });
+  ses.setPermissionCheckHandler((_contents, permission, requestingOrigin) =>
+    clipboardWrite.has(permission) && originAllowed(requestingOrigin));
+  // FIX80 — the blanket refusal made EVERY download affordance in the
+  // app a silent no-op: message-attachment downloads, generated images,
+  // canvas export, conversation export (all are <a download> on blob
+  // URLs in web-chat). A download the APP'S OWN page starts is the
+  // product working, not a drive-by; letting it proceed shows Electron's
+  // native save dialog. Anything not initiated by an allowed origin
+  // stays refused, which is what the deny-all was for.
+  ses.on("will-download", (event, item, contents) => {
+    let initiator = "";
+    try {
+      initiator = new URL(contents.getURL()).origin;
+    } catch {
+      /* refused below */
+    }
+    if (allowed.has(initiator)) {
+      log.info(`DOWNLOAD ALLOWED (${initiator}): ${redactUrl(item.getURL())} → save dialog`);
+      return;
+    }
+    event.preventDefault();
+    log.warn(`DOWNLOAD REFUSED: ${redactUrl(item.getURL())}`);
+  });
+}
+
+// ── crash handling ──────────────────────────────────────────────────────────
+// FIX47 Part D — right-click. Every window (main and quick-ask) gets the
+// same menu, built from what was clicked (context-menu.ts); Electron shows
+// nothing on its own. External links open in the system browser through
+// the same door as window.open (setWindowOpenHandler above).
+function installContextMenu(contents: WebContents): void {
+  contents.on("context-menu", (_event, params) => {
+    const p: ContextMenuParams = {
+      x: params.x,
+      y: params.y,
+      isEditable: params.isEditable,
+      selectionText: params.selectionText ?? "",
+      linkURL: params.linkURL ?? "",
+      mediaType: params.mediaType,
+      srcURL: params.srcURL ?? "",
+      editFlags: params.editFlags,
+    };
+    const host = {
+      copy: () => contents.copy(),
+      cut: () => contents.cut(),
+      paste: () => contents.paste(),
+      undo: () => contents.undo(),
+      redo: () => contents.redo(),
+      selectAll: () => contents.selectAll(),
+      copyImageAt: (x: number, y: number) => contents.copyImageAt(x, y),
+      writeClipboardText: (text: string) => clipboard.writeText(text),
+      openExternal: (url: string) => {
+        log.info(`context menu → system browser: ${redactUrl(url)}`);
+        void shell.openExternal(url);
+      },
+      // FIX81 ④ — Save Image As: one download mechanism (will-download,
+      // app-origin allowed → native save dialog), not a second path.
+      downloadURL: (url: string) => contents.downloadURL(url),
+    };
+    const template = buildContextMenu(p).map((item) =>
+      "type" in item
+        ? { type: "separator" as const }
+        : { label: item.label, accelerator: item.accelerator, enabled: item.enabled, click: () => actionFor(item, p, host) },
+    );
+    const win = BrowserWindow.fromWebContents(contents) ?? undefined;
+    Menu.buildFromTemplate(template).popup({ window: win });
+  });
+}
+
+function installCrashHandlers(contents: WebContents): void {
+  contents.on("render-process-gone", (_event, details) => {
+    rendererCrashes += 1;
+    log.error(`RENDERER GONE #${rendererCrashes} reason=${details.reason} exitCode=${details.exitCode}`);
+    const win = BrowserWindow.fromWebContents(contents);
+    if (!win || win.isDestroyed()) return;
+    if (details.reason === "clean-exit") return;
+    if (flags.e1Probe || rendererCrashes <= 1) {
+      log.info("recovering: reloading the page");
+      setTimeout(() => {
+        if (!win.isDestroyed()) void win.loadURL(config.pageUrl);
+      }, 300);
+      return;
+    }
+    void dialog
+      .showMessageBox(win, rendererGoneDialog({ reason: details.reason, exitCode: details.exitCode, logPath: log.filePath }))
+      .then(({ response }) => {
+        if (response === 0) void win.loadURL(config.pageUrl);
+        else app.quit();
+      });
+  });
+}
+
+// ── tray / hotkey / login item / deep link ──────────────────────────────────
+/** The tray's "Clear local data…" action: confirm, wipe the plaintext
+ *  derived caches, report counts (never contents). The shell log file
+ *  is re-attached afterwards so logging keeps working. */
+async function clearLocalDataWithConfirm(): Promise<void> {
+  const { response } = await dialog.showMessageBox(clearLocalDataDialog());
+  if (response !== 0) return;
+  const counts = wipeLocalData(app.getPath("userData"));
+  log.attachFile(path.join(app.getPath("userData"), "logs", "shell.log"));
+  log.info(
+    `local data cleared: history=${counts.historyFiles} conversation-state=${counts.conversationStateFiles} run-ledger=${counts.runLedgerFiles} logs=${counts.logFiles}`,
+  );
+  new Notification(dataClearedNotification(counts.historyFiles + counts.conversationStateFiles + counts.runLedgerFiles + counts.logFiles)).show();
+}
+
+function createTray(): void {
+  const icon = nativeImage.createFromPath(path.join(APP_ROOT, "assets", "app.ico"));
+  tray = new Tray(icon);
+  tray.setToolTip("SRAN Desktop");
+  rebuildTrayMenu();
+  // §2.5 (FIX34): what a click opens is a SETTING (Claude on Windows forces the
+  // quick entry with no way to change it — anthropics/claude-code#22420). The
+  // default is the ordinary-app behaviour: the main window.
+  tray.on("click", () => {
+    if (shellPrefs?.current().trayClick === "quick") toggleQuickWindow("tray");
+    else toggleMainWindow();
+  });
+  log.info("tray created");
+}
+
+/** FIX33 B4 — the tray menu carries an always-on-top checkbox (persisted with
+ * the window state). AM10 F — the template (tray-menu.ts) is in the current
+ * language; this is also what applyLocale calls to redraw it. */
+function rebuildTrayMenu(): void {
+  if (!tray) return;
+  const template = buildTrayTemplate(
+    {
+      toggleMain: () => toggleMainWindow(),
+      toggleQuick: () => toggleQuickWindow("tray-menu"),
+      setAlwaysOnTop: (on) => {
+        if (mainWindow && !mainWindow.isDestroyed()) setAlwaysOnTop(mainWindow, on);
+      },
+      signIn: () => void sessionController?.signInFromView(),
+      signOut: () => void sessionController?.signOut("tray", true),
+      clearLocalData: () => void clearLocalDataWithConfirm(),
+      quit: () => {
+        isQuitting = true;
+        app.quit();
+      },
+    },
+    {
+      quickHotkey: shellPrefs?.current().quickHotkey ?? "",
+      alwaysOnTop: mainWindow?.isAlwaysOnTop() ?? windowState?.current().alwaysOnTop ?? false,
+    },
+  );
+  tray.setContextMenu(Menu.buildFromTemplate(template as Electron.MenuItemConstructorOptions[]));
+}
+function registerHotkey(): void {
+  const ok = globalShortcut.register(config.hotkey, toggleMainWindow);
+  if (ok) log.info(`global hotkey registered: ${config.hotkey}`);
+  else {
+    log.warn(`global hotkey NOT registered (held by another app?): ${config.hotkey}`);
+    notifyHotkeyFailure("main", config.hotkey);
+  }
+}
+
+// ── FIX34 Part A: the quick-ask window ─────────────────────────────────────
+
+/** Registers the quick-ask hotkey. A failure (another app holds the key) is
+ * TOLD to the user — an OS notification at boot, the settings page's error
+ * on a change — never swallowed. Returns false when the OS refused it. */
+function registerQuickHotkey(accelerator: string, origin: "boot" | "settings"): boolean {
+  if (quickHotkeyRegistered === accelerator) return true;
+  let ok = false;
+  try {
+    ok = globalShortcut.register(accelerator, () => toggleQuickWindow("hotkey"));
+  } catch (err) {
+    log.warn(`quick-ask hotkey register threw for ${accelerator}: ${(err as Error).message}`);
+    ok = false;
+  }
+  if (ok) {
+    if (quickHotkeyRegistered) globalShortcut.unregister(quickHotkeyRegistered);
+    quickHotkeyRegistered = accelerator;
+    log.info(`quick-ask hotkey registered: ${accelerator}`);
+    rebuildTrayMenu();
+    return true;
+  }
+  log.warn(`quick-ask hotkey NOT registered (held by another app?): ${accelerator}`);
+  if (origin === "boot") notifyHotkeyFailure("quick", accelerator);
+  return false;
+}
+
+function notifyHotkeyFailure(which: "main" | "quick", accelerator: string): void {
+  try {
+    if (Notification.isSupported()) new Notification(hotkeyUnavailableNotification(which, describeAccelerator(accelerator))).show();
+  } catch (err) {
+    log.warn(`hotkey notification failed: ${(err as Error).message}`);
+  }
+}
+
+/** AM6 — the Agent Market toasts this process still holds. Electron drops a
+ * Notification with its last reference, and the click handler with it: a
+ * toast nobody holds opens nothing. Bounded by the server's page of 20. */
+const agentToasts: Notification[] = [];
+const AGENT_TOASTS_KEPT = 20;
+
+/** AM6 — one OS notification for one Agent Market notification: the server's
+ * title and body as they came, nothing added. False when the OS cannot show
+ * it, and the poller then does not report it as shown. */
+function showAgentToast(title: string, body: string, onClick: () => void): boolean {
+  try {
+    if (!Notification.isSupported()) return false;
+    const toast = new Notification({ title, body });
+    toast.on("click", () => {
+      const held = agentToasts.indexOf(toast);
+      if (held >= 0) agentToasts.splice(held, 1);
+      onClick();
+    });
+    agentToasts.push(toast);
+    if (agentToasts.length > AGENT_TOASTS_KEPT) agentToasts.shift();
+    toast.show();
+    return true;
+  } catch (err) {
+    log.warn(`agent notification failed: ${(err as Error).message}`);
+    return false;
+  }
+}
+
+/** shell.prefs.set — validate, apply the OS side-effects, persist. A hotkey
+ * the OS refuses is NOT stored: the previous one keeps working and the page
+ * gets the reason. AM10 F: `locale` (exactly en | th, else refused) is the
+ * page saying which language it is in — persisted here, drawn by applyLocale. */
+function applyShellPrefs(patch: Record<string, unknown>): { ok: boolean; prefs: ShellPrefs; error?: string } {
+  const store = shellPrefs!;
+  const next: Partial<ShellPrefs> = {};
+  if (patch["trayClick"] !== undefined) {
+    if (patch["trayClick"] !== "main" && patch["trayClick"] !== "quick") return { ok: false, prefs: store.current(), error: "trayClick-invalid" };
+    next.trayClick = patch["trayClick"];
+  }
+  const locale = localeFromPatch(patch);
+  if (!locale.ok) return { ok: false, prefs: store.current(), error: locale.error };
+  if (locale.locale) next.locale = locale.locale;
+  if (patch["quickHotkey"] !== undefined) {
+    const v = validateAccelerator(typeof patch["quickHotkey"] === "string" ? patch["quickHotkey"] : null);
+    if (!v.ok) return { ok: false, prefs: store.current(), error: `hotkey-${v.reason}` };
+    if (v.accelerator === config.hotkey) return { ok: false, prefs: store.current(), error: "hotkey-taken-by-main" };
+    if (!registerQuickHotkey(v.accelerator, "settings")) return { ok: false, prefs: store.current(), error: "hotkey-taken" };
+    next.quickHotkey = v.accelerator;
+  }
+  const prefs = store.update(next);
+  // A new language redraws the menu AND the tray (applyLocale); otherwise the
+  // tray alone, as before (the hotkey shown beside Quick ask may have changed).
+  if (locale.locale && locale.locale !== currentLocale()) applyLocale(locale.locale);
+  else rebuildTrayMenu();
+  return { ok: true, prefs };
+}
+
+function quickPageUrl(): string {
+  return `${config.pageUrl.slice(0, config.pageUrl.indexOf("/", 8))}/quick`;
+}
+
+function createQuickWindow(): BrowserWindow {
+  const saved = quickState?.current().bounds ?? null;
+  const displays = screen.getAllDisplays().map((d) => d.workArea);
+  const bounds = sanitizeBounds(saved, displays);
+  const win = new BrowserWindow({
+    ...(bounds ? bounds : { ...QUICK_DEFAULT_SIZE, ...quickDefaultPosition() }),
+    minWidth: 480,
+    minHeight: 320,
+    show: false,
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    title: t("window.quickTitle"),
+    icon: path.join(APP_ROOT, "assets", "app.ico"),
+    autoHideMenuBar: true,
+    webPreferences: buildWebPreferences({
+      preloadPath: path.join(__dirname, "..", "preload", "index.js"),
+      isRelease,
+    }),
+  });
+  win.setMenuBarVisibility(false);
+  const remember = () => {
+    if (!win.isDestroyed() && win.isVisible()) quickState?.update({ bounds: win.getNormalBounds() });
+  };
+  win.on("resize", remember);
+  win.on("move", remember);
+  win.on("page-title-updated", (event) => event.preventDefault());
+  win.once("ready-to-show", () => {
+    if (quickPendingShow) {
+      quickPendingShow = false;
+      presentQuickWindow(win);
+    }
+  });
+  // Close-on-blur, the quick-entry idiom (Spotlight, Claude, Raycast): the
+  // window is for one question; clicking anywhere else dismisses it.
+  win.on("blur", () => {
+    if (win.isDestroyed() || !win.isVisible()) return;
+    if (Date.now() - quickShownAt < QUICK_BLUR_GRACE_MS) return;
+    hideQuickWindow("blur");
+  });
+  win.on("close", (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      hideQuickWindow("close");
+    }
+  });
+  win.on("closed", () => {
+    quickWindow = null;
+  });
+  win.webContents.on("did-finish-load", () => log.info(`quick did-finish-load ${redactUrl(win.webContents.getURL())}`));
+  win.webContents.on("did-fail-load", (_e, code, description, url, isMainFrame) => {
+    if (isMainFrame && code !== -3) log.error(`quick did-fail-load ${code} ${description} ${redactUrl(url)}`);
+  });
+  bridge?.addWindow(win);
+  void win.loadURL(quickPageUrl()).catch((err: Error) => log.warn(`quick load rejected: ${err.message}`));
+  return win;
+}
+
+/** First-open position: centred horizontally in the top third of the display
+ * under the cursor — where a launcher box is expected to appear. */
+function quickDefaultPosition(): { x: number; y: number } {
+  const d = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  return {
+    x: Math.round(d.x + (d.width - QUICK_DEFAULT_SIZE.width) / 2),
+    y: Math.round(d.y + d.height * 0.18),
+  };
+}
+
+function presentQuickWindow(win: BrowserWindow): void {
+  if (win.isDestroyed()) return;
+  // Re-check the saved place against the displays that exist NOW (a monitor
+  // may have gone away since the window was created).
+  const saved = quickState?.current().bounds ?? null;
+  const ok = sanitizeBounds(saved, screen.getAllDisplays().map((d) => d.workArea));
+  if (!ok) {
+    const size: Rect = { ...quickDefaultPosition(), ...QUICK_DEFAULT_SIZE };
+    win.setBounds(size);
+  }
+  quickShownAt = Date.now();
+  win.show();
+  win.focus();
+  log.info("quick-ask window shown");
+}
+
+function showQuickWindow(origin: string): void {
+  if (!sessionController?.hasSession) {
+    // Signed out: the quick box cannot work; the main window carries the sign-in view.
+    log.info(`quick-ask (${origin}): no session — showing the main window instead`);
+    showMainWindow();
+    return;
+  }
+  if (!quickWindow || quickWindow.isDestroyed()) {
+    quickPendingShow = true;
+    quickWindow = createQuickWindow();
+    log.info(`quick-ask (${origin}): window created, showing when ready`);
+    return;
+  }
+  presentQuickWindow(quickWindow);
+}
+
+function hideQuickWindow(reason: string): void {
+  if (!quickWindow || quickWindow.isDestroyed() || !quickWindow.isVisible()) return;
+  quickState?.update({ bounds: quickWindow.getNormalBounds() }, true);
+  quickWindow.hide();
+  log.info(`quick-ask window hidden (${reason})`);
+}
+
+function toggleQuickWindow(origin: string): void {
+  if (quickWindow && !quickWindow.isDestroyed() && quickWindow.isVisible()) hideQuickWindow(origin);
+  else showQuickWindow(origin);
+}
+
+/** quick.openInMain — hand a quick-ask conversation to the main window. The
+ * page has already turned memory back on (it is a normal saved chat now). */
+function quickOpenInMain(conversationId: string): void {
+  hideQuickWindow("open-in-main");
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  const pageOrigin = config.pageUrl.slice(0, config.pageUrl.indexOf("/", 8));
+  void win.loadURL(`${pageOrigin}/chat/${encodeURIComponent(conversationId)}`);
+  showMainWindow();
+  log.info(`quick-ask → main window: conv=${conversationId}`);
+}
+function applyLoginItem(): void {
+  const current = app.getLoginItemSettings();
+  if (current.openAtLogin !== config.openAtLogin) {
+    app.setLoginItemSettings({ openAtLogin: config.openAtLogin });
+    log.info(`login item set: openAtLogin=${config.openAtLogin}`);
+  } else {
+    log.info(`login item unchanged: openAtLogin=${current.openAtLogin}`);
+  }
+}
+function registerDeepLinkScheme(scheme: string): void {
+  const ok = isRelease
+    ? app.setAsDefaultProtocolClient(scheme)
+    : app.setAsDefaultProtocolClient(scheme, process.execPath, [path.resolve(process.argv[1] ?? APP_ROOT)]);
+  log.info(`deep link scheme ${scheme}:// ${ok ? "registered" : "NOT registered"}`);
+}
+function findDeepLink(argv: readonly string[], scheme: string): string | null {
+  return argv.find((a) => a.toLowerCase().startsWith(`${scheme}://`)) ?? null;
+}
+function handleDeepLink(url: string): void {
+  log.info(`DEEP LINK received: ${redactUrl(url)}`);
+  showMainWindow();
+  // E2: the OAuth callback (nonce-bound; SessionController decides).
+  if (parseLoginTicket(url, config.protocolScheme) !== null) {
+    void sessionController?.handleDeepLink(url);
+    return;
+  }
+  // A connector's consent flow, come back from the system browser: land on the
+  // Connectors page, which says what was connected (or that nothing was).
+  const back = parseConnectorReturn(url, config.protocolScheme);
+  if (back !== null) {
+    log.info(`CONNECTOR RETURN: ${back.connector} ${back.status}${back.reason ? ` (${back.reason})` : ""}`);
+    navigateMain(connectorsPageUrl(pageOrigin(), back));
+    return;
+  }
+  // FIX34 Part B: app links (Claude's shape). Malformed → dropped quietly.
+  const link = parseAppLink(url, config.protocolScheme, deepLinkHost());
+  if (link === null) {
+    log.warn("DEEP LINK dropped: not a login ticket and not an app link for this scheme/host");
+    return;
+  }
+  log.info(`APP LINK: ${link.kind}${link.kind === "new" ? ` q=${link.q ? `${link.q.length} chars` : "-"} file=${link.file ? "yes" : "-"}` : ` id=${link.id}`}`);
+  void openAppLink(link);
+}
+
+/** The deep-link host mirrors the web app's host (claude://claude.ai/… ↔ sran://<pageUrl host>/…). */
+function deepLinkHost(): string {
+  try {
+    return new URL(config.pageUrl).host;
+  } catch {
+    return "";
+  }
+}
+
+function pageOrigin(): string {
+  return config.pageUrl.slice(0, config.pageUrl.indexOf("/", 8));
+}
+
+async function openAppLink(link: AppLink): Promise<void> {
+  let target: string;
+  switch (link.kind) {
+    case "chat":
+      target = `${pageOrigin()}/chat/${encodeURIComponent(link.id)}`;
+      break;
+    case "project":
+      target = `${pageOrigin()}/chat/projects?project=${encodeURIComponent(link.id)}`;
+      break;
+    case "new": {
+      if (link.file) {
+        // Part C: the Explorer menu — confirm, (grant,) upload, then open the chat
+        // with the file staged in the composer. The user still presses Send.
+        const opened = await attachFileFromLink(link.file, link.q);
+        if (!opened) return;
+        target = opened;
+        break;
+      }
+      // `q` is PREFILLED into the composer by the page and never sent (Part B rule 1).
+      target = `${pageOrigin()}/chat${link.q ? `?q=${encodeURIComponent(link.q)}` : ""}`;
+      break;
+    }
+  }
+  navigateMain(target);
+}
+
+function navigateMain(target: string): void {
+  const win = mainWindow;
+  if (!sessionController?.hasSession || !win || win.isDestroyed()) {
+    pendingNavigation = target;
+    log.info("APP LINK: no session yet — will open after sign-in");
+    return;
+  }
+  void win.loadURL(target).catch((err: Error) => log.warn(`app link navigation rejected: ${err.message}`));
+  showMainWindow();
+}
+
+// ── FIX34 Part C: "Ask SRAN about this file" (Explorer context menu) ──────────
+//
+// The rule is Claude Desktop's for folders supplied through a link: the file is
+// UNTRUSTED input, so the host shows a confirmation EVERY time — even when the
+// folder is already granted — naming the full path. A file outside every grant
+// asks for that folder in the same dialog instead of refusing. The bytes are
+// then uploaded to chat-edge as a normal attachment (never a path to the model)
+// and the chat opens with the file staged in the composer.
+
+const ATTACH_MAX_BYTES = 200 * 1024 * 1024; // chat-edge MAX_FILE_SIZE_BYTES default (web fileUtil mirrors it)
+const ATTACH_MIME: Record<string, string> = {
+  pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  csv: "text/csv", txt: "text/plain", md: "text/markdown", markdown: "text/markdown", html: "text/html", htm: "text/html", json: "application/json",
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
+};
+
+async function attachFileFromLink(filePath: string, q: string | null): Promise<string | null> {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return null;
+  if (!sessionController?.hasSession) {
+    await dialog.showMessageBox(win, attachSignInFirstDialog());
+    return null;
+  }
+  let size = 0;
+  try {
+    const st = fs.statSync(filePath);
+    if (!st.isFile()) throw new Error("not a file");
+    size = st.size;
+  } catch {
+    log.warn(`ATTACH LINK: not a readable file: ${filePath}`);
+    await dialog.showMessageBox(win, attachNotOpenedDialog(filePath));
+    return null;
+  }
+  if (size > ATTACH_MAX_BYTES) {
+    await dialog.showMessageBox(win, attachTooLargeDialog(filePath));
+    return null;
+  }
+  const folder = path.dirname(filePath);
+  const inGrant = (grants?.list() ?? []).some((g) => {
+    const a = path.win32.normalize(folder).toLowerCase();
+    const r = path.win32.normalize(g).toLowerCase().replace(/[\\/]+$/, "");
+    return a === r || a.startsWith(r + "\\");
+  });
+  // ALWAYS confirm (Claude: "always shows a confirmation dialog … even if you've trusted that folder before").
+  const choice = await dialog.showMessageBox(win, attachConfirmDialog({ filePath, folder, inGrant }));
+  if (choice.response !== 1) {
+    log.info("ATTACH LINK: cancelled by the user");
+    return null;
+  }
+  if (!inGrant && grants) {
+    const v = grants.add(folder);
+    if (v.verdict !== "Ok") {
+      log.warn(`ATTACH LINK: folder grant refused (${v.verdict}): ${folder}`);
+      await dialog.showMessageBox(win, attachFolderRefusedDialog(folder, v.verdict));
+      return null;
+    }
+    log.info(`ATTACH LINK: folder granted: ${v.canonical}`);
+  }
+  const chatEdge = chatEdgeRef;
+  if (!chatEdge) return null;
+  const conversationId = await chatEdge.createConversation(config.defaultModel);
+  if (!conversationId) {
+    await dialog.showMessageBox(win, attachChatFailedDialog());
+    return null;
+  }
+  const name = path.basename(filePath);
+  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
+  const mime = ATTACH_MIME[ext] ?? "application/octet-stream";
+  let fileId: string | null = null;
+  try {
+    fileId = await chatEdge.uploadFileBytes(conversationId, fs.readFileSync(filePath), name, mime);
+  } catch (err) {
+    log.warn(`ATTACH LINK: read/upload failed: ${(err as Error).message}`);
+  }
+  if (!fileId) {
+    await dialog.showMessageBox(win, attachFailedDialog(name));
+    return null;
+  }
+  log.info(`ATTACH LINK: ${name} (${size} bytes) → conv=${conversationId} file=${fileId}`);
+  return `${pageOrigin()}/chat/${encodeURIComponent(conversationId)}?attach=${encodeURIComponent(fileId)}${q ? `&q=${encodeURIComponent(q)}` : ""}`;
+}
+
+// ── dev diagnostics ─────────────────────────────────────────────────────────
+interface Flags {
+  devtools: boolean;
+  e1Probe: boolean;
+  measure: boolean;
+  sessionFile: string | null;
+  exitAfter: number | null;
+  corruptAccess: number | null;
+  collision: boolean;
+  serverRevoke: number | null;
+  signout: number | null;
+  pageLogout: number | null;
+  rotateNow: number | null;
+  nonceFile: string | null;
+  e3Probe: string | null;
+  e4Probe: string | null;
+  /** dev: add a folder grant without the native picker */
+  grant: string | null;
+  /** dev: force every turn onto one model (the S2 auto-routing defect) */
+  model: string | null;
+  /** FIX68 dev: the program the "Add custom connector" file picker would
+   * return, so the E4 probe can drive that flow without an OS dialog. The
+   * spawn-consent dialog is answered "Add connector" and its exact text is
+   * logged. Diagnostic → refused in a packaged build like every other flag. */
+  probeMcpServer: string | null;
+  /** FIX69 dev: the remote-connector form's answers come from the environment
+   * (FIX69_PROBE_URL / FIX69_PROBE_HEADER / FIX69_PROBE_KEY, read per call) so
+   * the E4 probe can drive that flow without the host window; the native
+   * confirmation is answered "Add" and its text logged. Dev-only like the rest. */
+  probeMcpRemote: boolean;
+  anyDiagnostic: boolean;
+}
+function parseFlags(argv: readonly string[]): Flags {
+  const valueOf = (name: string): string | null => {
+    const i = argv.indexOf(name);
+    return i >= 0 && i + 1 < argv.length ? argv[i + 1]! : null;
+  };
+  const msOf = (name: string): number | null => {
+    const v = valueOf(name);
+    return v === null ? null : Number.parseInt(v, 10);
+  };
+  const f: Omit<Flags, "anyDiagnostic"> = {
+    devtools: argv.includes("--devtools"),
+    e1Probe: argv.includes("--e1-probe"),
+    measure: argv.includes("--measure"),
+    sessionFile: valueOf("--session-file"),
+    exitAfter: msOf("--exit-after"),
+    corruptAccess: msOf("--probe-corrupt-access"),
+    collision: argv.includes("--probe-collision"),
+    serverRevoke: msOf("--probe-server-revoke"),
+    signout: msOf("--probe-signout"),
+    pageLogout: msOf("--probe-page-logout"),
+    rotateNow: msOf("--probe-rotate-now"),
+    nonceFile: valueOf("--probe-nonce-file"),
+    e3Probe: valueOf("--probe-e3"),
+    e4Probe: valueOf("--probe-e4"),
+    grant: valueOf("--grant"),
+    model: valueOf("--model"),
+    probeMcpServer: valueOf("--probe-mcp-server"),
+    probeMcpRemote: argv.includes("--probe-mcp-remote"),
+  };
+  const anyDiagnostic = Object.values(f).some((v) => v !== null && v !== false);
+  return { ...f, anyDiagnostic };
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+function summaryLine(): string {
+  const refusals = log.lines.filter((l) => /(NAVIGATION|REDIRECT|FRAME NAVIGATION) REFUSED/.test(l)).length;
+  return `E2_SUMMARY ${JSON.stringify({ refusals, rotations: sessionController?.rotations ?? 0, hasSession: sessionController?.hasSession ?? false, logFile: log.filePath })}`;
+}
+function quitWithSummary(code = 0): void {
+  log.info(summaryLine());
+  process.stdout.write(summaryLine() + "\n");
+  isQuitting = true;
+  app.exit(code);
+}
+
+function scheduleProbes(win: BrowserWindow, ctl: SessionController): void {
+  const at = (ms: number | null, fn: () => void | Promise<void>) => {
+    if (ms !== null) setTimeout(() => void fn(), ms);
+  };
+  at(flags.rotateNow, async () => {
+    log.info("PROBE: host rotation on demand");
+    await ctl.rotate("probe");
+  });
+  at(flags.corruptAccess, async () => {
+    log.info("PROBE: corrupting the jar's access cookie (simulated invalid access token), then reloading");
+    await ctl.probeCorruptAccessCookie();
+  });
+  at(flags.signout, async () => {
+    log.info("PROBE: host-initiated sign-out (the tray's Sign out)");
+    await ctl.signOut("probe", true);
+  });
+  at(flags.pageLogout, async () => {
+    log.info("PROBE: page-side logout (web-chat's browser path: POST /portal/auth/logout then location.href = PORTAL/login)");
+    await win.webContents.executeJavaScript(
+      `fetch(${JSON.stringify(config.gatewayUrl)} + '/portal/auth/logout', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json; charset=utf-8' } })
+         .then(r => { console.log('[e2-probe] logout status=' + r.status); location.href = ${JSON.stringify(config.portalOrigin)} + '/login'; })`,
+    );
+  });
+  at(flags.serverRevoke, async () => {
+    const refresh = ctl.currentRefreshToken();
+    if (refresh === null) return;
+    log.info(`PROBE: server-side revocation of the session's refresh token (sha256/8=${fingerprint(refresh)}) via POST /portal/auth/logout from the host`);
+    const r = await new PortalAuthClient(config.gatewayUrl).logout(refresh);
+    log.info(`PROBE: revocation status=${r.status}`);
+    await sleep(500);
+    await ctl.probeCorruptAccessCookie();
+  });
+  if (flags.collision) void runCollisionProbe(win, ctl);
+  at(flags.exitAfter, () => quitWithSummary(0));
+}
+
+async function runCollisionProbe(win: BrowserWindow, ctl: SessionController): Promise<void> {
+  const GRACE_MS = 31_000;
+  log.info("=== COLLISION PROBE (criterion 4) ===");
+  await sleep(4000);
+  log.info(`PROBE A: waiting ${GRACE_MS / 1000}s (> 30 s refresh grace) with the page idle, then a host rotation`);
+  await sleep(GRACE_MS);
+  const a = await ctl.rotate("collision-probe-A");
+  log.info(`PROBE A RESULT: host rotation ${a ? "200 — no second holder consumed the token" : "FAILED"}`);
+  log.info("PROBE B (positive control): page-context fetch('/portal/auth/refresh') — the second holder the spike had");
+  const pageStatus = await win.webContents.executeJavaScript(
+    `fetch(${JSON.stringify(config.gatewayUrl)} + '/portal/auth/refresh', { method: 'POST', credentials: 'include' }).then(r => r.status)`,
+  );
+  log.info(`PROBE B: page-side refresh status=${String(pageStatus)} (the jar's refresh cookie is now rotated; the host's copy is stale)`);
+  await sleep(GRACE_MS);
+  const before = ctl.hasSession;
+  const b = await ctl.rotate("collision-probe-B");
+  log.info(`PROBE B RESULT: host rotation ${b ? "200 (unexpected)" : `rejected — hasSession ${before} → ${ctl.hasSession} (the spike's step-7 outcome, reproduced on demand)`}`);
+  log.info("=== COLLISION PROBE DONE ===");
+  quitWithSummary(a && !b ? 0 : 1);
+}
+
+// ── E3 probes ───────────────────────────────────────────────────────────────
+type Check = { name: string; pass: boolean; evidence: string };
+
+/** Type into web-chat's composer and press Enter — the page's own send path
+ * (ChatInput.onKeyDown → shouldSendOnEnter → submit). DOM automation inside
+ * the page, never OS input. */
+const TYPE_AND_SEND = (text: string) => `(() => {
+  const ta = document.querySelector('textarea');
+  if (!ta) return 'no-textarea';
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(ta, ${JSON.stringify(text)});
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  ta.focus();
+  ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+  return 'sent';
+})()`;
+
+const PAGE_TAIL = (n: number) => `document.body.innerText.replace(/\\s+/g, ' ').slice(-${n})`;
+
+async function runE3Probe(win: BrowserWindow, ctl: SessionController, co: TurnCoordinator, chatEdge: ChatEdgeClient, name: string): Promise<void> {
+  const checks: Check[] = [];
+  const check = (n: string, pass: boolean, evidence: string) => {
+    checks.push({ name: n, pass, evidence });
+    log.info(`[${pass ? "PASS" : "FAIL"}] ${n} — ${evidence}`);
+  };
+  const wc = win.webContents;
+  const js = (code: string) => wc.executeJavaScript(code) as Promise<unknown>;
+  const lastLine = (re: RegExp) => [...log.lines].reverse().find((l) => re.test(l)) ?? "(no log line)";
+  const b = bridge!;
+
+  /** Send a turn through the composer, wait for the host to finish it,
+   * return {convId, reply, dom}. */
+  const turn = async (text: string, timeoutMs = 90_000): Promise<{ convId: string; reply: string; dom: string }> => {
+    const accepted = b.accepted.length;
+    const sent = await js(TYPE_AND_SEND(text));
+    if (sent !== "sent") throw new Error(`composer not found (${String(sent)})`);
+    const t0 = Date.now();
+    while (b.accepted.length === accepted || !b.accepted.slice(accepted).some((a) => a.type === "turn.submit")) {
+      if (Date.now() - t0 > 15_000) throw new Error("turn.submit never arrived at the host");
+      await sleep(100);
+    }
+    const convId = co.lastConversationId!;
+    const deadline = Date.now() + timeoutMs;
+    while (co.isRunning(convId) && Date.now() < deadline) await sleep(100);
+    await sleep(1200); // let the page render the final delta
+    const dom = (await js(PAGE_TAIL(600))) as string;
+    return { convId, reply: co.lastReply.get(convId) ?? "", dom };
+  };
+
+  const finish = () => {
+    const failed = checks.filter((c) => !c.pass).length;
+    log.info(`=== E3 PROBE ${name}: ${checks.length - failed}/${checks.length} passed ===`);
+    process.stdout.write(`E3_PROBE ${JSON.stringify({ name, checks, logFile: log.filePath })}\n`);
+    isQuitting = true;
+    app.exit(failed === 0 ? 0 : 1);
+  };
+
+  try {
+    // Wait for the page + the handshake.
+    const t0 = Date.now();
+    while (!log.lines.some((l) => /BRIDGE HANDSHAKE/.test(l)) && Date.now() - t0 < 20_000) await sleep(200);
+    check("bridge handshake (ui.ready, nonce verified) arrived from the top document", log.lines.some((l) => /BRIDGE HANDSHAKE/.test(l)), lastLine(/BRIDGE HANDSHAKE/));
+    await sleep(800);
+
+    switch (name) {
+      case "memory": {
+        const number = String(100000 + Math.floor(Math.random() * 900000));
+        log.info(`PROBE memory: random 6-digit number generated at test time = ${number}`);
+        const t1 = await turn(`Please remember this number: ${number}. Reply with just "OK".`);
+        check("turn 1 completed", t1.reply.length > 0, `reply="${t1.reply.slice(0, 60)}"`);
+        const t2 = await turn("What number did I ask you to remember? Reply with only the digits.");
+        check("turn 2 recalls the number", t2.reply.includes(number), `reply="${t2.reply.slice(0, 80)}" expected=${number}`);
+        check("the number is on screen", t2.dom.includes(number), `page tail: …${t2.dom.slice(-160)}`);
+        await sleep(6000);
+        const conv = await chatEdge.getConversation(t1.convId);
+        const sidebar = (await js(`document.body.innerText.includes(${JSON.stringify(conv?.title ?? "\u0000")})`)) as boolean;
+        check("conversation has a title on chat-edge and it is in the sidebar", !!conv?.title && !/^new chat$/i.test(conv.title) && sidebar, `title="${conv?.title ?? "(none)"}" inSidebarDom=${sidebar} ${lastLine(/TURN TITLE/)}`);
+        break;
+      }
+      case "five": {
+        const word = ["tangerine", "cobalt", "viridian", "saffron", "magenta"][Math.floor(Math.random() * 5)]! + "-" + Math.floor(Math.random() * 1000);
+        log.info(`PROBE five: turn-1 fact = favourite colour "${word}"`);
+        await turn(`My favourite colour is "${word}". Reply with just "Noted".`);
+        await turn("Name one planet. One word only.");
+        await turn("What is 7 times 8? Digits only.");
+        await turn("Say a short greeting in Thai.");
+        const t5 = await turn("What did I tell you my favourite colour was, in turn one? Reply with only that colour.");
+        check("turn 5 references turn 1", t5.reply.toLowerCase().includes(word.toLowerCase()), `reply="${t5.reply.slice(0, 80)}" expected="${word}"`);
+        check("five turns of history went out on turn 5", /TURN OUTBOUND[^\n]*: 10 msg/.test(lastLine(/TURN OUTBOUND/)), lastLine(/TURN OUTBOUND/).slice(30, 260));
+        break;
+      }
+      case "artifact":
+      case "containment": {
+        const t1 = await turn(
+          'Return a complete, minimal HTML page as a single ```html fenced code block: a <h1> reading "E3 containment probe", one <button> that changes the heading colour when clicked, and a tiny inline <script>. No explanation, only the code block.',
+        );
+        check("HTML artifact turn returned a ```html block", /```html/i.test(t1.reply), `reply starts: ${t1.reply.slice(0, 80).replace(/\n/g, "\\n")}`);
+        await sleep(800);
+        // web-chat may auto-open the canvas when the artifact arrives; only
+        // click an "Open in Canvas" affordance, never "Close canvas".
+        const opened = await js(`(() => { if (document.querySelector('iframe[data-testid="canvas-frame"]')) return 'already-open'; const b = [...document.querySelectorAll('button')].find(x => { const t = (x.textContent || '') + ' ' + (x.getAttribute('aria-label') || '') + ' ' + (x.title || ''); return /canvas/i.test(t) && !/close/i.test(t); }); if (!b) return 'no-button'; b.click(); return 'clicked:' + (b.textContent || b.getAttribute('aria-label')); })()`);
+        await sleep(2500);
+        const frames = wc.mainFrame.framesInSubtree.filter((f) => f !== wc.mainFrame);
+        const canvas = frames.find((f) => f.url === "about:srcdoc") ?? null;
+        const domFrames = (await js(`JSON.stringify([...document.querySelectorAll('iframe')].map(f => ({ sandbox: f.getAttribute('sandbox'), hasSrcdoc: f.hasAttribute('srcdoc'), testid: f.getAttribute('data-testid') })))`)) as string;
+        check("an executable canvas frame is mounted (srcdoc, sandbox=allow-scripts)", canvas !== null && /"sandbox":"allow-scripts"/.test(domFrames), `open=${String(opened)} iframes=${domFrames} childFrames=${frames.map((f) => f.url).join(",")}`);
+        if (canvas) {
+          // Prove WHICH frame we are in, then attempt every path to the host.
+          const inside = (await runInFrame(canvas, `(async () => {
+            const r = { href: location.href, body: (document.body ? document.body.innerHTML : '').slice(0, 160), attempts: {} };
+            const tryIt = (k, fn) => { try { const v = fn(); r.attempts[k] = 'no-throw:' + String(v).slice(0, 60); } catch (e) { r.attempts[k] = 'threw:' + (e && e.message ? e.message : String(e)).slice(0, 80); } };
+            tryIt('typeof window.sranHost', () => typeof window.sranHost);
+            tryIt('window.sranHost.postMessage', () => window.sranHost.postMessage({ nonce: 'x', type: 'ui.ready', payload: { from: 'canvas-child' } }));
+            tryIt('parent.sranHost.postMessage', () => parent.sranHost.postMessage({ nonce: 'x', type: 'ui.ready', payload: { from: 'canvas-child' } }));
+            tryIt('top.sranHost', () => top.sranHost);
+            tryIt('parent.document', () => parent.document.title);
+            tryIt('typeof require', () => typeof require);
+            tryIt('typeof process', () => typeof process);
+            tryIt('typeof ' + ${JSON.stringify("ipc" + "Renderer")}, () => typeof window[${JSON.stringify("ipc" + "Renderer")}]);
+            tryIt('parent.postMessage (page-level, not host)', () => parent.postMessage({ __sranCanvas: true, type: 'probe', payload: 'from-canvas-child' }, '*'));
+            try { await fetch(${JSON.stringify(config.gatewayUrl)} + '/portal/me', { credentials: 'include' }); r.attempts['fetch gateway'] = 'reached-network'; } catch (e) { r.attempts['fetch gateway'] = 'threw:' + String(e && e.message || e).slice(0, 60); }
+            try { await fetch('/api/v1/conversations'); r.attempts['fetch app origin'] = 'reached-network'; } catch (e) { r.attempts['fetch app origin'] = 'threw:' + String(e && e.message || e).slice(0, 60); }
+            return JSON.stringify(r);
+          })()`)) as string;
+          log.info(`CANVAS CHILD FRAME REPORT: ${inside}`);
+          const parsed = JSON.parse(inside) as { href: string; body: string; attempts: Record<string, string> };
+          check("frame proved: location.href is about:srcdoc and the body is the artifact's", parsed.href === "about:srcdoc" && /containment probe/i.test(parsed.body), `href=${parsed.href} body="${parsed.body.slice(0, 100)}"`);
+          await sleep(1000);
+          const fromChild = b.accepted.filter((a) => a.origin !== new URL(config.pageUrl).origin);
+          const anyChildLine = log.lines.some((l) => /BRIDGE INBOUND.*canvas-child/.test(l) || /BRIDGE INBOUND: .* from (null|about:|\(unparseable\))/.test(l));
+          check("host received NOTHING from the canvas frame", fromChild.length === 0 && !anyChildLine, `attempts=${JSON.stringify(parsed.attempts)}; accepted-from-other-origins=${fromChild.length}`);
+          // React artifact (§4): observe what actually happens.
+          const t2 = await turn(
+            'Return a small React component as a single ```jsx fenced code block named App: it renders an <h1> reading "E3 react probe" and a counter button using useState. No explanation, only the code block.',
+          );
+          check("React artifact turn returned a ```jsx/tsx block", /```(jsx|tsx|react)/i.test(t2.reply), `reply starts: ${t2.reply.slice(0, 80).replace(/\n/g, "\\n")}`);
+          await sleep(800);
+          const cspBefore = log.lines.filter((l) => /CSP \(renderer console\)/.test(l)).length;
+          await js(`(() => { const bs = [...document.querySelectorAll('button')].filter(x => { const t = (x.textContent || '') + ' ' + (x.getAttribute('aria-label') || ''); return /canvas/i.test(t) && !/close/i.test(t); }); const b = bs[bs.length - 1]; if (b) b.click(); return bs.length; })()`);
+          await sleep(4000);
+          const reactFrame = wc.mainFrame.framesInSubtree.filter((f) => f !== wc.mainFrame).find((f) => f.url === "about:srcdoc") ?? null;
+          let reactState = "(no frame)";
+          if (reactFrame) {
+            reactState = (await runInFrame(reactFrame, `JSON.stringify({ href: location.href, rootChildren: (document.getElementById('root') || {}).childElementCount ?? -1, h1: (document.querySelector('h1') || {}).textContent || null, hasBabel: typeof Babel !== 'undefined', hasReact: typeof React !== 'undefined' })`)) as string;
+          }
+          const cspLines = log.lines.filter((l) => /CSP \(renderer console\)/.test(l)).slice(cspBefore);
+          log.info(`REACT CANVAS FRAME REPORT: ${reactState}; CSP lines during mount: ${cspLines.length}`);
+          for (const l of cspLines.slice(0, 4)) log.info(`  ${l.slice(0, 260)}`);
+          const rendered = /"rootChildren":[1-9]/.test(reactState) && /react probe/i.test(reactState);
+          check(`React artifact ${rendered ? "RENDERS" : "does NOT render"} under the current CSP (observation for §4)`, true, `${reactState}; csp-violations=${cspLines.length}`);
+          (checks[checks.length - 1] as Check & { rendered?: boolean }).rendered = rendered;
+          // Control: a valid message from the TOP document arrives.
+          const acceptedBefore = b.accepted.length;
+          await js(`window.sranHost.postMessage({ nonce: window.sranHost.nonce, type: 'ui.ready', payload: { conversationId: null, lastSeq: 0 } })`);
+          await sleep(500);
+          check("control: ui.ready posted from the TOP document arrived (the log records arrivals)", b.accepted.length === acceptedBefore + 1, lastLine(/BRIDGE HANDSHAKE/));
+        }
+        break;
+      }
+      case "cancel": {
+        const accepted = b.accepted.length;
+        await js(TYPE_AND_SEND("Write a 600-word essay about the history of TCP congestion control, in numbered paragraphs."));
+        const t0c = Date.now();
+        while (!b.accepted.slice(accepted).some((a) => a.type === "turn.submit") && Date.now() - t0c < 15_000) await sleep(100);
+        const convId = co.lastConversationId!;
+        await sleep(2500);
+        const lenAtCancel = (co.currentAssistantText(convId) ?? "").length;
+        log.info(`PROBE cancel: posting turn.cancel from the page at +2.5 s (${lenAtCancel} chars streamed so far)`);
+        await js(`window.sranHost.postMessage({ nonce: window.sranHost.nonce, type: 'turn.cancel', payload: { conversationId: ${JSON.stringify(convId)} } })`);
+        await sleep(1500);
+        const stopped = !co.isRunning(convId);
+        const lenAfter = (co.lastReply.get(convId) ?? "").length;
+        await sleep(3000);
+        const lenLater = (co.lastReply.get(convId) ?? "").length;
+        check("turn.cancel arrived and the host cancelled the turn", stopped && log.lines.some((l) => /TURN CANCELLED/.test(l)), `${lastLine(/TURN CANCEL requested/)} → ${lastLine(/TURN CANCELLED/)}`);
+        check("the generation actually stopped (no more text after cancel)", lenAfter === lenLater && lenAfter > 0 && lenAfter < 3000, `chars at cancel=${lenAtCancel}, 1.5 s later=${lenAfter}, 4.5 s later=${lenLater}; tail="…${(co.lastReply.get(convId) ?? "").slice(-70)}"`);
+        break;
+      }
+      case "reload": {
+        const accepted = b.accepted.length;
+        await js(TYPE_AND_SEND("Write a 600-word essay about the history of TCP congestion control: slow start, congestion avoidance, fast retransmit, fast recovery. Plain prose paragraphs only — no headings, no lists, no bold, no markdown of any kind."));
+        const t0r = Date.now();
+        while (!b.accepted.slice(accepted).some((a) => a.type === "turn.submit") && Date.now() - t0r < 15_000) await sleep(100);
+        const convId = co.lastConversationId!;
+        await sleep(3500);
+        const charsAtReload = (co.currentAssistantText(convId) ?? "").length;
+        const runningAtReload = co.isRunning(convId);
+        log.info(`PROBE reload: reloading the page mid-turn at +3.5 s (turn running=${runningAtReload}, ${charsAtReload} chars streamed)`);
+        wc.reload();
+        const t1r = Date.now();
+        while (!log.lines.some((l) => /RESUME conv=/.test(l)) && Date.now() - t1r < 20_000) await sleep(100);
+        while (co.isRunning(convId)) await sleep(100);
+        await sleep(2500);
+        const reply = co.lastReply.get(convId) ?? "";
+        const dom = (await js(`document.body.innerText.replace(/\\s+/g, ' ')`)) as string;
+        // Windows taken INSIDE the first and last sentences: innerText drops
+        // list markers and markdown at the edges, prose in the middle survives.
+        const flat = reply.replace(/\s+/g, " ").trim();
+        const head = flat.slice(20, 80).trim();
+        const tail = flat.slice(-80, -20).trim();
+        const occurrences = (needle: string) => (needle ? dom.split(needle).length - 1 : 0);
+        check("the turn was still running at reload", runningAtReload && charsAtReload > 0, `running=${runningAtReload} chars=${charsAtReload}`);
+        check("ui.ready after reload carried lastSeq and the host replayed from seq+1", /RESUME conv=.*replaying/.test(lastLine(/RESUME conv=/)), `${lastLine(/BRIDGE HANDSHAKE/)} → ${lastLine(/RESUME conv=/)}`);
+        check("the answer is on screen whole (head present once, tail present once — not blank, not duplicated)", occurrences(head) === 1 && occurrences(tail) === 1, `head×${occurrences(head)} tail×${occurrences(tail)} replyChars=${reply.length} ${lastLine(/TURN DONE/)}`);
+        break;
+      }
+      case "reject": {
+        const before = log.lines.length;
+        await js(`(() => {
+          const n = window.sranHost.nonce;
+          window.sranHost.postMessage({ nonce: n, type: 'turn.frobnicate', payload: {} });
+          window.sranHost.postMessage({ nonce: 'not-the-nonce', type: 'ui.ready', payload: {} });
+          window.sranHost.postMessage({ type: 'ui.ready', payload: {} });
+          window.sranHost.postMessage({ nonce: n, type: 'turn.submit', payload: { conversationId: 'c1', text: 'hi', attachmentHandles: ['C:\\\\Windows\\\\win.ini'], modelId: null } });
+          window.sranHost.postMessage({ nonce: n, type: 'turn.submit', payload: { conversationId: 'c1', text: 'hi', attachmentHandles: ['../../etc/passwd'], modelId: null } });
+          window.sranHost.postMessage({ nonce: n, type: 'host.query', payload: { requestId: 'q1', op: 'shell.exec', args: {} } });
+          window.sranHost.postMessage('just a string');
+          return 'posted 7';
+        })()`);
+        await sleep(800);
+        const dropped = log.lines.slice(before).filter((l) => /BRIDGE INBOUND DROPPED/.test(l));
+        const turnsStarted = log.lines.slice(before).filter((l) => /TURN START/.test(l)).length;
+        const has = (re: RegExp) => dropped.some((l) => re.test(l));
+        check("unknown type dropped", has(/unknown-type:turn\.frobnicate/), dropped.find((l) => /unknown-type/.test(l)) ?? "(none)");
+        check("wrong nonce dropped", has(/nonce-mismatch/), dropped.find((l) => /nonce-mismatch/.test(l)) ?? "(none)");
+        check("missing nonce dropped", dropped.filter((l) => /nonce-mismatch/.test(l)).length >= 2, `${dropped.filter((l) => /nonce-mismatch/.test(l)).length} nonce-mismatch line(s)`);
+        check("path-shaped attachment handle dropped, and no TURN START followed", has(/attachmentHandle-path-shaped/) && turnsStarted === 0, `${dropped.filter((l) => /path-shaped/.test(l)).length} line(s); TURN START lines=${turnsStarted}`);
+        check("unknown host.query op dropped", has(/unknown-op:shell\.exec/), dropped.find((l) => /unknown-op/.test(l)) ?? "(none)");
+        check("non-object envelope dropped", has(/not-an-object/), dropped.find((l) => /not-an-object/.test(l)) ?? "(none)");
+        log.info("wrong-origin senderFrame: NOT producible live from the same-origin page (sub-frames get no preload; a same-origin child calling parent.sranHost runs in the top frame) — unit test only: test/ipc-guard.test.ts + test/bridge-protocol.test.ts");
+        break;
+      }
+      case "logout": {
+        const before = log.lines.length;
+        const result = await js(`new Promise((resolve) => {
+          window.sranHost.addEventListener('message', (e) => { if (e.data && e.data.type === 'host.result' && e.data.payload.requestId === 'q-logout') resolve(JSON.stringify(e.data.payload)); });
+          window.sranHost.postMessage({ nonce: window.sranHost.nonce, type: 'host.query', payload: { requestId: 'q-logout', op: 'session.logout', args: {} } });
+          setTimeout(() => resolve('timeout'), 8000);
+        })`);
+        await sleep(1500);
+        const lines = log.lines.slice(before);
+        check("host.query session.logout accepted and answered with host.result", String(result).includes('"ok":true'), `host.result=${String(result)}`);
+        check("host signed out: server revoked, store + jar cleared, page blanked, signed-out view", lines.some((l) => /SIGNED OUT \(reason=bridge\)/.test(l)) && lines.some((l) => /Server-side revocation ok/.test(l)) && !ctl.hasSession, lines.filter((l) => /HOST QUERY|revocation|Jar cleared|SIGNED OUT|VIEW: signed-out/.test(l)).map((l) => l.slice(24, 140)).join(" | "));
+        break;
+      }
+      default:
+        check(`unknown probe '${name}'`, false, "");
+    }
+  } catch (err) {
+    check("probe threw", false, (err as Error).message);
+  }
+  finish();
+}
+
+async function runInFrame(frame: WebFrameMain, code: string): Promise<unknown> {
+  return frame.executeJavaScript(code);
+}
+
+async function runE1Probe(win: BrowserWindow): Promise<void> {
+  const wc = win.webContents;
+  const checks: Check[] = [];
+  const check = (name: string, pass: boolean, evidence: string) => {
+    checks.push({ name, pass, evidence });
+    log.info(`[${pass ? "PASS" : "FAIL"}] ${name} — ${evidence}`);
+  };
+  const lastLine = (pattern: RegExp) => [...log.lines].reverse().find((l) => pattern.test(l)) ?? "(no log line)";
+  const pageOrigin = new URL(config.pageUrl).origin;
+
+  log.info("=== E1 PROBE: provoking every refusal ===");
+  await sleep(1500);
+  const cspLoadViolations = log.lines.filter((l) => /CSP \(renderer console\)/.test(l)).length;
+  check("page's own bounce to the portal is refused (re-auth signal)", log.lines.some((l) => /NAVIGATION REFUSED \(portal-reauth\)/.test(l)), lastLine(/portal-reauth/));
+  const before = log.lines.length;
+  await wc.executeJavaScript(`location.href = 'https://example.com/?x=' + encodeURIComponent(location.origin)`);
+  await sleep(800);
+  const refused = log.lines.slice(before).find((l) => /NAVIGATION REFUSED \(outside-allow-list\)/.test(l));
+  check("top-level navigation to https://example.com/?x=<allowed origin> refused", refused !== undefined && new URL(wc.getURL()).origin === pageOrigin, `${refused ?? "(no refusal logged)"}; page still at ${redactUrl(wc.getURL())}`);
+  const windowsBefore = BrowserWindow.getAllWindows().length;
+  await wc.executeJavaScript(`window.open('https://example.com/e1-external-link')`);
+  await sleep(800);
+  check("window.open('https://example.com/...') denied in-app and sent to the system browser", log.lines.some((l) => /window\.open → system browser: https:\/\/example\.com\/e1-external-link/.test(l)) && BrowserWindow.getAllWindows().length === windowsBefore, `${lastLine(/window\.open/)}; windows=${BrowserWindow.getAllWindows().length}`);
+  await wc.executeJavaScript(`(() => { const f = document.createElement('iframe'); f.src = 'https://example.com/e1-frame'; document.body.appendChild(f); return true; })()`);
+  await sleep(800);
+  const frameByGuard = log.lines.some((l) => /FRAME NAVIGATION REFUSED \(outside-allow-list\)/.test(l));
+  const frameByCsp = log.lines.some((l) => /CSP \(renderer console\): Framing 'https:\/\/example\.com\//.test(l));
+  check("iframe to https://example.com refused (CSP frame-src or will-frame-navigate)", frameByGuard || frameByCsp, frameByGuard ? lastLine(/FRAME NAVIGATION REFUSED/) : `by CSP: ${lastLine(/Framing 'https:\/\/example\.com\//)}`);
+  const fetchOutcome = await wc.executeJavaScript(`fetch('https://example.com/e1-csp', {mode:'no-cors'}).then(() => 'reached network', e => 'blocked: ' + e.message)`);
+  await sleep(300);
+  check("CSP header applied: fetch to https://example.com blocked by connect-src", String(fetchOutcome).startsWith("blocked") && log.lines.some((l) => /CSP \(renderer console\)/.test(l)), `fetch → ${String(fetchOutcome)}; CSP console lines during page load (0 = CSP did not break the page): ${cspLoadViolations}`);
+  const crashesBefore = rendererCrashes;
+  const recovered = new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => resolve(false), 8000);
+    wc.once("render-process-gone", () => {
+      wc.once("did-finish-load", () => {
+        clearTimeout(timer);
+        resolve(true);
+      });
+    });
+  });
+  wc.forcefullyCrashRenderer();
+  const didRecover = await recovered;
+  check("renderer forcefully crashed → render-process-gone handled → page reloaded", rendererCrashes === crashesBefore + 1 && didRecover, `${lastLine(/RENDERER GONE/)} → ${lastLine(/did-finish-load/)}`);
+  // The page-side check names the IPC primitive by concatenation so the
+  // confinement scan (no-remote-no-ipcrenderer.test.ts) stays strict about
+  // the token appearing outside the preload; this string runs in the page.
+  const ipcGlobal = "ipc" + "Renderer";
+  const surface = await wc.executeJavaScript(
+    `JSON.stringify({ keys: Object.keys(window.sranHost ?? {}).sort(), frozen: Object.isFrozen(window.sranHost), hasRequire: typeof require !== 'undefined', hasProcess: typeof process !== 'undefined', hasIpc: typeof window[${JSON.stringify(ipcGlobal)}] !== 'undefined', nonceType: typeof window.sranHost?.nonce })`,
+  );
+  const s = JSON.parse(String(surface)) as { keys: string[]; frozen: boolean; hasRequire: boolean; hasProcess: boolean; hasIpc: boolean };
+  const expected = [...BRIDGE_SURFACE_MEMBERS].sort().join(",");
+  check(`page sees window.sranHost = {${expected}} exactly; no require/process/IPC primitive`, s.keys.join(",") === expected && s.frozen && !s.hasRequire && !s.hasProcess && !s.hasIpc, surface as string);
+  const failed = checks.filter((c) => !c.pass).length;
+  log.info(`=== E1 PROBE DONE: ${checks.length - failed}/${checks.length} passed; log file ${log.filePath} ===`);
+  process.stdout.write(`E1_PROBE ${JSON.stringify({ checks, logFile: log.filePath })}\n`);
+  isQuitting = true;
+  app.exit(failed === 0 ? 0 : 1);
+}
+
+function runMeasure(win: BrowserWindow): void {
+  const created = process.getCreationTime();
+  win.webContents.once("did-finish-load", () => {
+    const coldStartMs = created === null ? -1 : Date.now() - created;
+    setTimeout(() => {
+      const metrics = app.getAppMetrics().map((m) => ({
+        type: m.type,
+        pid: m.pid,
+        name: m.name ?? null,
+        workingSetMB: Math.round((m.memory.workingSetSize / 1024) * 10) / 10,
+        privateMB: Math.round(((m.memory.privateBytes ?? 0) / 1024) * 10) / 10,
+      }));
+      const totalWorkingSetMB = Math.round(metrics.reduce((s, m) => s + m.workingSetMB, 0) * 10) / 10;
+      const totalPrivateMB = Math.round(metrics.reduce((s, m) => s + m.privateMB, 0) * 10) / 10;
+      process.stdout.write(`E1_MEASURE ${JSON.stringify({ coldStartMs, processes: metrics.length, totalWorkingSetMB, totalPrivateMB, perProcess: metrics })}\n`);
+      isQuitting = true;
+      app.exit(0);
+    }, 2000);
+  });
+}

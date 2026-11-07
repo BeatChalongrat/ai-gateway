@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- E0 §2/§3: the PARENT process. Spawns the published ToolsSidecar exe as
+       a child over stdio using the production StdioMcpTransport (the same
+       client the app uses for third-party MCP servers), round-trips real
+       tools/call requests and records the numbers. Not shipped; a measurement
+       harness that lives next to the thing it measures. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SranDesktop.SidecarProbe</RootNamespace>
+    <AssemblyName>SranDesktop.SidecarProbe</AssemblyName>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SranDesktop.Infrastructure\SranDesktop.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

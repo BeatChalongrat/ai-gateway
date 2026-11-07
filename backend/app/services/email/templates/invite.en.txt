@@ -1,0 +1,14 @@
+You're invited to join {{tenant_name}} on SRAN AI Gateway
+
+{{inviter_name}} invited you to join the {{tenant_name}} team on
+SRAN AI Gateway.
+
+Accept the invite here:
+{{invite_link}}
+
+Or create an account and paste this code on the signup form:
+{{invite_code}}
+
+The invite expires in 7 days.
+
+— The SRAN team

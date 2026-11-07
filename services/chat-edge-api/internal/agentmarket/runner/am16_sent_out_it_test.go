@@ -1,0 +1,246 @@
+package runner
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	am "github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/agentmarket"
+)
+
+// AM16 — a run says on the face of its own card when something of it was sent to a model outside the
+// organisation as it was typed. The real engine in the real sandbox; the stand-in gateway answers for
+// every model name, so a model the runner does not hold as in-house is a model outside.
+//
+// The scan is the case that was wrong before this card: a page read by an outside model left as an
+// image — which nothing masks — while the run's card said "masked".
+
+const (
+	// the recipient the stand-in gateway's catalogue names for the outside model: a route and a company
+	am16Recipient = "standin:vision-co"
+	am16Scan      = "s01_scan300_full_tax_invoice.pdf"
+	// the name the stand-in gateway answers a page-reading call under; these tests do NOT hold it as
+	// in-house (am15's do), so here it is a model outside the organisation
+	am16Outside = "fake-vision"
+)
+
+// progressOf is the run's own progress card as the thread holds it.
+func (e *itEnv) progressOf(run uuid.UUID) map[string]any {
+	e.t.Helper()
+	items, err := e.store.ThreadItemsAfter(context.Background(), e.install.ID, nil, 0, 500)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	for _, it := range items {
+		if it.Kind == "progress" && it.RunID != nil && *it.RunID == run {
+			var p map[string]any
+			_ = json.Unmarshal(it.Payload, &p)
+			return p
+		}
+	}
+	e.t.Fatalf("run %s has no progress card", run)
+	return nil
+}
+
+func (e *itEnv) am16Switches(slug string, leave, masked bool) {
+	e.t.Helper()
+	ctx := context.Background()
+	if _, err := e.store.EnsureOrg(ctx, am.Config{}); err != nil {
+		e.t.Fatal(err)
+	}
+	if _, err := e.store.Pool.Exec(ctx, `UPDATE agent_market.org_settings SET documents_may_leave = true WHERE org_id = $1`, am.DefaultOrg); err != nil {
+		e.t.Fatal(err)
+	}
+	if _, err := e.store.Pool.Exec(ctx, `INSERT INTO agent_market.agent_egress (org_id, slug, documents_may_leave, masked) VALUES ($1, $2, $3, $4)
+		ON CONFLICT (org_id, slug) DO UPDATE SET documents_may_leave = EXCLUDED.documents_may_leave, masked = EXCLUDED.masked`,
+		am.DefaultOrg, slug, leave, masked); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// nameRecipients names who outside the organisation may be sent documents (AM16): for one agent (slug),
+// or — with no slug — on the organisation's own list, which is the ceiling for every agent.
+func (e *itEnv) nameRecipients(slug string, keys ...string) {
+	e.t.Helper()
+	ctx := context.Background()
+	for _, k := range keys {
+		var err error
+		if slug == "" {
+			_, err = e.store.Pool.Exec(ctx, `INSERT INTO agent_market.org_recipients (org_id, recipient) VALUES ($1, $2) ON CONFLICT DO NOTHING`, am.DefaultOrg, k)
+		} else {
+			_, err = e.store.Pool.Exec(ctx, `INSERT INTO agent_market.agent_recipients (org_id, slug, recipient) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+				am.DefaultOrg, slug, k)
+		}
+		if err != nil {
+			e.t.Fatal(err)
+		}
+	}
+}
+
+// visionStep is the step that read the scan by eye, or nil.
+func (e *itEnv) visionStep(run uuid.UUID) *am.Step {
+	for _, s := range e.steps(run) {
+		if s.Name == "vision:"+am16Scan {
+			x := s
+			return &x
+		}
+	}
+	return nil
+}
+
+// A scan, an agent whose documents may leave and are not masked, a model outside that reads images:
+// the page goes to that model, and the run says so — beside the step, on its progress card while it is
+// still waiting for the person's answers, and (the IT lane's other tests hold the files card's fields)
+// nowhere does it say the page was masked away. Then the refusal: the admin turns masking on, and the
+// same scan is not read by the outside model at all.
+func TestAScanReadByAModelOutsideIsSaidOnTheFaceOfTheRunsCard(t *testing.T) {
+	e := newIT(t)
+	if e == nil {
+		return
+	}
+	in := e.setupInvoiceInstall()
+	// (the stand-in gateway's catalogue says who runs the outside model, as the real one does)
+	e.recipients = map[string][]string{am16Outside: {am16Recipient}}
+	r := e.runner("r1")
+	// the only model that reads images is one the runner does not hold as in-house
+	r.Model.VisionModel = am16Outside
+	e.gatewayHonours.Store(true)
+
+	// 1. the default: nothing leaves. No model may read the page (the only one is outside), so it is
+	//    read by OCR on the organisation's own machine, and no card says anything left.
+	run := e.invoiceRun(am16Scan)
+	e.drive(r, run.ID, 6*time.Minute, parkedOrTerminal)
+	if s := e.visionStep(run.ID); s != nil {
+		t.Fatalf("documents stay inside and the only model that reads images is outside: a %q step ran (%s)", s.Name, s.Status)
+	}
+	if p := e.progressOf(run.ID); p["sent_out_unmasked"] == true {
+		t.Fatalf("nothing left, and the card says it did: %v", p)
+	}
+
+	// 2a. AM16, the recipients: may leave, not masked — and nobody named. "May leave" with nothing ticked
+	//     is nobody: the page is not given to the outside model, and nothing is said to have left.
+	e.am16Switches(in.Slug, true, false)
+	run = e.invoiceRun(am16Scan)
+	e.drive(r, run.ID, 6*time.Minute, parkedOrTerminal)
+	if s := e.visionStep(run.ID); s != nil {
+		t.Fatalf("documents may leave but nobody was named, and a page went to a model anyway: step %q %s %s", s.Name, s.Status, s.Output)
+	}
+	if p := e.progressOf(run.ID); p["sent_out_unmasked"] == true {
+		t.Fatalf("nobody was named, the page stayed, and the card says it left: %v", p)
+	}
+	// … named for the organisation only: the agent's own list is still empty — still nobody
+	e.nameRecipients("", am16Recipient)
+	run = e.invoiceRun(am16Scan)
+	e.drive(r, run.ID, 6*time.Minute, parkedOrTerminal)
+	if s := e.visionStep(run.ID); s != nil {
+		t.Fatalf("named for the organisation, not for this agent, and a page went out: step %q %s", s.Name, s.Status)
+	}
+
+	// 2. may leave, not masked, and the company that runs the model named for this agent: the page is
+	//    read by the outside model — and the run says so
+	e.nameRecipients(in.Slug, am16Recipient)
+	run = e.invoiceRun(am16Scan)
+	got := e.drive(r, run.ID, 6*time.Minute, parkedOrTerminal)
+	s := e.visionStep(run.ID)
+	if s == nil || s.Status != "succeeded" {
+		t.Fatalf("the scan was not read by eye: %+v (run %s %s)", s, got.Status, got.StatusReason)
+	}
+	var v visionReading
+	_ = json.Unmarshal(s.Output, &v)
+	if v.Model != am16Outside {
+		t.Fatalf("read by %q, want the outside model", v.Model)
+	}
+	if !sentOutStamped(s.Output) {
+		t.Fatalf("the page went to a model outside and nothing beside the step says so: %s", s.Output)
+	}
+	if p := e.progressOf(run.ID); p["sent_out_unmasked"] != true {
+		t.Fatalf("the run's own card does not say its documents were sent outside unmasked (run %s %s): %v", got.Status, got.StatusReason, p)
+	}
+	// every model call of these rounds told the gateway who it may be sent to — none left with no list,
+	// and the gateway had nothing to refuse (the runner never asked for what was not named)
+	e.egressMu.Lock()
+	saidAll := append([]string{}, e.recipientsSaid...)
+	e.egressMu.Unlock()
+	if len(saidAll) == 0 {
+		t.Fatal("no model call was seen by the stand-in gateway")
+	}
+	for _, said := range saidAll {
+		if strings.HasSuffix(said, " -") || strings.HasSuffix(said, " null") {
+			t.Fatalf("a model call of a round left with no list of recipients: %q (all: %v)", said, saidAll)
+		}
+	}
+	if n := e.refusedCalls.Load(); n != 0 {
+		t.Fatalf("the runner asked the gateway %d time(s) for a recipient that was not named", n)
+	}
+
+	// 3. the refusal: masking on. An image cannot be masked, so the page is not given to the outside
+	//    model — whatever the leave switch says — and nothing is said to have left.
+	e.am16Switches(in.Slug, true, true)
+	run = e.invoiceRun(am16Scan)
+	e.drive(r, run.ID, 6*time.Minute, parkedOrTerminal)
+	if s := e.visionStep(run.ID); s != nil {
+		t.Fatalf("masking is on and a page went to a model anyway: step %q %s %s", s.Name, s.Status, s.Output)
+	}
+	if p := e.progressOf(run.ID); p["sent_out_unmasked"] == true {
+		t.Fatalf("masking is on, the page stayed, and the card says it left: %v", p)
+	}
+}
+
+// A page that was SENT and never answered still left. The outside model gives no answer in time: the
+// run waits for its model (AM15) — and its card already says the documents were sent outside unmasked.
+// When the model is back and the step is run again, what the first attempt sent is not forgotten.
+func TestAPageSentToAModelThatDidNotAnswerStillLeft(t *testing.T) {
+	e := newIT(t)
+	if e == nil {
+		return
+	}
+	in := e.setupInvoiceInstall()
+	ctx := context.Background()
+	e.recipients = map[string][]string{am16Outside: {am16Recipient}}
+	r := e.runner("r1")
+	r.Model.VisionModel = am16Outside
+	e.gatewayHonours.Store(true)
+	e.am16Switches(in.Slug, true, false)
+	e.nameRecipients("", am16Recipient)
+	e.nameRecipients(in.Slug, am16Recipient)
+
+	run := e.invoiceRun(am16Scan)
+	// (AM18: words typed with the files are read first, by a model — a round of files alone, so that the
+	// first thing this run needs the model for is the page)
+	if _, err := e.store.Pool.Exec(ctx, `UPDATE agent_market.agent_runs SET message = '' WHERE id = $1`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.away.Store(true)
+	got := e.drive(r, run.ID, 6*time.Minute, parkedOrTerminal)
+	if got.StatusReason != am.ReasonModelUnreachable {
+		t.Fatalf("the model gave no answer: the run should wait for it — %s (%s)", got.Status, got.StatusReason)
+	}
+	s := e.visionStep(run.ID)
+	if s == nil || s.Status != "failed" || !sentOutStamped(s.Output) {
+		t.Fatalf("the failed step does not say the page was sent out: %+v", s)
+	}
+	if p := e.progressOf(run.ID); p["sent_out_unmasked"] != true {
+		t.Fatalf("a run that waits for the model it sent a page to does not say the page left: %v", p)
+	}
+	if !strings.Contains(string(s.Output), sentOutKey) {
+		t.Fatalf("the stamp: %s", s.Output)
+	}
+
+	// the model is back, and this time the page is read
+	e.away.Store(false)
+	if n := r.resumeModelParked(ctx); n < 1 {
+		t.Fatalf("the model is back: %d resumed", n)
+	}
+	e.drive(r, run.ID, 6*time.Minute, parkedOrTerminal)
+	s = e.visionStep(run.ID)
+	if s == nil || s.Status != "succeeded" || !sentOutStamped(s.Output) {
+		t.Fatalf("the step run again: %+v", s)
+	}
+	if p := e.progressOf(run.ID); p["sent_out_unmasked"] != true {
+		t.Fatalf("the card after the step was run again: %v", p)
+	}
+}

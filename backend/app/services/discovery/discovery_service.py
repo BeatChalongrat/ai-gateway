@@ -1,0 +1,682 @@
+"""Model discovery orchestrator.
+
+Calls every provider adapter, enriches with litellm pricing, and
+upserts ``model_configs`` rows. Honors ``is_manual_override=True``
+(never overwrites admin edits) and soft-deactivates models that
+disappeared from the upstream APIs.
+
+Concurrency model
+-----------------
+``sync_all`` is async (provider HTTP calls are awaited concurrently)
+but the DB writes happen against a SYNC SQLAlchemy ``Session``. We
+dispatch the upsert loop to a thread via ``asyncio.to_thread`` so the
+event loop isn't blocked while psycopg executes.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+
+import structlog
+
+from sqlalchemy.orm import Session
+
+from app.models.model_config import ModelConfigORM
+from app.services.discovery.pricing_fetcher import PricingFetcher
+from app.services.discovery.provider_discovery import (
+    DEFAULT_MAX_CONTEXT_TOKENS,
+    DiscoveredModel,
+    PROVIDER_DISCOVERY,
+    clear_discovery_failure,
+    pop_discovery_failure,
+)
+from app.services.provider_key_service import ProviderKeyService, _effective_endpoint
+from app.services.providers.credential import ProviderCredential
+
+
+logger = structlog.get_logger(__name__)
+
+
+@dataclass
+class SyncResult:
+    """Summary returned to the scheduler / admin API."""
+
+    provider: str | None  # None = all providers
+    inserted: int = 0
+    updated: int = 0
+    skipped_override: int = 0
+    deactivated: int = 0
+    # C2: models seen upstream that are NOT in the catalog. When
+    # auto-add is off (the default), these are logged for admin review
+    # rather than inserted, and counted here.
+    discovered_new: int = 0
+    new_models: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    # Models the providers actually reported this run (before the
+    # auto-add decision). ``inserted``/``updated`` count what the
+    # CATALOG did; this counts what the PROVIDER said, which is the
+    # number an operator who just pasted a key wants to see.
+    models_found: int = 0
+    # provider -> short, secret-free reason it reported no models.
+    # ``errors`` keeps its old meaning (orchestrator-level failures, and
+    # the daily sweep's log line asserts on it); this is the per-provider
+    # "why zero" the adapters used to swallow. Both are returned, so a
+    # caller can say more than "0 models" without any log spelunking.
+    provider_errors: dict[str, str] = field(default_factory=dict)
+    duration_seconds: float = 0.0
+    synced_at: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "provider": self.provider,
+            "inserted": self.inserted,
+            "updated": self.updated,
+            "skipped_override": self.skipped_override,
+            "deactivated": self.deactivated,
+            "discovered_new": self.discovered_new,
+            "new_models": list(self.new_models),
+            "errors": list(self.errors),
+            "models_found": self.models_found,
+            "provider_errors": dict(self.provider_errors),
+            "duration_seconds": round(self.duration_seconds, 3),
+            "synced_at": self.synced_at.isoformat(),
+        }
+
+
+def _group_by_endpoint(
+    provider_name: str, pool: list
+) -> list[list]:
+    """Split a provider's key pool into groups that reach the same box.
+
+    FIX85 Part C. Order is the pool's (creation) order, so a provider
+    whose keys all share one endpoint yields one group holding the
+    whole pool — the pre-FIX85 request pattern, unchanged.
+    """
+    groups: dict[str | None, list] = {}
+    for key in pool:
+        endpoint = _effective_endpoint(provider_name, key) if isinstance(key, ProviderCredential) else None
+        groups.setdefault(endpoint, []).append(key)
+    return list(groups.values())
+
+
+def _reclaim(row: ModelConfigORM, claims: dict, answered: set[str]) -> None:
+    """Rewrite ``row.served_by_keys``: drop the answered keys' old claims,
+    add ``claims``. Assigns a NEW dict so SQLAlchemy sees the change."""
+    current = dict(row.served_by_keys or {})
+    kept = {k: v for k, v in current.items() if k not in answered}
+    kept.update(claims)
+    if kept != current:
+        row.served_by_keys = kept
+
+
+def _enrich_with_pricing(
+    model: DiscoveredModel,
+    pricing_fetcher: PricingFetcher,
+) -> None:
+    """Fill missing pricing/context fields from the litellm cache.
+
+    Mutates ``model`` in place. Does NOT overwrite values the
+    provider API already populated (notably OpenRouter, see
+    ``DiscoveredModel.cost_from_provider``). Does NOT overwrite a
+    non-default ``max_context_tokens`` set by the provider adapter.
+    """
+    if model.cost_from_provider:
+        # Provider-supplied pricing is authoritative — skip litellm
+        # entirely. Avoids the case where litellm lags behind a
+        # price change OpenRouter already publishes.
+        return
+
+    pricing = pricing_fetcher.get_model_pricing(model.model, model.provider)
+    if not pricing:
+        return
+
+    if model.cost_per_input_token == 0.0:
+        cost_in = pricing.get("input_cost_per_token")
+        if isinstance(cost_in, (int, float)) and cost_in >= 0:
+            model.cost_per_input_token = float(cost_in)
+    if model.cost_per_output_token == 0.0:
+        cost_out = pricing.get("output_cost_per_token")
+        if isinstance(cost_out, (int, float)) and cost_out >= 0:
+            model.cost_per_output_token = float(cost_out)
+    if model.max_context_tokens == DEFAULT_MAX_CONTEXT_TOKENS:
+        # ``max_input_tokens`` FIRST: litellm's legacy ``max_tokens``
+        # key is the max OUTPUT figure for many entries (gpt-4o: 16384,
+        # o1: 100000). Preferring it is what filled ~30 catalog rows
+        # with an output cap as their "context window" — the data
+        # migration 076 repairs those; this ordering stops the refill.
+        max_tokens = pricing.get("max_input_tokens") or pricing.get("max_tokens")
+        if isinstance(max_tokens, int) and max_tokens > 0:
+            model.max_context_tokens = max_tokens
+
+
+# Thresholds shared with model_registry via the leaf module
+# ``providers.cost_tiers`` (safe from the registry lifespan cycle the
+# old duplicated copy dodged).
+from app.services.providers.cost_tiers import derive_cost_tier as _derive_cost_tier  # noqa: E402
+
+
+class ModelDiscoveryService:
+    """Coordinates the sync across providers, pricing, and DB."""
+
+    def __init__(
+        self,
+        *,
+        pricing_fetcher: PricingFetcher | None = None,
+        provider_key_service: ProviderKeyService | None = None,
+    ) -> None:
+        self.pricing_fetcher = pricing_fetcher or PricingFetcher()
+        self.provider_key_service = provider_key_service or ProviderKeyService()
+
+    # ------------------------------------------------------------------
+    # Public entry points
+    # ------------------------------------------------------------------
+
+    async def sync_all(self, db: Session) -> SyncResult:
+        """Sync every configured provider into ``model_configs``.
+
+        Returns a single aggregated ``SyncResult`` with totals across
+        all providers. Errors from individual provider adapters are
+        captured in ``result.errors`` and never raised — partial
+        success is the design goal.
+        """
+        return await self._sync(db, provider_filter=None)
+
+    async def sync_provider(
+        self, provider: str, db: Session
+    ) -> SyncResult:
+        """Sync a single provider — used by the admin trigger."""
+        return await self._sync(db, provider_filter=provider)
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _discover_with_key_fallback(
+        provider_name: str,
+        adapter,
+        api_keys: list[str | None],
+    ) -> tuple[list[DiscoveredModel], str | None]:
+        """Try ``adapter`` with each candidate key until one reports models.
+
+        A provider can hold several active keys — dispatch round-robins
+        over them, which is right for load. Reading a catalog is not a
+        load-balanced operation: it needs one key that works. Drawing a
+        single key by round-robin therefore made discovery a COIN FLIP
+        on any provider whose pool is mixed, and that is exactly how a
+        self-hosted box ended up with a green key, a saved endpoint and
+        an empty catalog — the draw landed on a key left over from the
+        previous endpoint and the box answered 401.
+
+        Cost is bounded and only paid on failure: the loop stops at the
+        first key that returns models, so a healthy provider still makes
+        exactly one request. It also stops on any failure a different key
+        could not fix — a box that never answered said nothing about the
+        credential, and walking the pool against a dead endpoint would
+        only multiply the wait by the number of keys.
+
+        Returns ``(models, reason)``; ``reason`` is the LAST attempt's
+        short explanation and is ``None`` on success.
+        """
+        reason: str | None = None
+        for api_key in api_keys:
+            # Clear first so a reason left by the previous key (or an
+            # earlier run) can never be read as this attempt's.
+            clear_discovery_failure(provider_name)
+            models = await adapter(api_key)
+            failure = pop_discovery_failure(provider_name)
+            if models:
+                # FIX85 Part C — remember WHICH key (and so which box)
+                # reported these models. Only a key with a row can be
+                # named; a legacy / stub key leaves the models unstamped
+                # and dispatch treats them as it always has.
+                if isinstance(api_key, ProviderCredential) and api_key.key_id:
+                    stamp = {
+                        "base_url": _effective_endpoint(provider_name, api_key),
+                        "label": api_key.label,
+                        "at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    for m in models:
+                        m.served_by = {**m.served_by, api_key.key_id: dict(stamp)}
+                return models, None
+            if failure is None:
+                # Empty with no recorded reason — nothing says another
+                # key would do better.
+                return [], None
+            reason, key_specific = failure
+            if not key_specific:
+                break
+        return [], reason
+
+    async def _sync(
+        self,
+        db: Session,
+        *,
+        provider_filter: str | None,
+    ) -> SyncResult:
+        start = time.perf_counter()
+        result = SyncResult(provider=provider_filter)
+
+        # 1. Refresh litellm pricing cache. Failure → empty dict;
+        #    enrichment becomes a no-op for this run, DB rows keep
+        #    their last-known values.
+        await self.pricing_fetcher.fetch()
+
+        # 2. Resolve which providers to hit + their API keys.
+        if provider_filter is not None:
+            providers = {provider_filter: PROVIDER_DISCOVERY.get(provider_filter)}
+            if providers[provider_filter] is None:
+                result.errors.append(
+                    f"unknown provider '{provider_filter}'"
+                )
+                result.duration_seconds = time.perf_counter() - start
+                return result
+        else:
+            providers = dict(PROVIDER_DISCOVERY)
+
+        # API keys are read off the SYNC session — already on the
+        # caller's thread, no need to dispatch. The WHOLE candidate pool
+        # is read, not one round-robin draw: see
+        # :meth:`_discover_with_key_fallback`.
+        #
+        # FIX85 Part C — a provider can hold keys for DIFFERENT boxes, and
+        # each box has its own catalogue. The pool is grouped by the
+        # endpoint each key actually reaches; every group is asked (one
+        # working key per group is enough), and the answers are merged.
+        # A provider whose keys all share one endpoint is one group — the
+        # exact request pattern of before.
+        api_keys: dict[str, list[list[str | None]]] = {}
+        for provider_name in providers:
+            try:
+                pool: list[str | None] = list(
+                    self.provider_key_service.get_all_active_keys(db, provider_name)
+                )
+            except Exception as exc:
+                pool = []
+                result.errors.append(
+                    f"{provider_name}: key lookup failed: {exc}"
+                )
+            # A keyless provider still gets one attempt with None: the
+            # static-list adapters need no credential, and the ones that
+            # do report "no API key configured" for themselves.
+            api_keys[provider_name] = _group_by_endpoint(provider_name, pool) or [[None]]
+
+        # 3. Run all provider discoveries concurrently. Each adapter
+        #    swallows its own errors and returns []; we still wrap
+        #    in gather(..., return_exceptions=True) as a belt-and-
+        #    braces guard.
+        coros = [
+            self._discover_every_endpoint(name, adapter, api_keys[name])
+            for name, adapter in providers.items()
+        ]
+        discovered_lists = await asyncio.gather(*coros, return_exceptions=True)
+
+        seen_keys: set[tuple[str, str]] = set()
+        all_discovered: list[DiscoveredModel] = []
+        # Providers we have authoritative results for. A provider that
+        # returned [] (missing API key, network failure, schema drift)
+        # is intentionally NOT added — soft-deactivate must skip those
+        # providers entirely so their seed/auto rows survive transient
+        # outages instead of getting wiped to is_active=False.
+        # FIX85: with several boxes, "authoritative" means EVERY box
+        # answered — one box down must not deactivate the other's models.
+        synced_providers: set[str] = set()
+        # provider -> key ids that answered this run (their earlier
+        # claims on models they no longer list are dropped in persist).
+        answered_keys: dict[str, set[str]] = {}
+        for (provider_name, _), entry in zip(providers.items(), discovered_lists):
+            if isinstance(entry, BaseException):
+                result.errors.append(
+                    f"{provider_name}: adapter raised: {entry}"
+                )
+                result.provider_errors[provider_name] = (
+                    f"discovery failed unexpectedly ({type(entry).__name__})"
+                )
+                continue
+            models, reason, complete = entry
+            if not models:
+                if reason:
+                    result.provider_errors[provider_name] = reason
+                continue
+            if complete:
+                synced_providers.add(provider_name)
+            elif reason:
+                # Some models arrived, one box did not answer: say so
+                # (nothing of that box is deactivated).
+                result.errors.append(f"{provider_name}: {reason}")
+                result.provider_errors[provider_name] = reason
+            for model in models:
+                _enrich_with_pricing(model, self.pricing_fetcher)
+                all_discovered.append(model)
+                seen_keys.add((model.provider, model.model))
+                if model.served_by:
+                    answered_keys.setdefault(provider_name, set()).update(model.served_by)
+
+        # 4. Upsert + soft-deactivate in a single thread hop so the
+        #    event loop doesn't block on psycopg I/O.
+        def _persist() -> tuple[int, int, int, int, int, list[str]]:
+            return self._persist_results(
+                db,
+                discovered=all_discovered,
+                seen_keys=seen_keys,
+                synced_providers=synced_providers,
+                provider_filter=provider_filter,
+                answered_keys=answered_keys,
+            )
+
+        (
+            inserted,
+            updated,
+            skipped,
+            deactivated,
+            discovered_new,
+            new_models,
+        ) = await asyncio.to_thread(_persist)
+        result.inserted = inserted
+        result.updated = updated
+        result.skipped_override = skipped
+        result.deactivated = deactivated
+        result.discovered_new = discovered_new
+        result.new_models = new_models
+        result.models_found = len(all_discovered)
+
+        # 5. Refresh the in-memory registry so the new rows are live
+        #    without waiting for the next process restart. The import
+        #    is local to avoid a circular dependency at module-load
+        #    time (registry → discovery → registry).
+        from app.services.providers.model_registry import _registry
+        try:
+            await _registry.reload(db)
+        except Exception as exc:
+            result.errors.append(f"registry reload failed: {exc}")
+
+        result.duration_seconds = time.perf_counter() - start
+        result.synced_at = datetime.now(timezone.utc)
+        logger.info(
+            "model_discovery_sync_complete",
+            **result.to_dict(),
+        )
+        return result
+
+    async def _discover_every_endpoint(
+        self,
+        provider_name: str,
+        adapter,
+        groups: list[list[str | None]],
+    ) -> tuple[list[DiscoveredModel], str | None, bool]:
+        """FIX85 Part C — ask each box the provider's keys reach, merge.
+
+        Returns ``(models, reason, complete)``: ``complete`` is True when
+        every group answered with models — only then may the caller treat
+        the union as the provider's whole catalogue (and deactivate what
+        is missing from it). A single group is exactly the pre-FIX85
+        call.
+        """
+        merged: dict[str, DiscoveredModel] = {}
+        reason: str | None = None
+        complete = True
+        for group in groups:
+            models, group_reason = await self._discover_with_key_fallback(
+                provider_name, adapter, group
+            )
+            if not models:
+                complete = False
+                if group_reason:
+                    endpoint = _effective_endpoint(provider_name, group[0]) if group and group[0] is not None else None
+                    where = f"{endpoint}: " if endpoint and len(groups) > 1 else ""
+                    reason = reason or f"{where}{group_reason}"
+                continue
+            for m in models:
+                have = merged.get(m.model)
+                if have is None:
+                    merged[m.model] = m
+                else:
+                    # Same model on two boxes: one catalogue row, both
+                    # claims. Capability flags come from the first box
+                    # that listed it (they are inferred from the id).
+                    have.served_by = {**have.served_by, **m.served_by}
+        return list(merged.values()), reason, complete
+
+    def _persist_results(
+        self,
+        db: Session,
+        *,
+        discovered: list[DiscoveredModel],
+        seen_keys: set[tuple[str, str]],
+        synced_providers: set[str],
+        provider_filter: str | None,
+        answered_keys: dict[str, set[str]] | None = None,
+    ) -> tuple[int, int, int, int, int, list[str]]:
+        """Apply the upsert + soft-deactivate logic.
+
+        Returns ``(inserted, updated, skipped_override, deactivated,
+        discovered_new, new_models)``. Commits at the end; rolls back on
+        any unexpected error.
+
+        C2: new models (seen upstream, absent from the catalog) are
+        auto-inserted only when ``settings.model_discovery_auto_add`` is
+        True. The default is log-only — a model new to the upstream
+        catalog is recorded ("New model available: …") for an admin to
+        review and curate, rather than silently entering the routable
+        pool with un-vetted pricing/capabilities.
+        """
+        from app.core.config import settings
+
+        auto_add = bool(getattr(settings, "model_discovery_auto_add", False))
+        # Per-provider auto-add allowlist (C2 refinement): self-hosted
+        # boxes are the operator's own catalog — auto-adding them is the
+        # whole point of discovery there — while the global flag stays
+        # off so cloud catalogs (e.g. OpenRouter's hundreds of models
+        # with un-vetted pricing) still land as log-only.
+        auto_add_providers = settings.model_discovery_auto_add_providers_set
+        answered_keys = answered_keys or {}
+        inserted = 0
+        updated = 0
+        skipped_override = 0
+        deactivated = 0
+        discovered_new = 0
+        new_models: list[str] = []
+        now = datetime.now(timezone.utc)
+
+        try:
+            existing = {
+                (r.provider, r.model): r
+                for r in db.query(ModelConfigORM).all()
+            }
+
+            # --- upsert ---
+            for model in discovered:
+                key = (model.provider, model.model)
+                row = existing.get(key)
+                if row is None:
+                    if not (auto_add or model.provider in auto_add_providers):
+                        # Log-only (C2): surface the new model for admin
+                        # review; don't add it to the routable pool.
+                        slug = f"{model.provider}/{model.model}"
+                        discovered_new += 1
+                        new_models.append(slug)
+                        logger.info(
+                            "model_discovery_new_model_available",
+                            provider=model.provider,
+                            model=model.model,
+                            note="not auto-added; set model_discovery_auto_add to enable",
+                        )
+                        continue
+                    db.add(
+                        ModelConfigORM(
+                            provider=model.provider,
+                            model=model.model,
+                            supports_streaming=model.supports_streaming,
+                            supports_tools=model.supports_tools,
+                            supports_vision=model.supports_vision,
+                            max_context_tokens=model.max_context_tokens,
+                            cost_tier=_derive_cost_tier(
+                                model.cost_per_input_token
+                            ),
+                            latency_tier="standard",
+                            cost_per_input_token=model.cost_per_input_token,
+                            cost_per_output_token=model.cost_per_output_token,
+                            source="auto",
+                            is_manual_override=False,
+                            is_active=True,
+                            last_synced_at=now,
+                            supports_reasoning=model.supports_reasoning,
+                            reasoning_strategy=model.reasoning_strategy,
+                            default_reasoning_mode="auto",
+                            served_by_keys=dict(model.served_by),
+                        )
+                    )
+                    inserted += 1
+                    continue
+
+                # FIX85 Part C — who serves it is a FACT about the boxes,
+                # not a curated capability, so it is recorded on manual
+                # rows too (before the override guard below). A key that
+                # answered this run re-asserts its claims; its stale ones
+                # go; keys that did not answer keep theirs.
+                _reclaim(row, model.served_by, answered_keys.get(model.provider, set()))
+
+                if row.is_manual_override:
+                    # Touch the timestamp so admins can see the sync
+                    # *considered* this row, but don't overwrite the
+                    # admin's values.
+                    row.last_synced_at = now
+                    skipped_override += 1
+                    continue
+
+                row.supports_streaming = model.supports_streaming
+                # Tools / vision: PROMOTE-ONLY, same contract as
+                # reasoning below. These flags are keyword-inferred from
+                # the model id when the provider API doesn't surface
+                # them, and the keyword lists inevitably lag new
+                # families (gpt-5 matched neither _TOOL_KEYWORDS nor
+                # _VISION_KEYWORDS when it shipped) — an inference miss
+                # must not demote a row corrected by migration or admin.
+                # Demotion stays a manual admin action.
+                # FIX64 — a value a person set or a test proved is not
+                # re-guessed: the row's provenance says which flags the
+                # sync may still promote, and records where a promotion
+                # came from (the provider's own statement vs a name).
+                from app.services.capability_test import (
+                    discovery_may_promote,
+                    record_provenance,
+                )
+                from app.services.discovery.provider_discovery import (
+                    _provider_stated_capabilities,
+                )
+
+                stated = _provider_stated_capabilities(model.raw)
+                if (
+                    model.supports_tools
+                    and not row.supports_tools
+                    and discovery_may_promote(row, "tools")
+                ):
+                    row.supports_tools = True
+                    record_provenance(
+                        row, "tools",
+                        "provider" if "supports_tools" in stated else "inferred",
+                    )
+                if (
+                    model.supports_vision
+                    and not row.supports_vision
+                    and discovery_may_promote(row, "vision")
+                ):
+                    row.supports_vision = True
+                    record_provenance(
+                        row, "vision",
+                        "provider" if "supports_vision" in stated else "inferred",
+                    )
+                # Context: a discovered value equal to the provider-
+                # adapter sentinel means "the API didn't say and litellm
+                # had no entry" — keep the row's real value instead of
+                # stomping it with the guess. Non-sentinel values are
+                # genuine upstream/litellm data and still flow.
+                if (
+                    model.max_context_tokens != DEFAULT_MAX_CONTEXT_TOKENS
+                    or (row.max_context_tokens or 0) <= 0
+                ):
+                    row.max_context_tokens = model.max_context_tokens
+                # Prices: 0.0 means "unknown" (litellm miss), not
+                # "free". Never overwrite a known price with unknown —
+                # this is what silently reverted the migration-shipped
+                # price corrections (068/069/071) on rows that aren't
+                # flagged is_manual_override. Real prices (OpenRouter
+                # inline, litellm hits) still track upstream, and
+                # cost_tier is re-derived only when a price was written.
+                if model.cost_per_input_token > 0.0:
+                    row.cost_per_input_token = model.cost_per_input_token
+                    row.cost_tier = _derive_cost_tier(
+                        model.cost_per_input_token
+                    )
+                if model.cost_per_output_token > 0.0:
+                    row.cost_per_output_token = model.cost_per_output_token
+                row.is_active = True
+                row.last_synced_at = now
+                # Reasoning: PROMOTE-ONLY. Discovery may turn a row's
+                # reasoning capability ON when the id implies it (e.g. a
+                # freshly-listed o3), but must never turn it OFF — an
+                # inference miss would otherwise clobber seed/manual
+                # reasoning rows (deepseek-reasoner, Groq R1-distill) on
+                # a routine sync. Demotion stays a manual admin action.
+                if model.supports_reasoning and not row.supports_reasoning:
+                    row.supports_reasoning = True
+                    row.reasoning_strategy = model.reasoning_strategy
+                    if not row.default_reasoning_mode:
+                        row.default_reasoning_mode = "auto"
+                # Promote 'seed' rows to 'auto' once the sync has
+                # confirmed them — keeps the source column meaningful.
+                if row.source == "seed":
+                    row.source = "auto"
+                updated += 1
+
+            # --- soft-deactivate models that vanished ---
+            # Only consider rows whose provider successfully reported a
+            # non-empty model list this run. A provider that returned []
+            # (missing API key, network failure, schema drift) carries no
+            # signal that its rows have actually disappeared upstream, so
+            # leaving them active is the safe default. This guards the
+            # seed catalog from being silently wiped on a fresh install
+            # where keys haven't been entered yet.
+            for (provider_name, model_name), row in existing.items():
+                if (provider_name, model_name) in seen_keys:
+                    continue
+                # FIX85 Part C — a key that answered and no longer lists
+                # this model no longer serves it, whatever else happened.
+                answered = answered_keys.get(provider_name)
+                if answered and provider_name != (provider_filter or provider_name):
+                    answered = None
+                if answered:
+                    _reclaim(row, {}, answered)
+                if provider_name not in synced_providers:
+                    continue
+                # When syncing a single provider, only consider rows
+                # belonging to that provider for deactivation. A full
+                # sync considers all rows.
+                if provider_filter is not None and provider_name != provider_filter:
+                    continue
+                if row.is_manual_override:
+                    continue
+                if not row.is_active:
+                    continue
+                row.is_active = False
+                row.last_synced_at = now
+                deactivated += 1
+
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
+        return (
+            inserted,
+            updated,
+            skipped_override,
+            deactivated,
+            discovered_new,
+            new_models,
+        )

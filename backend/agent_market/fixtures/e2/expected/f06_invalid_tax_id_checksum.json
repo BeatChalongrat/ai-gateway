@@ -1,0 +1,97 @@
+{
+ "schema": "e2.expected.v1",
+ "id": "f06_invalid_tax_id_checksum",
+ "files": [
+  "docs/f06_invalid_tax_id_checksum.pdf"
+ ],
+ "class": "digital",
+ "purpose": "a 13-digit seller tax ID whose check digit is wrong: the format check fails and asks",
+ "source_fixture": null,
+ "duplicate_of": null,
+ "scope": "full",
+ "scope_fields": null,
+ "truth": {
+  "document_type": "full_tax_invoice",
+  "seller_name": {
+   "value": "บริษัท ไทยพาณิชย์ขนส่ง จำกัด (มหาชน)",
+   "normalized": {
+    "legal_form": "public_company_limited",
+    "core": "ไทยพาณิชย์ขนส่ง"
+   }
+  },
+  "seller_tax_id": {
+   "value": "0107537002144",
+   "valid": false
+  },
+  "seller_branch": "00000",
+  "buyer_name": {
+   "value": "บริษัท สรานเทค โซลูชั่นส์ จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "สรานเทค โซลูชั่นส์"
+   }
+  },
+  "buyer_tax_id": {
+   "value": "0105563012343",
+   "valid": true
+  },
+  "buyer_branch": "00000",
+  "document_number": "TS-6909-112",
+  "document_date": "2026-09-16",
+  "due_date": "2026-10-16",
+  "currency": "THB",
+  "vat_mode": "exclusive",
+  "sum_lines": "9800.00",
+  "discount": "0.00",
+  "subtotal": "9800.00",
+  "vat_rate": "7",
+  "vat_amount": "686.00",
+  "total": "10486.00",
+  "wht_rate": null,
+  "wht_amount": null,
+  "net_payable": null,
+  "line_items": [
+   {
+    "description": "ค่าขนส่งพัสดุ",
+    "quantity": "10",
+    "unit_price": "980.00",
+    "amount": "9800.00"
+   }
+  ]
+ },
+ "checks": {
+  "document_type": "pass",
+  "seller_tax_id_format": "fail",
+  "buyer_tax_id_format": "pass",
+  "document_date": "pass",
+  "line_arithmetic": "pass",
+  "subtotal_sum": "pass",
+  "vat_7_percent": "pass",
+  "grand_total": "pass",
+  "wht": "skip",
+  "currency": "pass",
+  "required_fields": "pass",
+  "buyer_match": "pass",
+  "duplicate": "pass",
+  "original_copy": "pass"
+ },
+ "history": [],
+ "questions": {
+  "must": [
+   "check_failed:seller_tax_id_format"
+  ],
+  "may": false,
+  "allowed_extra": [],
+  "max": 1
+ },
+ "rules": [
+  "no_silent_errors"
+ ],
+ "provenance": {
+  "method": "pdf_text",
+  "pages": 1,
+  "totals_page": 1
+ },
+ "confidence": null,
+ "ui": null
+}

@@ -1,0 +1,371 @@
+// File-attachment HTTP handlers.
+//
+// Routes (all behind RequireAuth):
+//
+//	POST   /api/v1/conversations/{id}/files   multipart upload
+//	GET    /api/v1/conversations/{id}/files   list attachments
+//	GET    /api/v1/files/{fileID}/download    stream original blob
+//	DELETE /api/v1/files/{fileID}             remove blob + row
+//
+// All tenant scoping happens inside FileService — the handlers only
+// do request parsing + status mapping.
+package handler
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"syscall"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/middleware"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/service"
+)
+
+type FileHandler struct {
+	files *service.FileService
+	// maxMemMultipartMB controls how much of an upload buffers in
+	// memory before spilling to a temp file. 32MiB matches the
+	// per-file cap with headroom for headers.
+	maxMemMultipartMB int64
+}
+
+func NewFileHandler(f *service.FileService) *FileHandler {
+	return &FileHandler{files: f, maxMemMultipartMB: 32}
+}
+
+// ---------------------------------------------------------------------------
+// Wire types
+// ---------------------------------------------------------------------------
+
+type fileResponse struct {
+	ID               string `json:"id"`
+	ConversationID   string `json:"conversation_id"`
+	MessageID        string `json:"message_id,omitempty"`
+	OriginalFilename string `json:"filename"`
+	ContentType      string `json:"content_type"`
+	FileSizeBytes    int64  `json:"file_size_bytes"`
+	ExtractionStatus string `json:"extraction_status"`
+	CreatedAt        string `json:"created_at"`
+	DownloadURL      string `json:"download_url"`
+	// Phase 4 — Excel Smart Workspace surface fields. Frontend
+	// uses IsGenerated to flip the file card into the
+	// "AI-generated" treatment; Version + ParentFileID drive the
+	// version history view; ChangeLog is the list of executor
+	// changes rendered inside the result card.
+	IsGenerated  bool     `json:"is_generated,omitempty"`
+	ParentFileID string   `json:"parent_file_id,omitempty"`
+	Version      int      `json:"version,omitempty"`
+	ChangeLog    []string `json:"change_log,omitempty"`
+	// ClientID is the desktop's own file id for attachments that client
+	// uploaded (FIX 10 dedup key) — lets it correlate a server file back
+	// to its local copy. Omitted for web uploads and generated files.
+	ClientID string `json:"client_id,omitempty"`
+	// FIX67 — the model that produced a generated image/video ("gpt-image-1",
+	// or "mock-image-1" after a fallback). Rendered under the artifact as
+	// "Made by …". Carried in inspection_json (nil for media otherwise) so no
+	// schema change / new scanned column was needed.
+	GeneratedBy string `json:"generated_by,omitempty"`
+	// FIX131 A2 — why the server could not read this file's text
+	// (encrypted | scanned | damaged | unknown); omitted for a readable or
+	// still-reading file. The page words it on the file's own chip.
+	UnreadableReason string `json:"unreadable_reason,omitempty"`
+	// FIX131 A4 — for a generated Office/PDF file: the file it was made
+	// from and how (edit | input). Set by the execute routes and GET
+	// /messages; omitted elsewhere.
+	MadeFrom *madeFromResponse `json:"made_from,omitempty"`
+}
+
+// FileToWire formats a model.ConversationFile for the wire. Exported
+// so the message handler can include attachments in its responses.
+func FileToWire(f *model.ConversationFile) fileResponse {
+	r := fileResponse{
+		ID:               f.ID.String(),
+		ConversationID:   f.ConversationID.String(),
+		OriginalFilename: f.OriginalFilename,
+		ContentType:      f.ContentType,
+		FileSizeBytes:    f.FileSizeBytes,
+		ExtractionStatus: f.ExtractionStatus,
+		CreatedAt:        f.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		DownloadURL:      "/files/" + f.ID.String() + "/download",
+		IsGenerated:      f.IsGenerated,
+		Version:          f.Version,
+	}
+	if f.MessageID != nil {
+		r.MessageID = f.MessageID.String()
+	}
+	// FIX67 — attribution rides in inspection_json for generated media.
+	if f.IsGenerated && f.InspectionJSON != nil {
+		var meta struct {
+			GeneratedBy string `json:"generated_by"`
+		}
+		if json.Unmarshal([]byte(*f.InspectionJSON), &meta) == nil {
+			r.GeneratedBy = meta.GeneratedBy
+		}
+	}
+	if f.ParentFileID != nil {
+		r.ParentFileID = f.ParentFileID.String()
+	}
+	if why, bad := service.UnreadableReason(*f); bad {
+		r.UnreadableReason = why
+	}
+	if f.ClientID != nil {
+		r.ClientID = *f.ClientID
+	}
+	if f.ChangeLog != nil && *f.ChangeLog != "" {
+		// Persisted as newline-joined; split back into a list for
+		// the frontend so the result card can render one bullet
+		// per change without re-splitting.
+		for _, line := range splitLines(*f.ChangeLog) {
+			if line != "" {
+				r.ChangeLog = append(r.ChangeLog, line)
+			}
+		}
+	}
+	return r
+}
+
+func splitLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	out := []string{}
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			out = append(out, s[start:i])
+			start = i + 1
+		}
+	}
+	if start <= len(s) {
+		out = append(out, s[start:])
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------------
+// Upload
+// ---------------------------------------------------------------------------
+
+func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	convID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
+		return
+	}
+
+	// Cap total request size at maxMemMultipartMB + headroom so a
+	// hostile client can't exhaust disk by streaming forever. The
+	// per-file 25MiB ceiling lives in FileService.Upload.
+	if err := r.ParseMultipartForm(h.maxMemMultipartMB * 1024 * 1024); err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid multipart body")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "missing 'file' field")
+		return
+	}
+	defer file.Close()
+
+	ct := header.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+
+	row, err := h.files.Upload(r.Context(), service.UploadInput{
+		TenantID:       caller.TenantUUID,
+		UserID:         caller.UserID,
+		ConversationID: convID,
+		OriginalName:   header.Filename,
+		ContentType:    ct,
+		Size:           header.Size,
+		Body:           file,
+		// Optional dedup key (FIX 10): the desktop sends its local file
+		// id as a plain multipart field so re-syncs upsert.
+		ClientID: r.FormValue("client_id"),
+	})
+	if err != nil {
+		h.writeUploadError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(FileToWire(row))
+}
+
+// humanBytes renders a byte cap the way a user reads it ("200 MB",
+// "1 GB"). Binary units, one decimal only when it isn't whole, so the
+// common power-of-two caps print cleanly.
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return trimZero(float64(n)/float64(1<<30)) + " GB"
+	case n >= 1<<20:
+		return trimZero(float64(n)/float64(1<<20)) + " MB"
+	case n >= 1<<10:
+		return trimZero(float64(n)/float64(1<<10)) + " KB"
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
+}
+
+func trimZero(v float64) string {
+	s := fmt.Sprintf("%.1f", v)
+	return strings.TrimSuffix(s, ".0")
+}
+
+func (h *FileHandler) writeUploadError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrFileConvNotFound):
+		WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
+	case errors.Is(err, service.ErrFileEmpty):
+		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, "empty upload")
+	case errors.Is(err, service.ErrFileTooLarge):
+		// Phase 7: report the CONFIGURED cap. The old text said "25 MB"
+		// while the service enforced MAX_FILE_SIZE_BYTES (200 MiB by
+		// default), so users saw a limit that did not exist.
+		WriteError(w, http.StatusRequestEntityTooLarge, CodeValidationError,
+			fmt.Sprintf("file too large (max %s)", humanBytes(h.files.MaxUploadBytes())))
+	case errors.Is(err, service.ErrFileTypeNotAllowed):
+		WriteError(w, http.StatusUnsupportedMediaType, CodeValidationError, "file type not allowed")
+	case errors.Is(err, service.ErrFileConvQuotaExceeded):
+		WriteError(w, http.StatusRequestEntityTooLarge, CodeValidationError,
+			fmt.Sprintf("conversation file quota exceeded (max %s total)",
+				humanBytes(h.files.MaxConversationBytes())))
+	case errors.Is(err, syscall.ENAMETOOLONG):
+		// FIX130 C3.4 — the storage refused the name. storageObjectName
+		// keeps every name inside the budget, so this is defence in depth:
+		// a request that can never succeed as sent is a 4xx the client can
+		// explain, never a 500 it retries forever.
+		WriteError(w, http.StatusUnprocessableEntity, CodeFilenameTooLong, "file name too long")
+	default:
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// List
+// ---------------------------------------------------------------------------
+
+func (h *FileHandler) List(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	convID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
+		return
+	}
+	files, err := h.files.List(r.Context(), caller.TenantUUID, caller.UserID, convID)
+	if err != nil {
+		if errors.Is(err, service.ErrFileConvNotFound) {
+			WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		return
+	}
+	out := make([]fileResponse, 0, len(files))
+	for i := range files {
+		out = append(out, FileToWire(&files[i]))
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"files": out})
+}
+
+// ---------------------------------------------------------------------------
+// Download
+// ---------------------------------------------------------------------------
+
+func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	fileID, err := uuid.Parse(chi.URLParam(r, "fileID"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid file id")
+		return
+	}
+	handle, err := h.files.OpenForDownload(r.Context(), caller.TenantUUID, caller.UserID, fileID)
+	if err != nil {
+		if errors.Is(err, service.ErrFileNotFound) {
+			WriteError(w, http.StatusNotFound, CodeNotFound, "file not found")
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		return
+	}
+	// Presigned URL path: send the browser straight to the object
+	// store. Saves a service-side proxy hop and removes us from the
+	// hot byte path on large downloads. 307 keeps the method as GET.
+	if handle.PresignedURL != "" {
+		http.Redirect(w, r, handle.PresignedURL, http.StatusTemporaryRedirect)
+		return
+	}
+	defer handle.Body.Close()
+
+	w.Header().Set("Content-Type", handle.File.ContentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(handle.File.FileSizeBytes, 10))
+	// RFC 6266 says percent-encode the filename for safety; we keep
+	// it simple with quoted form + UTF-8 fallback. Browsers handle
+	// the basic quoted form fine for ASCII; users uploading
+	// non-ASCII filenames see the UUID-prefixed sanitized name.
+	w.Header().Set("Content-Disposition",
+		`attachment; filename="`+handle.File.OriginalFilename+`"`)
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, handle.Body)
+}
+
+// ---------------------------------------------------------------------------
+// Delete
+// ---------------------------------------------------------------------------
+
+func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	fileID, err := uuid.Parse(chi.URLParam(r, "fileID"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid file id")
+		return
+	}
+	if err := h.files.Delete(r.Context(), caller.TenantUUID, caller.UserID, fileID); err != nil {
+		if errors.Is(err, service.ErrFileNotFound) {
+			WriteError(w, http.StatusNotFound, CodeNotFound, "file not found")
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DeleteByClientID — FIX127 A1. 204 when an unattached upload with that
+// client_id was removed; 404 when there is none (never uploaded, already
+// gone, or attached to a sent message — the composer cannot take back a
+// sent attachment).
+func (h *FileHandler) DeleteByClientID(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	convID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
+		return
+	}
+	clientID := chi.URLParam(r, "clientID")
+	if len(clientID) == 0 || len(clientID) > 128 {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid client id")
+		return
+	}
+	if err := h.files.DeleteByClientID(r.Context(), caller.TenantUUID, caller.UserID, convID, clientID); err != nil {
+		if errors.Is(err, service.ErrFileNotFound) {
+			WriteError(w, http.StatusNotFound, CodeNotFound, "file not found")
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

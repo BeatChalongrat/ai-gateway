@@ -1,0 +1,155 @@
+"""Canonical provider domain contracts.
+
+These types define the boundary between provider adapters and the rest of
+the gateway.  Every adapter normalizes its upstream response into a
+ProviderResponse before returning.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class ProviderUsage:
+    """Token usage as reported by the upstream provider.
+
+    ``reasoning_tokens`` is the OpenAI o-series subdivision of
+    ``completion_tokens`` (returned under
+    ``usage.completion_tokens_details.reasoning_tokens``). Anthropic
+    folds thinking tokens into ``output_tokens`` with no separate
+    counter — the Anthropic parser leaves the field at 0; the
+    gateway estimates from ``reasoning_content`` length when surfacing
+    to the caller. 0 = no reasoning tokens spent (or provider doesn't
+    break the count out).
+    """
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    reasoning_tokens: int = 0
+    # Subset of ``prompt_tokens`` that the provider served from its prompt
+    # cache. OpenAI returns this for free under
+    # ``usage.prompt_tokens_details.cached_tokens`` (cached input bills at a
+    # reduced rate). 0 = no cache hit, or the provider doesn't report it —
+    # so the cost path is byte-identical for every non-OpenAI provider.
+    cached_prompt_tokens: int = 0
+    # P1 Item 4 — Anthropic prompt-cache WRITE tokens
+    # (``usage.cache_creation_input_tokens``). Distinct from
+    # ``cached_prompt_tokens`` (cache READS): writes bill at a 25% markup
+    # (1.25× input) while reads bill at ~10%. 0 for OpenAI (no separate
+    # write counter) and every non-caching call, so cost stays unchanged.
+    cache_creation_prompt_tokens: int = 0
+
+
+@dataclass(frozen=True)
+class ProviderResponse:
+    """Canonical response from any provider adapter.
+
+    Attributes
+    ----------
+    content : str
+        Assistant message text.
+    model : str
+        Model name as reported by the provider.
+    finish_reason : str
+        Why generation stopped — "stop", "length", "content_filter", etc.
+    usage : ProviderUsage | None
+        Token counts from the provider.  None when the provider doesn't
+        report usage (e.g. some OpenRouter models).
+    raw : dict
+        Full raw provider JSON response for debugging / audit.
+    reasoning_content : str | None
+        Full reasoning / thinking text emitted by the model when
+        reasoning mode is enabled (OpenAI o-series ``reasoning_content``,
+        Anthropic ``thinking`` blocks, Gemini ``thoughts``, DeepSeek-R1
+        ``reasoning_content``). ``None`` when the request did not enable
+        reasoning or the provider returned no reasoning output. T1 just
+        threads this field through the dataclass — adapters do not
+        populate it yet; T2 wires per-provider parsing.
+    """
+
+    content: str
+    model: str
+    finish_reason: str = "stop"
+    usage: ProviderUsage | None = None
+    # FIX119 — why the model stopped, in the gateway's own closed set
+    # (app.services.providers.stop_reason; docs/contracts/terminal_cause.json).
+    # ``finish_reason`` above stays OpenAI-shaped for API compatibility;
+    # this one says refusal / stop_sequence / unknown where that vocabulary
+    # cannot. ``unknown`` is the honest default, never end_turn.
+    stop_reason: str = "unknown"
+    # FIX119 — the provider's own request id from its response headers
+    # (OpenAI ``x-request-id``, Anthropic ``request-id``); None when the
+    # provider sent none. Logged beside the gateway's id so a failure can
+    # be chased to the provider's side.
+    provider_request_id: str | None = None
+    raw: dict = field(default_factory=dict)
+    # Function-calling: populated by the provider parser when the model
+    # invoked a tool. Each entry mirrors the OpenAI schema
+    # ({"id", "type", "function": {"name", "arguments"}}). None when the
+    # response is plain text — keeps the dataclass backward-compatible.
+    tool_calls: list[dict] | None = None
+    # Reasoning / thinking text. Populated by T2 adapter changes once
+    # per-provider parsing lands; defaults to None so every existing
+    # adapter (which does not set it) stays byte-identical.
+    reasoning_content: str | None = None
+    # T5 — Anthropic extended-thinking signature. The opaque token that
+    # accompanies a thinking block; must be replayed verbatim with the
+    # thinking text on a tool-loop continuation. None for every other
+    # provider / non-reasoning response.
+    reasoning_signature: str | None = None
+
+
+@dataclass(frozen=True)
+class ProviderStreamChunk:
+    """A single chunk from a streaming provider response.
+
+    Attributes
+    ----------
+    delta : str
+        Incremental text content (may be empty for metadata-only chunks).
+    finish_reason : str | None
+        Set on the final chunk (e.g. "stop", "length"). None for intermediate chunks.
+    model : str
+        Model name (usually set on the first chunk, empty on subsequent).
+    usage : ProviderUsage | None
+        Token counts. Only set on the trailing usage chunk emitted when the
+        adapter requests `stream_options.include_usage` from the upstream
+        provider. None for intermediate content chunks.
+    reasoning_delta : str | None
+        Incremental reasoning / thinking text fragment. Populated only
+        when the model emits a thinking-block delta (Anthropic
+        ``thinking_delta``, OpenAI-compatible ``delta.reasoning_content``,
+        Gemini ``thoughts`` parts). ``None`` for plain text / tool-call
+        chunks. T1 just threads the field; T2 wires adapters + the SSE
+        emitter to forward it.
+    """
+
+    delta: str = ""
+    finish_reason: str | None = None
+    model: str = ""
+    usage: ProviderUsage | None = None
+    # FIX119 — set on the chunk that carries ``finish_reason``: the closed
+    # set value (see ProviderResponse.stop_reason). None on other chunks.
+    stop_reason: str | None = None
+    # FIX119 — the provider's own request id, set once on the first chunk
+    # the adapter yields after the response headers arrived.
+    provider_request_id: str | None = None
+    # Tool-call delta fragments streamed by OpenAI when the model is
+    # invoking a function. The first chunk carries
+    # ``[{index, id, type, function:{name, arguments:""}}]`` and
+    # subsequent chunks append to ``function.arguments``. ``None`` when
+    # the chunk is plain text. A single chunk MAY carry both ``delta``
+    # (text) and ``tool_calls``; the SSE emitter forwards each
+    # independently.
+    tool_calls: list[dict] | None = None
+    # Reasoning / thinking delta. A single chunk MAY carry both
+    # ``delta`` (final-answer text) and ``reasoning_delta`` (thought
+    # text); T2's SSE emitter forwards each independently.
+    reasoning_delta: str | None = None
+    # T5 — Anthropic extended-thinking signature fragment. Emitted on the
+    # ``signature_delta`` event that closes a thinking block. Carried so the
+    # response layer can surface it for a tool-loop round-trip. None on
+    # every other chunk.
+    reasoning_signature: str | None = None

@@ -1,0 +1,14 @@
+{
+  "schema": "agent.market.selftest.v1",
+  "note": "Runs the whole agent on the bundled sample data and shows the user the real report and deck before they trust it with their own data.",
+  "files": ["sample-data/GL_2569-09.xlsx", "sample-data/GL_2569-08.xlsx", "sample-data/งบประมาณ_2569.xlsx"],
+  "message": "ปิดงบเดือนกันยายน 2569",
+  "settings_note": "The company the sample ledgers belong to (their printed heading). A self-test run lays it over the install's own company name, so a report made from sample numbers never carries the person's real company name; a real run never uses it.",
+  "settings": {"company": "บริษัท สยามตัวอย่างการค้า จำกัด"},
+  "formats": ["docx", "pptx", "xlsx"],
+  "expect": {
+    "findings": [],
+    "period": "2026-09",
+    "lines": {"revenue": "12480300.00", "total_expenses": "9737150.00", "net_profit": "2746970.55"}
+  }
+}

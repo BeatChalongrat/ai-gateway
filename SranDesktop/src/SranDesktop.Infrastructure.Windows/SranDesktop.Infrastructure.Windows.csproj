@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The Windows half of the per-OS cluster that needs NO desktop UI
+       framework (Infrastructure split, 2026-08-25): Win32 P/Invoke input +
+       screen capture, System.Drawing screenshots, DPAPI credentials, the
+       registry (autostart, Chrome native-messaging manifest), System.Speech.
+       net8.0-windows for the OS APIs; deliberately no UseWPF, so a headless
+       process (the tools sidecar) can reference it without carrying the
+       WindowsDesktop framework. Namespaces are unchanged from where these
+       files lived (SranDesktop.Infrastructure.*) so no consumer changed. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SranDesktop.Infrastructure</RootNamespace>
+    <AssemblyName>SranDesktop.Infrastructure.Windows</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SranDesktop.Tests" />
+    <InternalsVisibleTo Include="SranDesktop.Infrastructure.Windows.Desktop" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Drawing.Common" Version="8.0.*" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.*" />
+    <!-- R10 Fix 2: Windows built-in speech (Azure lives in the portable project) -->
+    <PackageReference Include="System.Speech" Version="8.0.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SranDesktop.Infrastructure\SranDesktop.Infrastructure.csproj" />
+    <ProjectReference Include="..\SranDesktop.Application\SranDesktop.Application.csproj" />
+    <ProjectReference Include="..\SranDesktop.Domain\SranDesktop.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

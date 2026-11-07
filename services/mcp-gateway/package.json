@@ -1,0 +1,18 @@
+{
+  "name": "sran-mcp-gateway",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Hosts stdio MCP servers behind streamable HTTP + a catalog endpoint for SRAN Desktop; per-user OAuth connector instances (Phase 7)",
+  "scripts": {
+    "test": "node --test test/lib.test.js test/server.test.js test/migrate_legacy_workspace.test.js test/am9_mail.test.js",
+    "migrate:legacy-workspace": "node scripts/migrate_legacy_workspace.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server-filesystem": "latest",
+    "@modelcontextprotocol/server-memory": "latest",
+    "@modelcontextprotocol/server-github": "latest",
+    "@modelcontextprotocol/server-slack": "latest",
+    "supergateway": "latest",
+    "express": "^4.18.0"
+  }
+}

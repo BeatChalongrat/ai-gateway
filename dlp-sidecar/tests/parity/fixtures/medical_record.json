@@ -1,0 +1,65 @@
+{
+  "detector": "medical_record",
+  "entity_type": "medical_record",
+  "category": "pii",
+  "severity": 3,
+  "cases": [
+    {
+      "id": "hn_thai_keyword",
+      "input": "ผู้ป่วย HN 123456 admitted today",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 11,
+          "end": 17
+        }
+      ]
+    },
+    {
+      "id": "mrn_english",
+      "input": "MRN 7890123 transferred to ward 5",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 4,
+          "end": 11
+        }
+      ]
+    },
+    {
+      "id": "patient_id",
+      "input": "Patient ID 4567890 ready for surgery",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 11,
+          "end": 18
+        }
+      ]
+    },
+    {
+      "id": "bare_six_digits_no_context",
+      "input": "code 123456 unrelated",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "hn_substring_no_match",
+      "input": "Johnson 123456 stayed home",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "no_number_present",
+      "input": "HN keyword alone no number",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    }
+  ]
+}

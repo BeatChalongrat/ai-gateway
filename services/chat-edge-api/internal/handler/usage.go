@@ -1,0 +1,237 @@
+package handler
+
+// Usage endpoint — GET /api/v1/usage/me.
+//
+// Web-chat's credit badge + usage popover need the caller's credit
+// balance and per-model breakdown. Both already exist on the gateway's
+// portal API (GET /portal/me and GET /portal/me/usage/summary — the
+// same endpoints the Portal Dashboard reads, so the numbers always
+// match). This handler is a thin authenticated proxy: it forwards the
+// caller's own portal JWT as a Bearer header and reshapes the two
+// responses into one usage payload. No usage data is duplicated in
+// chat-edge.
+//
+// Credit semantics (portal convention): deduction is cost-based —
+// each billable request debits ceil(cost_usd × tenant_markup ×
+// USAGE_CREDITS_PER_USD), min 1 (see the gateway's
+// credit_service.credits_for_cost; 3,000,000/USD anchors 1 credit ≈ 1
+// blended budget-tier token). credit_balance is the REMAINING prepaid
+// balance, credit_used the lifetime debit sum, total allotment =
+// balance + used. Credits are a lifetime pool — there is no reset
+// date.
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"math"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/middleware"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+)
+
+type UsageHandler struct {
+	// gatewayBase is the gateway root (no /v1 suffix) — portal routes
+	// live at {base}/portal/*.
+	gatewayBase string
+	client      *http.Client
+	// FIX33 A-W8 — optional; nil = the response carries no compaction block.
+	compaction *repository.CompactionUsageRepo
+}
+
+// NewUsageHandler derives the portal-API root from the configured
+// gateway API URL (which carries a /v1 suffix for the proxy routes).
+func NewUsageHandler(gatewayAPIURL string) *UsageHandler {
+	base := strings.TrimSuffix(strings.TrimRight(gatewayAPIURL, "/"), "/v1")
+	return &UsageHandler{
+		gatewayBase: base,
+		client:      &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
+// Wire types — the exact shape the web-chat popover consumes.
+
+type usageCredits struct {
+	Total     int64   `json:"total"`
+	Used      int64   `json:"used"`
+	Remaining int64   `json:"remaining"`
+	ResetDate *string `json:"reset_date"` // always null — lifetime pool
+}
+
+type usageModelRow struct {
+	Model        string  `json:"model"`
+	Provider     string  `json:"provider"`
+	Tokens       int64   `json:"tokens"`
+	CreditsUsed  int64   `json:"credits_used"`
+	RequestCount int64   `json:"request_count"`
+	Percentage   float64 `json:"percentage"`
+}
+
+type usageResponse struct {
+	Credits      usageCredits    `json:"credits"`
+	UsageByModel []usageModelRow `json:"usage_by_model"`
+	// TotalCreditsUsed sums display credits across ALL models (not just
+	// the top-5 rows) — drives the panel's "Total used" footer.
+	TotalCreditsUsed int64  `json:"total_credits_used"`
+	Period           string `json:"period"`
+	// FIX33 A-W8 — the compaction bill, separate from the answers.
+	Compaction *repository.CompactionUsageTotals `json:"compaction,omitempty"`
+}
+
+// Gateway response slices (only the fields we read).
+
+type portalMe struct {
+	CreditBalance int64 `json:"credit_balance"`
+	CreditUsed    int64 `json:"credit_used"`
+	// FIX88 — the per-user ceiling (migration 088 backfilled it to
+	// balance + used, so a deployment that has just migrated shows the
+	// same total it showed before). Absent (0) on a gateway older than
+	// FIX88 → the old derivation, so nothing divides by zero.
+	CreditQuota int64 `json:"credit_quota"`
+}
+
+// creditsTotal — FIX88: "full" is a stored fact, the ceiling. The old
+// derivation balance + used inflated the denominator on every top-up, so
+// a topped-up account could never read as full again. Kept as the
+// fallback only for a gateway that does not send the ceiling.
+func creditsTotal(me portalMe) int64 {
+	if me.CreditQuota > 0 {
+		return me.CreditQuota
+	}
+	return me.CreditBalance + me.CreditUsed
+}
+
+type portalUsageSummary struct {
+	Totals struct {
+		Requests    int64 `json:"requests"`
+		Tokens      int64 `json:"tokens"`
+		CreditsUsed int64 `json:"credits_used"`
+	} `json:"totals"`
+	TopModels []struct {
+		Model       string `json:"model"`
+		Provider    string `json:"provider"`
+		Requests    int64  `json:"requests"`
+		Tokens      int64  `json:"tokens"`
+		CreditsUsed int64  `json:"credits_used"`
+	} `json:"top_models"`
+}
+
+// Me serves GET /usage/me.
+func (h *UsageHandler) Me(w http.ResponseWriter, r *http.Request) {
+	token, err := middleware.ExtractPortalToken(r)
+	if err != nil {
+		WriteError(w, http.StatusUnauthorized, CodeUnauthorized, "unauthorized")
+		return
+	}
+
+	var me portalMe
+	if err := h.getJSON(r.Context(), token, "/portal/me", &me); err != nil {
+		slog.Warn("usage_proxy_me_failed", "err", err.Error())
+		WriteError(w, http.StatusBadGateway, "USAGE_UNAVAILABLE", "usage data unavailable")
+		return
+	}
+	var summary portalUsageSummary
+	if err := h.getJSON(r.Context(), token, "/portal/me/usage/summary", &summary); err != nil {
+		slog.Warn("usage_proxy_summary_failed", "err", err.Error())
+		WriteError(w, http.StatusBadGateway, "USAGE_UNAVAILABLE", "usage data unavailable")
+		return
+	}
+
+	rows := make([]usageModelRow, 0, len(summary.TopModels))
+	for _, m := range summary.TopModels {
+		// Display credits come from the gateway (real logged cost ×
+		// USAGE_CREDITS_PER_USD). FIX86: there is no longer a "fall back
+		// to raw tokens" branch — the gateway that answers this call is
+		// this repo's and always sends credits_used, and a tenant whose
+		// logged cost is genuinely zero (self-hosted models) was being
+		// shown TOKEN counts labelled as credits, a second way for two
+		// screens to disagree.
+		credits := m.CreditsUsed
+		totalCredits := summary.Totals.CreditsUsed
+		pct := 0.0
+		if totalCredits > 0 {
+			pct = math.Round(float64(credits)/float64(totalCredits)*1000) / 10
+		}
+		rows = append(rows, usageModelRow{
+			Model:        m.Model,
+			Provider:     m.Provider,
+			Tokens:       m.Tokens,
+			CreditsUsed:  credits,
+			RequestCount: m.Requests,
+			Percentage:   pct,
+		})
+	}
+	// Most-used first by credits so the popover's color ranking is
+	// stable (summary sorts by request count, which can differ).
+	for i := 1; i < len(rows); i++ {
+		for j := i; j > 0 && rows[j].CreditsUsed > rows[j-1].CreditsUsed; j-- {
+			rows[j], rows[j-1] = rows[j-1], rows[j]
+		}
+	}
+
+	// The request-log roll-up (tenant-wide, priced from logged cost).
+	// Reported under its own name; "used" is the ledger below.
+	totalCredits := summary.Totals.CreditsUsed
+	// FIX33 A-W8 — the cost of compacting, separate from the cost of
+	// answering (Claude's usage.iterations[]). Lifetime, like the rest
+	// of this response. Absent when the repo isn't wired; zero rows is
+	// a real answer ("compaction has cost you nothing so far").
+	var compaction *repository.CompactionUsageTotals
+	if h.compaction != nil {
+		if caller, ok := middleware.CallerFrom(r.Context()); ok {
+			if t, err := h.compaction.TotalsForUser(r.Context(), caller.TenantUUID, caller.UserID, time.Time{}); err == nil {
+				compaction = &t
+			} else {
+				slog.Warn("usage_compaction_totals_failed", "err", err.Error())
+			}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	// FIX86 — ONE source for "used": the account ledger (/portal/me),
+	// the same field the Portal's USED shows. TotalCreditsUsed below is
+	// the request-log roll-up and is a different fact (tenant scope,
+	// float cost × rate); the UI labels it separately.
+	_ = json.NewEncoder(w).Encode(usageResponse{
+		Credits: usageCredits{
+			Total:     creditsTotal(me),
+			Used:      me.CreditUsed,
+			Remaining: me.CreditBalance,
+			ResetDate: nil,
+		},
+		UsageByModel:     rows,
+		TotalCreditsUsed: totalCredits,
+		Period:           "lifetime",
+		Compaction:       compaction,
+	})
+}
+
+// SetCompactionUsageRepo wires the A-W8 sink so /usage/me can report it.
+func (h *UsageHandler) SetCompactionUsageRepo(r *repository.CompactionUsageRepo) {
+	h.compaction = r
+}
+
+func (h *UsageHandler) getJSON(ctx context.Context, token, path string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.gatewayBase+path, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("gateway %s: status=%d body=%.200s", path, resp.StatusCode, string(body))
+	}
+	return json.Unmarshal(body, out)
+}

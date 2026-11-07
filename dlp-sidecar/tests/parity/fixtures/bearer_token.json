@@ -1,0 +1,101 @@
+{
+  "detector": "bearer_token",
+  "entity_type": "bearer_token",
+  "category": "secret",
+  "severity": 4,
+  "cases": [
+    {
+      "id": "bearer_token",
+      "input": "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature here",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 15,
+          "end": 76
+        }
+      ]
+    },
+    {
+      "id": "aws_access_key",
+      "input": "use AKIAIOSFODNN7EXAMPLE for upload",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 4,
+          "end": 24
+        }
+      ]
+    },
+    {
+      "id": "openai_key",
+      "input": "key sk-proj-1a2b3c4d5e6f7g8h9i0jKLMNOP12345 done",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 4,
+          "end": 43
+        }
+      ]
+    },
+    {
+      "id": "github_pat",
+      "input": "tok ghp_abcdefghijklmnopqrstuvwxyzABCDEFGHIJ stored",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 4,
+          "end": 44
+        }
+      ]
+    },
+    {
+      "id": "anthropic_excluded",
+      "input": "key sk-ant-api03-AAAAAAAAAAAAAAAAAAAA done",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "plain_word_bearer",
+      "input": "she said bear her load no token",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "no_secret_present",
+      "input": "hello world nothing sensitive",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "openai_key_short_prefix",
+      "input": "token sk-test-abc123 here",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 6,
+          "end": 20
+        }
+      ]
+    },
+    {
+      "id": "gateway_api_key",
+      "input": "leaked gw_abc123def456 oops",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 7,
+          "end": 22
+        }
+      ]
+    }
+  ]
+}

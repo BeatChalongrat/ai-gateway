@@ -1,0 +1,20 @@
+# Local overrides. Compose auto-merges this on top of docker-compose.yml, so
+# `docker compose -p ai-gateway up -d` (the live stack on this machine) gets
+# them.
+#
+# FIX133 B — nothing runs in dev mode here any more. The backend has been the
+# image's production process since FIX131; admin-ui and portal now run their
+# built images too (production mode behind the Caddy front door, service
+# `edge`). The hot-reload shapes — backend `uvicorn --reload`, admin-ui and
+# portal `next dev` on bind mounts — live in docker-compose.dev.yml and are
+# opt-in:
+#
+#   docker compose -p ai-gateway -f docker-compose.yml \
+#     -f docker-compose.override.yml -f docker-compose.dev.yml up -d backend ops-watch admin-ui portal
+#
+# NEVER leave the live stack in that shape (every checkout edit deploys
+# itself; dev mode ships debug output and non-Secure cookies).
+#
+# The backend's extra CORS origins (the 127.0.0.1 twins) moved into the base
+# file's CORS_ORIGINS default; set CORS_ORIGINS in .env for the https origins.
+services: {}

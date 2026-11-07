@@ -1,0 +1,599 @@
+/* Outfit is the heading font for the authenticated app shell. Inter +
+   Geist Mono come in via next/font/google in app/layout.tsx (so they
+   self-host and ship with size-adjust). */
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------------
+   Semantic theme tokens
+   ---------------------------------------------------------------------
+   The authenticated app shell ((app)/* routes + components/Sidebar)
+   reads from these tokens. They swap based on the data-theme attribute
+   on <html>, set by ThemeProvider (localStorage key sran-portal-theme).
+   Default is "light" (user-facing SaaS convention; admin-ui defaults
+   to "dark"). Sidebar navy stays #060A1D in BOTH themes — brand
+   signature, matches admin-ui.
+   --------------------------------------------------------------------- */
+:root, [data-theme="light"] {
+  --bg-base: #F7F8FC;
+  --bg-surface: #FFFFFF;
+  --bg-surface-2: #FAFAFA;
+  --bg-sidebar: #060A1D;
+  --bg-elevated: #F0F1F4;
+  --border-default: #E8E9ED;
+  --border-subtle: #F2F3F5;
+  --text-primary: #1A1C23;
+  --text-secondary: #4B5673;
+  --text-tertiary: #6B6F7E;
+  /* FIX87 Part C — muted text is still text: 4.5:1 on the canvas and on
+     cards (was #8B92A5, 2.9:1 — the dashboard / billing table headers). */
+  --text-muted: #6B7185;
+  /* FIX87 Part C — the fill under white button text: 4.9:1 (was #6366F1,
+     4.47:1). Still ≥ 3:1 against the dark canvas (WCAG 1.4.11). */
+  --accent-primary: #5B5EEE;
+  /* FIX87 Part C — accent-coloured TEXT (links, "View all", counts). One
+     fill token cannot be both readable under white and readable as text
+     on the dark canvas, so text has its own: 4.6:1 here, 6.5:1 in dark. */
+  --accent-text: #5B5EEE;
+  --accent-success: #059669;
+  --accent-warning: #D97706;
+  --accent-danger: #DC2626;
+  --accent-violet: #7C3AED;
+  --accent-cyan: #0891B2;
+  --hero-gradient: linear-gradient(135deg, #0A1230 0%, #1A2450 50%, #0A1230 100%);
+  --hero-glow: rgba(99, 102, 241, 0.25);
+}
+
+[data-theme="dark"] {
+  --bg-base: #0A1230;
+  --bg-surface: #0F1835;
+  --bg-surface-2: #0C1530;
+  --bg-sidebar: #060A1D;
+  --bg-elevated: #1A2450;
+  --border-default: #1F2A55;
+  --border-subtle: #141D3F;
+  --text-primary: #FFFFFF;
+  --text-secondary: #8B96BA;
+  /* FIX87 Part C — 4.5:1 on the dark canvas and cards (was 4.1:1 / 2.7:1). */
+  --text-tertiary: #808AB0;
+  --text-muted: #7C87AE;
+  --accent-primary: #5B5EEE;
+  --accent-text: #8B8FF9;
+  --accent-success: #10B981;
+  --accent-warning: #F59E0B;
+  --accent-danger: #F87171;
+  --accent-violet: #8B5CF6;
+  --accent-cyan: #06B6D4;
+  --hero-gradient: linear-gradient(135deg, #0F1835 0%, #1A2450 50%, #0F1835 100%);
+  --hero-glow: rgba(99, 102, 241, 0.25);
+}
+
+:root {
+  /* App shell palette — used by the dashboard, projects, billing, etc. */
+  --brand-dark: #0a1a38;
+  --brand-navy: #1e3a5f;
+  --brand-blue: #3b6cf6;
+  --brand-green: #10b981;
+  --brand-orange: #f59e0b;
+  --brand-red: #ef4444;
+  --bg-page: #f8f9fb;
+  --bg-card: #ffffff;
+  --text-muted-legacy: #6b7280;
+  --border: #e5e7eb;
+
+  /* Marketing surface — landing page tokens. Kept in :root (not scoped
+     to .marketing) so the values are inspectable from anywhere and
+     stay consistent if other public pages reuse them later. */
+  --bg: #F7F8FC;
+  --bg-2: #FFFFFF;
+  --bg-soft: #F0F2F8;
+
+  --line: #E6E8F0;
+  --line-2: #D4D7E3;
+  --line-soft: #EEF0F7;
+
+  --text: #1A1F36;
+  --text-2: #525F7F;
+  --text-3: #8792A8;
+
+  --violet: #6E5EF6;
+  --violet-soft: #EEECFF;
+  --cyan: #3DB5C7;
+  --cyan-soft: #E4F5F8;
+  --green: #10B981;
+  --green-soft: #DCFCE7;
+  --amber: #F59E0B;
+  --rose: #F43F5E;
+
+  /* Login visual-panel navy. Used for the deep gradient backdrop on
+     the auth split layout — sits visually between the brand-dark of
+     the app shell and pure black. */
+  --navy-1: #0B1E4A;
+  --navy-2: #1A2E5E;
+  --navy-3: #243975;
+
+  --accent-grad: linear-gradient(135deg, #6E5EF6 0%, #3DB5C7 100%);
+  --accent-grad-anim: linear-gradient(
+    135deg,
+    #6E5EF6 0%,
+    #8B7FFF 25%,
+    #3DB5C7 50%,
+    #8B7FFF 75%,
+    #6E5EF6 100%
+  );
+
+  --shadow-sm: 0 1px 2px rgba(26, 31, 54, 0.04), 0 1px 1px rgba(26, 31, 54, 0.02);
+  --shadow-md: 0 4px 12px rgba(26, 31, 54, 0.06), 0 1px 3px rgba(26, 31, 54, 0.04);
+  --shadow-lg: 0 20px 48px rgba(26, 31, 54, 0.08), 0 8px 16px rgba(26, 31, 54, 0.04);
+  --shadow-xl: 0 30px 72px rgba(26, 31, 54, 0.12), 0 12px 24px rgba(26, 31, 54, 0.06);
+  --shadow-glow: 0 20px 60px -20px rgba(110, 94, 246, 0.35);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* Motion design tokens. Shared across all (app) micro-interactions
+     so cadence is consistent. Prefer --motion-base for most hovers;
+     --motion-fast for button presses; --motion-slow for hero reveals.
+     All animations must honor prefers-reduced-motion (see override
+     below). */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 300ms;
+  --motion-slower: 600ms;
+
+  /* Font-family handles bound to the next/font CSS variables exposed
+     by app/layout.tsx. The ui-sans-serif / ui-monospace fallbacks
+     keep the page legible if next/font ever fails to load. */
+  --ff: var(--font-inter, "Inter"), ui-sans-serif, system-ui, sans-serif;
+  --ff-mono: var(--font-geist-mono, "Geist Mono"), ui-monospace, SFMono-Regular,
+    Menlo, monospace;
+}
+
+html {
+  /* Space for the fixed marketing nav so in-page targets (e.g.
+     #features) don't land hidden under the sticky nav. We do NOT set
+     scroll-behavior: smooth here — JS-driven anchor scrolls in
+     MarketingNav animate the scroll manually, and the two mechanisms
+     race each other and cancel mid-animation in Chrome. */
+  scroll-padding-top: 80px;
+}
+
+html,
+body {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3 {
+  font-family: "Outfit", sans-serif;
+  letter-spacing: -0.01em;
+}
+
+/* Small but important: smooth color transitions everywhere — kept fast
+   (150ms) so nothing feels laggy, scoped to color/border to avoid
+   animating layout. */
+* {
+  transition: background-color 150ms, border-color 150ms, color 150ms;
+}
+
+/* Buttons compress slightly on press — tactile feedback for clicks. */
+button {
+  transition: all 100ms;
+}
+button:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+/* -------------------------------------------------------------------
+   PATTERN 1 — Card hover elevation (opt in via class="card-hover")
+   ------------------------------------------------------------------- */
+.card-hover {
+  transition:
+    transform var(--motion-base) var(--ease-out-expo),
+    box-shadow var(--motion-base) var(--ease-out-expo),
+    border-color var(--motion-base) var(--ease-out-expo);
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 12px 24px -8px rgba(99, 102, 241, 0.18),
+    0 4px 8px -2px rgba(0, 0, 0, 0.08);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+[data-theme="dark"] .card-hover:hover {
+  box-shadow:
+    0 12px 28px -8px rgba(99, 102, 241, 0.25),
+    0 4px 8px -2px rgba(0, 0, 0, 0.4);
+}
+
+/* Table row hover — subtle version of card-hover for <tr>. Transform
+   on <tr> is flaky across browsers; use background tint instead. */
+.row-hover {
+  transition: background-color var(--motion-base) var(--ease-out-expo);
+}
+.row-hover:hover {
+  background-color: rgba(99, 102, 241, 0.04);
+}
+[data-theme="dark"] .row-hover:hover {
+  background-color: rgba(99, 102, 241, 0.08);
+}
+
+/* -------------------------------------------------------------------
+   PATTERN 2 — Primary button press feedback
+   ------------------------------------------------------------------- */
+.btn-premium {
+  transition:
+    transform var(--motion-fast) var(--ease-out-quad),
+    box-shadow var(--motion-base) var(--ease-out-expo),
+    background-color var(--motion-base) ease,
+    filter var(--motion-base) ease;
+  will-change: transform;
+}
+.btn-premium:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px -4px rgba(99, 102, 241, 0.35);
+  filter: brightness(1.03);
+}
+.btn-premium:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+  transition-duration: 60ms;
+}
+
+/* Glow ring around the credit bar in the navy card. */
+.glow-bar {
+  box-shadow: 0 0 18px rgba(59, 108, 246, 0.35);
+}
+
+/* -------------------------------------------------------------------
+   PATTERN 3 — Page enter fade + lift
+   -------------------------------------------------------------------
+   App Router doesn't remount layouts on route change, so the keyed
+   client wrapper in components/PageEnter.tsx re-renders this div with
+   a fresh key on every pathname change, which retriggers the anim. */
+@keyframes pageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.page-enter {
+  animation: pageEnter var(--motion-slow) var(--ease-out-expo) both;
+}
+
+/* Modal enter — scale + fade for emphasis. */
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.modal-in {
+  animation: modalIn 180ms ease-out both;
+}
+
+/* -------------------------------------------------------------------
+   PATTERN 5 — Sidebar nav hover translateX
+   -------------------------------------------------------------------
+   Applied via class="nav-item" on anchors inside the sidebar. The
+   nav items already have their own color hover via Tailwind utilities;
+   this adds the 2px horizontal shift. Skipped for the active item so
+   the accent rail doesn't shimmy with the link. */
+.nav-item {
+  transition:
+    background-color var(--motion-base) ease,
+    color var(--motion-base) ease,
+    transform var(--motion-base) var(--ease-out-expo);
+}
+.nav-item:hover:not(.is-active) {
+  transform: translateX(2px);
+}
+
+/* -------------------------------------------------------------------
+   PATTERN 6 — Credit hero alive effects
+   ------------------------------------------------------------------- */
+@keyframes heroGlowPulse {
+  0%,
+  100% {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+.hero-glow {
+  animation: heroGlowPulse 6s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+@keyframes heroGridDrift {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 40px 40px;
+  }
+}
+.hero-grid {
+  animation: heroGridDrift 20s linear infinite;
+}
+
+@keyframes heroCircleDraw {
+  from {
+    stroke-dashoffset: var(--circle-circumference, 263.89);
+  }
+  to {
+    stroke-dashoffset: var(--circle-target-offset, 0);
+  }
+}
+.hero-circle {
+  animation: heroCircleDraw 1.2s var(--ease-out-expo) 0.3s both;
+}
+
+/* -------------------------------------------------------------------
+   PATTERN 7 — Theme toggle icon crossfade
+   -------------------------------------------------------------------
+   Both icons live in the button simultaneously, absolute-positioned.
+   Only the .visible one is opaque at full scale. Keeps the button
+   label ("Theme") in normal flow; icons live next to it via flex. */
+.theme-icon {
+  position: absolute;
+  display: inline-flex;
+  transition:
+    opacity var(--motion-base) ease,
+    transform var(--motion-base) var(--ease-out-expo);
+  opacity: 0;
+  transform: rotate(-90deg) scale(0.8);
+  pointer-events: none;
+}
+.theme-icon.is-visible {
+  opacity: 1;
+  transform: rotate(0) scale(1);
+}
+
+/* -------------------------------------------------------------------
+   PATTERN 8 — Stagger fade-up for list rows
+   -------------------------------------------------------------------
+   Applied to <tr class="row-stagger" style={animationDelay: `${i * 50}ms`}>
+   on the Team page so members fade in one after another on load. 250ms
+   fade + 8px→0 translate feels "list materialising" without being slow.
+*/
+@keyframes rowStagger {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.row-stagger {
+  animation: rowStagger 250ms var(--ease-out-expo) both;
+}
+
+/* -------------------------------------------------------------------
+   PATTERN 9 — Avatar hover lift
+   -------------------------------------------------------------------
+   A subtle scale + soft shadow on hover. Kept quiet (105%, not 110%)
+   so it reads as "this is interactive" without disturbing rows.
+*/
+.avatar-hover {
+  transition:
+    transform var(--motion-base) var(--ease-out-expo),
+    box-shadow var(--motion-base) var(--ease-out-expo);
+}
+.avatar-hover:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px -2px rgba(99, 102, 241, 0.25);
+}
+
+/* -------------------------------------------------------------------
+   PATTERN 10 — Filter chip bounce on click
+   -------------------------------------------------------------------
+   Active-state confirmation: a quick 97%→100% pulse so the user sees
+   the chip "acknowledge" the click even before the data updates.
+*/
+@keyframes chipBounce {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(0.97); }
+  100% { transform: scale(1); }
+}
+.chip-bounce:active {
+  animation: chipBounce 200ms var(--ease-out-quad);
+}
+
+/* -------------------------------------------------------------------
+   PATTERN 11 — Chart bar grow-in
+   -------------------------------------------------------------------
+   Usage page: bars render at transform-origin bottom and animate
+   scaleY 0→1 over 400ms with a per-bar stagger supplied inline.
+*/
+@keyframes barGrow {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+.bar-grow {
+  transform-origin: bottom;
+  animation: barGrow 400ms var(--ease-out-expo) both;
+}
+.bar-grow:hover {
+  transform: scaleY(1.05);
+  transition: transform 100ms ease-out;
+}
+
+/* -------------------------------------------------------------------
+   PATTERN 12 — Toast slide-in from top-right (spring-ish)
+   -------------------------------------------------------------------
+   Approximates Framer's stiffness-300/damping-30 spring with a cubic
+   Bezier that overshoots ~3% then settles. Keeps the toast feeling
+   "arrive" rather than "appear."
+*/
+@keyframes toastIn {
+  0%   { opacity: 0; transform: translateX(100%) translateY(-4px); }
+  70%  { opacity: 1; transform: translateX(-4px) translateY(0); }
+  100% { opacity: 1; transform: translateX(0) translateY(0); }
+}
+.toast-in {
+  animation: toastIn 320ms cubic-bezier(0.34, 1.4, 0.64, 1) both;
+}
+
+/* -------------------------------------------------------------------
+   PATTERN 13 — Empty-state float
+   -------------------------------------------------------------------
+   Gentle up/down loop on illustrations so blank pages feel alive.
+   3s cycle, 4px range — well below anything that would bother a
+   vestibular-sensitive user (and the reduced-motion block below
+   kills it outright).
+*/
+@keyframes emptyFloat {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
+.empty-float {
+  animation: emptyFloat 3s ease-in-out infinite;
+}
+
+/* -------------------------------------------------------------------
+   PATTERN 13b — Dropdown menu slide + fade
+   -------------------------------------------------------------------
+   Two variants for the row-kebab menu: one that opens downward (the
+   common case) and one that flips to open upward when the trigger
+   is close to the viewport bottom. Both 150ms ease-out cubic. The
+   close state reverses the transform so the menu "retracts" into
+   the trigger rather than popping out.
+*/
+@keyframes menuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes menuInUp {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes menuOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.96);
+  }
+}
+@keyframes menuOutUp {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.96);
+  }
+}
+.menu-anim-in-down { animation: menuIn 150ms cubic-bezier(0.16, 1, 0.3, 1) both; transform-origin: top right; }
+.menu-anim-in-up   { animation: menuInUp 150ms cubic-bezier(0.16, 1, 0.3, 1) both; transform-origin: bottom right; }
+.menu-anim-out-down { animation: menuOut 150ms cubic-bezier(0.4, 0, 1, 1) both; transform-origin: top right; }
+.menu-anim-out-up   { animation: menuOutUp 150ms cubic-bezier(0.4, 0, 1, 1) both; transform-origin: bottom right; }
+
+/* -------------------------------------------------------------------
+   PATTERN 14 — Skeleton shimmer
+   -------------------------------------------------------------------
+   Background-position animation across a slanted gradient — reads as
+   "loading" without rotating anything (so it's safe under reduced-
+   motion too; we disable it anyway). 1.5s loop.
+*/
+@keyframes skelShimmer {
+  0%   { background-position: -200px 0; }
+  100% { background-position: calc(200px + 100%) 0; }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-elevated) 0%,
+    color-mix(in srgb, var(--bg-elevated) 60%, var(--bg-surface)) 40%,
+    var(--bg-elevated) 80%
+  );
+  background-size: 200px 100%;
+  background-repeat: no-repeat;
+  animation: skelShimmer 1.5s infinite linear;
+  border-radius: 6px;
+}
+
+/* -------------------------------------------------------------------
+   Reduced-motion override — honors OS-level accessibility preference
+   (macOS: System Settings → Accessibility → Display → Reduce motion).
+   Kills keyframe animations and transitions near-instantly across the
+   entire document. Keep this block LAST in the file so it overrides
+   any later-declared transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Focus ring — applies everywhere we don't override it. */
+input:focus,
+button:focus-visible,
+a:focus-visible,
+[role="switch"]:focus-visible {
+  outline: 2px solid var(--brand-blue);
+  outline-offset: 2px;
+}
+
+/* Quiet scrollbar. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #e5e7eb;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #cbd5e0;
+}

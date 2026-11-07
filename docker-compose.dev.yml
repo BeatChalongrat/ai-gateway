@@ -1,0 +1,98 @@
+# FIX131 — OPT-IN backend hot reload. Not loaded unless you name it:
+#
+#   docker compose -p ai-gateway -f docker-compose.yml \
+#     -f docker-compose.override.yml -f docker-compose.dev.yml up -d backend ops-watch
+#
+# (or put all three in COMPOSE_FILE in your own shell / .env; the separator is
+# ";" on Windows, ":" elsewhere — COMPOSE_PATH_SEPARATOR overrides it).
+#
+# What it changes, for the backend and ops-watch only:
+#   * backend: ONE `uvicorn --reload` process on a bind mount of ./backend, so
+#     a saved .py file is live within seconds — with everything that implies:
+#     no worker processes (the /ready worker board and the multiprocess
+#     /metrics are off), every edit to the checkout reaches this container,
+#     and the file watcher polls the Windows bind mount (the live reload
+#     process idled at ~27 % of a core);
+#   * the read-only cross-tree mounts some backend tests read (docs, examples,
+#     chat-edge Go source, desktop sources, compose files, DLP parity
+#     fixtures) — for running a test file inside this dev container by hand;
+#     the real lane is scripts/backend-test-lane.sh (a throwaway container);
+#   * ops-watch reads backend/app from the checkout (read-only), so a change
+#     to app/ops/watch.py is live on its next restart without an image build.
+#
+# Leave it: `docker compose -p ai-gateway up -d backend ops-watch` recreates
+# both from the image (the production process). NEVER leave the live stack in
+# this shape: every checkout edit would deploy itself (FIX88/FIX90 history).
+services:
+  backend:
+    # Migrations still run once on container start; `exec` makes uvicorn
+    # PID 1 so SIGTERM reaches it (FIX126 O3).
+    command: >-
+      sh -c "python -m alembic upgrade head &&
+             exec uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload --reload-dir /app/app"
+    volumes:
+      - ./backend:/app
+      # Test-time mounts (read-only). test_*_docs.py read ../docs/*.md;
+      # test_dlp_docs.py validates examples/*.json; the FIX127 E2 cross-tree
+      # gates read chat-edge's Go tool registry, the desktop sources
+      # (SranDesktop/src + apps/desktop/src) and the compose wiring; the DLP
+      # parity test reads the Rust sidecar's fixtures.
+      - ./docs:/docs:ro
+      - ./examples:/examples:ro
+      - ./services/chat-edge-api:/services/chat-edge-api:ro
+      - ./SranDesktop/src:/SranDesktop/src:ro
+      - ./apps/desktop/src:/apps/desktop/src:ro
+      - ./docker-compose.yml:/docker-compose.yml:ro
+      - ./docker-compose.prod.yml:/docker-compose.prod.yml:ro
+      - ./dlp-sidecar/tests/parity/fixtures:/work/dlp-sidecar/tests/parity/fixtures:ro
+    environment:
+      # Schema-drift guard (FIX 3 / FIX90): hot reload lets code advance past
+      # the schema the container migrated at START; the app then refuses with
+      # "SCHEMA DRIFT: DB at N, code needs M" and `make migrate` fixes it.
+      # SCHEMA_DRIFT_MODE=autoupgrade in your own .env opts back in to
+      # in-process upgrades (not recommended: see FIX90).
+      SCHEMA_DRIFT_MODE: ${SCHEMA_DRIFT_MODE:-failclosed}
+      # watchfiles polls on the Windows-to-container bridge — docker
+      # inotify events don't always propagate through the Hyper-V layer.
+      WATCHFILES_FORCE_POLLING: "true"
+
+  ops-watch:
+    volumes:
+      - ./backend:/app:ro
+
+  # FIX133 B — admin-ui / portal hot reload (`next dev` on a bind mount), the
+  # shape docker-compose.override.yml carried until FIX133. Opt-in only.
+  admin-ui:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "if [ ! -d node_modules ] || [ ! -f node_modules/.install-stamp ]; then npm ci && touch node_modules/.install-stamp; fi && npx next dev -H 0.0.0.0 -p 3000"
+    volumes:
+      - ./admin-ui:/app
+      - admin_ui_node_modules:/app/node_modules
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_GATEWAY_URL:-http://localhost:8080}
+      GATEWAY_API_URL: http://backend:8080
+      CHAT_EDGE_API_URL: http://chat-edge-api:4000/api/v1
+      CHAT_EDGE_ADMIN_API_KEY: ${CHAT_EDGE_ADMIN_API_KEY:-dev-chat-edge-admin-key-change-in-prod}
+      WATCHPACK_POLLING: "true"
+    build: !reset null
+
+  portal:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "if [ ! -d node_modules ] || [ ! -f node_modules/.install-stamp ]; then npm ci && touch node_modules/.install-stamp; fi && npx next dev -H 0.0.0.0 -p 3001"
+    volumes:
+      - ./portal:/app
+      - portal_node_modules:/app/node_modules
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_GATEWAY_URL:-http://localhost:8080}
+      NEXT_PUBLIC_OAUTH_ENABLED: ${NEXT_PUBLIC_OAUTH_ENABLED:-false}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3001}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev-portal-nextauth-secret}
+      BACKEND_URL: http://backend:8080
+      WATCHPACK_POLLING: "true"
+    build: !reset null
+
+volumes:
+  admin_ui_node_modules:
+  portal_node_modules:

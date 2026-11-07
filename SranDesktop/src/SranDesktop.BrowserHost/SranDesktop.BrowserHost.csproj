@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SranDesktop.BrowserHost</RootNamespace>
+    <AssemblyName>SranDesktop.BrowserHost</AssemblyName>
+  </PropertyGroup>
+
+  <!-- The wire codec is SOURCE-LINKED from Infrastructure: this exe is spawned
+       by Chrome and must stay a dependency-free instant-start relay — no
+       reference to the WPF-heavy Infrastructure assembly. -->
+  <ItemGroup>
+    <Compile Include="..\SranDesktop.Infrastructure\Native\Browser\BrowserWire.cs"
+             Link="BrowserWire.cs" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SRAN Desktop Browser Bridge</title>
+  <style>
+    body { font-family: "Segoe UI", sans-serif; max-width: 460px; margin: 40px auto; color: #222; }
+    h1 { font-size: 18px; }
+    label { display: block; font-size: 13px; margin: 16px 0 4px; color: #555; }
+    input { width: 100%; padding: 8px; font-size: 13px; box-sizing: border-box; }
+    button { margin-top: 12px; padding: 8px 18px; font-size: 13px; cursor: pointer; }
+    #status { margin-top: 16px; font-size: 13px; }
+    .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+    .on { background: #2ecc71; } .off { background: #e74c3c; }
+    p.hint { font-size: 12px; color: #777; }
+  </style>
+</head>
+<body>
+  <h1>SRAN Desktop Browser Bridge</h1>
+  <p class="hint">Normally there is nothing to paste: SRAN Desktop writes the pairing token into this
+    extension's folder (pairing.json) and the extension reads it itself. The desktop app must be running.
+    Paste a token here only if you loaded the extension from a folder the app does not write to;
+    an empty field means "use the one the app provided".</p>
+  <p class="hint">This extension's id: <code id="ownId">…</code> — it must match "Expected id" in
+    SRAN Desktop → Settings → Browser.</p>
+  <label for="token">Pairing token (optional)</label>
+  <input id="token" type="text" autocomplete="off" spellcheck="false">
+  <button id="save">Save &amp; reconnect</button>
+  <div id="status"><span class="dot off"></span><span id="statusText">Not connected</span></div>
+  <script src="options.js"></script>
+</body>
+</html>

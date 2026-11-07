@@ -1,0 +1,21 @@
+{
+  "generated": "manual",
+  "count": 15,
+  "keys": [
+    "src/app/chat/settings/DeviceSettings.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: <span className=\"font-mono text-text-secondary\">chrome://extensions</span>",
+    "src/app/chat/skills/page.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: placeholder=\"summarize-short\"",
+    "src/app/shared/[token]/page.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: <footer className=\"mx-auto max-w-3xl px-4 pb-8 pt-2 text-center text-[10px] text-text-muted\">\n        {t(\"shared.poweredBy\")} SRAN Chat\n      </footer>",
+    "src/app/shared/[token]/page.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: <span className=\"text-sm font-semibold tracking-tight\">\n              SRAN Chat\n            </span>",
+    "src/components/canvas/CanvasPanel.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: <span className=\"font-medium text-text-primary\">v{v.version}</span>",
+    "src/components/chat/AttachmentDropZone.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: <div className=\"mt-0.5 text-[11px] text-text-muted\">\n            PDF · DOCX · XLSX · CSV · TXT · PNG · JPG\n          </div>",
+    "src/components/chat/EmptyState.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: alt=\"SRAN Chat\"",
+    "src/components/chat/ExcelPlanCard.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: <span>Excel</span>",
+    "src/components/chat/Sidebar.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: <span className=\"font-normal\">Chat</span>",
+    "src/components/chat/Sidebar.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: aria-label=\"SRAN Chat\"",
+    "src/components/media/ProvenanceBadge.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: <span className=\"text-text-secondary\">· C2PA</span>",
+    "src/components/media/VideoGenForm.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: <option value=\"1080p\">1080p</option>",
+    "src/components/media/VideoGenForm.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: <option value=\"720p\">720p</option>",
+    "src/components/workspace/VersionTimeline.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: <span className=\"text-sm font-semibold text-text-primary\">\n                    v{v.version}\n                    {v.is_current ? (\n                      <span className=\"ml-2 text-[10px] font-medium uppercase tracking-wider text-text-muted\">\n                        {t(\"ws.current\")}\n                      </span>\n                    ) : null}\n                  </span>",
+    "src/components/workspace/WorkspacePanel.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: <span className=\"flex-shrink-0 rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold text-text-muted\">\n                    v{f.version}\n                  </span>"
+  ]
+}

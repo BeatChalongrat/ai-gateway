@@ -1,0 +1,106 @@
+"use client";
+
+// FIX22 §2 — update NOTIFICATION banner (stage 1). The desktop host posts a
+// `host.notice` {kind:"update-available", latest, current} when the gateway
+// publishes a version newer than the running app. This renders a small,
+// dismissible, non-modal strip. There is deliberately NO link, NO download
+// and NO install action: the user installs by hand (stage 2 — a signed
+// update feed — waits for a code-signing certificate). Dismissal is remembered
+// PER VERSION in localStorage, so a dismissed version stays dismissed across
+// reloads but the next version shows again. Hosted mode only: a plain browser
+// never receives the notice and renders nothing.
+
+import { useEffect, useState, type HTMLAttributes, type ReactNode } from "react";
+import { X } from "lucide-react";
+
+import { useHostedMode } from "@/hooks/useHostedMode";
+import { bridge, type HostNotice } from "@/lib/bridge";
+import { useT } from "@/lib/i18n";
+
+export const UPDATE_DISMISSED_KEY = "sran.desktop.updateDismissed";
+
+function readDismissed(): string {
+  try {
+    return window.localStorage.getItem(UPDATE_DISMISSED_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeDismissed(version: string): void {
+  try {
+    window.localStorage.setItem(UPDATE_DISMISSED_KEY, version);
+  } catch {
+    /* private mode / blocked storage — the banner just returns next reload */
+  }
+}
+
+export function UpdateBanner() {
+  const hosted = useHostedMode();
+  const t = useT();
+  const [notice, setNotice] = useState<Extract<HostNotice, { kind: "update-available" }> | null>(null);
+  const [dismissedVersion, setDismissedVersion] = useState<string>("");
+
+  useEffect(() => {
+    if (!hosted) return;
+    setDismissedVersion(readDismissed());
+    return bridge.onHostNotice((n) => {
+      if (n.kind === "update-available") setNotice(n);
+    });
+  }, [hosted]);
+
+  if (!hosted || !notice || notice.latest === dismissedVersion) return null;
+
+  const dismiss = () => {
+    writeDismissed(notice.latest);
+    setDismissedVersion(notice.latest);
+  };
+
+  return (
+    <BannerStrip data-testid="update-banner" onDismiss={dismiss} dismissLabel={t("update.desktopDismiss")}>
+      {t("update.available", { latest: notice.latest, current: notice.current })}{" "}
+      <span className="text-text-muted">{t("update.howTo")}</span>
+    </BannerStrip>
+  );
+}
+
+/** The chat's banner strip under the top bar: a line (or two) and a close
+ *  button, until the person closes it. AM6 — exported so that what else the
+ *  chat has to tell a person in a strip (an agent's notification) is this
+ *  strip, not a copy of it; `actions` sit before the close button, and
+ *  `wrap` lets them go under the text on a narrow screen. */
+export function BannerStrip({
+  children,
+  actions,
+  onDismiss,
+  dismissLabel,
+  wrap = false,
+  ...rest
+}: {
+  children: ReactNode;
+  actions?: ReactNode;
+  onDismiss?: () => void;
+  dismissLabel?: string;
+  wrap?: boolean;
+} & Omit<HTMLAttributes<HTMLDivElement>, "children" | "className">) {
+  return (
+    <div
+      role="status"
+      {...rest}
+      className={`mx-3 mt-1 flex shrink-0 items-center gap-3 rounded-lg border border-border-subtle bg-bg-elevated px-3 py-2 text-xs text-text-secondary md:mx-4${wrap ? " flex-wrap" : ""}`}
+    >
+      <span className="min-w-0 flex-1">{children}</span>
+      {actions}
+      {onDismiss ? (
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label={dismissLabel}
+          className="focus-ring rounded-md p-1 text-text-muted transition-colors hover:bg-bg-surface hover:text-text-primary"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      ) : null}
+    </div>
+  );
+}

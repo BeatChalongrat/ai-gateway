@@ -1,0 +1,179 @@
+"""Request log persistence and query service."""
+
+from __future__ import annotations
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
+
+from app.domain.observability import RequestRecord
+from app.models.request_log import RequestLogORM
+# FIX130 E3 — every row written marks the chat turn's ledger (a no-op
+# outside a chat request) so the pre-provider row is never a second row.
+from app.services.pre_provider_log import note_row_written
+
+
+def _build_request_log_orm(record: RequestRecord) -> RequestLogORM:
+    """Map a :class:`RequestRecord` to a :class:`RequestLogORM` row.
+
+    Shared by the sync (:meth:`RequestLogService.persist`) and async
+    (:meth:`RequestLogService.persist_async`) write paths so the column
+    mapping stays in exactly one place.
+    """
+    return RequestLogORM(
+        request_id=record.request_id,
+        tenant_id=record.tenant_id,
+        project_id=record.project_id,
+        user_id=record.user_id,
+        provider=record.provider,
+        model=record.model,
+        status=record.status.value if hasattr(record.status, "value") else str(record.status),
+        policy_action=record.policy_action,
+        latency_ms=record.latency_ms,
+        prompt_tokens=record.prompt_tokens,
+        completion_tokens=record.completion_tokens,
+        total_tokens=record.total_tokens,
+        estimated_cost_usd=record.estimated_cost_usd,
+        reasoning_tokens=record.reasoning_tokens,
+        reasoning_cost=record.reasoning_cost,
+        error_code=record.error_code,
+        dlp_input_findings=record.dlp_input_findings,
+        dlp_input_action=record.dlp_input_action,
+        dlp_output_findings=record.dlp_output_findings,
+        dlp_categories=",".join(record.dlp_categories) if record.dlp_categories else None,
+        router_used=record.router_used,
+        task_category=record.task_category,
+        policy_profile_id=record.policy_profile_id,
+        input_raw=record.input_raw,
+        input_masked=record.input_masked,
+        output_raw=record.output_raw,
+        output_final=record.output_final,
+        dlp_findings_json=record.dlp_findings_json,
+        input_raw_encrypted=record.input_raw_encrypted,
+        fallback_used=bool(record.fallback_used),
+        fallback_attempts=record.fallback_attempts,
+        original_provider=record.original_provider,
+        original_model=record.original_model,
+    )
+
+
+class RequestLogService:
+
+    def persist(self, session: Session, record: RequestRecord) -> None:
+        """Write a RequestRecord to the database.
+
+        Flushes only — the CALLER owns the commit (the orchestrator /
+        public_chat session lifecycle commits the unit of work). This is
+        the contract the async variant mirrors.
+        """
+        log = _build_request_log_orm(record)
+        session.add(log)
+        session.flush()
+        note_row_written()
+
+    async def persist_async(
+        self, session: AsyncSession, record: RequestRecord
+    ) -> None:
+        """Async variant of :meth:`persist`.
+
+        Identical logic on an :class:`~sqlalchemy.ext.asyncio.AsyncSession`:
+        build the ORM row, ``add`` it (sync), then ``await session.flush()``.
+        Flushes only — the CALLER owns the commit, exactly matching the sync
+        contract so the orchestrator's session unit-of-work is unchanged.
+        """
+        log = _build_request_log_orm(record)
+        session.add(log)
+        await session.flush()
+        note_row_written()
+
+    def list_recent(
+        self, session: Session, limit: int = 100
+    ) -> list[RequestLogORM]:
+        stmt = (
+            select(RequestLogORM)
+            .order_by(RequestLogORM.created_at.desc())
+            .limit(limit)
+        )
+        return list(session.execute(stmt).scalars().all())
+
+    def list_by_project(
+        self, session: Session, project_id: str, limit: int = 100
+    ) -> list[RequestLogORM]:
+        stmt = (
+            select(RequestLogORM)
+            .where(RequestLogORM.project_id == project_id)
+            .order_by(RequestLogORM.created_at.desc())
+            .limit(limit)
+        )
+        return list(session.execute(stmt).scalars().all())
+
+    def list_paginated(
+        self,
+        session: Session,
+        *,
+        limit: int,
+        offset: int,
+        project_id: str | None = None,
+    ) -> tuple[list[RequestLogORM], int]:
+        """Return (rows, total) for audit listings. ``total`` counts the
+        filtered set ignoring pagination so the UI can render accurate
+        pager controls even when only a page worth of rows is fetched."""
+        base = select(RequestLogORM)
+        count_base = select(func.count()).select_from(RequestLogORM)
+        if project_id is not None:
+            base = base.where(RequestLogORM.project_id == project_id)
+            count_base = count_base.where(RequestLogORM.project_id == project_id)
+        total = int(session.execute(count_base).scalar() or 0)
+        stmt = (
+            base.order_by(RequestLogORM.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        rows = list(session.execute(stmt).scalars().all())
+        return rows, total
+
+    def get_by_id(
+        self, session: Session, request_id: str
+    ) -> RequestLogORM | None:
+        return session.get(RequestLogORM, request_id)
+
+    def usage_summary_by_project(
+        self, session: Session, project_id: str
+    ) -> dict:
+        """Aggregate usage for a project."""
+        rows = self.list_by_project(session, project_id, limit=10000)
+        total_tokens = sum(r.total_tokens for r in rows)
+        total_cost = sum(r.estimated_cost_usd for r in rows)
+        return {
+            "project_id": project_id,
+            "total_requests": len(rows),
+            "total_tokens": total_tokens,
+            "total_estimated_cost_usd": round(total_cost, 6),
+        }
+
+    def usage_summary_all(self, session: Session) -> dict:
+        """Aggregate usage across every project.
+
+        Uses a SQL ``SUM`` rather than loading rows into memory — the
+        per-project variant's 10k row cap is a pragmatic compromise,
+        but the all-projects path can easily blow past that on a real
+        deployment. ``project_id`` in the returned dict is ``None`` so
+        clients can distinguish "total across everything" from any
+        individual project's summary.
+        """
+        from sqlalchemy import func
+
+        stmt = select(
+            func.count().label("count"),
+            func.coalesce(func.sum(RequestLogORM.total_tokens), 0).label("tokens"),
+            func.coalesce(
+                func.sum(RequestLogORM.estimated_cost_usd), 0.0
+            ).label("cost"),
+        )
+        row = session.execute(stmt).one()
+        return {
+            "project_id": None,
+            "total_requests": int(row.count or 0),
+            "total_tokens": int(row.tokens or 0),
+            "total_estimated_cost_usd": round(float(row.cost or 0.0), 6),
+        }

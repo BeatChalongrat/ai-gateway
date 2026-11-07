@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The .NET tools sidecar (E0 spike → E4 full tool set). A console exe
+       that exposes the SranDesktop MCP tools as an MCP server over stdio
+       (newline-delimited JSON-RPC 2.0), spawned as a child process by the
+       Electron shell exactly the way Claude Desktop spawns its MCP servers.
+
+       References the portable Infrastructure and the Windows (no-WPF) pack.
+       Infrastructure.Windows.Desktop (UIA, clipboard, WPF plumbing) is
+       deliberately NOT referenced: UIA is not registered in the sidecar by
+       owner decision (E4), and the clipboard is the Electron host's. That is
+       what keeps the WindowsDesktop framework out of this binary. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SranDesktop.ToolsSidecar</RootNamespace>
+    <AssemblyName>SranDesktop.ToolsSidecar</AssemblyName>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <!-- Shipped form: self-contained single file, no SDK/runtime on the
+         user's machine. Untrimmed: trimming breaks System.Text.Json's
+         reflection paths at runtime (INFRA_SPLIT_REPORT.md §5). -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SranDesktop.Infrastructure\SranDesktop.Infrastructure.csproj" />
+    <ProjectReference Include="..\SranDesktop.Infrastructure.Windows\SranDesktop.Infrastructure.Windows.csproj" />
+    <ProjectReference Include="..\SranDesktop.Application\SranDesktop.Application.csproj" />
+    <ProjectReference Include="..\SranDesktop.Domain\SranDesktop.Domain.csproj" />
+  </ItemGroup>
+
+  <!-- The Chrome extension bundle ships BESIDE the sidecar (not inside it) so
+       the host can deploy it to its own data folder and provision the pairing
+       token there — never into the repo tree. pairing.json is excluded on
+       purpose: it is generated at runtime, per install. -->
+  <ItemGroup>
+    <None Include="..\..\browser-extension\**" Exclude="..\..\browser-extension\pairing.json"
+          Link="browser-extension\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- The native-messaging relay (a tiny, dependency-free exe Chrome spawns)
+       is published next to the sidecar — the same idiom the WPF app uses. -->
+  <Target Name="PublishBrowserHost" AfterTargets="Publish">
+    <MSBuild Projects="..\SranDesktop.BrowserHost\SranDesktop.BrowserHost.csproj"
+             Targets="Restore;Publish"
+             RemoveProperties="PublishProfile;PublishTrimmed"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true;PublishSingleFile=true;PublishDir=$(PublishDir)" />
+  </Target>
+
+</Project>

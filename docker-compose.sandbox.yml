@@ -1,0 +1,88 @@
+# Phase 13 Part A — hardened code-interpreter sandbox: chat-edge wiring.
+#
+# SCOPE NOTE: docker-compose.webchat.yml now carries this same wiring INLINE
+# (sandbox on by default), because the chat-edge services fail closed without
+# it — no sandbox means no PDF/DOCX/XLSX text extraction, no Office plan
+# cards, no compare, no run_python. This overlay remains for the BASE/desktop
+# stack, where chat-edge-api is profile-gated and does not get that default.
+# Layering it on the webchat stack is a redundant no-op (identical values).
+#
+# Apply ON TOP of the base + webchat compose to let chat-edge spawn
+# per-run sandbox containers:
+#
+#   docker compose -p ai-gateway \
+#     -f docker-compose.yml -f docker-compose.webchat.yml -f docker-compose.sandbox.yml \
+#     up -d chat-edge-api
+#
+# PREREQUISITES (one-time):
+#   1. Build the sandbox image so the daemon can run it per-exec:
+#        docker build -f services/chat-edge-api/sandbox/Dockerfile.sandbox \
+#          -t ai-gateway-sandbox:latest services/chat-edge-api
+#   2. chat-edge must contain the `docker` CLI. Add to
+#      services/chat-edge-api/Dockerfile's runtime stage:
+#        RUN apk add --no-cache docker-cli
+#      and COPY the seccomp profile in:
+#        COPY --from=builder /app/sandbox/seccomp.json /sandbox/seccomp.json
+#      (or mount it as below), then rebuild chat-edge-api.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# DOCKER-SOCKET PRIVILEGE — READ THIS.
+# Mounting /var/run/docker.sock gives chat-edge the ability to control the
+# Docker daemon = effectively host root. That is a real privilege increase.
+# It is acceptable ONLY because the docker `run` argv is built entirely by
+# trusted Go (internal/sandbox) from server constants — NO model input ever
+# reaches it; the model only supplies a plan/code FILE that runs INSIDE the
+# no-privilege sandbox. For a hardened prod posture, replace this socket
+# mount with a minimal BROKER service that owns the socket and exposes only
+# execute(job); then a chat-edge RCE still cannot issue arbitrary docker
+# commands. This overlay is the pragmatic single-host form.
+# ─────────────────────────────────────────────────────────────────────────
+
+services:
+  chat-edge-api:
+    environment:
+      SANDBOX_ENABLED: "1"
+      SANDBOX_IMAGE: "ai-gateway-sandbox:latest"
+      # Path INSIDE the chat-edge container where the docker CLI reads the
+      # seccomp profile (the CLI reads it and ships JSON to the daemon).
+      SANDBOX_SECCOMP_PATH: "/sandbox/seccomp.json"
+      # ── HOST-vs-CONTAINER PATH — READ THIS (subtle, easy to invert) ──────
+      # chat-edge is ITSELF a container, but the per-run sandbox is launched
+      # by the HOST docker daemon. So there are TWO distinct paths:
+      #
+      #   SANDBOX_WORKDIR      = the IN-CONTAINER staging root (the bind mount
+      #                          target below) where chat-edge writes per-run
+      #                          in/out dirs.
+      #   SANDBOX_HOST_WORKDIR = the SAME dir AS THE DAEMON SEES IT — i.e. the
+      #                          HOST side of the bind mount, used to build the
+      #                          `docker run -v <host>:/job/out` source.
+      #
+      # These are NOT the same value. Setting SANDBOX_HOST_WORKDIR to the
+      # in-container path ("/sandbox-runs") makes the daemon -v a path that
+      # only exists inside chat-edge → it creates an empty root-owned dir on
+      # the host, the uid-65534 sandbox can't write __meta.json → "no result
+      # sidecar" → every run_python 503s. So HOST_WORKDIR must equal the bind
+      # SOURCE (an ABSOLUTE host path the daemon can resolve).
+      SANDBOX_WORKDIR: "/sandbox-runs"
+      SANDBOX_HOST_WORKDIR: "${SANDBOX_HOST_DIR:-${PWD}/data/sandbox-runs}"
+      # FIX17 §4 — DEVELOPMENT MODE: unset = the daemon's default runtime
+      # (runc) with the standard container boundary. Production requires
+      # gVisor via SANDBOX_RUNTIME=runsc (docker-compose.prod.yml). Either
+      # way the boot log states `boundary_in_effect=<standard|gvisor>` from
+      # a real probe run. See docs/DEPLOY_SANDBOX.md.
+      SANDBOX_RUNTIME: "${SANDBOX_RUNTIME:-}"
+    volumes:
+      # Daemon control socket (see privilege note above).
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Shared staging dir. MUST be a bind to a real, ABSOLUTE host path so
+      # the per-run in/out dirs chat-edge writes are the SAME inodes the
+      # daemon bind-mounts into the sandbox container, AND so SANDBOX_HOST_DIR
+      # (used as the -v source above) is a path the daemon can resolve. A
+      # named volume would NOT work (the daemon can't -v a path that only
+      # exists inside another container's volume); a RELATIVE path would not
+      # resolve for `docker run -v`. ${PWD} makes the default absolute and
+      # equal to how compose resolves ./data/sandbox-runs from the repo root.
+      - ${SANDBOX_HOST_DIR:-${PWD}/data/sandbox-runs}:/sandbox-runs
+      # Seccomp profile available to the CLI inside chat-edge (alternative
+      # to baking it into the image in the Dockerfile).
+      - ./services/chat-edge-api/sandbox/seccomp.json:/sandbox/seccomp.json:ro

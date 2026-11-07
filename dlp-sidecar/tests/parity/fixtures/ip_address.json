@@ -1,0 +1,122 @@
+{
+  "detector": "ip_address",
+  "entity_type": "ipv4_address",
+  "category": "network",
+  "severity": 2,
+  "cases": [
+    {
+      "id": "ipv4_simple",
+      "input": "server at 192.168.1.1 listening",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 10,
+          "end": 21
+        }
+      ]
+    },
+    {
+      "id": "ipv4_high_octets",
+      "input": "edge 255.255.255.255 broadcast",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 20
+        }
+      ]
+    },
+    {
+      "id": "ipv6_full",
+      "input": "addr 2001:0db8:85a3:0000:0000:8a2e:0370:7334 reached",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 44
+        }
+      ]
+    },
+    {
+      "id": "ipv6_compressed",
+      "input": "addr ::1 here",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 8
+        }
+      ]
+    },
+    {
+      "id": "ipv4_octet_overflow",
+      "input": "999.999.999.999 invalid",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "no_dots_no_match",
+      "input": "version 12345 deployed",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "no_ip_present",
+      "input": "no addresses here",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "sql_date_cast_not_ipv6",
+      "input": "SELECT '2025-01-01'::date AS d",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "sql_date_cast_upper_not_ipv6",
+      "input": "GENERATE_SERIES('2568-01-01'::DATE, '2568-12-01'::DATE)",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "cpp_scope_not_ipv6",
+      "input": "call ns::addr and boost::asio here",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "ipv6_loopback_still_matches",
+      "input": "ping ::1 now",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 8
+        }
+      ]
+    },
+    {
+      "id": "ipv6_after_punct_still_matches",
+      "input": "gw=2001:db8::1.",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 3,
+          "end": 14
+        }
+      ]
+    }
+  ]
+}

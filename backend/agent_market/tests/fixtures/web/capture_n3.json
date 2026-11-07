@@ -1,0 +1,81 @@
+{
+ "schema": "web.capture.v1",
+ "fetcher_version": "1.0.0",
+ "requested_url": "http://www.b2b-network.test/products/es-48p",
+ "started_at": "2026-10-06T11:42:32.543Z",
+ "clock": "UTC",
+ "outcome": "captured",
+ "final_url": "http://www.b2b-network.test/products/es-48p",
+ "http": {
+  "status": 200,
+  "content_type": "text/html; charset=utf-8",
+  "content_length": 1253,
+  "headers": {
+   "connection": "close",
+   "content-type": "text/html; charset=utf-8",
+   "date": "Tue, 06 Oct 2026 11:42:32 GMT",
+   "transfer-encoding": "chunked"
+  }
+ },
+ "body_sha256": "362b498353e6bdc6160247d2d7592c857df19cb54ec5e262dc3690ba9c70fb11",
+ "snapshot_sha256": "76b49398b2d039b929667374b6f7c19558692cf113d75942eafcf0ed5c6e6871",
+ "robots": {
+  "url": "http://www.b2b-network.test/robots.txt",
+  "status": 200,
+  "allowed": true,
+  "rule": "",
+  "group": "*",
+  "sha256": "34f61f3e3fedb0174b3a1ea8da425f6a350747318c9f08d92dde2599d979d06d"
+ },
+ "page_rules": [],
+ "hosts": {
+  "named": "www.b2b-network.test",
+  "address": "93.184.215.14",
+  "reached": [
+   "www.b2b-network.test"
+  ],
+  "not_opened": []
+ },
+ "bytes": {
+  "document": 1253,
+  "transfer": 1253,
+  "transfer_capped": false
+ },
+ "page": {
+  "width": 1280,
+  "height": 900,
+  "screenshot_height": 900,
+  "lang": "th",
+  "markup_truncated": false,
+  "text_truncated": false
+ },
+ "counts": {
+  "shown_blocks": 7,
+  "shown_characters": 301,
+  "struck_blocks": 0,
+  "hidden_pieces": 0,
+  "attributes": 0,
+  "comments": 0,
+  "structured": 0,
+  "meta": 1
+ },
+ "files": {
+  "hidden.json": {
+   "sha256": "243b394fabd315527225a80dfbffa849369f2b092a90c5f911335105d2c9040c",
+   "bytes": 185
+  },
+  "page.html": {
+   "sha256": "5b51e69b4d89e51c98b9488243accb8fd5c5f644df2d8edaca03b1ec6dea5608",
+   "bytes": 1252
+  },
+  "screenshot.jpg": {
+   "sha256": "c5a2e06d0c54c5693cc801fafb30d21c87a4a629b441ba379026be3d5a0c0153",
+   "bytes": 38743
+  },
+  "text.json": {
+   "sha256": "1de0c3ba604c749ff4e038a100523b18a7a0fe7cd4cd6f832a8b905b2dbe3792",
+   "bytes": 1324
+  }
+ },
+ "finished_at": "2026-10-06T11:42:33.338Z"
+}

@@ -1,0 +1,35 @@
+[tool.pytest.ini_options]
+# Bare `pytest` must never collect outside tests/: the live-probe script
+# test_dlp_prompt_live.py sys.exit()s at import without a real API key,
+# which INTERNALERRORs collection (broke CI backend-test and `make
+# test-unit`). Explicit paths on the command line still work as usual.
+testpaths = ["tests"]
+# Each test gets its own event loop (the library's own recommendation and
+# its future default). Without this, async fixtures share a loop across a
+# wider scope, and anything cached on the first loop — notably the shared
+# redis.asyncio connection pool — outlives it and raises "Event loop is
+# closed" for whoever runs next.
+asyncio_default_fixture_loop_scope = "function"
+# FIX57 — the test ORDER is pinned, and so is the seed that produces it.
+#
+# pytest-randomly shuffles collection, which is the only reason this
+# suite's shared-state bugs surface at all; its default seed is derived
+# from the clock, so the order — and therefore which order-dependent
+# tests fail — changed on every run. That is what made the release gate
+# unusable: FIX56.1 measured two orderings and got two different sets of
+# "new" failures (8 and 15), every one of which passed in isolation.
+#
+# A fixed seed keeps the shuffle and makes it repeatable, so the gate
+# compares like with like. It also removes the crash that made the lane
+# unreadable: _reseed() adds a CRC32 offset to this seed and passes the
+# sum, unclamped, to thinc's numpy seeder, which rejects anything at or
+# above 2**32. From 0 every offset stays in range.
+#
+# Changing this number reshuffles the suite and will move which
+# order-dependent tests fail. Do not touch it without regenerating
+# tests/known_failing.txt in the same commit.
+addopts = "--randomly-seed=0"
+# No --ignore list. Six doc/inventory test files were excluded here; all
+# six pass. test_dlp_docs.py needed examples/ mounted into the dev
+# container (docker-compose.override.yml), not disabling -- it had been
+# failing on a missing path, not on drift.

@@ -1,0 +1,269 @@
+{
+ "schema": "e2.fixtures.v1",
+ "fixtures": [
+  {
+   "id": "d01_clean_full_tax_invoice",
+   "class": "digital",
+   "purpose": "clean digital full tax invoice: every field read from the text layer, zero questions",
+   "files": [
+    "docs/d01_clean_full_tax_invoice.pdf"
+   ],
+   "sha256": {
+    "docs/d01_clean_full_tax_invoice.pdf": "e35632e9e0b4d02da020424db8e4a1e61ba0c6380be7e070074e1bf0e86c00d3"
+   }
+  },
+  {
+   "id": "d02_classic_hyphen_taxid",
+   "class": "digital",
+   "purpose": "second clean layout: the full company name (the modern layouts print บจก.), hyphenated tax IDs, DD/MM/BE date, branch 00002, header discount",
+   "files": [
+    "docs/d02_classic_hyphen_taxid.pdf"
+   ],
+   "sha256": {
+    "docs/d02_classic_hyphen_taxid.pdf": "f278942d8e6bfe9d47f0fe8b7ecf8b23111642c22fc9530ea67241c0a97e1e9f"
+   }
+  },
+  {
+   "id": "d03_abbreviated_retail",
+   "class": "digital",
+   "purpose": "abbreviated tax invoice: no buyer is normal for this type (not a failure); VAT included in prices",
+   "files": [
+    "docs/d03_abbreviated_retail.pdf"
+   ],
+   "sha256": {
+    "docs/d03_abbreviated_retail.pdf": "e8c7884b5152345fbbf2094c615dc24850044311fd5a1b0f844d41a9ac050b02"
+   }
+  },
+  {
+   "id": "d04_receipt_no_vat_no_lines",
+   "class": "digital",
+   "purpose": "receipt only: no VAT line, no line-item table (one amount in the text), seller not VAT-registered",
+   "files": [
+    "docs/d04_receipt_no_vat_no_lines.pdf"
+   ],
+   "sha256": {
+    "docs/d04_receipt_no_vat_no_lines.pdf": "b23a46b85ea284ae689d83713a8ea43c2c8d18fe5fb1ba6a5221626e40c617f7"
+   }
+  },
+  {
+   "id": "d05_wht_service_invoice",
+   "class": "digital",
+   "purpose": "service invoice with withholding tax 3 % and net payable; หจก.; tax IDs with spaces",
+   "files": [
+    "docs/d05_wht_service_invoice.pdf"
+   ],
+   "sha256": {
+    "docs/d05_wht_service_invoice.pdf": "43746ac18631a15d1d8b9790044ad8407df6d449da17e84dc9faf3e4e75cf41e"
+   }
+  },
+  {
+   "id": "d06_thai_digits_bmj",
+   "class": "digital",
+   "purpose": "Thai digits for every number and date, abbreviated month with a 2-digit BE year, บมจ.",
+   "files": [
+    "docs/d06_thai_digits_bmj.pdf"
+   ],
+   "sha256": {
+    "docs/d06_thai_digits_bmj.pdf": "99b4bd6482c8e17583a15dd3e7335fc5c1977a57a2b1a6151313c6312707decf"
+   }
+  },
+  {
+   "id": "d07_multipage",
+   "class": "digital",
+   "purpose": "two pages, the item table continues on page 2 and the totals are only on page 2",
+   "files": [
+    "docs/d07_multipage.pdf"
+   ],
+   "sha256": {
+    "docs/d07_multipage.pdf": "d103a8e58bfb42018d1a8a6239d868ebd9a88389a381b9d9d3b05e320d15b93a"
+   }
+  },
+  {
+   "id": "d08_vat_rounding_edge",
+   "class": "digital",
+   "purpose": "VAT rounding edge: 7 % of 1,234.50 is 86.415; the software truncated to 86.41 — within the 0.01 tolerance, not a failure",
+   "files": [
+    "docs/d08_vat_rounding_edge.pdf"
+   ],
+   "sha256": {
+    "docs/d08_vat_rounding_edge.pdf": "5744c3103be29593e02d8c3da83ad16674cdff6369811ac04024112f1c55e673"
+   }
+  },
+  {
+   "id": "d09_billing_note_not_tax_invoice",
+   "class": "digital",
+   "purpose": "an invoice/bill that is not a tax invoice: document type drives the rules (no input-VAT claim, no failure)",
+   "files": [
+    "docs/d09_billing_note_not_tax_invoice.pdf"
+   ],
+   "sha256": {
+    "docs/d09_billing_note_not_tax_invoice.pdf": "42f189a88a220c3dfec04ca195ac33e9c523e549a12f2a1760e2b7cff19dce5a"
+   }
+  },
+  {
+   "id": "e01_etax_pdf_embedded_xml",
+   "class": "etax_pdf",
+   "purpose": "e-Tax Invoice PDF carrying the ETDA XML as an embedded file: the XML is the source, the text layer confirms it",
+   "files": [
+    "docs/e01_etax_pdf_embedded_xml.pdf"
+   ],
+   "sha256": {
+    "docs/e01_etax_pdf_embedded_xml.pdf": "35bbd448c0098a049feebceff6452ed1d85d844b88b4377a6ed127028dcbfbd7"
+   }
+  },
+  {
+   "id": "e02_etax_xml_receipt",
+   "class": "etax_xml",
+   "purpose": "e-Receipt/e-Tax Invoice delivered as the ETDA XML file alone",
+   "files": [
+    "docs/e02_etax_xml_receipt.xml"
+   ],
+   "sha256": {
+    "docs/e02_etax_xml_receipt.xml": "75bebc2dbc97efeb1d8689b07e1f489917b13981a30378cfe3712bf9e34cf2f4"
+   }
+  },
+  {
+   "id": "f01_line_total_mismatch",
+   "class": "digital",
+   "purpose": "line 2 prints 1,530.00 for 3 × 450.00 (1,350.00): the line check fails and asks, never picks a number",
+   "files": [
+    "docs/f01_line_total_mismatch.pdf"
+   ],
+   "sha256": {
+    "docs/f01_line_total_mismatch.pdf": "71db528fbcc2480fdd984964dae91c1cbb356b25a7e2aaa0eb51521d7addb0b4"
+   }
+  },
+  {
+   "id": "f02_vat_mismatch",
+   "class": "digital",
+   "purpose": "VAT printed 750.00 on a 10,000.00 base (7 % is 700.00): the VAT check fails and asks",
+   "files": [
+    "docs/f02_vat_mismatch.pdf"
+   ],
+   "sha256": {
+    "docs/f02_vat_mismatch.pdf": "8d53118f0da44439126ea72c55d580fab7740e9eaf3db0f4085f0e6d35e29395"
+   }
+  },
+  {
+   "id": "f03_duplicate_of_d01",
+   "class": "digital",
+   "purpose": "the same invoice as d01 sent again as a copy (different file bytes, same supplier tax ID + number + date + total)",
+   "files": [
+    "docs/f03_duplicate_of_d01.pdf"
+   ],
+   "sha256": {
+    "docs/f03_duplicate_of_d01.pdf": "aa3f4e3e5ed5d547fbd6f82e92733e4cf3e5fb2d68e279211da79db17a539c55"
+   }
+  },
+  {
+   "id": "f04_wrong_buyer",
+   "class": "digital",
+   "purpose": "a full tax invoice made out to another company's tax ID: input VAT cannot be claimed, ask",
+   "files": [
+    "docs/f04_wrong_buyer.pdf"
+   ],
+   "sha256": {
+    "docs/f04_wrong_buyer.pdf": "cc6b30147cbe42e5326011ce4b25fed374bbf5f038e0c4c61771ef08fe59d36d"
+   }
+  },
+  {
+   "id": "f05_missing_seller_tax_id",
+   "class": "digital",
+   "purpose": "a full tax invoice with no seller tax ID: a required field for this document type is missing",
+   "files": [
+    "docs/f05_missing_seller_tax_id.pdf"
+   ],
+   "sha256": {
+    "docs/f05_missing_seller_tax_id.pdf": "6c3f36d24808db72a4228ab665a8073a330c4d6e71bb60344e899f5cd0ff9023"
+   }
+  },
+  {
+   "id": "f06_invalid_tax_id_checksum",
+   "class": "digital",
+   "purpose": "a 13-digit seller tax ID whose check digit is wrong: the format check fails and asks",
+   "files": [
+    "docs/f06_invalid_tax_id_checksum.pdf"
+   ],
+   "sha256": {
+    "docs/f06_invalid_tax_id_checksum.pdf": "8ee7120ec4cb2b50c4494a8ea5c29881f259987a17d74bf03dc7eb65eae227f8"
+   }
+  },
+  {
+   "id": "f07_foreign_currency_usd",
+   "class": "digital",
+   "purpose": "a USD invoice from a foreign supplier: the THB amount needs an exchange-rate source, ask",
+   "files": [
+    "docs/f07_foreign_currency_usd.pdf"
+   ],
+   "sha256": {
+    "docs/f07_foreign_currency_usd.pdf": "972097f2b66a6e4a5293b8ca439875fbfe85ed9127af775a7295795675a85ceb"
+   }
+  },
+  {
+   "id": "p01_photo_crumpled_thermal",
+   "class": "photo",
+   "purpose": "phone photo of a crumpled thermal receipt: triage only (vendor/date/total/VAT/tax ID); low confidence becomes a question, never a number",
+   "files": [
+    "docs/p01_photo_crumpled_thermal.jpg"
+   ],
+   "sha256": {
+    "docs/p01_photo_crumpled_thermal.jpg": "eae3c30465091a9df24318e5305f972e7a81b881277ec30388a046de1ae221dc"
+   }
+  },
+  {
+   "id": "p02_photo_flat_receipt",
+   "class": "photo",
+   "purpose": "a flat, well-lit phone photo of a receipt: still triage only, questions allowed but numbers must be right or asked",
+   "files": [
+    "docs/p02_photo_flat_receipt.jpg"
+   ],
+   "sha256": {
+    "docs/p02_photo_flat_receipt.jpg": "793f46ce718af15968a14bb347090f49725f51a999ce26274e6721d102fd5ddd"
+   }
+  },
+  {
+   "id": "s01_scan300_full_tax_invoice",
+   "class": "scan300",
+   "purpose": "office-quality 300 DPI scan of d01: OCR path",
+   "files": [
+    "docs/s01_scan300_full_tax_invoice.pdf"
+   ],
+   "sha256": {
+    "docs/s01_scan300_full_tax_invoice.pdf": "a21da51c6b860a3e7ab39e74c37c462a0192f0c5e425925945cd3e7887ef09d1"
+   }
+  },
+  {
+   "id": "s02_scan200_full_tax_invoice",
+   "class": "scan200",
+   "purpose": "office-quality 200 DPI scan of d01",
+   "files": [
+    "docs/s02_scan200_full_tax_invoice.pdf"
+   ],
+   "sha256": {
+    "docs/s02_scan200_full_tax_invoice.pdf": "fc5daa8522dbace85a48f4b35aea504088f98ecfe946d6ea75863e985b9764bd"
+   }
+  },
+  {
+   "id": "s03_scan300_wht_invoice",
+   "class": "scan300",
+   "purpose": "300 DPI scan of the WHT invoice (Angsana New, spaces in tax IDs)",
+   "files": [
+    "docs/s03_scan300_wht_invoice.pdf"
+   ],
+   "sha256": {
+    "docs/s03_scan300_wht_invoice.pdf": "513aa461789e08726e1bc73b59b9ec098fd14a1948cde25ee12a2d1f9d9e6df3"
+   }
+  },
+  {
+   "id": "s04_scan200_classic",
+   "class": "scan200",
+   "purpose": "200 DPI scan of the classic layout (Tahoma, hyphenated tax IDs, discount)",
+   "files": [
+    "docs/s04_scan200_classic.pdf"
+   ],
+   "sha256": {
+    "docs/s04_scan200_classic.pdf": "62d68dfd4ee883cfc38da34b1a4f6b43eddcf2c413aab7c17056bf47a17d08b1"
+   }
+  }
+ ]
+}

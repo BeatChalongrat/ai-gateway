@@ -1,0 +1,221 @@
+# Agent Market — the execution plane, behind its own compose profile.
+#
+# NOT part of the default `up`: nothing here starts unless the profile is
+# named, and it runs as its own compose project so the core's tooling
+# (autoheal labels, ops-watch's project filter, build-images.sh) never sees
+# it. It joins the core network as an external one.
+#
+#   live:  docker compose -p sran-agent-market -f docker-compose.agent-market.yml --profile agent-market up -d
+#   test:  AM_NETWORK=sran-test_default AM_UPLOADS_VOLUME=sran-test_ts_chat_edge_uploads \
+#          docker compose -p sran-agent-market-test -f docker-compose.agent-market.yml --profile agent-market up -d
+#   stop:  docker compose -p sran-agent-market -f docker-compose.agent-market.yml --profile agent-market down
+#
+# Bulkheads (docs/agent-market/ARCHITECTURE.md):
+#   * own container with hard CPU/memory limits; every step runs in a fresh
+#     sandbox container (ai-gateway-sandbox, --network none, own limits);
+#   * own Postgres pool (AGENT_RUNNER_POOL_MAX_CONNS, application_name
+#     agent-runner) and its own queue lane (AGENT_RUNNER_SLOTS);
+#   * own model-gateway API key (AGENT_RUNNER_GATEWAY_API_KEY) — its own
+#     rate limit and spend, revocable on its own;
+#   * no autoheal label: a crash is restarted by `restart: unless-stopped`
+#     only, and the core's autoheal never touches it;
+#   * sees only the agent-market/ folder of the uploads volume (subpath).
+#   * PDF (and .xlsx recalculation) is LibreOffice in its own doc-converter
+#     container: no port, no volume, read-only root, and its only network is
+#     `converter` — internal (no route out) and shared with agent-runner alone.
+#   * AM12: the one container that reaches the public web is web-fetcher. It
+#     holds no key, no volume and no docker socket; agent-runner reaches it on
+#     `fetch` (internal, those two alone) and it goes out through `web`, which
+#     nothing else of the platform is on — it is not on the core network, so
+#     no core service has a name or an address it can use. agent-runner itself
+#     is on no network with a route to the web that it did not have before.
+name: sran-agent-market
+
+services:
+  agent-market-init:
+    # Creates the agent-market/ folder the runner's subpath mount needs, then exits.
+    profiles: ["agent-market"]
+    image: alpine:3.20
+    command: ["sh", "-c", "mkdir -p /uploads/agent-market && echo ready"]
+    volumes:
+      - uploads:/uploads
+    restart: "no"
+    network_mode: none
+
+  agent-runner:
+    # memory guard (scripts/ops/live_memory.py): its turn when the Docker VM runs out
+    oom_score_adj: -500
+    profiles: ["agent-market"]
+    image: ai-gateway-agent-runner:${AM_RUNNER_TAG:-latest}
+    container_name: ${AM_CONTAINER_NAME:-sran-agent-runner}
+    restart: unless-stopped
+    depends_on:
+      agent-market-init:
+        condition: service_completed_successfully
+    environment:
+      - AGENT_MARKET_ENABLED=${AGENT_MARKET_ENABLED:-false}
+      - AGENT_RUNNER_DATABASE_URL=postgres://chatedge:${WEBCHAT_POSTGRES_PASSWORD:-chatedge_pass}@postgres-webchat:5432/sran_ai?sslmode=disable
+      - AGENT_RUNNER_POOL_MAX_CONNS=${AGENT_RUNNER_POOL_MAX_CONNS:-4}
+      - AGENT_RUNNER_SLOTS=${AGENT_RUNNER_SLOTS:-1}
+      - AGENT_RUNNER_MODEL_CONCURRENCY=${AGENT_RUNNER_MODEL_CONCURRENCY:-1}
+      - AGENT_RUNNER_YIELD_ACTIVE_TURNS=${AGENT_RUNNER_YIELD_ACTIVE_TURNS:-1}
+      - AGENT_RUNNER_YIELD_MAX_SECONDS=${AGENT_RUNNER_YIELD_MAX_SECONDS:-300}
+      - AGENT_SANDBOX_CPUS=${AGENT_SANDBOX_CPUS:-1.0}
+      - AGENT_SANDBOX_WALL_SECONDS=${AGENT_SANDBOX_WALL_SECONDS:-240}
+      - AGENT_RUNNER_SWEEP_SECONDS=${AGENT_RUNNER_SWEEP_SECONDS:-60}
+      - AGENT_RUNNER_SWEEP_GRACE_SECONDS=${AGENT_RUNNER_SWEEP_GRACE_SECONDS:-60}
+      - AGENT_RUNNER_GATEWAY_URL=${AGENT_RUNNER_GATEWAY_URL:-http://gateway:8080/v1}
+      - AGENT_RUNNER_GATEWAY_API_KEY=${AGENT_RUNNER_GATEWAY_API_KEY:-}
+      - AGENT_RUNNER_YIELD_URL=${AGENT_RUNNER_YIELD_URL:-http://backend:8080/ready}
+      - AGENT_MARKET_MODEL_PRIMARY=${AGENT_MARKET_MODEL_PRIMARY:-qwen3.8-27b-fp8}
+      - AGENT_MARKET_MODEL_FALLBACK=${AGENT_MARKET_MODEL_FALLBACK:-deepseek-v4-flash}
+      - AGENT_MARKET_SELF_HOSTED_MODELS=${AGENT_MARKET_SELF_HOSTED_MODELS:-qwen3.8-27b-fp8}
+      # AM2: reads page images of scans and photos — used only while it is in
+      # the self-hosted list above (documents never go to an outside provider).
+      - AGENT_MARKET_VISION_MODEL=${AGENT_MARKET_VISION_MODEL:-qwen3.8-27b-fp8}
+      - AGENT_MARKET_CREDITS_PER_USD=${USAGE_CREDITS_PER_USD:-3000000}
+      - STORAGE_BACKEND=${STORAGE_BACKEND:-local}
+      - FILE_STORAGE_ROOT=/app/data/uploads
+      - S3_BUCKET=${S3_BUCKET:-}
+      - S3_REGION=${S3_REGION:-}
+      - S3_ENDPOINT=${S3_ENDPOINT:-}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-}
+      - SANDBOX_IMAGE=${SANDBOX_IMAGE:-ai-gateway-sandbox:latest}
+      - SANDBOX_SECCOMP_PATH=/sandbox/seccomp.json
+      - SANDBOX_WORKDIR=/agent-sandbox-runs
+      - SANDBOX_HOST_WORKDIR=${AM_SANDBOX_HOST_DIR:-${PWD}/data/agent-sandbox-runs}
+      - SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-}
+      - AGENT_MARKET_CONVERTER_URL=${AGENT_MARKET_CONVERTER_URL:-http://doc-converter:8096}
+      # AM7: a person's reminders also go by e-mail once an admin set up the
+      # relay (admin-ui › Agent Market › อีเมล); the link in them points here.
+      - AGENT_MARKET_SMTP_PASSWORD=${AGENT_MARKET_SMTP_PASSWORD:-}
+      - AGENT_MARKET_WEB_URL=${WEB_CHAT_PUBLIC_URL:-https://localhost:3002/chat}
+      # AM12: a round on the web. The runner opens no page itself — it asks
+      # web-fetcher for one address at a time — and it searches through the
+      # model gateway's own /v1/search with the key above (the organisation's
+      # search provider is set in admin-ui; the runner holds no provider key).
+      - AGENT_MARKET_FETCHER_URL=${AGENT_MARKET_FETCHER_URL:-http://web-fetcher:8097}
+      - AGENT_MARKET_FETCH_TIMEOUT_SECONDS=${AGENT_MARKET_FETCH_TIMEOUT_SECONDS:-75}
+      - AGENT_MARKET_SEARCH_USD_PER_QUERY=${AGENT_MARKET_SEARCH_USD_PER_QUERY:-0.008}
+    volumes:
+      # The docker socket launches the per-step sandbox containers (the same
+      # privilege chat-edge holds for run_python); no model input reaches argv.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${AM_SANDBOX_HOST_DIR:-${PWD}/data/agent-sandbox-runs}:/agent-sandbox-runs
+      - ./services/chat-edge-api/sandbox/seccomp.json:/sandbox/seccomp.json:ro
+      - type: volume
+        source: uploads
+        target: /app/data/uploads/agent-market
+        volume:
+          subpath: agent-market
+    networks:
+      - core
+      - converter
+      - fetch
+    ports:
+      - "127.0.0.1:${AM_RUNNER_PORT:-28095}:8095"
+    deploy:
+      resources:
+        limits:
+          cpus: "${AM_RUNNER_CPUS:-1.0}"
+          memory: "${AM_RUNNER_MEMORY:-768m}"
+    labels:
+      sran.agent-market: "true"
+    stop_grace_period: 20s
+
+  doc-converter:
+    # memory guard (scripts/ops/live_memory.py): its turn when the Docker VM runs out
+    oom_score_adj: -300
+    # LibreOffice (+ poppler, Thai fonts) turning a finished .docx/.xlsx/.pptx
+    # into a PDF and recalculating an .xlsx (services/doc-converter). One
+    # conversion at a time, a fresh profile each, a wall-clock limit that kills
+    # the whole process group. Reachable only from agent-runner; no egress.
+    #   build: bash scripts/agent-market/build-converter.sh
+    profiles: ["agent-market"]
+    image: ai-gateway-doc-converter:${AM_CONVERTER_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      - CONVERT_TIMEOUT_SECONDS=${AM_CONVERT_TIMEOUT_SECONDS:-60}
+      - MAX_INPUT_BYTES=${AM_CONVERT_MAX_INPUT_BYTES:-26214400}
+    networks:
+      - converter
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 768m
+    pids_limit: 128
+    cpus: "${AM_CONVERTER_CPUS:-1.0}"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8096/health', timeout=3).status == 200 else 1)"]
+      interval: 15s
+      timeout: 4s
+      start_period: 30s
+      retries: 3
+    labels:
+      sran.agent-market: "true"
+    stop_grace_period: 10s
+
+  web-fetcher:
+    # memory guard (scripts/ops/live_memory.py): its turn when the Docker VM runs out
+    oom_score_adj: -300
+    # AM12: opens ONE public web page per request in a headless browser with
+    # a fresh profile, and answers with what a person would have seen on it
+    # (text, a picture, hashes, the fetch's own log) or with a refusal and its
+    # reason (services/web-fetcher). No key, no cookie kept, no volume; it
+    # refuses private, loopback, link-local and metadata addresses, the
+    # platform's own names, anything but http/https on the standard ports,
+    # sign-in and payment pages, downloads, pages over the size limit, and
+    # every host but the one named in the request (no redirect to another
+    # host, no link followed). AGENT_MARKET_ENABLED=false: it fetches nothing.
+    #   build: bash scripts/agent-market/build-fetcher.sh
+    profiles: ["agent-market"]
+    image: ai-gateway-web-fetcher:${AM_FETCHER_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      - AGENT_MARKET_ENABLED=${AGENT_MARKET_ENABLED:-false}
+      # names of the organisation's own public sites, comma-separated: never opened
+      - WEB_FETCHER_OWN_HOSTS=${AM_FETCHER_OWN_HOSTS:-}
+      - WEB_FETCHER_MAX_BYTES=${AM_FETCHER_MAX_BYTES:-10485760}
+      - WEB_FETCHER_TIMEOUT_MS=${AM_FETCHER_TIMEOUT_MS:-45000}
+    networks:
+      - fetch
+      - web
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: "${AM_FETCHER_MEMORY:-1536m}"
+    pids_limit: 512
+    cpus: "${AM_FETCHER_CPUS:-1.0}"
+    labels:
+      sran.agent-market: "true"
+    stop_grace_period: 10s
+
+volumes:
+  uploads:
+    external: true
+    name: ${AM_UPLOADS_VOLUME:-ai-gateway_chat_edge_uploads}
+
+networks:
+  core:
+    external: true
+    name: ${AM_NETWORK:-ai-gateway_default}
+  converter:
+    # agent-runner <-> doc-converter only. internal: no gateway, no route out,
+    # so a document can never make the converter fetch or send anything.
+    internal: true
+  fetch:
+    # agent-runner <-> web-fetcher only. internal: no route out, so the runner
+    # gains no way to the web; it can only ask the fetcher for one address.
+    internal: true
+  web:
+    # web-fetcher's way out to the public web, and nothing else is on it: the
+    # fetcher shares no network with the core services, the databases or the
+    # model gateway. (The test stack replaces this with a network that has no
+    # route out and holds stand-in sites: scripts/agent-market/test-web.yml.)
