@@ -2,7 +2,7 @@
 
 The admin API provides management and observability endpoints for gateway operators. All endpoints are under the `/admin` prefix.
 
-**Note:** Admin authentication (RBAC) is deferred to Phase 9. Currently all admin endpoints are open.
+**Source review: 2026-11-12.** Admin routes require an admin session and RBAC. The main router uses `require_admin_session`; cookie mutations also pass CSRF checks. Portal JWTs and public inference keys are not substitutes for the browser admin session. See `backend/app/api/deps.py`, `api/routes/admin.py` and `middleware/csrf.py`.
 
 ## Tenants
 
@@ -114,8 +114,4 @@ All admin endpoints use the unified error envelope:
 
 ## Known Limitations
 
-- No admin authentication/RBAC (deferred to Phase 9)
-- No tenant/project update or delete endpoints
-- No policy profile CRUD via admin API (profiles are code-defined)
-- Pagination only on tenants endpoint (others return all records up to limit)
-- Frontend admin-ui exists as stub — backend API is the primary admin interface
+This page is a compact subset, not a full route inventory. Provider key/endpoint management, policy CRUD, model discovery, sessions/accounts, usage/credits and other admin surfaces are implemented; `admin-ui` is an active application. Read the registered routers and schemas for exact methods, authorization and pagination rather than assuming every resource has the same CRUD contract.

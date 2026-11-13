@@ -1,5 +1,11 @@
 # DLP Architecture
 
+Visual review (2026-11-13): the `ai_repair` mode of `edit_office_file` makes separately attributed gateway calls with `visual_review: true`. These require `media_pii_egress=allow` even when DLP is off; page pixels cannot be text-masked. Local tool classification does not exempt those gateway calls. See [data boundary](VISUAL_EDITOR.md#deployment-and-data-boundary).
+
+Tool classification update (2026-11-13): `edit_office_file`, `import_local_file` and `save_conversation_file` are LOCAL_EXECUTION, matching sandbox file operations; `video_job` is PLACEHOLDER_SAFE status/cancel control. Video creation still follows media prompt DLP/provider policy. See [editor/media contracts](OFFICE_EDITOR.md).
+
+Reference-image editing (2026-11-13) adds a raw-pixel path within the existing media channel: no external URLs, bounded inline still images, explicit tenant allow policy, and a raw-egress audit action. Prompt DLP does not OCR or mask these image pixels. See [Office/media review](OFFICE_MEDIA_PARITY.md).
+
 Data Loss Prevention (DLP) in the Secure AI Gateway scans request and response content for sensitive data, evaluates policy rules, and transforms content before it leaves or enters the gateway.
 
 ## Pipeline
@@ -138,19 +144,27 @@ Environment variables:
 
 ## Privacy Guarantee
 
-`DLPAuditEntry` is the only DLP type that reaches logs or persistence. It contains:
+The privacy-safe `DLPAuditEntry` event contains:
 - `detector_name`, `entity_type`, `category`, `severity`, `action`, `field_path`, `direction`
 
-It does **not** contain `matched_text`. The raw sensitive value exists only in transient memory during the request lifecycle and is never written to any log, database, or external system.
+It does **not** contain `matched_text`. This describes that audit event, not all
+platform storage. Original uploads, conversation records and encrypted request
+traces have separate storage/retention rules; see `DATA_RETENTION_PLAN.md`.
 
 ## Intentional raw egress (Phase 9; extended by FIX 2)
 
-Four channels — and only four — send user content to third-party providers **without identity-PII masking**, because masking would break the feature itself:
+As of 2026-11-12, five channels are registered in `RAW_EGRESS_ALLOWED`.
+The first four send content without identity-PII masking for their specific
+functions; `agent_documents` uses the trusted-caller decision described below:
 
 - **Web search** (`POST /v1/search` → Tavily/Brave/SerpAPI/Google/Bing): the real query is required for useful results. A masked query ("prognosis for `<PERSON_1>`") returns garbage.
 - **Media generation** (`/v1/images|videos|audio/generations` + the chat-edge media tool path → OpenAI/Replicate/ElevenLabs): the prompt is the creative intent; masking a name yields the wrong image/voice/video.
 - **Embeddings** (`POST /v1/embeddings` → OpenAI; used by knowledge-base indexing and RAG retrieval): the embedding vector of a masked chunk ("notes about `<PERSON_1>`") no longer matches the real query, so retrieval breaks. Covers **both** the KB *document content* on index and the *search query* on retrieval. *(FIX 2 — the gateway now fronts this so chat-edge no longer calls OpenAI directly.)*
 - **Voice** (`POST /v1/voice/transcribe` + `/v1/voice/synthesize` → OpenAI Whisper/TTS): STT needs the real audio; TTS needs the real text to speak. *(FIX 2 — likewise gateway-fronted.)*
+- **Agent documents** (`agent_documents`): an explicitly trusted caller with
+  masking off and permission for documents to leave can send text as typed.
+  Its credential check/audit behavior is in `dlp/in_house.py` and the dedicated
+  section below; it does not use the four-channel scan flow unchanged.
 
 This pass-through is deliberate and bounded:
 
@@ -164,7 +178,7 @@ Enterprise/PDPA customers should be shown this section as the disclosure they co
 
 ## Masking follows where the data goes — an in-house model is not egress
 
-Masking exists to stop data leaving the organisation. A request that cannot leave is not masked; every other request is masked as described above. The rule lives in one module, `app/services/dlp/in_house.py`, and it is **not** a fifth raw-egress channel: nothing reaches a third party.
+Masking exists to stop data leaving the organisation. A request that cannot leave is not masked; every other request is masked as described above. The rule lives in one module, `app/services/dlp/in_house.py`, and it is **not** a third-party raw-egress channel: nothing reaches a third party.
 
 A chat-completion request reaches its model **as typed** only when all of these hold:
 
@@ -213,16 +227,16 @@ Enterprise/PDPA customers should be shown this section with the one on intention
 
 ## Code interpreter sandbox (Phase 13) — an internal trust boundary
 
-The gateway runs a code interpreter: the model can author Python (the `run_python` tool) and the plan-exec workspaces (Excel/Doc/Pptx) run generated code against the user's own files. Unlike the two raw-egress channels above, **this is not an egress channel at all** — it is an *internal trust boundary*, the same class as the NER sidecar. The interpreter processes RAW user data, but nothing it touches can reach a third party from inside the boundary.
+The gateway runs a code interpreter: the model can author Python (the `run_python` tool) and the plan-exec workspaces (Excel/Doc/Pptx) run generated code against the user's own files. Unlike the registered raw-egress channels above, **this is not an egress channel at all** — it is an *internal trust boundary*, the same class as the NER sidecar. The interpreter processes RAW user data, but nothing it touches can reach a third party from inside the boundary.
 
 The boundary is enforced by the sandbox, not by convention. Every run is a per-run ephemeral `docker run --rm` of the dedicated `ai-gateway-sandbox` image, launched by trusted Go in chat-edge (`services/chat-edge-api/internal/sandbox/sandbox.go`) with a fixed lockdown flag set — no model input ever reaches the `docker run` argv:
 
 1. **No network egress — proven at two layers.** The container is launched with `--network none` (no route to postgres/redis/gateway/internet), and the seccomp profile (`services/chat-edge-api/sandbox/seccomp.json`) is default-deny (`SCMP_ACT_ERRNO`) with **every networking syscall removed** — `socket`/`connect`/`bind`/`listen`/`accept`/`sendto`/`recvfrom`/… are absent, so model-authored code cannot even create a socket. The raw user data inside the interpreter has no path out.
 2. **No secrets in the boundary.** The container inherits none of chat-edge's env — no API keys, DB strings, or provider credentials cross into the code that runs on user data (`--cap-drop ALL`, `--user 65534:65534`, `--security-opt no-new-privileges`, read-only rootfs, resource caps).
-3. **Results reach a provider ONLY through the masked completion pipeline.** The interpreter's stdout and produced artifacts come back to chat-edge, are surfaced to the user, and on the next turn are fed to the model as ordinary conversation content — which means they pass through the same DLP mask → guardrail → dispatch pipeline (`orchestrator.py`) as any other message before any provider adapter sees them. The model's authored code and its stdout are DLP-masked like all other content; identity PII the code printed is masked before egress, and the credential/secret class blocks.
+3. **Results reach a provider through the gateway policy pipeline.** The interpreter's stdout and produced artifacts come back to chat-edge, are surfaced to the user, and on the next turn are fed to the model as ordinary conversation content — which means they pass through the same DLP mask → guardrail → dispatch pipeline (`orchestrator.py`) as any other message before any provider adapter sees them. On the standard text path, code/stdout are subject to DLP. Trusted-caller exceptions described above still apply; generated image bytes are not text-masked.
 4. **Machine-checked, both languages.** The no-third-party-network guarantee is pinned by a Go unit test (`internal/sandbox/sandbox_test.go::TestSandbox_DockerArgsAlwaysNoNetwork`) that fails if the arg builder ever emits a `--network` value other than `none`. The Python egress gate (`tests/test_dlp_egress_invariant.py`) cross-pins that proof and the seccomp no-socket property, and asserts the interpreter is correctly **absent** from `RAW_EGRESS_ALLOWED` — it is a no-egress path, not a raw one.
 
-**Why this is stronger than a typical hosted code interpreter (e.g. ChatGPT Advanced Data Analysis).** In ADA-style designs the sandbox runs the user's data and the *same* provider that hosts the sandbox also hosts the model — there is no masking layer between the analyzed data and the model provider, so raw data (names, IDs, secrets in a spreadsheet) is visible to the provider by construction. Here the sandbox is ours, network-isolated, and its output re-enters the model only after DLP masking. **Raw user data processed by the interpreter never reaches a third party through code execution**; the only provider-bound representation of that data is the masked completion.
+**Scope of the guarantee.** The sandbox cannot directly use the network. The gateway controls later transmission of its results; its text policy, authorized exceptions and image limitations remain relevant. Neither sandbox isolation nor this document establishes universal data redaction or product-wide superiority over another system.
 
 ## Adding a New Detector
 

@@ -1,5 +1,14 @@
 # Agent Market — architecture (AM1)
 
+**Current entry point, 2026-11-12:** this cumulative document starts with AM1
+and records later extensions below. The checkout now contains six packages:
+financial_report, bank_reconciliation, invoice_processing, expense_audit,
+po_matching and procurement. Ordinary Web Chat/Desktop Office tools have a
+different execution path; see [Office workflows](../OFFICE_WORKFLOWS.md).
+Generic chat now has its own optional Office converter wiring and overlay;
+Agent Market's converter alone does not activate it. See
+[Office templates](../OFFICE_TEMPLATES.md) for that separate delivery gate.
+
 Installable agents that work in their own chat workspace, ask the user back
 when the data is unclear, and deliver a report, a deck and tables. AM1 ships
 the spine and agent 9 (Financial Report + Executive Deck). Removal:

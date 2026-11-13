@@ -1,5 +1,7 @@
 # Provider Adapter Architecture
 
+Media readiness update (2026-11-13): GPT Image 1 and Sora 2 are retired in current public documentation. Migration 090 seeds GPT Image 2.6 Flare for images, preserves custom destination orders and disables retired Sora catalogue entries. Reference images use multipart edits, and unsupported edit fallbacks fail explicitly. Provider-key configuration and account access remain separate. See [research and activation](OFFICE_MEDIA_PARITY.md).
+
 The gateway routes LLM requests through provider adapters that translate between the gateway's canonical format and each upstream provider's API.
 
 ## Pipeline
@@ -24,6 +26,12 @@ Request
 ```
 
 ## Supported Providers
+
+Source review 2026-11-12: `ProviderDispatcher.adapters` registers **12** names:
+`openai`, `anthropic`, `openrouter`, `minimax`, `qwen`, `kimi`, `zai`, `google`,
+`groq`, `deepseek`, `xai`, `sranai`. Registration does not prove credentials,
+models or capacity are configured. Pending adapters are excluded from dispatch.
+The table below illustrates the first three; runtime configuration owns endpoints.
 
 | Provider | Adapter | Base URL | Auth Header | Format |
 |----------|---------|----------|-------------|--------|
@@ -82,8 +90,8 @@ app/
       error_handler.py    map_provider_error(), call_with_retry()
       model_registry.py   resolve_provider(), list_models()
       openai_adapter.py   OpenAIAdapter (chat + stream_chat)
-      anthropic_adapter.py AnthropicAdapter (chat only)
-      openrouter_adapter.py OpenRouterAdapter (chat only)
+      anthropic_adapter.py AnthropicAdapter (chat and streaming)
+      openrouter_adapter.py OpenRouterAdapter (chat and streaming)
 
     provider_dispatcher.py  Routes to adapter by provider_name
     routing_service.py      Model → provider routing logic

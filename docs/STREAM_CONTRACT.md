@@ -4,6 +4,12 @@
 from `chat-edge-api` or over the Electron bridge as `turn.event` from the
 desktop host. One envelope, one set of terminal events, one resume rule.
 
+**Office update, 2026-11-12:** local import and sandbox outputs reuse the existing
+attachment events and transcript linkage; no new SSE envelope was introduced.
+Imported files initially report extraction pending rather than falsely claiming
+completion. Tool-level file IDs and transfer semantics are specified in
+[Office workflows](OFFICE_WORKFLOWS.md).
+
 **Not in scope.** OpenAI-style background runs (a run that keeps going for
 hours after the client is gone). Our runs live and die inside one turn.
 This contract only makes a run **resumable without gaps or duplicates**,

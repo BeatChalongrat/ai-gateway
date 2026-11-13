@@ -1,5 +1,12 @@
 # รายการรอเจ้าของตัดสิน — รวมทุกรอบ (FIX33 → FIX51)
 
+Workspace UX follow-up (2026-11-13): shared Web Chat/Electron file tabs, selection rewrites, recoverable drafts with Undo/Redo, review-before-accept AI proposals, checkpointed jobs, a cross-chat file library, geometry controls and a 12-template gallery are described in [Artifact workspace](ARTIFACT_WORKSPACE.md). Model/provider tests remain mocked.
+
+> สถานะเอกสาร 2026-11-12: หน้านี้เป็นบันทึกการตัดสินใจสะสม ข้อสังเกตที่มีวันที่
+> และรายการที่ปิดแล้วเป็นหลักฐานตามช่วงเวลานั้น ไม่ใช่ผลตรวจระบบที่กำลังรันใหม่
+> ความสามารถ Office/ไฟล์ในเครื่องและช่องว่างปัจจุบันอยู่ใน
+> [Office workflows](OFFICE_WORKFLOWS.md).
+
 รวบจาก `FIX33`, `FIX33_1`, `FIX34`, `FIX34_1`, `FIX35`, `FIX36`, `FIX37`, `FIX38` + สิ่งที่เจอตอนตรวจหลัง merge (FIX39) + `docs/audit/2026-08-31-feature-parity/`
 **เรียงตามความคุ้ม** (ผลที่ได้ ÷ แรงที่ลง) ไม่ได้เรียงตามรอบ · อัปเดต 2026-09-01 หลัง FIX40 — `main` = `feat/shell-phase1` = `fix40/overmask` = `6445210` (110 commits นำหน้า `gitlab/main`, **ยังไม่ push**)
 

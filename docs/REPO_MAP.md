@@ -1,5 +1,7 @@
 # Repository map
 
+Office/media implementation map: `services/chat-edge-api/scripts/motion_templates.py` (three MP4 starters), `backend/app/services/media_gen/image_inputs.py` (reference validation), `services/chat-edge-api/internal/service/image_sources.go` and `apps/desktop/src/main/image-sources.ts` (conversation ownership). [Current comparison and readiness](OFFICE_MEDIA_PARITY.md).
+
 What is tracked is what a person who cloned this repository needs to build, run, deploy, operate or
 understand the system. Working notes, per-round probes, result folders and reports stay on the
 author's machine: `.gitignore` names those kinds, and `scripts/gate/tracks.py` (the gate's `tracks`
@@ -17,17 +19,22 @@ words where it is cited, never by a path a clone cannot follow.
   `agent-sandbox`, `kb-models`.
 - `apps/web-chat/` — the chat app (Next.js); `apps/desktop/` — the Electron desktop app that hosts it.
 - `admin-ui/` — the admin console (Next.js); `portal/` — the user portal (Next.js).
-- `SranDesktop/` — the earlier .NET 8 WPF desktop client (not shipped; CI no longer builds it).
+- `SranDesktop/` — legacy WPF UI plus the .NET ToolsSidecar and BrowserHost still packaged with Electron; the WPF UI is not the shipped client.
 - `dlp-sidecar/`, `rate-limiter/` (Rust), `log-worker/` (Go) — sidecars of the gateway.
 - `infra/` — Caddy, Postgres, pgbouncer, Prometheus, Grafana, backup, nginx, k8s, Terraform.
 - `scripts/` — see below. `tools/loadtest/` — the load-test kit. `mock/` — the mock provider.
 - `examples/` — sample requests and policies. `tests/fixtures/` — a shared corpus. `releases/` — the
   desktop update manifest (`latest.json`, live).
-- `docker-compose*.yml` — the stacks: live (`docker-compose.yml` + `webchat.yml` + `agent-market.yml`),
-  dev, prod, sandbox, test stack. `Makefile`, `.env.example`, `.gitlab-ci.yml`, `.github/workflows/ci.yml`.
+- `docker-compose*.yml` — mutually exclusive base (`docker-compose.yml`) and standalone
+  webchat shapes, with compatible prod/sandbox/Agent Market/Office overlays and a test stack.
+  The base and webchat files must not be merged. `Makefile`, `.env.example`, CI definitions.
 - `README.md`, `ARCHITECTURE.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `LICENSE`.
 
 ## docs/
+
+- Start here: `DOCUMENTATION_INDEX.md` (scope/currentness) and `OFFICE_WORKFLOWS.md`
+  (Web Chat/Desktop Office capabilities, public Claude comparison, transfer contract and tests).
+- `OFFICE_TEMPLATES.md` — shared starters, typed data and converter-backed delivery checks.
 
 - Architecture and design: `ARCHITECTURE_OVERVIEW.md`, `SYSTEM_DESIGN.md`, `API_DESIGN.md`,
   `PUBLIC_API.md`, `ADMIN_API.md`, `ROUTING_ARCHITECTURE.md`, `ROUTING_STRATEGY.md`,

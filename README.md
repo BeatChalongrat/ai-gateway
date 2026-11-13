@@ -1,8 +1,20 @@
 # SRAN AI Gateway
 
+Workspace UX (2026-11-13): [shared editing/recovery/review/library/template flow](docs/ARTIFACT_WORKSPACE.md) is implemented for Web Chat and Electron with mocked-provider acceptance tests. Deploy migration 051 and rebuilt API, sandbox and clients together.
+
+Visual editor follow-up (2026-11-13): Web Chat/Electron now share direct paragraph/text-box editing, native PDF text replacement, image controls, immutable revisions and bounded AI review/correction for Word/PPT/images. See [implementation, configuration and limits](docs/VISUAL_EDITOR.md) and [editor/video contracts](docs/OFFICE_EDITOR.md). Source changes require rollout; no live provider API was tested.
+
+Office/image/video follow-up (2026-11-13): reference-image edits on Web/Desktop, three editable MP4 motion templates, current image-model defaults and server-enforced video cost confirmation. See the [detailed capability review](docs/OFFICE_MEDIA_PARITY.md) for research, deployment steps, tests and remaining gaps.
+
+Source documentation reviewed **2026-11-12**. Start with the
+[documentation index](docs/DOCUMENTATION_INDEX.md) for current references and
+[Office/local-file workflows](docs/OFFICE_WORKFLOWS.md) for the Web Chat and
+Desktop comparison, implemented changes, tests and remaining gaps.
+
 A multi-tenant AI platform whose core is a **DLP masking gateway**: PDPA-aware
-scanning masks sensitive values before any request reaches a third-party LLM and
-restores them in the response. Around that core it adds an agentic desktop app,
+scanning masks detected sensitive text on the standard completion path and
+restores it in the response. Explicit raw-egress channels and image limitations
+are documented below. Around that core it adds an agentic desktop app,
 a code interpreter, OAuth connectors, per-user MCP workspaces, chat + KB-RAG,
 web search, and image/video/audio generation.
 
@@ -22,15 +34,17 @@ routing, dispatch, auth, and logging.
 ```
 HTTP client ──► Go gateway :8080 ──► FastAPI backend (internal :8080 / host :8081)
  (SDK, curl,     PUBLIC ENTRY        DLP mask ─► route ─► provider dispatch ─► restore
-  web-chat,      auth · proxy        (OpenAI / Anthropic / 9 others, or mock :9090)
+  web-chat,      auth · proxy        (OpenAI / Anthropic / 10 others, or mock :9090)
   desktop)
 ```
 
-The LLM never sees raw sensitive values — only neutral mask tokens. The reply is
-restored to the caller with the originals in place. See
+On the standard masked text path, the model receives neutral mask tokens and
+the reply is restored for the caller. This is not a guarantee for image bytes
+or explicitly authorized unmasked paths. See
 [ARCHITECTURE.md §2](./ARCHITECTURE.md) for the full pipeline and
 [docs/DLP_ARCHITECTURE.md](./docs/DLP_ARCHITECTURE.md) for the masking invariant,
-the two intentional raw-egress channels (web search + media), and the code-
+the five registered raw-egress channels (search, media, embeddings, voice,
+agent documents), and the code-
 interpreter sandbox trust boundary.
 
 ---
@@ -44,11 +58,11 @@ interpreter sandbox trust boundary.
 - **backend** (FastAPI, host `:8081`) — DLP, routing, dispatch, auth, logging
 - **chat-edge-api** (Go, `:4000`) — chat, memory, KB/RAG, files, search, media,
   code interpreter *(desktop profile)*
-- **mcp-gateway** (Go, `:3200`) — per-user MCP servers + OAuth connectors
+- **mcp-gateway** (Node.js/Express, `:3200`) — per-user MCP servers + OAuth connectors
   *(desktop profile)*
 - **ner-service** (`:8001`) — spaCy/Presidio NER for DLP
 - **dlp-sidecar** (Rust), **rate-limiter** (Rust), **log-worker** (Go) —
-  gRPC sidecars, each **off by default**, flip on by env flag, fail open to the
+  gRPC sidecars, each **off by default**, flip on by env flag, fall back to the
   Python/in-process path
 - **postgres** (pgvector) + **redis 7** (auth'd) — internal only
 - **prometheus** `:9091` / **grafana** `:3100` — observability
@@ -57,7 +71,17 @@ interpreter sandbox trust boundary.
 **Frontends / clients** — three Next.js apps: **admin-ui** `:3000`,
 **portal** `:3001`, **web-chat** `:3002` (`apps/web-chat/`); the desktop app that
 ships is `apps/desktop/` (Electron, hosting the web chat). `SranDesktop/` is the
-earlier .NET 8 WPF client — kept as code, not shipped, not built by CI.
+earlier .NET WPF UI; its ToolsSidecar and BrowserHost components are still used
+by Electron. The WPF window itself is not the current shipped client.
+
+Office workflows use `chat-edge-api` and its sandbox. Desktop can import a
+supported file from a granted folder, edit its original bytes through
+`run_python(files=[file_id])`, attach the output and save a new local copy.
+Web Chat supports uploaded files and downloads; it does not remotely control
+Desktop's folders. Both clients share [12 Office templates](docs/OFFICE_TEMPLATES.md).
+The optional Office overlay adds LibreOffice recalculation, formula-error checks
+and page rendering to Python outputs and plan cards. Exact Office fidelity is
+not a universal guarantee; see the [capability matrix](docs/OFFICE_WORKFLOWS.md).
 
 ---
 
@@ -250,7 +274,7 @@ Three surfaces, one enforcement point:
 |---|---|
 | **Portal** (`:3001`) | NextAuth → Google → the id_token is re-verified by the backend (`POST /portal/auth/oauth/verify`, JWKS + `aud` pin) → HttpOnly cookies |
 | **Web chat** (`:3002`) | No sign-in of its own — rides the portal's HttpOnly cookie session |
-| **Desktop** (WPF) | System browser → server-side PKCE (`GET /portal/auth/oauth/start?client=desktop`) → backend exchanges the code (client secret never ships in the app) → one-time **nonce-bound ticket** via the `sran://` deep link → `POST /portal/auth/oauth/desktop/exchange` returns the token pair (stored via DPAPI) |
+| **Desktop** (Electron) | System browser → server-side PKCE (`GET /portal/auth/oauth/start?client=desktop`) → backend exchanges the code → nonce-bound ticket through `sran://` → desktop exchange returns the token pair; the host protects credentials |
 
 **Email+password is disabled system-wide** by `PASSWORD_LOGIN_ENABLED=false`
 (Phase 3 cutover): `POST /portal/auth/login`, `/signup`, and
@@ -343,17 +367,17 @@ ai-gateway/
 ├── services/
 │   ├── gateway/            # Go public API gateway (:8080)
 │   ├── chat-edge-api/      # Go chat/RAG/files/search/media/code-interpreter
-│   └── mcp-gateway/        # Go per-user MCP + OAuth connectors
+│   └── mcp-gateway/        # Node.js/Express per-user MCP + OAuth connectors
 ├── backend/                # FastAPI backend (DLP, routing, dispatch, logging)
 │   ├── app/services/dlp/   # detectors/, classifier, transformer, egress_policy
 │   ├── app/services/policy/
 │   ├── app/services/providers/   # 11 adapters
-│   ├── migrations/versions/      # alembic, latest 064
+│   ├── migrations/versions/      # Alembic, through 090 in this checkout
 │   └── ner_service/        # spaCy/Presidio NER (own image)
 ├── admin-ui/               # Next.js admin (:3000)
 ├── portal/                 # Next.js customer portal (:3001)
 ├── apps/web-chat/          # Next.js web chat (:3002)
-├── SranDesktop/            # earlier .NET 8 WPF desktop client (not shipped, not built by CI)
+├── SranDesktop/            # legacy WPF UI + still-used .NET ToolsSidecar/BrowserHost
 ├── dlp-sidecar/            # Rust DLP gRPC sidecar
 ├── rate-limiter/           # Rust rate-limit gRPC sidecar
 ├── log-worker/             # Go log-writer gRPC sidecar

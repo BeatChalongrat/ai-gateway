@@ -1,5 +1,11 @@
 # Agent Market — operations (AM1b, AM2, AM3)
 
+**2026-11-12 cross-reference:** shared Office generators now preserve Word
+template defaults and support ordered PPTX edits. Generator action exceptions
+return failure instead of successful partial output. The Python lane also runs
+the real-file Office regressions. See [Office workflows](../OFFICE_WORKFLOWS.md);
+this source update does not change the deployed runner or converter image.
+
 What runs, where it is bounded, how you see it, and how to take it out.
 Removal of the code: `REMOVAL.md`. Design: `ARCHITECTURE.md`.
 
