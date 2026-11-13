@@ -536,6 +536,10 @@ async def chat_completions(
       log finalizers still run.
     Every early return or raise inside the pipeline releases the slot.
     """
+    if payload.visual_review:
+        from app.services.dlp.visual_review import enforce_visual_review_policy
+        await enforce_visual_review_policy(payload, auth, session)
+
     from fastapi.responses import JSONResponse as _ArmourResponse
     from app.services.gateway import fallback_policy as _fb_opt
 

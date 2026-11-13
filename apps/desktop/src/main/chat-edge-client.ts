@@ -352,7 +352,8 @@ export class ChatEdgeClient {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ code, files: fileIds, ...(conversationId ? { conversation_id: conversationId } : {}) }),
-        signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
+        // Sandbox execution plus bounded Office recalculation/render review.
+        signal: AbortSignal.any([signal, AbortSignal.timeout(300_000)]),
       });
       if (!res.ok) {
         this.log.warn(`chat-edge POST /api/v1/code/run → HTTP ${res.status}`);
@@ -439,7 +440,7 @@ export class ChatEdgeClient {
   /** FIX3 §4: upload raw bytes (a scanned PDF the sidecar read + handed over) to
    * chat-edge for OCR. The host holds the session; the sidecar never does. Returns
    * the server file id, or null on failure. */
-  async uploadFileBytes(conversationId: string, bytes: Buffer, name: string, mime: string): Promise<string | null> {
+  async uploadFileBytes(conversationId: string, bytes: Buffer, name: string, mime: string, signal?: AbortSignal): Promise<string | null> {
     const token = this.accessToken();
     if (!token) return null;
     try {
@@ -449,7 +450,7 @@ export class ChatEdgeClient {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: form,
-        signal: AbortSignal.timeout(120_000),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000),
       });
       if (!res.ok) {
         this.log.warn(`chat-edge OCR upload → HTTP ${res.status}`);
@@ -473,13 +474,13 @@ export class ChatEdgeClient {
   /** FIX27: the bytes of an uploaded image, for the vision block. Bounded
    * (25 MB, 60 s); the presigned-S3 307 is followed by fetch, which drops the
    * Authorization header on the cross-origin hop. */
-  async downloadFileBytes(fileId: string): Promise<{ bytes: Buffer; mime: string } | null> {
+  async downloadFileBytes(fileId: string, signal?: AbortSignal): Promise<{ bytes: Buffer; mime: string } | null> {
     const token = this.accessToken();
     if (!token) return null;
     try {
       const res = await fetch(`${this.baseUrl}/api/v1/files/${encodeURIComponent(fileId)}/download`, {
         headers: { Authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(60_000),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000),
       });
       if (!res.ok) {
         this.log.warn(`chat-edge file download ${fileId} → HTTP ${res.status}`);
@@ -488,10 +489,28 @@ export class ChatEdgeClient {
       const len = Number(res.headers.get("content-length") ?? "0");
       if (len > 25 * 1024 * 1024) {
         this.log.warn(`chat-edge file download ${fileId}: ${len} bytes exceeds the 25 MB attachment bound`);
+        await res.body?.cancel();
         return null;
       }
-      const buf = Buffer.from(await res.arrayBuffer());
-      if (buf.length > 25 * 1024 * 1024) return null;
+      if (!res.body) return null;
+      const reader = res.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let total = 0;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          total += value.byteLength;
+          if (total > 25 * 1024 * 1024) {
+            await reader.cancel();
+            return null;
+          }
+          chunks.push(value);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      const buf = Buffer.concat(chunks, total);
       return { bytes: buf, mime: (res.headers.get("content-type") ?? "").split(";")[0]!.trim() };
     } catch (err) {
       this.log.warn(`chat-edge file download ${fileId} failed: ${(err as Error).message}`);
@@ -634,6 +653,20 @@ export class ChatEdgeClient {
       return null;
     }
     return result;
+  }
+
+  /** Authenticated bounded requests for host-owned Office/media actions. */
+  async officeMediaRequest<T = unknown>(path: string, body: unknown, signal: AbortSignal, timeoutMs = 240_000): Promise<T> {
+    const token = this.accessToken();
+    if (!token) throw new Error("Sign in before using Office/media tools.");
+    const response = await fetch(`${this.baseUrl}/api/v1${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
+    });
+    if (!response.ok) throw new Error(`Office/media request failed (HTTP ${response.status}): ${(await response.text()).slice(0, 500)}`);
+    return await response.json() as T;
   }
 
   private async get<T>(path: string, timeoutMs = this.timeoutMs): Promise<T | null> {

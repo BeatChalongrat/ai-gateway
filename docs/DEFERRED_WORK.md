@@ -1,5 +1,17 @@
 # Deferred Work — tracked backlog
 
+Workspace UX follow-up (2026-11-13): shared Web Chat/Electron file tabs, selection rewrites, recoverable drafts with Undo/Redo, review-before-accept AI proposals, checkpointed jobs, a cross-chat file library, geometry controls and a 12-template gallery are described in [Artifact workspace](ARTIFACT_WORKSPACE.md). Model/provider tests remain mocked.
+
+Current Office/media backlog (2026-11-13): [the capability review](OFFICE_MEDIA_PARITY.md#remaining-work-ordered-by-user-impact) lists remaining WYSIWYG/coauthoring, semantic diff, broader visual feedback, brand fidelity, live-provider acceptance, connector and device-bridge work. Visual paragraph/text-box editing, native PDF replacement, Word/PPT/image AI review, immutable history/restore, PPTX edge repair and video host tools are implemented in source; see [current scope](VISUAL_EDITOR.md). Full Office fidelity, collaborative editing and live quality benchmarks remain open.
+
+**2026-11-12 Office scope update:** the shipped host is Electron. Local file
+import/save joins granted folders to server Python; it does not implement
+offline PDF generation or a local Pyodide/Office runtime. Older .NET suggestions
+below record the original deferral rationale. Current capabilities and remaining
+current recalculation/render support and remaining visual/device-bridge gaps are
+in [Office workflows](OFFICE_WORKFLOWS.md).
+These existing deferrals are not reopened by the documentation refresh.
+
 This file is the **tracked** (git-committed) home for deliberate deferrals so
 they are findable in code review and don't live only in a gitignored task
 board (`TASK_BOARD.md` is `.gitignore`d). Each entry records the **current

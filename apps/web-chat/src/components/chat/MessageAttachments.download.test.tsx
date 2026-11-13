@@ -8,7 +8,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockDownload } = vi.hoisted(() => ({ mockDownload: vi.fn() }));
+const { mockDownload, mockPreview } = vi.hoisted(() => ({ mockDownload: vi.fn(), mockPreview: vi.fn() }));
+vi.mock("./FilePreviewModal", async importOriginal => ({ ...await importOriginal<typeof import("./FilePreviewModal")>(), useFilePreviewOpener: () => ({ open: mockPreview, overlay: null }) }));
 
 vi.mock("@/lib/fileUtil", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/fileUtil")>();
@@ -56,6 +57,12 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("MessageAttachments image download", () => {
+  it("opens the shared image editor workspace from its explicit edit action", () => {
+    render(<MessageAttachments files={[imageFile]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit / versions" }));
+    expect(mockPreview).toHaveBeenCalledWith(imageFile);
+    expect(useLightboxStore.getState().src).toBeNull();
+  });
   it("downloads the loaded object URL under the attachment filename", () => {
     render(<MessageAttachments files={[imageFile]} />);
 

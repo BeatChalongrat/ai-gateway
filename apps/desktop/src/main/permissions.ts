@@ -30,6 +30,7 @@ const SAFE = new Set([
 export function classifyDanger(name: string, category: ToolCategory): { isDangerous: boolean; reasonKey: string } {
   if (SAFE.has(name.toLowerCase())) return { isDangerous: false, reasonKey: "" };
   if (name.toLowerCase() === "run_python") return { isDangerous: true, reasonKey: "danger.code" };
+  if (name.toLowerCase() === "import_local_file") return { isDangerous: true, reasonKey: "danger.fileUpload" };
   switch (category) {
     case "Shell": return { isDangerous: true, reasonKey: "danger.shell" };
     case "Screen": return { isDangerous: true, reasonKey: "danger.computerUse" };
@@ -45,6 +46,8 @@ export function classifyDanger(name: string, category: ToolCategory): { isDanger
  * such fields): the WPF registry's values, by name; unknown (remote MCP)
  * tools are Network/Ask — fail-safe, exactly as RemoteMcpTool. */
 const KNOWN: Record<string, { category: ToolCategory; defaultPermission: PermissionLevel }> = {
+  import_local_file: { category: "FileSystem", defaultPermission: "Ask" },
+  save_conversation_file: { category: "FileSystem", defaultPermission: "Ask" },
   read_file: { category: "FileSystem", defaultPermission: "AllowAlways" },
   read_document: { category: "FileSystem", defaultPermission: "AllowAlways" },
   list_directory: { category: "FileSystem", defaultPermission: "AllowAlways" },
@@ -79,6 +82,9 @@ const KNOWN: Record<string, { category: ToolCategory; defaultPermission: Permiss
   browser_type: { category: "Browser", defaultPermission: "Ask" },
   browser_screenshot: { category: "Browser", defaultPermission: "AllowAlways" },
   open_url: { category: "Browser", defaultPermission: "Ask" },
+  edit_office_file: { category: "Network", defaultPermission: "Ask" },
+  generate_video: { category: "Network", defaultPermission: "Ask" },
+  video_job: { category: "Network", defaultPermission: "Ask" },
   run_python: { category: "Network", defaultPermission: "Ask" },
   run_subagent: { category: "Network", defaultPermission: "AllowAlways" },
 };
@@ -286,6 +292,8 @@ export function toolSubject(name: string, args: Record<string, unknown>): string
   switch (name) {
     case "read_file":
     case "read_document":
+    case "import_local_file":
+    case "save_conversation_file":
     case "write_file":
     case "edit_file":
     case "list_directory":

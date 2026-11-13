@@ -1,12 +1,4 @@
-"""OpenAI image backend — a thin wrapper over the existing images client.
-
-This changes NOTHING about how ``gpt-image-1`` is produced: it calls the same
-``openai_images_client.generate_image`` with the same arguments and re-raises the
-same domain exceptions. The only new thing is the ``ImageGenResult`` envelope
-carrying the producing provider/model so the caller can attribute and, on a
-raise, fall to the next destination. (FIX67 tripwire: the gpt-image-1 path is
-byte-for-byte unchanged.)
-"""
+"""OpenAI image generation and reference-edit adapter. Producing provider/model are retained; edit failure never becomes a text-only generation."""
 
 from __future__ import annotations
 
@@ -20,6 +12,13 @@ from app.services.providers import openai_images_client
 
 class OpenAIImageBackend(ImageBackend):
     provider_name = "openai"
+
+    async def edit(self, session, *, source_images, **kwargs) -> ImageGenResult:
+        result = await openai_images_client.generate_image(
+            session, source_images=source_images, **kwargs,
+        )
+        return ImageGenResult(provider="openai", model=result.model, data=result.data,
+                              cost_usd=result.cost_usd, raw=result.raw)
 
     async def generate(
         self,

@@ -1,5 +1,11 @@
 # AI Gateway — Phase 2A: Admin Auth & Authorization Redesign
 
+> **Historical design reference (clarified 2026-11-12).** The draft/approval
+> status below belongs to the April design proposal. Admin session auth and
+> RBAC are now implemented; use [ADMIN_API.md](ADMIN_API.md) and
+> [SECURITY_MODEL.md](SECURITY_MODEL.md) for current behavior. This document is
+> retained for design rationale, not as a claim that admin auth is unfinished.
+
 > **Status:** Draft. **Stops for Beat review** before any implementation.
 > **Scope:** P0-1, P0-2, P0-5, P0-6, P0-8. Portal-user auth is explicitly NOT touched.
 > **Locked decisions from Beat (2026-04-22):** hybrid session model (Redis-backed for admin, keep portal JWT) • retain role hierarchy, add decorator enforcement • OAuth moves server-side via authlib.

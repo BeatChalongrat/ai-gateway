@@ -62,7 +62,7 @@ def usable_image_destinations(session, valid_providers):
     if not order:
         # Legacy default: a lone openai destination (pre-FIX67 behaviour) so a
         # deployment that never seeds the order still offers image generation.
-        order = [media_dest.Destination(provider="openai", model="gpt-image-1")]
+        order = [media_dest.Destination(provider="openai", model="gpt-image-2.6-flare")]
     return media_dest.usable_destinations(
         order,
         valid_providers=valid_providers,

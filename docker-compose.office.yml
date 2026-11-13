@@ -1,0 +1,45 @@
+# Optional shared Office review for either base/desktop OR standalone webchat.
+# docker compose -p ai-gateway -f docker-compose.webchat.yml -f docker-compose.office.yml up -d --build office-converter chat-edge-api
+# Do not combine the base and webchat Compose files.
+services:
+  chat-edge-api:
+    environment:
+      - OFFICE_CONVERTER_URL=http://office-converter:8096
+      - OFFICE_VISUAL_MODEL=${OFFICE_VISUAL_MODEL:-}
+    networks:
+      default: {}
+      office: {}
+    depends_on:
+      office-converter:
+        condition: service_healthy
+
+  office-converter:
+    build:
+      context: .
+      dockerfile: services/doc-converter/Dockerfile
+    image: ai-gateway-office-converter:latest
+    restart: unless-stopped
+    networks:
+      office: {}
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 768m
+    pids_limit: 128
+    cpus: "1.0"
+    environment:
+      - CONVERT_TIMEOUT_SECONDS=60
+      - MAX_INPUT_BYTES=26214400
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8096/health',timeout=3)"]
+      interval: 15s
+      timeout: 4s
+      start_period: 30s
+      retries: 3
+
+networks:
+  office:
+    internal: true

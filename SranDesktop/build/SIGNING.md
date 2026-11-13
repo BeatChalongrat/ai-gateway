@@ -1,5 +1,9 @@
 # Code-signing the SRAN Desktop installer (FIX-E)
 
+> ขอบเขตปัจจุบัน 2026-11-12: ขั้นตอน Inno Setup ด้านล่างเป็นของ WPF เดิม
+> แอปที่ใช้งานปัจจุบันสร้างจาก `apps/desktop` ด้วย Electron packaging
+> สถานะ certificate ด้านล่างเป็นบันทึกเดิม ไม่ได้ตรวจคลัง certificate ใหม่ในรอบนี้.
+
 สถานะ: **ท่อพร้อมแล้ว แต่ยังไม่มีใบ certificate** — ระหว่างนี้ build แบบไม่เซ็นได้ตามปกติ
 (`ISCC.exe build\SranDesktop.iss` เฉย ๆ = installer ไม่เซ็น เหมือนเดิมทุกอย่าง)
 
@@ -8,10 +12,11 @@
 | แบบ | ผลกับ SmartScreen | หมายเหตุ |
 |---|---|---|
 | **OV** (Organization Validation) | ยังเจอ "Unknown publisher" ช่วงแรก จนชื่อสะสม reputation (มักไม่กี่สัปดาห์ถึงเดือน) | ถูกกว่า, ออกเร็ว |
-| **EV** (Extended Validation) | ข้าม SmartScreen ได้ทันทีตั้งแต่ไฟล์แรก | แพงกว่า, ต้องมี hardware token / cloud HSM, lead time ~1 สัปดาห์+ |
+| **EV** (Extended Validation) | ไม่รับประกันการข้าม SmartScreen ทันที เช่นเดียวกับ OV | ตรวจข้อกำหนดการเก็บกุญแจและบริการเซ็นกับผู้ออกใบรับรอง |
 
-แนะนำ **EV** สำหรับ rollout พนักงาน non-IT (ตัดหน้าจอแดงตั้งแต่วันแรก) — เริ่มจัดหาให้เร็วที่สุด
-เพราะ lead time ของ cert คือคอขวดจริง ไม่ใช่งานโค้ด
+อย่าเลือก EV โดยตั้งสมมติฐานว่าจะไม่มีคำเตือน SmartScreen ตั้งแต่วันแรก
+Microsoft ระบุว่าพฤติกรรมให้ reputation ทันทีแบบเดิมไม่มีแล้ว:
+[SmartScreen reputation](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation).
 
 > cert แบบไฟล์ .pfx ใช้กับท่อนี้ได้ตรง ๆ; ถ้าเป็น EV token/HSM ให้แก้พารามิเตอร์ signtool
 > จาก `/f ... /p ...` เป็นของ provider (เช่น `/csp`/`/kc` หรือ `signtool sign /sha1 <thumbprint>`)

@@ -275,7 +275,21 @@ export interface PlanOutcome {
 
 /** Validation report shape returned by the chat-edge Excel
  *  validator. Mirrors excel_validator.py output. */
+export interface OfficeQualityReport {
+  repair_attempts?: number;
+  repaired?: boolean;
+  edge_ink?: number;
+  filename: string;
+  status: "partial" | "checked";
+  recalculated: boolean;
+  formulas?: number;
+  pages?: number;
+  rendered_pages?: number;
+  warnings?: string[];
+}
+
 export interface ExcelValidationReport {
+  office_quality?: OfficeQualityReport;
   valid: boolean;
   issues: string[];
   warnings: string[];
@@ -292,6 +306,7 @@ export interface ExcelExecuteResponse {
 /** Phase 4 Session 2 — Word/PDF report generation.
  *  Mirrors doc_validator.py output (docx + pdf use the same envelope). */
 export interface DocValidationReport {
+  office_quality?: OfficeQualityReport;
   valid: boolean;
   file_type: "docx" | "pdf" | string;
   file_size_bytes: number;
@@ -385,7 +400,8 @@ export interface ComparisonResponse {
 /** Phase 4 Session 3 — PowerPoint generation.
  *  Per-slide entry in pptx_generator.py's change_log. */
 export interface PptxChangeLogEntry {
-  slide: number;
+  slide?: number;
+  action?: number;
   type: string;
   status: "ok" | "error" | "skipped";
   detail?: string;

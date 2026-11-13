@@ -12,7 +12,7 @@
 
 import { useRef, useState } from "react";
 
-import { AlertTriangle, Download } from "lucide-react";
+import { AlertTriangle, Download, Pencil } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { isUnreadable, unreadableMessageKey } from "@/lib/fileExtraction";
@@ -64,7 +64,7 @@ export function MessageAttachments({ files }: Props) {
         <div className="flex flex-wrap gap-1.5">
           {images.map((f) => (
             <figure key={f.id} className="m-0 flex flex-col gap-0.5">
-              <ImageThumb file={f} />
+              <ImageThumb file={f} onEdit={() => preview(f)} />
               {f.generated_by ? <MadeBy by={f.generated_by} /> : null}
             </figure>
           ))}
@@ -95,7 +95,7 @@ function MadeBy({ by }: { by: string }) {
   );
 }
 
-function ImageThumb({ file }: { file: FileAttachment }) {
+function ImageThumb({ file, onEdit }: { file: FileAttachment; onEdit: () => void }) {
   const t = useT();
   // AuthedImage hands us the loaded object URL; we reuse it for the
   // full-size lightbox AND the download button so neither triggers a
@@ -137,6 +137,7 @@ function ImageThumb({ file }: { file: FileAttachment }) {
       >
         <Download className="h-3.5 w-3.5" aria-hidden />
       </button>
+      {/\.(png|jpe?g|webp)$/i.test(file.filename) && <button type="button" aria-label={t("editor.title")} title={t("editor.title")} onClick={onEdit} className="focus-ring absolute bottom-1.5 right-1.5 rounded-md bg-black/55 p-1.5 text-white"><Pencil className="h-3.5 w-3.5" aria-hidden /></button>}
     </div>
   );
 }

@@ -1,5 +1,19 @@
 # SRAN AI Gateway — Architecture
 
+Artifact workspace: [durable drafts, checkpointed proposals and review-gated publication](docs/ARTIFACT_WORKSPACE.md) use Chat Edge migration 051 and the shared Web/Electron renderer.
+
+Office follow-up (2026-11-13): shared visual editor → fixed sandbox editing/rendering → immutable revisions. Optional vision review uses the gateway with explicit raw-page egress policy, then validates and re-renders typed corrections before publication. See [visual architecture](docs/VISUAL_EDITOR.md) and [editor/video contracts](docs/OFFICE_EDITOR.md).
+
+Media follow-up: image references use the provider edit API; motion graphics render in the existing sandbox; premium video jobs wait in `pending_confirm` until owner confirmation. Read [Office/media parity](docs/OFFICE_MEDIA_PARITY.md) for the current source assessment.
+
+Source review: **2026-11-12**. Runtime configuration and deployed image revisions
+must be inspected separately; this document describes the checked-out code.
+
+Office follow-up: both clients share 12 document/data starters and a pre-delivery
+quality stage. The optional `docker-compose.office.yml` adds an internal
+LibreOffice converter for recalculation, rendering and previews; see
+[Office templates](docs/OFFICE_TEMPLATES.md) for activation and limits.
+
 This is the system-level map: services, the request path, and the security
 boundaries. For a fast setup and API examples see [README.md](./README.md).
 For the deep DLP design (detector registry, masking invariant, egress policy,
@@ -12,15 +26,16 @@ points there rather than forking it.
 ## 1. What this is
 
 A multi-tenant AI proxy whose **core value is a DLP masking gateway**: PDPA-aware
-scanning masks sensitive values before any request reaches a third-party LLM and
-restores them in the response. Around that core the platform adds an agentic
+scanning masks detected sensitive text on the standard completion path and
+restores it in the response. Explicit unmasked routes and image bytes have
+different boundaries (section 5). Around that core the platform adds an agentic
 desktop app, a code interpreter, OAuth connectors, per-user MCP workspaces,
 chat + KB-RAG, web search, and image/video/audio generation.
 
 The system grew via a **strangler-fig migration**: a Go API gateway now sits in
 front of the original FastAPI backend as the public entry point, and several hot
 paths (DLP, rate-limiting, log-writing) have Rust/Go sidecars that are gated on
-by env flag with fail-open fallback to the Python implementation.
+by env flag with fallback to the Python implementation; this does not bypass DLP.
 
 ---
 
@@ -50,7 +65,7 @@ debugging only. External clients must hit `:8080`.
 │     4. MASK → neutral tokens (counters, stable via the vault)      │
 │     5. moderation + guardrail                                      │
 │     6. routing (keyword → semantic → cost-tier → fallback)         │
-│     7. provider dispatch ──► OpenAI / Anthropic / 9 others         │
+│     7. provider dispatch ──► OpenAI / Anthropic / 10 others         │
 │     8. DLP outbound + RESTORE + orphan sanitiser                   │
 │     9. encrypt input_raw_encrypted (AES-256-GCM)                   │
 │    10. INSERT request_logs (monthly partitions)                    │
@@ -60,11 +75,11 @@ debugging only. External clients must hit `:8080`.
    (internal)          (internal)         (or mock :9090 in tests)
 ```
 
-**The masking invariant** — raw sensitive values reach a provider only as neutral
-tokens; the raw value lives in transient request memory and is never written to
-any log/DB/external system (only the token-free `DLPAuditEntry` is persisted).
-Full detail, including the deliberate exceptions, is in
-[docs/DLP_ARCHITECTURE.md](./docs/DLP_ARCHITECTURE.md). Two summarized below.
+**The standard masking path** replaces detected sensitive text before external
+completion dispatch. The token-free DLP audit event is distinct from encrypted
+request traces, conversation storage and original uploaded files. Do not infer
+that the platform stores no raw user data. Full details and exceptions are in
+[docs/DLP_ARCHITECTURE.md](./docs/DLP_ARCHITECTURE.md) and section 5 below.
 
 ---
 
@@ -77,7 +92,7 @@ Started by `docker-compose.yml` (+ overlays). Ports shown are **host** ports.
 | **gateway** (Go) | `services/gateway` | **8080** | Public entrypoint; reverse-proxies to backend |
 | **backend** (FastAPI) | `backend/` | 8081 | DLP, routing, dispatch, auth, logging — authoritative |
 | **chat-edge-api** (Go) | `services/chat-edge-api` | 4000 | Conversations, memory, KB/RAG, files, web search, media tools, code interpreter. `profiles: [desktop]` |
-| **mcp-gateway** (Go) | `services/mcp-gateway` | 3200 | Per-user JWT-verified MCP servers + OAuth connectors. `profiles: [desktop]` |
+| **mcp-gateway** (Node.js/Express) | `services/mcp-gateway` | 3200 | Per-user JWT-verified MCP servers + OAuth connectors. `profiles: [desktop]` |
 | **ner-service** (FastAPI + spaCy/Presidio) | `backend/ner_service` | 8001 | NER detection sidecar for DLP |
 | **dlp-sidecar** (Rust) | `dlp-sidecar/` | 9102 (metrics) | gRPC DLP engine; gated `DLP_ENGINE=rust\|shadow` |
 | **rate-limiter** (Rust) | `rate-limiter/` | 9101 (metrics) | gRPC sliding-window; gated `RATE_LIMITER_ENGINE=rust` |
@@ -96,7 +111,12 @@ Frontends and clients:
 | **admin-ui** (Next.js) | `admin-ui/` | 3000 | gateway + chat-edge admin |
 | **portal** (Next.js) | `portal/` | 3001 | gateway (+ OAuth connectors) |
 | **web-chat** (Next.js) | `apps/web-chat/` | 3002 | gateway + chat-edge (`docker-compose.webchat.yml`) |
-| **SranDesktop** (.NET 8 WPF) | `SranDesktop/` | — | gateway + chat-edge + mcp-gateway |
+| **Desktop** (Electron/TypeScript) | `apps/desktop/` | — | Hosted Web Chat UI; host agent loop to gateway; persistence/files through chat-edge; .NET tools sidecar |
+
+`SranDesktop/` contains the legacy WPF UI and the still-used .NET ToolsSidecar /
+BrowserHost. Caddy terminates browser-facing HTTPS; see [TLS topology](docs/ops/tls.md).
+Agent Market additionally uses `agent-runner`, `doc-converter`, `web-fetcher` and
+the `agent_market` schema; it has a separate queued execution plane.
 
 Sidecars default to their Python/in-process equivalents; each flips on by env
 flag and fails open. See README §"Environment Variables" and `docker-compose.yml`
@@ -110,8 +130,13 @@ comments for the exact flags.
   policy profiles, deterministic per-conversation tokens.
 - **Chat + KB-RAG** — chat-edge conversations, memory, per-user knowledge bases
   with pgvector embeddings.
-- **Desktop agentic app** — `SranDesktop/`, a .NET 8 WPF client over
-  gateway + chat-edge + MCP.
+- **Desktop agentic app** — `apps/desktop/`, Electron hosting the shared web UI.
+  TypeScript owns the turn loop, consent and host tools; .NET handles local MCP
+  tools. See [desktop architecture](docs/DESKTOP_APP_ARCHITECTURE.md).
+- **Office/local files** — server plan generators and Python; Desktop transfer
+  tools join granted folders to conversation storage. Existing PPTX edits,
+  DOCX style preservation and reusable sandbox file IDs are described in
+  [Office workflows](docs/OFFICE_WORKFLOWS.md).
 - **Code interpreter / sandbox** — model-authored Python (`run_python`), the
   plan-exec workspaces (Excel/Doc/Pptx), file text extraction, inspectors,
   validators, version compare and vision image resize. The binary default is
@@ -149,19 +174,16 @@ comments for the exact flags.
 
 ## 5. Security boundaries
 
-The masking invariant has exactly **two deliberate raw-egress channels** and one
-**internal trust boundary**. All three are documented, machine-checked, and
+There are **five registered raw-egress channels** and an internal code-execution
+boundary. They are documented and covered by dedicated checks,
 detailed in [docs/DLP_ARCHITECTURE.md](./docs/DLP_ARCHITECTURE.md); the summary:
 
-1. **Web search + media generation — intentional raw egress (Phase 9).** These
-   two channels send user content to providers *without* identity-PII masking,
-   because masking breaks the feature (a search for `<PERSON_1>` returns garbage;
-   a masked image prompt yields the wrong image). Bounded by: the credential /
-   secret class is *always* withheld (403 on leak), per-tenant `block` mode fails
-   closed, every PII-carrying egress is audited as `raw_egress_allow` with
-   category counts only (never the text), and the whitelist is a single constant
-   pinned by `tests/test_dlp_egress_invariant.py` (CI fails if a new outbound-HTTP
-   module isn't classified).
+1. **Intentional raw egress.** `RAW_EGRESS_ALLOWED` names `web_search`,
+   `media_gen`, `embeddings`, `voice` and `agent_documents`. Search/media/
+   embeddings/TTS use text scanning and tenant egress policy; STT audio cannot
+   be scanned as text before transcription. Agent documents use the trusted
+   caller, masking and egress decision in `dlp/in_house.py`, with their own
+   audit marker. Image pixels are not redacted by the text DLP detector.
 
 2. **Code interpreter sandbox — internal trust boundary (Phase 13), not egress.**
    The interpreter processes *raw* user data, but nothing it touches can reach a
@@ -170,8 +192,9 @@ detailed in [docs/DLP_ARCHITECTURE.md](./docs/DLP_ARCHITECTURE.md); the summary:
    (no model input in the argv): `--network none` **plus** a default-deny seccomp
    profile with every networking syscall removed, `--cap-drop ALL`,
    `--user 65534`, `no-new-privileges`, read-only rootfs, no inherited secrets.
-   Interpreter stdout/artifacts re-enter the model only through the normal DLP
-   mask pipeline. Pinned by a Go test (`TestSandbox_DockerArgsAlwaysNoNetwork`)
+   Returned text re-enters the gateway policy pipeline before model dispatch;
+   policy exceptions still apply and generated image pixels are not text-masked.
+   The no-network boundary is pinned by a Go test (`TestSandbox_DockerArgsAlwaysNoNetwork`)
    and the Python egress invariant test (which asserts the interpreter is
    *absent* from the raw-egress whitelist). **On by default on the webchat
    stack** (see §4); off elsewhere unless the overlay is applied. The cost of
@@ -186,7 +209,7 @@ detailed in [docs/DLP_ARCHITECTURE.md](./docs/DLP_ARCHITECTURE.md); the summary:
 ## 6. Data & migrations
 
 - **Backend schema** — Alembic under `backend/migrations/versions/`; latest is
-  **`064_tenant_pii_egress_policy.py`**. The backend applies migrations on
+  **`090_media_readiness.py`**. The backend applies migrations on
   startup.
 - **Chat-edge schema** — separate SQL migrations in
   `services/chat-edge-api/migrations`, applied by the Postgres init hook on a
@@ -205,7 +228,7 @@ detailed in [docs/DLP_ARCHITECTURE.md](./docs/DLP_ARCHITECTURE.md); the summary:
 | **dev** | `make up` (`docker-compose.yml`) | Core stack, ports on 0.0.0.0. chat-edge/mcp/nginx are `profiles: [desktop]` and do **not** start here |
 | **web-chat dev** | `make webchat-up` | Adds web-chat `:3002` + chat-edge on its own pg/redis, **with the code-interpreter sandbox enabled** (builds `ai-gateway-sandbox:latest` first) |
 | **prod-desktop** | `make prod-desktop` | base + `docker-compose.prod.yml` + `--profile desktop` → chat-edge + mcp-gateway + nginx (`:80/:443`), all bound to 127.0.0.1 behind nginx |
-| **sandbox overlay** | `+ docker-compose.sandbox.yml` on webchat | Wires chat-edge to spawn per-run sandbox containers (`SANDBOX_ENABLED=1`); requires building `ai-gateway-sandbox:latest` and a docker socket — read the header in that file first |
+| **sandbox overlay** | `+ docker-compose.sandbox.yml` on base/desktop | Enables per-run sandbox containers; the standalone webchat stack already includes this wiring. Build the sandbox image and read the overlay header first |
 
 `REDIS_PASSWORD` is **mandatory** for every shape — the redis service and its
 consumers (`?:` guards in compose) refuse to start without it.
@@ -220,7 +243,7 @@ consumers (`?:` guards in compose) refuse to start without it.
 | Egress whitelist (raw-egress invariant) | `backend/app/services/dlp/egress_policy.py` |
 | Policy profiles + evaluator | `backend/app/services/policy/` |
 | Orchestrator (request lifecycle) | `backend/app/services/orchestrator.py` |
-| Provider adapters (11) | `backend/app/services/providers/` |
+| Provider adapters (12 registered) | `backend/app/services/provider_dispatcher.py` and `providers/` |
 | Admin / portal / gateway routes | `backend/app/api/routes/` |
 | Sandbox launcher (Go) | `services/chat-edge-api/internal/sandbox/` |
 | Config (every env var) | `backend/app/core/config.py` |

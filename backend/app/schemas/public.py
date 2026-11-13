@@ -155,7 +155,7 @@ class ModelListResponse(BaseModel):
 class ImageGenerationRequest(BaseModel):
     """Public request for POST /v1/images/generations (OpenAI-compatible)."""
 
-    model: str = "gpt-image-1"
+    model: str = "gpt-image-2.6-flare"
     prompt: str = Field(..., min_length=1, max_length=4000)
     n: int = Field(1, ge=1, le=10)  # dall-e-3 is forced to 1 in the client
     # Union of gpt-image-1 (auto / 1024x1536 / 1536x1024) and DALL-E sizes.
@@ -168,6 +168,8 @@ class ImageGenerationRequest(BaseModel):
     quality: Literal["auto", "low", "medium", "high", "standard", "hd"] = "auto"
     style: Literal["vivid", "natural"] = "vivid"
     response_format: Literal["url", "b64_json"] = "url"
+    # SRAN extension: route reference-image requests to the provider edit API.
+    source_images: List[str] = Field(default_factory=list, max_length=4)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -178,10 +180,11 @@ class ImageData(BaseModel):
 
 
 class ImageUsage(BaseModel):
-    """SRAN extension — per-image cost (image gen is priced per image, not
-    per token)."""
+    """SRAN standard-rate estimate; provider token usage when complete, otherwise
+    an output-only legacy estimate. Reconcile provider invoices separately."""
 
     cost_usd: float = 0.0
+    cost_estimated: bool = True
 
 
 class ImageGenerationResponse(BaseModel):
@@ -249,6 +252,7 @@ class ChatCompletionsRequest(BaseModel):
     gateway-specific extensions (e.g. ``use_case``).
     """
 
+    visual_review: bool = False
     model: str = "auto"
     messages: List[Message] = Field(..., min_length=1)
     stream: bool = False

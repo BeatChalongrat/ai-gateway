@@ -1,14 +1,19 @@
 # CI runner setup — what the GitLab admin needs to do
 
+**Currentness note (2026-11-12):** the failure counts below are historical
+investigation evidence, not a current remote runner audit. Recheck runner
+registration/online status before provisioning. This review did not change CI
+infrastructure. The legacy WPF job was removed from both CI definitions.
+
 **Project:** `srandev/ai-gateway` on `gitlab-dev.gbtech.co.th` (project id 163)
 **Requested by:** ________________ **Date:** ________________
 
 ## Why this is needed
 
-Every pipeline of this project has failed since June without running a
+The original runner investigation recorded failures since June without running a
 single job — 124 pipelines, 0 jobs executed. GitLab only *schedules* CI
 jobs; a **runner** is a separate program that picks them up and runs
-them. This project has **no runner registered**, so every job sits in
+them. At that investigation, this project had **no runner registered**, so jobs sat in
 `pending` until GitLab gives up and marks it
 `stuck_pending_no_matching_runners`. The red pipeline emails are about
 that, not about the code.
@@ -23,9 +28,8 @@ Steps (GitLab ≥ 16, "new runner" flow):
 
 1. In GitLab: **Settings → CI/CD → Runners → New project runner**
    (or a group/instance runner shared with other projects).
-2. ⭐ **Tick "Run untagged jobs".** Our jobs carry **no tags** (the one
-   exception is `desktop-test`, tagged `windows`, which is manual and
-   optional). A runner that only accepts tagged jobs will leave the
+2. ⭐ **Tick "Run untagged jobs".** The current Linux jobs carry no tags. The
+   legacy WPF `desktop-test` job was removed in AM19. A runner that only accepts tagged jobs will leave the
    pipeline exactly as stuck as it is today — this is the single easiest
    thing to get wrong.
 3. Copy the registration token GitLab shows (it is shown once — do not
@@ -73,8 +77,8 @@ check once a runner exists to test it against. The other jobs
 (Go, Node, audits) are expected to pass or to fail for reasons listed
 in the FIX61 report.
 
-`desktop-test` needs a **Windows** runner tagged `windows`; it is manual
-and optional, and nobody is asking for that today.
+The WPF `desktop-test` job no longer exists. Electron tests run from
+`apps/desktop`; local verification uses the desktop lane in the release gate.
 
 ## Who to tell when it is done
 

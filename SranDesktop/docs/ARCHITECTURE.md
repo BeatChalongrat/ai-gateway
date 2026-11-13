@@ -1,7 +1,10 @@
 # SRAN Desktop — Architecture
 
-Native Windows chat client (C# / .NET 8 / WPF) for the SRAN AI Gateway.
-The layer map, the auth flow and the sync contract below are the reference; this file supersedes the original build spec.
+**Historical WPF implementation reference, clarified 2026-11-12.** The current
+shipped UI/agent host is Electron in `apps/desktop`; see
+[the current architecture](../../docs/DESKTOP_APP_ARCHITECTURE.md). The .NET
+ToolsSidecar and BrowserHost in this tree remain runtime dependencies. The
+layers and flows below describe the older WPF client, not today's renderer.
 
 ## Layers
 

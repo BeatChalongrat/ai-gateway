@@ -1,22 +1,9 @@
-"""OpenAI Images API client — a STANDALONE client, NOT a chat adapter.
+"""OpenAI image generation/edit client with configured keys and bounded references.
 
-Supports the current **gpt-image-1** family (OpenAI's image model now that
-DALL-E is being retired) and DALL-E 3/2 for accounts that still have them.
-Reuses the same infra the chat adapters use — the shared pooled async httpx
-client, base-URL override, provider-key resolution, and retry/error mapping —
-without pretending an image request is a chat turn.
-
-Image models are intentionally NOT in the chat routing candidate pool: their
-per-token cost is 0, so the auto-router would otherwise route a CHAT request
-to an image model.
-
-Per-family differences this client normalises:
-  * gpt-image-1: quality ∈ {auto,low,medium,high}; returns ``b64_json`` (no
-    URL); no ``style``/``response_format``. Token-priced -> cost is APPROX.
-  * dall-e-3: quality ∈ {standard,hd}; returns a (temporary ~1h) ``url``.
-  * dall-e-2: no quality; returns a URL.
-The current OpenAI images API rejects ``response_format`` and ``style`` for
-all of them, so neither is ever sent.
+Default: GPT-Image-2.6 Flare (public docs verified 2026-11-12). GPT Image 1
+and Sora 2 are retired; legacy normalization remains for compatible deployments
+and historical tests. Provider-reported token breakdowns feed a standard-rate
+cost estimate; cache/contract discounts and missing usage need reconciliation.
 """
 
 from __future__ import annotations
@@ -37,11 +24,9 @@ from app.services.providers.http_client import get_provider_client
 
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 
-# Image models advertised in /v1/models + accepted by the route. gpt-image-1
-# is the current OpenAI image model; DALL-E is retiring (and absent on many
-# accounts). The client still understands dall-e-* by id if they're re-added.
-IMAGE_MODELS = ("gpt-image-1", "gpt-image-1-mini")
-DEFAULT_IMAGE_MODEL = "gpt-image-1"
+# Models accepted without an operator destination override. Account access is separate.
+IMAGE_MODELS = ("gpt-image-2.6-flare", "gpt-image-1-mini")
+DEFAULT_IMAGE_MODEL = "gpt-image-2.6-flare"
 logger = structlog.get_logger(__name__)
 
 
@@ -113,6 +98,23 @@ class ImageResult:
     raw: dict = field(default_factory=dict)
 
 
+def usage_cost_usd(model: str, usage: dict, fallback: float) -> float:
+    """Token-based estimate where the provider reports a complete breakdown.
+
+    Published standard rates (USD per million), verified 2026-11-12.
+    Cache/batch/contract discounts are not assumed; usage.cost_usd is an estimate.
+    Legacy/custom providers without a breakdown retain the output-only estimate.
+    """
+    rates = {"gpt-image-2.6-flare": (5, 8, 30), "gpt-image-1": (5, 10, 40), "gpt-image-1-mini": (2, 2.5, 8)}
+    details = usage.get("input_tokens_details", {}) if isinstance(usage, dict) else {}
+    if model not in rates or not isinstance(details, dict):
+        return fallback
+    counts = (details.get("text_tokens"), details.get("image_tokens"), usage.get("output_tokens"))
+    if any(not isinstance(n, int) or isinstance(n, bool) or n < 0 for n in counts):
+        return fallback
+    return round(sum(n * rate for n, rate in zip(counts, rates[model])) / 1_000_000, 6)
+
+
 async def generate_image(
     session: AsyncSession,
     *,
@@ -124,10 +126,19 @@ async def generate_image(
     quality: str = "auto",
     style: str = "vivid",
     response_format: str = "url",
+    source_images: list[str] | None = None,
 ) -> ImageResult:
     """POST /images/generations. ``prompt`` is the already-DLP-masked text.
     Provider/HTTP errors are raised as the gateway's domain exceptions (via
     ``call_with_retry``) for the central handler to map."""
+    files = None
+    endpoint = "/images/generations"
+    if source_images:
+        from app.services.media_gen.image_inputs import validate_image_inputs
+        if not _is_gpt_image(model):
+            raise ProviderUnavailableError("Reference-image editing requires a GPT Image destination")
+        files = [("image[]", item) for item in validate_image_inputs(source_images)]
+        endpoint = "/images/edits"
     key = await ProviderKeyService().get_active_key_async(session, "openai")
     if not key:
         raise ProviderUnavailableError(
@@ -151,6 +162,13 @@ async def generate_image(
         provider_name="openai",
     )
     headers = {"Authorization": f"Bearer {key}"}
+    request_body = {"json": body}
+    if files:
+        # The pooled chat client defaults to application/json. Obtain a public
+        # httpx multipart encoder's boundary and override that default explicitly.
+        multipart = httpx.Request("POST", "https://image-request.invalid", data={k: str(v) for k, v in body.items()}, files=files)
+        headers["Content-Type"] = multipart.headers["Content-Type"]
+        request_body = {"content": multipart.read()}
     timeout = httpx.Timeout(
         connect=settings.provider_timeout_connect,
         read=settings.openai_image_timeout_seconds,
@@ -163,14 +181,14 @@ async def generate_image(
         request_id=request_id,
         provider="openai",
         model=model,
-        endpoint="/images/generations",
+        endpoint=endpoint,
         timeout_ms=int(settings.openai_image_timeout_seconds * 1000),
     )
     try:
         resp = await call_with_retry(
             lambda: client.post(
-                "/images/generations",
-                json=body,
+                endpoint,
+                **request_body,
                 headers=headers,
                 timeout=timeout,
             ),
@@ -190,7 +208,7 @@ async def generate_image(
             request_id=request_id,
             provider="openai",
             model=model,
-            endpoint="/images/generations",
+            endpoint=endpoint,
             elapsed_ms=elapsed_ms,
             timeout_ms=int(settings.openai_image_timeout_seconds * 1000),
             error_code=getattr(exc, "code", type(exc).__name__),
@@ -204,7 +222,7 @@ async def generate_image(
         request_id=request_id,
         provider="openai",
         model=model,
-        endpoint="/images/generations",
+        endpoint=endpoint,
         status_code=resp.status_code,
         elapsed_ms=elapsed_ms,
         timeout_ms=int(settings.openai_image_timeout_seconds * 1000),
@@ -213,6 +231,6 @@ async def generate_image(
         created=int(data.get("created", time.time())),
         data=list(data.get("data", [])),
         model=model,
-        cost_usd=image_cost_usd(model, size, quality, n_eff),
+        cost_usd=usage_cost_usd(model, data.get("usage", {}), image_cost_usd(model, size, quality, n_eff)),
         raw=data,
     )

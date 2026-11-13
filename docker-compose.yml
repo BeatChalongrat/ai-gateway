@@ -565,7 +565,8 @@ services:
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-}
       S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
-      IMAGE_GEN_MODEL: ${IMAGE_GEN_MODEL:-gpt-image-1}
+      OFFICE_VISUAL_MODEL: ${OFFICE_VISUAL_MODEL:-}
+      IMAGE_GEN_MODEL: ${IMAGE_GEN_MODEL:-gpt-image-2.6-flare}
       CHAT_EDGE_IMAGE_TIMEOUT_SECONDS: ${CHAT_EDGE_IMAGE_TIMEOUT_SECONDS:-180}
       # FIX132 B — the knowledge base; same knobs as docker-compose.webchat.yml
       # (docs/ops/knowledge-base.md). kb-models below is desktop-profile too.

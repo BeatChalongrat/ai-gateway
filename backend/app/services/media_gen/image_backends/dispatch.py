@@ -39,6 +39,7 @@ async def generate_with_fallback(
     style: str = "vivid",
     response_format: str = "b64_json",
     request_id: str | None = None,
+    source_images: list[str] | None = None,
     on_attempt: Optional[Callable[[Destination, bool, Optional[Exception]], None]] = None,
 ) -> ImageGenResult:
     """Produce an image from the first working destination, or raise.
@@ -58,7 +59,9 @@ async def generate_with_fallback(
             )
             continue
         try:
-            result = await backend.generate(
+            operation = backend.edit if source_images else backend.generate
+            extra = {"source_images": source_images} if source_images else {}
+            result = await operation(
                 session,
                 model=dest.model,
                 prompt=prompt,
@@ -68,6 +71,7 @@ async def generate_with_fallback(
                 style=style,
                 response_format=response_format,
                 request_id=request_id,
+                **extra,
             )
             logger.info(
                 "image_destination_produced",

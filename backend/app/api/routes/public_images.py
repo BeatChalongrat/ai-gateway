@@ -1,20 +1,10 @@
-"""Image generation endpoint — POST /v1/images/generations.
-
-Flow: auth -> inbound DLP on the prompt (block or mask) -> call the OpenAI
-images client -> DLP-restore the revised_prompt -> log per-image cost.
-
-Reuses the orchestrator's tested DLP helpers (scan -> classify+evaluate ->
-mask) so image prompts get the same masking semantics as chat. NER is OFF on
-the prompt scan: image prompts legitimately name their subjects, and the
-regex detectors already cover the real egress risk (emails, phones, national
-IDs, credentials, keys).
-"""
+"""Image generation/reference-edit endpoint. Shared auth, rate, prompt DLP, raw-image policy and cost attribution; images are not text-masked."""
 
 import time
 import uuid
 
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import ResolvedApiKey, get_resolved_api_key
@@ -181,6 +171,19 @@ async def generate_images(
     model = payload.model if payload.model in IMAGE_MODELS else DEFAULT_IMAGE_MODEL
     orch = GatewayOrchestrator()
 
+    # Images cannot be text-masked. Enforce the tenant boundary even when text
+    # DLP is disabled; never imply that a prompt scan inspected the pixels.
+    if payload.source_images:
+        from app.models.tenant import TenantORM
+        from app.services.media_gen.image_inputs import validate_image_inputs
+        try:
+            validate_image_inputs(payload.source_images)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        tenant = await session.get(TenantORM, auth.tenant_id)
+        if tenant is None or str(getattr(tenant, "media_pii_egress", "block")) != "allow":
+            raise DLPViolationError("Tenant policy blocks raw reference-image egress.")
+
     # --- Cost-control rate limit (before any provider / DLP work) ------
     await _enforce_image_rate_limits(orch, auth)
 
@@ -199,7 +202,7 @@ async def generate_images(
     # --- Inbound DLP on the prompt -------------------------------------
     span_map: dict[str, str] = {}
     masked_prompt = payload.prompt
-    dlp_action = "allow"
+    dlp_action = "raw_egress_allow" if payload.source_images else "allow"
     dlp_findings = 0
     if settings.dlp_enabled:
         # Media-generation DLP profile (Sprint 2A): identity-class PII
@@ -346,6 +349,7 @@ async def generate_images(
             quality=payload.quality,
             style=payload.style,
             response_format=payload.response_format,
+            **({"source_images": payload.source_images} if payload.source_images else {}),
         )
     except GatewayError as exc:
         details = getattr(exc, "details", {}) or {}

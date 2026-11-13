@@ -3,10 +3,13 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { VideoJobsPanel } from "@/components/media/VideoJobsPanel";
 import { AboveComposerStack } from "@/components/chat/AboveComposerStack";
 import { AttachmentDropZone } from "@/components/chat/AttachmentDropZone";
 import { ChatInput, uploadFiles } from "@/components/chat/ChatInput";
 import { ChatThread } from "@/components/chat/ChatThread";
+import { ArtifactHub } from "@/components/chat/ArtifactHub";
+import { useArtifactAutoOpen } from "@/hooks/useArtifactAutoOpen";
 import { ConversationFiles } from "@/components/chat/ConversationFiles";
 import { EmptyState } from "@/components/chat/EmptyState";
 import { ExportMenu } from "@/components/chat/ExportMenu";
@@ -84,6 +87,7 @@ export default function ConversationPage() {
   const selectGlobalModel = useModelStore((s) => s.selectModel);
   const getModelById = useModelStore((s) => s.getModelById);
 
+  useArtifactAutoOpen(convId, messages, messagesLoaded);
   const streaming = useIsStreaming(convId);
   const conv = conversations.find((c) => c.id === convId);
 
@@ -97,6 +101,11 @@ export default function ConversationPage() {
   //             what is attached and decides whether to send.
   useEffect(() => {
     if (!convId) return;
+    const artifact = new URLSearchParams(window.location.search).get("artifact");
+    if (artifact) void api.listFiles(convId).then(result => {
+      const file = result.files.find(f => f.id === artifact);
+      if (file && useChatStore.getState().activeConversationId === convId) useSidePaneStore.getState().open({ kind: "preview", file });
+    }).catch(() => undefined);
     const q = consumeQueryPrefill();
     if (q) setInjectedText(q);
     const attach = consumeQueryAttach();
@@ -302,6 +311,7 @@ export default function ConversationPage() {
       {/* FIX130 C4 — what stacks on top of the composer is measured, so
           the credits badge floats above it instead of on it. */}
       <AboveComposerStack>
+        <VideoJobsPanel key={convId} conversationId={convId} />
         {/* FIX130 C3.5 — below md the header (and its meter) is hidden, so
             the phone gets the meter as a tappable chip here. Passive: the
             header's instance, mounted but hidden, fetches the numbers. */}
@@ -335,7 +345,7 @@ export default function ConversationPage() {
           conversationId={convId}
           onOpen={() => openPane({ kind: "workspace" })}
         />
-        <ConversationFiles conversationId={convId} />
+        <ConversationFiles conversationId={convId} /><ArtifactHub conversationId={convId} />
         <ExportMenu
           conversationId={convId}
           onShare={() => setShareOpen(true)}

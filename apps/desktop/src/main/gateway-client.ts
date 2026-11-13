@@ -445,14 +445,14 @@ export class GatewayClient {
   /** FIX9 Part B: generate an image (POST /v1/images/generations) with the agent
    * key — host-side, the run_python/web_search precedent, so the sidecar never
    * holds the JWT. Returns a data: URI on success. */
-  async generateImage(prompt: string, signal: AbortSignal): Promise<{ ok: true; dataUri: string; revised?: string; producedBy?: string } | { ok: false; error: string }> {
+  async generateImage(prompt: string, signal: AbortSignal, options: { source_images?: string[]; size?: string; quality?: string } = {}): Promise<{ ok: true; dataUri: string; revised?: string; producedBy?: string } | { ok: false; error: string }> {
     const key = await this.getOrProvisionKey();
     if (!key) return { ok: false, error: "The app could not obtain a gateway key for this account." };
     try {
       const res = await fetch(`${this.gatewayUrl}/v1/images/generations`, {
         method: "POST",
         headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ prompt, response_format: "b64_json", n: 1 }),
+        body: JSON.stringify({ prompt, response_format: "b64_json", n: 1, ...options }),
         signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
       });
       if (!res.ok) {

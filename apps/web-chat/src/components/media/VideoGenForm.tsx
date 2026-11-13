@@ -33,8 +33,8 @@ interface Props {
   conversationId?: string | null;
 }
 
-// "confirm" (Sprint 3): the job is reserved but NOT polling yet, awaiting the
-// user's premium-cost confirmation (post-submit flow). "cancelled": user
+// "confirm": the server holds the job in pending_confirm; no provider dispatch
+// happens until the owner approves the quote. "cancelled": user
 // aborted an in-flight job.
 type Phase =
   | "form"
@@ -53,8 +53,19 @@ export function VideoGenForm({ model, conversationId }: Props) {
   const t = useT();
   const [prompt, setPrompt] = useState("");
   const [duration, setDuration] = useState(5);
-  const [resolution, setResolution] = useState("1080p");
-  const [hasAudio, setHasAudio] = useState(false);
+  const [videoConfig, setVideoConfig] = useState<{ enabled: boolean; reason: string; maxDuration: number } | null>(null);
+  const [configFailed, setConfigFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    api.getVideoConfig().then(config => {
+      if (cancelled) return;
+      const limit = config.supported_controls?.duration_sec?.[1];
+      const maxDuration = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 60) : 10;
+      setVideoConfig({ enabled: config.enabled, reason: config.reason, maxDuration });
+      setDuration(value => Math.min(value, maxDuration));
+    }).catch(() => { if (!cancelled) setConfigFailed(true); });
+    return () => { cancelled = true; };
+  }, []);
   const [phase, setPhase] = useState<Phase>("form");
   const [job, setJob] = useState<MediaJobStatus | null>(null);
   const [cost, setCost] = useState<{
@@ -64,7 +75,7 @@ export function VideoGenForm({ model, conversationId }: Props) {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<MediaGenErrorCode | null>(null);
-  // Job reserved by submit() and awaiting confirm (or being polled).
+  // Job created by submit(), pending confirmation or queued for execution.
   const [pendingJobId, setPendingJobId] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<Date | null>(null);
   // Authed playback: the finished artifact's bytes are fetched through
@@ -171,8 +182,8 @@ export function VideoGenForm({ model, conversationId }: Props) {
         prompt: prompt.trim(),
         model: model.id,
         duration_sec: duration,
-        resolution,
-        has_audio: hasAudio,
+        resolution: "auto",
+        has_audio: false,
         conversation_id: conversationId ?? null,
       });
       setCost({
@@ -201,10 +212,19 @@ export function VideoGenForm({ model, conversationId }: Props) {
     }
   }
 
-  function confirmGenerate() {
+  async function confirmGenerate() {
     if (!pendingJobId) return;
-    setPhase("polling");
-    startPolling(pendingJobId);
+    setPhase("submitting");
+    try {
+      const confirmed = await api.confirmMediaJob(pendingJobId);
+      if (confirmed.status !== "queued" && confirmed.status !== "processing" && confirmed.status !== "done") throw new Error("Video job is no longer available for generation.");
+      setPhase("polling");
+      startPolling(pendingJobId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("media.submitVideoFailed"));
+      setErrorCode("unknown");
+      setPhase("failed");
+    }
   }
 
   async function cancelGenerate() {
@@ -253,34 +273,16 @@ export function VideoGenForm({ model, conversationId }: Props) {
               <input
                 type="range"
                 min={1}
-                max={10}
+                max={videoConfig?.maxDuration ?? 10}
                 value={duration}
                 onChange={(e) => setDuration(Number(e.target.value))}
                 className="accent-rose-400"
               />
               <span className="w-8 tabular-nums text-text-primary">{t("unit.secShort", { n: String(duration) })}</span>
             </label>
-            <label className="flex items-center gap-2 text-sm text-text-secondary">
-              <span>{t("media.resolution")}</span>
-              <select
-                value={resolution}
-                onChange={(e) => setResolution(e.target.value)}
-                className="rounded-md border border-border bg-bg-base px-2 py-1 text-sm text-text-primary"
-              >
-                <option value="720p">720p</option>
-                <option value="1080p">1080p</option>
-              </select>
-            </label>
-            <label className="flex items-center gap-2 text-sm text-text-secondary">
-              <input
-                type="checkbox"
-                checked={hasAudio}
-                onChange={(e) => setHasAudio(e.target.checked)}
-                className="accent-rose-400"
-              />
-              <span>{t("media.audio")}</span>
-            </label>
+            <p className="text-sm text-text-secondary">{t("media.videoControlsNote")}</p>
           </div>
+          {!videoConfig?.enabled && <p role="status" className="text-sm text-text-secondary">{videoConfig?.reason || t(configFailed ? "media.videoUnavailable" : "media.videoChecking")}</p>}
           {phase === "failed" && errorCode ? (
             <MediaGenError
               errorCode={errorCode}
@@ -299,7 +301,7 @@ export function VideoGenForm({ model, conversationId }: Props) {
           <button
             type="button"
             onClick={submit}
-            disabled={!prompt.trim()}
+            disabled={!prompt.trim() || !videoConfig?.enabled}
             className="self-end rounded-full bg-rose-500 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {phase === "failed" ? t("common.retry") : t("media.generateVideo")}

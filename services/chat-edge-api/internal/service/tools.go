@@ -338,6 +338,7 @@ func (ec ToolExecContext) emit(u StreamUpdate) {
 // the message flow asks the executor "run this tool_call, give me
 // a string result"; the executor decides how to do that.
 type ToolExecutor struct {
+	editor   *FileService
 	memories *MemoryService
 	// FIX130 A2 — optional. When wired, the memory tools re-read the
 	// conversation at EXECUTION time and refuse unless its memory is
@@ -499,12 +500,12 @@ const memoryOffToolResult = "REFUSED: memory is off for this chat (or it is a te
 // either dependency is nil, generate_image is hidden from the tool
 // list. Must run after the executor exists (created inside
 // MessageService.SetMemoryService). An empty model defaults to
-// gpt-image-1 (OpenAI's current image model).
+// gpt-image-2.6-flare (default verified in public docs 2026-11-12).
 func (e *ToolExecutor) SetImageGeneration(gen imageGenerator, files generatedImageSaver, model string) {
 	e.imageGen = gen
 	e.imageFiles = files
 	if model == "" {
-		model = "gpt-image-1"
+		model = "gpt-image-2.6-flare"
 	}
 	e.imageModel = model
 }
@@ -641,6 +642,9 @@ func (e *ToolExecutor) ToolDefs(conv *model.Conversation) []GatewayTool {
 	// it whenever the dependencies are wired.
 	if e.videoGen != nil && e.videoFiles != nil {
 		defs = append(defs, generateVideoToolDef())
+		if _, ok := e.videoGen.(videoJobProxy); ok {
+			defs = append(defs, videoJobToolDef())
+		}
 	}
 	// Web search. Wired-globally like image gen; the PER-TENANT gate
 	// (tenant search_enabled + a provider configured) is applied by the
@@ -658,6 +662,9 @@ func (e *ToolExecutor) ToolDefs(conv *model.Conversation) []GatewayTool {
 	// Phase 13 Part B — run_python. Not gated on MemoryEnabled (running
 	// analysis code doesn't write user memory); offered in every
 	// conversation where the sandbox-backed interpreter is wired.
+	if e.editor != nil {
+		defs = append(defs, fileEditorToolDef())
+	}
 	if e.HasCodeInterpreter() {
 		defs = append(defs, runPythonToolDef())
 	}
@@ -702,6 +709,8 @@ func (e *ToolExecutor) Execute(
 		return dlpBlockedToolResult(call.Function.Name)
 	}
 	switch call.Function.Name {
+	case "edit_office_file":
+		return e.execFileEditor(ctx, call.Function.Arguments, ec)
 	case "save_memory":
 		return e.execSaveMemory(ctx, call.Function.Arguments, ec)
 	case "list_memories":
@@ -712,6 +721,8 @@ func (e *ToolExecutor) Execute(
 		return e.execSearchPastConversations(ctx, call.Function.Arguments, ec)
 	case "generate_image":
 		return e.execGenerateImage(ctx, call.Function.Arguments, ec)
+	case "video_job":
+		return e.execVideoJob(ctx, call.Function.Arguments, ec)
 	case "generate_video":
 		return e.execGenerateVideo(ctx, call.Function.Arguments, ec)
 	case "web_search":
@@ -1253,9 +1264,10 @@ func generateImageToolDef() GatewayTool {
 		Function: GatewayToolFunction{
 			Name: "generate_image",
 			Description: "Generate an image from a text description. Use this when the user asks to " +
-				"create, draw, generate, or make an image / picture / รูป / ภาพ. ALWAYS translate and " +
-				"enhance the user's request into a detailed, vivid ENGLISH prompt (subject, style, mood, " +
-				"composition, lighting) for the best result. The generated image is attached to your " +
+				"create, draw, generate, or edit an image / picture / รูป / ภาพ. Preserve literal text, names, " +
+				"language and the user's constraints. To edit an existing image, supply source_file_ids from " +
+				"this conversation; this sends those image bytes to the configured image provider. Only use " +
+				"references the user asked to use. The generated image is attached to your " +
 				"reply automatically — after calling this tool, just tell the user their image is ready " +
 				"in a short friendly sentence. Do NOT invent a URL or a markdown image link.",
 			Parameters: map[string]any{
@@ -1263,8 +1275,9 @@ func generateImageToolDef() GatewayTool {
 				"properties": map[string]any{
 					"prompt": map[string]any{
 						"type":        "string",
-						"description": "Detailed image description in English. Translate + enhance the user's request into a vivid, specific prompt.",
+						"description": "Image description or edit instruction. Keep quoted text exactly in its original language.",
 					},
+					"source_file_ids": map[string]any{"type": "array", "maxItems": 4, "items": map[string]any{"type": "string"}, "description": "Optional 1–4 existing conversation image IDs for editing; max 4 MiB each, 12 MiB total."},
 					"size": map[string]any{
 						"type":        "string",
 						"enum":        []string{"1024x1024", "1024x1536", "1536x1024"},
@@ -1283,9 +1296,10 @@ func generateImageToolDef() GatewayTool {
 }
 
 type generateImageArgs struct {
-	Prompt  string `json:"prompt"`
-	Size    string `json:"size"`
-	Quality string `json:"quality"`
+	SourceFileIDs []string `json:"source_file_ids"`
+	Prompt        string   `json:"prompt"`
+	Size          string   `json:"size"`
+	Quality       string   `json:"quality"`
 }
 
 func (e *ToolExecutor) execGenerateImage(
@@ -1317,15 +1331,21 @@ func (e *ToolExecutor) execGenerateImage(
 		quality = "auto"
 	}
 
+	resolver, _ := e.imageFiles.(codeFileResolver)
+	sources, err := resolveImageSources(ctx, resolver, ec, args.SourceFileIDs)
+	if err != nil {
+		return err.Error()
+	}
 	resp, err := e.imageGen.GenerateImages(ctx, GatewayCallContext{
 		TenantID:       ec.TenantID,
 		UserID:         ec.UserID,
 		ConversationID: ec.ConversationID,
 	}, GatewayImagesRequest{
-		Model:   e.imageModel,
-		Prompt:  args.Prompt,
-		Size:    size,
-		Quality: quality,
+		Model:        e.imageModel,
+		Prompt:       args.Prompt,
+		Size:         size,
+		Quality:      quality,
+		SourceImages: sources,
 	})
 	if err != nil {
 		// Surface the REAL provider failure (status + body snippet are
@@ -1382,7 +1402,7 @@ func (e *ToolExecutor) execGenerateImage(
 	if producedBy == "" {
 		producedBy = resp.Provider
 	}
-	if _, err := e.imageFiles.SaveGeneratedImage(ctx, GeneratedImageInput{
+	saved, err := e.imageFiles.SaveGeneratedImage(ctx, GeneratedImageInput{
 		TenantID:       ec.TenantID,
 		UserID:         ec.UserID,
 		ConversationID: ec.ConversationID,
@@ -1391,7 +1411,8 @@ func (e *ToolExecutor) execGenerateImage(
 		ContentType:    "image/png",
 		Prompt:         args.Prompt,
 		GeneratedBy:    producedBy,
-	}); err != nil {
+	})
+	if err != nil {
 		slog.Error("image_generation_save_failed",
 			"error", err.Error(),
 			"model", e.imageModel,
@@ -1402,11 +1423,15 @@ func (e *ToolExecutor) execGenerateImage(
 
 	// Result fed back to the model. The image is ALREADY attached to this
 	// reply, so the model must acknowledge it without fabricating a link.
+	fileID := ""
+	if saved != nil {
+		fileID = saved.ID.String()
+	}
 	return fmt.Sprintf(
-		"Image generated successfully (%s, %s) and attached to your reply. "+
+		"Image generated successfully (%s, %s) and attached to your reply. file_id=%s; produced_by=%s. "+
 			"Tell the user their image is ready in a short, friendly sentence. "+
 			"Do NOT include a URL or a markdown image — the image displays automatically.",
-		size, quality,
+		size, quality, fileID, producedBy,
 	)
 }
 
@@ -1426,7 +1451,7 @@ func generateVideoToolDef() GatewayTool {
 			Description: "Generate a short video clip from a text description. Use this when the user asks to " +
 				"create, make, or generate a video / clip / วิดีโอ / คลิป. ALWAYS translate and enhance the " +
 				"user's request into a detailed, vivid ENGLISH prompt (subject, action, camera, style, mood). " +
-				"The generated video is attached to your reply automatically — after calling this tool, just " +
+				"Only report completion when the tool confirms it. Pending cost confirmation requires the user. The generated video is attached on success — " +
 				"tell the user their video is ready in a short friendly sentence. Do NOT invent a URL or a " +
 				"markdown link. Generation can take up to a minute.",
 			Parameters: map[string]any{
@@ -1501,6 +1526,9 @@ func (e *ToolExecutor) execGenerateVideo(
 		}
 	}
 
+	if sub.RequiresConfirmation || sub.Status == "pending_confirm" {
+		return fmt.Sprintf("Video job %s is waiting for explicit cost confirmation (%s). It has NOT been dispatched. The owner must confirm using the Video jobs panel in this conversation. Do not claim it is generating or approve spending automatically.", sub.JobID, sub.EstimatedCostUSD)
+	}
 	// Poll until terminal. Fixed interval; the request ctx cancels it, and a
 	// hard deadline bounds a stuck provider.
 	jobID := sub.JobID
@@ -1509,13 +1537,13 @@ func (e *ToolExecutor) execGenerateVideo(
 	for {
 		select {
 		case <-ctx.Done():
-			return "The video generation was cancelled."
+			return fmt.Sprintf("Stopped waiting for video job %s. This does not cancel provider work; check or cancel it with video_job or the Video jobs panel.", jobID)
 		case <-time.After(pollInterval):
 		}
 		status, perr := e.videoGen.PollVideoJob(ctx, callCtx, jobID)
 		if perr != nil {
 			slog.Error("video_generation_poll_failed", "error", perr.Error(), "job_id", jobID)
-			return "I lost track of the video generation. Please try again."
+			return fmt.Sprintf("Could not poll video job %s. Check the Video jobs panel before submitting another paid job.", jobID)
 		}
 		if status.Status == "done" {
 			break
@@ -1525,8 +1553,11 @@ func (e *ToolExecutor) execGenerateVideo(
 				"job_id", jobID, "error_code", status.ErrorCode, "error_message", status.ErrorMessage)
 			return "The video generation failed. Please try again with a different prompt."
 		}
+		if status.Status == "cancelled" {
+			return "The video generation was cancelled."
+		}
 		if time.Now().After(deadline) {
-			return "The video generation took too long. Please try again."
+			return fmt.Sprintf("Stopped waiting for video job %s after the polling deadline. Check the Video jobs panel; the provider may still be working.", jobID)
 		}
 	}
 
@@ -1791,7 +1822,18 @@ func runPythonToolDef() GatewayTool {
 				"file_id(s) in 'files' — each is mounted read-only at /job/in/<original_filename>. " +
 				"Making alternatives for the user to choose between? Save them all in ONE run under " +
 				"distinct names (/job/out/option-a.png, /job/out/option-b.png) — all are attached. " +
-				"Re-running because the previous attempt was wrong? Write to the SAME filename.",
+				"Re-running because the previous attempt was wrong? Write to the SAME filename. " +
+				"For Office templates: import sys; sys.path.insert(0, '/sandbox/scripts'); " +
+				"from office_templates import catalog, create, inspect_file. Print catalog() first for schemas. " +
+				"For animated business graphics: import motion_templates; print(motion_templates.catalog()); " +
+				"motion_templates.render('motion.explainer' (or motion.metrics/motion.slideshow), data, '/job/out/brief.mp4'). " +
+				"It exports silent MP4, poster, contact sheet and editable storyboard JSON; review these before delivery. " +
+				"create(template_id, data, '/job/out/name.ext') supports pptx executive_brief/project_update/proposal, " +
+				"docx business_report/proposal/meeting_minutes, pdf business_report/invoice, xlsx budget/tracker/analysis " +
+				"and csv data_export (IDs use format.name). Supply real user facts, typed columns and sources; " +
+				"never invent missing figures. Inspect original files before editing; preserve their templates. " +
+				"Read the Office quality report: checked means rendered, not visually approved. Fix formula errors; " +
+				"do not claim recalculated values when recalculated=false. Inspect attached previews before delivery.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1925,6 +1967,7 @@ func (e *ToolExecutor) execRunPython(
 	// message id yet). They render through the same message_files SSE
 	// path images/videos use: png charts inline, other files as chips.
 	var savedImages, savedFiles []string
+	var savedReferences []string
 	if ec.MessageID != uuid.Nil {
 		for i, art := range res.Artifacts {
 			if i >= maxArtifacts {
@@ -1935,7 +1978,7 @@ func (e *ToolExecutor) execRunPython(
 				slog.Warn("run_python_artifact_read_failed", "name", art.Name, "err", rerr)
 				continue
 			}
-			if _, serr := e.codeSaver.SaveGeneratedFile(ctx, GeneratedFileInput{
+			saved, serr := e.codeSaver.SaveGeneratedFile(ctx, GeneratedFileInput{
 				TenantID:         ec.TenantID,
 				UserID:           ec.UserID,
 				ConversationID:   ec.ConversationID,
@@ -1943,9 +1986,13 @@ func (e *ToolExecutor) execRunPython(
 				Data:             data,
 				ContentType:      ArtifactContentType(art.Name),
 				OriginalFilename: art.Name,
-			}); serr != nil {
+			})
+			if serr != nil {
 				slog.Warn("run_python_artifact_save_failed", "name", art.Name, "err", serr)
 				continue
+			}
+			if saved != nil {
+				savedReferences = append(savedReferences, fmt.Sprintf("file_id=%s filename=%q", saved.ID, art.Name))
 			}
 			if IsImageArtifact(art.Name) {
 				savedImages = append(savedImages, art.Name)
@@ -1971,7 +2018,11 @@ func (e *ToolExecutor) execRunPython(
 		Truncated: outClipped || errClipped,
 	})
 
-	return formatRunPythonResult(res, savedImages, savedFiles, ec.MessageID == uuid.Nil)
+	result = formatRunPythonResult(res, savedImages, savedFiles, ec.MessageID == uuid.Nil)
+	if len(savedReferences) > 0 {
+		result += "\nTo read or revise these files, pass their file IDs to run_python files:\n" + strings.Join(savedReferences, "\n")
+	}
+	return result
 }
 
 // maxDisplayOutputBytes caps what one run's stdout/stderr contributes to

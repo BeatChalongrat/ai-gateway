@@ -5,9 +5,9 @@
 // Flow (decided in Sprint 3 planning): the form submits FIRST, then if the
 // backend returns ``requires_confirmation === true`` (the $1.00 threshold is
 // enforced server-side, so there is no client-side threshold constant) the
-// job is reserved-but-not-polled and this modal is shown with the backend's
-// exact figures. Cancel aborts via POST /v1/jobs/{id}/cancel (refund);
-// Confirm starts polling. Built on the shared Modal (ESC + backdrop close,
+// video job is pending_confirm (not runnable) and the modal shows its estimate.
+// Cancel aborts via POST /v1/jobs/{id}/cancel; Confirm calls the server's
+// confirmation endpoint before polling. Built on the shared Modal (ESC + backdrop close,
 // role=dialog, aria-modal, focus management).
 
 import { useT } from "@/lib/i18n";

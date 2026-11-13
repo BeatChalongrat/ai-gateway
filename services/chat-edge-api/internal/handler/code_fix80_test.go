@@ -36,10 +36,20 @@ type fix80Files struct {
 	saved      []service.GeneratedFileInput
 	savedIDs   []uuid.UUID
 	assertConv []uuid.UUID
+	inputConv  uuid.UUID
+	inputFile  uuid.UUID
+	inputCalls int
 }
 
 func (f *fix80Files) OpenUserFileCopy(_ context.Context, _, _, _ uuid.UUID) (string, string, func(), error) {
 	return "", "", func() {}, service.ErrFileNotFound
+}
+func (f *fix80Files) OpenConversationFileCopy(_ context.Context, _, _, convID, fileID uuid.UUID) (string, string, func(), error) {
+	f.inputCalls++
+	if convID != f.inputConv || fileID != f.inputFile {
+		return "", "", nil, service.ErrFileNotFound
+	}
+	return "input.xlsx", "input.xlsx", func() {}, nil
 }
 func (f *fix80Files) AssertConversationOwned(_ context.Context, _, _, convID uuid.UUID) error {
 	f.assertConv = append(f.assertConv, convID)
@@ -156,5 +166,20 @@ func TestCodeRun_ConversationGate_RefusesBadAndForeignIDs(t *testing.T) {
 	}
 	if len(files.saved) != 0 {
 		t.Fatalf("a refused conversation must persist nothing, got %d saves", len(files.saved))
+	}
+}
+
+func TestCodeRun_InputsBelongToNamedConversation(t *testing.T) {
+	conv, file := uuid.New(), uuid.New()
+	files := &fix80Files{ownedConv: conv, inputConv: conv, inputFile: file}
+	h := fix80Handler(t, files)
+	rec, _ := fix80Post(t, h, `{"code":"edit()","conversation_id":"`+conv.String()+`","files":["`+file.String()+`","`+file.String()+`"]}`)
+	if rec.Code != http.StatusOK || files.inputCalls != 1 {
+		t.Fatalf("expected one scoped input and a successful run, status=%d calls=%d body=%s", rec.Code, files.inputCalls, rec.Body.String())
+	}
+	files.saved = nil
+	rec, _ = fix80Post(t, h, `{"code":"edit()","conversation_id":"`+conv.String()+`","files":["`+uuid.New().String()+`"]}`)
+	if rec.Code != http.StatusNotFound || len(files.saved) != 0 {
+		t.Fatalf("foreign input must not produce artifacts, status=%d saved=%d", rec.Code, len(files.saved))
 	}
 }

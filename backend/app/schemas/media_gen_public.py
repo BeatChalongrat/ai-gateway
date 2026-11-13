@@ -9,24 +9,24 @@ strings (the DB stores UUIDs as String(36)).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class VideoGenPublicRequest(BaseModel):
-    prompt: str
+    prompt: str = Field(min_length=1, max_length=4000)
     model: str
-    duration_sec: int = 5
-    resolution: str = "1080p"
-    has_audio: bool = False
+    duration_sec: int = Field(5, ge=1, le=60, strict=True)
+    resolution: Literal["auto"] = "auto"
+    has_audio: Literal[False] = False
     conversation_id: Optional[str] = None
     idempotency_key: Optional[str] = None
 
 
 class VideoGenPublicResponse(BaseModel):
     job_id: str
-    status: str  # "queued"
+    status: str  # queued or pending_confirm
     estimated_cost_credits: int
     estimated_cost_usd: str
     balance_after_credits: int

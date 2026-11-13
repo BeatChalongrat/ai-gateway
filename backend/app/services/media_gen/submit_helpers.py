@@ -49,6 +49,14 @@ async def validate_model_capability(
     ).scalars().first()
     if mc is None:
         raise HTTPException(status_code=404, detail=f"model {model_id!r} not found")
+    if capability_attr == "supports_video_gen":
+        from app.services.media_gen.registry import registered_adapters
+        if mc.provider == "openai" and model_id.startswith("sora-"):
+            raise HTTPException(status_code=410, detail="Sora 2 / Videos API retired on 2026-09-24; configure a supported video provider.")
+        if not mc.is_active or (mc.provider, "video") not in registered_adapters():
+            raise HTTPException(status_code=400, detail="Video model is inactive or has no installed video adapter.")
+        if mc.provider != "mock" and not (settings.video_gen_enabled and settings.video_model_verified):
+            raise HTTPException(status_code=403, detail="Video generation requires the deployment gate and an owner-verified model.")
     if not getattr(mc, capability_attr, False):
         raise HTTPException(
             status_code=400,
@@ -162,6 +170,11 @@ async def estimate_and_validate_cost(
     input_metadata: dict,
 ) -> EstimateResult:
     """Estimate USD cost + check balance; raise 402 if insufficient."""
+    if job_type == "video":
+        duration = input_metadata.get("duration_sec", 5)
+        limit = max(1, min(60, settings.replicate_max_video_duration_sec))
+        if not isinstance(duration, int) or isinstance(duration, bool) or not 1 <= duration <= limit:
+            raise HTTPException(status_code=422, detail=f"duration_sec must be 1–{limit}; it is never silently shortened.")
     est = await estimate_and_check_balance(
         db, tenant_id, user_id, job_type, model_config, input_metadata
     )
@@ -251,6 +264,8 @@ async def insert_generation_job_row(
             )
         ).scalars().first()
         if existing is not None:
+            if existing.user_id != user_id:
+                raise HTTPException(status_code=409, detail="Idempotency key is already in use")
             return existing
     job = GenerationJobORM(
         id=str(uuid.uuid4()),
@@ -261,7 +276,7 @@ async def insert_generation_job_row(
         job_type=job_type,
         provider=provider,
         model_id=model_id,
-        status="queued",
+        status=("pending_confirm" if job_type == "video" and credits_to_usd(estimate_credits) >= Decimal(str(settings.video_gen_default_threshold_usd)) else "queued"),
         input_prompt=input_prompt,
         input_metadata=input_metadata,
         estimated_cost_credits=estimate_credits,
@@ -290,6 +305,6 @@ def format_submit_response_usd(job: GenerationJobORM, balance: int) -> dict:
         "estimated_cost_usd": credits_to_usd_display(est),
         "balance_after_credits": balance_after,
         "balance_after_usd": credits_to_usd_display(balance_after),
-        "requires_confirmation": credits_to_usd(est) >= threshold,
+        "requires_confirmation": job.status == "pending_confirm" if job.job_type == "video" else credits_to_usd(est) >= threshold,
         "poll_url": f"/v1/jobs/{job.id}",
     }

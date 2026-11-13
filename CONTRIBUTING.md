@@ -1,74 +1,57 @@
 # Contributing
 
-## Before you push: run the gate locally
+Source review: 2026-11-12. Read CLAUDE.md for authorship and live-model rules.
 
-```bash
-make ci
-```
+## Validate the affected path
 
-`make ci` runs the same three checks CI runs, against the running dev stack
-(`make up` first):
+| Change | Checks |
+|---|---|
+| Desktop | In apps/desktop: npm run typecheck; npm test; npm run build |
+| Web Chat | In apps/web-chat: npx tsc --noEmit; npm test; npm run lint:i18n; npm run check:classes; npm run lint:theme |
+| Chat-edge | In services/chat-edge-api: gofmt on changed Go files; targeted go test; go vet as appropriate |
+| Office generators | From root: python -m unittest discover -s services/chat-edge-api/scripts/tests -v; sandbox Python lane |
+| Backend | Unit/integration separation and known-failure handling in backend/tests and scripts/backend-test-lane.sh |
+| Documentation | Check local links, source claims and scripts/gate/tracks.py |
 
-| Target          | What it runs                                              |
-|-----------------|-----------------------------------------------------------|
-| `make test-unit`| `pytest -m "not integration"` in the backend container    |
-| `make typecheck`| `npx tsc --noEmit` for `apps/web-chat`                     |
-| `make go-test`  | `go vet ./... && go test ./...` for `services/chat-edge-api` |
+New local-file tests exercise real temporary files, permissions and conversation
+ownership. Office tests reopen actual generated files. They do not replace a
+live model/native UI walkthrough or visual Office inspection.
 
-`make test-all` runs the full backend suite including the integration lane —
-that needs the live stack (DLP sidecar, NER, Postgres, gRPC limiter) and is
-**not** part of the push gate. The push gate is the unit lane only.
+## Gate and CI
 
-## Continuous integration
+The complete local release gate is `scripts/gate.sh`: it serializes heavy work,
+checks host power and records results. Its lanes include backend, Go, Rust,
+web/admin/portal, desktop, Python, repository hygiene and operational checks.
+Read the script and [test-stack guide](docs/testing/test-stack.md) before running
+the full gate; some phases change test-service state or require a running stack.
 
-`.github/workflows/ci.yml` runs on every push to `main` and every PR
-targeting `main`. Three independent jobs (no build / deploy step — this is a
-test gate):
+`make ci` is a smaller convenience target (backend unit, web typecheck/tests
+and chat-edge Go). It is not the entire release gate.
 
-- **backend (pytest, unit lane)** — `pytest -m "not integration"`. Installs
-  `backend/requirements-dev.txt` only (no presidio/spaCy/semantic extras —
-  those power the integration lane, which is excluded).
-- **web-chat (tsc --noEmit)** — `npm ci` + `npx tsc --noEmit`.
-- **chat-edge-api (go vet + test)** — `go vet ./...` + `go test ./...`.
+GitLab is the primary CI definition in `.gitlab-ci.yml`; GitHub mirrors Linux
+lanes in `.github/workflows/ci.yml`. The definitions include more than the old
+three-job list: web unit/E2E, gateway/MCP, secret and dependency checks are also
+present. The WPF Windows job was removed; Electron has its own local suite.
+Read job definitions for current required/optional behavior and tool versions.
 
-All three must pass. The unit lane is the contract that must stay green
-(2230+ tests, 0 failures); the integration lane is exercised against a full
-stack, not in CI.
+Existing backend failures are named in the repository's known-failure records.
+Do not hide a new failure by weakening assertions, broadening exclusions or
+marking a required job optional. Historical passing counts are not today's
+result. If worker processes fail locally, report that separately from assertion
+failures; a bounded-worker rerun is appropriate for diagnosis.
 
-## Branch protection (one-time admin setup)
+## Documentation and delivery
 
-Branch protection is GitHub-side state, not a file in the repo, so it can't
-be committed. Apply it once with the GitHub CLI (`gh auth login` as a repo
-admin first). This requires the three CI checks to pass before `main` can be
-updated and forbids force-pushes:
+[Documentation index](docs/DOCUMENTATION_INDEX.md) distinguishes current source
+references, operational runbooks, historical decisions and runtime prompts.
+Update the relevant contract when behavior changes; preserve historical dates
+and do not rewrite operational evidence as a fresh successful run.
 
-```bash
-gh api -X PUT repos/BeatChalongrat/ai-gateway/branches/main/protection \
-  -H "Accept: application/vnd.github+json" \
-  -f 'required_status_checks[strict]=true' \
-  -f 'required_status_checks[contexts][]=backend (pytest, unit lane)' \
-  -f 'required_status_checks[contexts][]=web-chat (tsc --noEmit)' \
-  -f 'required_status_checks[contexts][]=chat-edge-api (go vet + test)' \
-  -f 'enforce_admins=false' \
-  -f 'required_pull_request_reviews=' \
-  -f 'restrictions=' \
-  -f 'allow_force_pushes=false' \
-  -f 'allow_deletions=false'
-```
+Working reports/probes remain outside tracked product documentation according
+to .gitignore and the tracks gate. New maintained docs/tests must be included
+in the eventual change set. A source build is not a deployed release; state
+which binaries/images, if any, were rebuilt or installed.
 
-Notes:
-- `required_status_checks[contexts]` must match the job `name:` values in
-  `ci.yml` exactly — update both together if a job is renamed.
-- `enforce_admins=false` lets a solo maintainer merge an admin hotfix without
-  a second reviewer; flip to `true` once the team grows.
-- PR reviews are left off (`required_pull_request_reviews=`) since the repo is
-  currently maintained solo. To require one approving review, replace that
-  line with
-  `-F 'required_pull_request_reviews[required_approving_review_count]=1'`.
-
-Verify the result:
-
-```bash
-gh api repos/BeatChalongrat/ai-gateway/branches/main/protection \
-  --jq '.required_status_checks.contexts'
-```
+No commit, merge, branch-protection change or deployment is implied by running
+tests. Use actual remote/project settings rather than the previous hard-coded
+GitHub protection example.

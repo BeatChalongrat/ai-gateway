@@ -42,6 +42,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -121,8 +122,13 @@ type FileService struct {
 	// scripts).
 	excel *ExcelService
 	// Phase 4 Session 2 — same hook for docx + pdf uploads.
-	docs    *DocService
-	sandbox *sandbox.Runner
+	docs             *DocService
+	sandbox          *sandbox.Runner
+	officeQuality    *OfficeQuality
+	visualGateway    visualGateway
+	visualModel      string
+	visualImageModel string
+	workCancels      sync.Map
 	// deletionAudit records explicit file deletions (row + storage
 	// object) in chat.deletion_audit. Wired via SetDeletionAudit;
 	// nil-safe.
@@ -815,6 +821,8 @@ func (s *FileService) AssertConversationOwned(ctx context.Context, tenantID, use
 // run_python's outputs flow through the SAME message.files[] pipeline
 // images/videos use (rendered inline for images, download chip otherwise).
 type GeneratedFileInput struct {
+	ParentFileID   *uuid.UUID
+	ChangeLog      string
 	TenantID       uuid.UUID
 	UserID         uuid.UUID
 	ConversationID uuid.UUID
@@ -866,7 +874,7 @@ func (s *FileService) SaveGeneratedFile(
 		m := in.MessageID
 		msgID = &m
 	}
-	row, err := s.files.Create(ctx, &model.ConversationFile{
+	record := &model.ConversationFile{
 		ConversationID:   in.ConversationID,
 		MessageID:        msgID,
 		TenantID:         in.TenantID,
@@ -880,7 +888,20 @@ func (s *FileService) SaveGeneratedFile(
 		IsGenerated:      true,
 		Version:          1,
 		InspectionJSON:   generatedByJSON(in.GeneratedBy),
-	})
+	}
+	if in.ParentFileID != nil {
+		record.ExtractionStatus = "processing"
+	}
+	if in.ChangeLog != "" {
+		record.ChangeLog = &in.ChangeLog
+	}
+	var row *model.ConversationFile
+	var err error
+	if in.ParentFileID != nil {
+		row, err = s.files.CreateRevision(ctx, *in.ParentFileID, record)
+	} else {
+		row, err = s.files.Create(ctx, record)
+	}
 	if err != nil {
 		_ = s.storage.Delete(ctx, key)
 		return nil, err
@@ -893,6 +914,14 @@ func (s *FileService) SaveGeneratedFile(
 		"mime_type", row.ContentType,
 		"file_size_bytes", row.FileSizeBytes,
 	)
+	if in.ParentFileID != nil {
+		job := *row
+		safeGo("file-revision-extraction", func() {
+			bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), extractionJobTimeout)
+			defer cancel()
+			s.runExtraction(bg, &job)
+		})
+	}
 	return row, nil
 }
 

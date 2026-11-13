@@ -51,9 +51,9 @@ type Handlers struct {
 	// assistant-produced file into a conversation (desktop generate_image,
 	// the media forms' finished jobs).
 	GeneratedFile *handler.GeneratedFileHandler
-	Preferences    *handler.PreferencesHandler
-	Share          *handler.ShareHandler
-	Admin          *handler.AdminHandler
+	Preferences   *handler.PreferencesHandler
+	Share         *handler.ShareHandler
+	Admin         *handler.AdminHandler
 	// Knowledge is optional — left nil when RAG isn't compiled in
 	// (it always is in the current build but the handler keeps a
 	// guard so omitting it doesn't crash the router setup).
@@ -278,9 +278,12 @@ func New(
 			// polling is not.
 			if h.MediaProxy != nil {
 				r.With(sendRateLimit).Post("/videos/generations", h.MediaProxy.SubmitVideo)
+				r.Get("/video/config", h.MediaProxy.VideoConfig)
 				r.With(sendRateLimit).Post("/audio/generations", h.MediaProxy.SubmitAudio)
+				r.Get("/jobs", h.MediaProxy.ListJobs)
 				r.Get("/jobs/{id}", h.MediaProxy.GetJob)
 				r.Post("/jobs/{id}/cancel", h.MediaProxy.CancelJob)
+				r.With(sendRateLimit).Post("/jobs/{id}/confirm", h.MediaProxy.ConfirmJob)
 				// Finished artifact bytes — streamed, cookie-authed. The
 				// web-chat media forms play video/audio from this via a
 				// blob object URL (Phase 11 A3).
@@ -313,6 +316,16 @@ func New(
 			// has no structured view, so a client can ask first and
 			// fall back to /text.
 			r.Get("/files/{fileID}/preview-data", h.File.PreviewData)
+			r.Post("/files/{fileID}/editor", h.File.Editor)
+			r.Get("/files/library", h.File.ArtifactLibrary)
+			r.Post("/conversations/{convID}/templates", h.File.WorkspaceTemplate)
+			r.Get("/files/{fileID}/draft", h.File.ArtifactDraft)
+			r.Put("/files/{fileID}/draft", h.File.ArtifactDraft)
+			r.Delete("/files/{fileID}/draft", h.File.ArtifactDraft)
+			r.Get("/files/{fileID}/work", h.File.ArtifactWork)
+			r.Post("/files/{fileID}/work", h.File.ArtifactWork)
+			r.Get("/file-work/{workID}", h.File.ArtifactWorkStatus)
+			r.Post("/file-work/{workID}", h.File.ArtifactWorkStatus)
 			r.Delete("/files/{fileID}", h.File.Delete)
 			// FIX127 A1 — a chip removed while its upload was still in
 			// flight: the client has no server id yet, only the client_id

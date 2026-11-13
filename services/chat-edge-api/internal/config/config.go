@@ -30,6 +30,9 @@ type Config struct {
 
 	// HTTP listener.
 	Port string `env:"PORT" envDefault:"4000"`
+	// Internal isolated LibreOffice service; empty means render/recalc unavailable.
+	OfficeConverterURL string `env:"OFFICE_CONVERTER_URL"`
+	OfficeVisualModel  string `env:"OFFICE_VISUAL_MODEL"`
 	// FIX119 Part C2 — a caller whose email matches this pattern is a
 	// test account: identity.users.is_test is set when the user row is
 	// provisioned, every conversation and message it creates or imports
@@ -342,8 +345,8 @@ type Config struct {
 	SandboxRuntime string `env:"SANDBOX_RUNTIME" envDefault:""`
 
 	// Phase B — the gateway image model the generate_image tool calls.
-	// gpt-image-1 is OpenAI's current image model (DALL-E is retiring).
-	ImageGenModel string `env:"IMAGE_GEN_MODEL" envDefault:"gpt-image-1"`
+	// Default image model; account access must be verified before enabling.
+	ImageGenModel string `env:"IMAGE_GEN_MODEL" envDefault:"gpt-image-2.6-flare"`
 	// Sprint 2A — the video model the generate_video tool submits to. The
 	// dev default is the mock provider (mock-video-1); Sprint 2B swaps in
 	// a real Replicate model id.
