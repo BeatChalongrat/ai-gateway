@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
+import { OfficeQualityNotice } from "./OfficeQualityNotice";
 import { api } from "@/lib/api";
 import { tOutside, useT } from "@/lib/i18n";
 import {
@@ -79,6 +80,7 @@ export interface PptxPlan {
     [k: string]: unknown;
   };
   slides?: PptxSlide[];
+  actions?: { type: string; slide?: number; to?: number; find?: string; replace?: string; text?: string }[];
   [k: string]: unknown;
 }
 
@@ -164,12 +166,19 @@ export function PptxPlanCard({ convId, plan, messageId, files, outcomes }: Props
   const layout = (settings.layout as string) || "16:9";
   const language = ((settings.language as string) || "en").toUpperCase();
   const slides = plan.slides || [];
+  const actions = plan.actions || [];
+  const metadata = [
+    ...(!plan.source_file_id || settings.layout ? [layout] : []),
+    ...(!plan.source_file_id || settings.language ? [language] : []),
+    ...(slides.length || !actions.length ? [`${slides.length} ${t(slides.length === 1 ? "unit.slide" : "unit.slides")}`] : []),
+    ...(actions.length ? [`${actions.length} ${t(actions.length === 1 ? "unit.action" : "unit.actions")}`] : []),
+  ].join(" · ");
 
   return (
     <CardShell
       headerIcon={<FileTypeBadge extension=".pptx" size="sm" />}
       headerTitle={t("plan.pptx.title")}
-      metadata={`${layout} · ${language} · ${slides.length} ${t(slides.length === 1 ? "unit.slide" : "unit.slides")}`}
+      metadata={metadata}
       footer={
         <PrimaryButton
           onClick={execute}
@@ -200,8 +209,27 @@ export function PptxPlanCard({ convId, plan, messageId, files, outcomes }: Props
           ))}
         </PlanList>
       ) : null}
+      {actions.length > 0 ? (
+        <PlanList title={t("plan.changes")}>
+          {actions.map((action, i) => (
+            <PlanListItem key={i} icon={<FileText className={SLIDE_ICON_CLASS} />} index={i + 1}>
+              {summarizeEdit(action)}
+            </PlanListItem>
+          ))}
+        </PlanList>
+      ) : null}
     </CardShell>
   );
+}
+
+function summarizeEdit(action: NonNullable<PptxPlan["actions"]>[number]): string {
+  switch (action.type) {
+    case "replace_text": return tOutside("plan.pptx.replaceText", { find: action.find ?? "", replace: action.replace ?? "" });
+    case "set_notes": return tOutside("plan.pptx.setNotes", { slide: String(action.slide ?? "") });
+    case "move_slide": return tOutside("plan.pptx.moveSlide", { slide: String(action.slide ?? ""), to: String(action.to ?? "") });
+    case "delete_slide": return tOutside("plan.pptx.deleteSlide", { slide: String(action.slide ?? "") });
+    default: return tOutside("plan.changes");
+  }
 }
 
 export function PptxResultCard({ result }: { result: DocResult }) {
@@ -258,10 +286,10 @@ export function PptxResultCard({ result }: { result: DocResult }) {
                   {entry.status === "error" ? "✗" : "✓"}
                 </span>
                 <span>
-                  {t("plan.slideEntry", {
+                  {entry.slide != null ? t("plan.slideEntry", {
                     n: String(entry.slide),
                     type: entry.type,
-                  })}
+                  }) : `${entry.action ?? i + 1}. ${t("plan.changes")}`}
                   {entry.detail ? ` — ${entry.detail}` : ""}
                 </span>
               </li>
@@ -292,6 +320,7 @@ export function PptxResultCard({ result }: { result: DocResult }) {
           </ul>
         </details>
       ) : null}
+      <OfficeQualityNotice report={validation?.office_quality} />
       {validation ? (
         <ValidationBadge
           valid={validation.valid ?? false}

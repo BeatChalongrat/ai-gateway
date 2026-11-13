@@ -1,18 +1,20 @@
 """Raw-egress policy for third-party calls (Gateway Phase 9).
 
-The gateway's core invariant is "no user content reaches a third party
-without DLP masking." Exactly TWO channels are exempt, because masking
-would break the feature itself:
+Standard completion text is DLP-masked before external dispatch. Five
+registered raw-egress channels have explicit policy gates:
 
 * ``web_search``  — a masked query ("prognosis for <PERSON_1>") returns
   garbage results; providers need the real query.
 * ``media_gen``   — the prompt IS the creative intent; masking a name
   yields the wrong image/voice/video.
+* ``embeddings`` — document/query text for vector generation.
+* ``voice`` — transcription audio and speech synthesis text.
+* ``agent_documents`` — trusted-caller decision in in_house.py; see below.
 
 ``RAW_EGRESS_ALLOWED`` is the machine-checked whitelist of those
 channels. ``tests/test_dlp_egress_invariant.py`` enumerates every
 outbound-to-third-party call site and fails if a site is neither masked
-nor on this list — adding a third raw-egress path therefore requires
+nor on this list — adding another raw-egress path therefore requires
 consciously editing this constant (and the disclosure doc,
 ``docs/DLP_ARCHITECTURE.md`` § "Intentional raw egress").
 

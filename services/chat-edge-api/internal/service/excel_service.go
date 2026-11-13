@@ -89,17 +89,19 @@ type WorkbookStructure struct {
 }
 
 type ExecutionResult struct {
-	Success     bool     `json:"success"`
-	OutputPath  string   `json:"output_file"`
-	Changes     []string `json:"changes"`
-	ActionCount int      `json:"action_count"`
+	OfficeQuality *OfficeQualityReport `json:"office_quality,omitempty"`
+	Success       bool                 `json:"success"`
+	OutputPath    string               `json:"output_file"`
+	Changes       []string             `json:"changes"`
+	ActionCount   int                  `json:"action_count"`
 }
 
 type ValidationResult struct {
-	Valid    bool           `json:"valid"`
-	Issues   []string       `json:"issues"`
-	Warnings []string       `json:"warnings"`
-	Stats    map[string]int `json:"stats"`
+	OfficeQuality *OfficeQualityReport `json:"office_quality,omitempty"`
+	Valid         bool                 `json:"valid"`
+	Issues        []string             `json:"issues"`
+	Warnings      []string             `json:"warnings"`
+	Stats         map[string]int       `json:"stats"`
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +126,10 @@ type ExcelService struct {
 	// python in-process-with-secrets. Injected via SetSandbox from
 	// main.go when SANDBOX_ENABLED. A nil sandbox fails closed.
 	sandbox *sandbox.Runner
+	office  *OfficeQuality
 }
+
+func (s *ExcelService) SetOfficeQuality(q *OfficeQuality) { s.office = q }
 
 // SetSandbox wires the Phase 13 hardened sandbox. Leaving it unset blocks
 // inspection, validation and generation.
@@ -402,6 +407,7 @@ func (s *ExcelService) ExecutePlan(
 	}
 
 	// Determine the output filename (user-supplied wins).
+	validation.OfficeQuality = execResult.OfficeQuality
 	outFilename := strings.TrimSpace(in.OutputFilename)
 	if outFilename == "" {
 		switch role {
@@ -532,6 +538,12 @@ func (s *ExcelService) runExecutor(
 		// stderr's last line, redacted, is a hint for the log.
 		return res.Stdout, fmt.Errorf("%w output.xlsx (exit %d; stderr: %s)", errGeneratorNoOutput, res.Exit,
 			redactScriptError(lastLine(res.Stderr)))
+	}
+	if res.Exit == 0 {
+		res.Stdout, err = s.office.FinalizePlan(ctx, art, res.Stdout)
+		if err != nil {
+			return res.Stdout, err
+		}
 	}
 	if err := copyFile(art.Path, outPath); err != nil {
 		return nil, err

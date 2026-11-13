@@ -57,7 +57,7 @@ class GenerationJobORM(Base):
     model_id: Mapped[str] = mapped_column(String(255), nullable=False)
     external_job_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    # queued | processing | done | failed | cancelled
+    # pending_confirm | queued | processing | done | failed | cancelled
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default=text("'queued'")
     )

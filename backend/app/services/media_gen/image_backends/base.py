@@ -38,6 +38,11 @@ class ImageBackend(ABC):
     #: Stable provider key (matches ``model_configs.provider`` + the order).
     provider_name: str = ""
 
+    async def edit(self, session, *, source_images, **kwargs) -> ImageGenResult:
+        """Never silently replace a reference-image edit with a fresh generation."""
+        from app.core.exceptions import ProviderUnavailableError
+        raise ProviderUnavailableError("This image destination does not support editing")
+
     @abstractmethod
     async def generate(
         self,

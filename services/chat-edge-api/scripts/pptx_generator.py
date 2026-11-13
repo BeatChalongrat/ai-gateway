@@ -6,9 +6,8 @@ Two modes:
 
     create: when <source.pptx> is omitted, builds a fresh deck from
             the requested presentation_settings + slides plan.
-    edit:   when <source.pptx> is provided, copies it to <output>
-            and APPENDS the planned slides to the existing deck.
-            Originals are never mutated.
+    edit:   loads the source, applies ordered actions to existing slides,
+            then appends any planned slides and saves a new output file.
 
 Each slide is built by a dedicated handler (title / section_divider /
 content / two_column / stats / table / chart / closing) and wrapped
@@ -21,7 +20,6 @@ Output: JSON result on stdout
 
 import json
 import os
-import shutil
 import sys
 from typing import Any
 
@@ -491,16 +489,107 @@ def _resolve_settings(plan: dict) -> dict:
     return settings
 
 
+def _text_frames(shapes):
+    for shape in shapes:
+        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+            yield from _text_frames(shape.shapes)
+        if shape.has_text_frame:
+            yield shape.text_frame
+        if shape.has_table:
+            for row in shape.table.rows:
+                for cell in row.cells:
+                    yield cell.text_frame
+
+
+def _replace_paragraph_text(paragraph, find: str, replacement: str) -> int:
+    """Replace across formatting runs, keeping unaffected runs and their styles."""
+    runs = list(paragraph.runs)
+    text = "".join(run.text for run in runs)
+    originals = [run.text for run in runs]
+    starts = []
+    offset = 0
+    for run in runs:
+        starts.append(offset)
+        offset += len(run.text)
+    matches = []
+    offset = text.find(find)
+    while offset >= 0:
+        matches.append(offset)
+        offset = text.find(find, offset + len(find))
+    for start in reversed(matches):
+        end = start + len(find)
+        first = next(i for i, text in enumerate(originals) if starts[i] <= start < starts[i] + len(text))
+        last = next(i for i, text in enumerate(originals) if starts[i] < end <= starts[i] + len(text))
+        prefix = runs[first].text[:start - starts[first]]
+        suffix = runs[last].text[end - starts[last]:]
+        if first == last:
+            runs[first].text = prefix + replacement + suffix
+        else:
+            runs[first].text = prefix + replacement
+            for i in range(first + 1, last):
+                runs[i].text = ""
+            runs[last].text = suffix
+    return len(matches)
+
+
+def _slide_index(prs, value, field="slide") -> int:
+    if type(value) is not int or not 1 <= value <= len(prs.slides):
+        raise ValueError(f"{field} must be between 1 and {len(prs.slides)}")
+    return value - 1
+
+
+def _apply_edit(prs, action: dict) -> str:
+    kind = action.get("type")
+    if kind == "replace_text":
+        find, replacement = action.get("find"), action.get("replace")
+        if not isinstance(find, str) or not find or not isinstance(replacement, str):
+            raise ValueError("replace_text needs nonempty find and string replace")
+        slides = prs.slides
+        if action.get("slide") is not None:
+            slides = [prs.slides[_slide_index(prs, action["slide"])]]
+        changed = sum(
+            _replace_paragraph_text(paragraph, find, replacement)
+            for slide in slides
+            for frame in _text_frames(slide.shapes)
+            for paragraph in frame.paragraphs
+        )
+        if changed == 0:
+            raise ValueError(f"Text was not found: {find!r}")
+        return f"Replaced {changed} occurrence(s)"
+    index = _slide_index(prs, action.get("slide"))
+    slide = prs.slides[index]
+    if kind == "set_notes":
+        text = action.get("text")
+        if not isinstance(text, str):
+            raise ValueError("set_notes needs string text")
+        slide.notes_slide.notes_text_frame.text = text
+        return f"Updated notes on slide {index + 1}"
+    if kind == "delete_slide":
+        if len(prs.slides) == 1:
+            raise ValueError("A presentation must retain at least one slide")
+        slide_id = prs.slides._sldIdLst[index]
+        prs.part.drop_rel(slide_id.rId)
+        prs.slides._sldIdLst.remove(slide_id)
+        return f"Removed slide {index + 1}"
+    if kind == "move_slide":
+        target = _slide_index(prs, action.get("to"), "to")
+        slide_ids = prs.slides._sldIdLst
+        slide_id = slide_ids[index]
+        slide_ids.remove(slide_id)
+        slide_ids.insert(target, slide_id)
+        return f"Moved slide {index + 1} to {target + 1}"
+    raise ValueError(f"Unsupported presentation action: {kind!r}")
+
+
 def generate_pptx(plan: dict, output_path: str, source_path: str | None = None) -> dict:
     settings = _resolve_settings(plan)
     slides_plan = plan.get("slides") or []
 
-    if source_path and os.path.exists(source_path):
-        # FIX131 — content only: copy2 also copies xattrs, and the sandbox
-        # seccomp profile refuses listxattr (EPERM on /job/in/source.*),
-        # which failed every same-kind edit (.pptx → .pptx) in the sandbox.
-        shutil.copyfile(source_path, output_path)
-        prs = Presentation(output_path)
+    if source_path:
+        if not os.path.isfile(source_path):
+            raise FileNotFoundError("The source presentation does not exist")
+        # Load the original read-only and save only after every edit succeeds.
+        prs = Presentation(source_path)
         mode = "edit"
     else:
         prs = Presentation()
@@ -525,9 +614,16 @@ def generate_pptx(plan: dict, output_path: str, source_path: str | None = None) 
         prs.core_properties.author = settings["author"]
 
     change_log: list[dict[str, Any]] = []
+    actions = plan.get("actions") or []
+    if actions and mode != "edit":
+        raise ValueError("Presentation actions require an existing source file")
+    for i, action in enumerate(actions):
+        detail = _apply_edit(prs, action)
+        change_log.append({"action": i + 1, "type": action["type"], "status": "ok", "detail": detail})
     for i, slide_data in enumerate(slides_plan):
         slide_type = (slide_data.get("type") or "content").lower()
         builder = SLIDE_BUILDERS.get(slide_type, build_content_slide)
+        previous_count = len(prs.slides)
         try:
             detail = builder(prs, slide_data, settings, colors)
             change_log.append(
@@ -537,16 +633,22 @@ def generate_pptx(plan: dict, output_path: str, source_path: str | None = None) 
             change_log.append(
                 {"slide": i + 1, "type": slide_type, "status": "error", "detail": str(exc)}
             )
+        finally:
+            # python-pptx chooses len(slides)+1, which can collide with a
+            # surviving slide after deletion/reordering. Allocate unused
+            # package names, including parts still referenced by hyperlinks.
+            for slide in list(prs.slides)[previous_count:]:
+                slide.part.partname = prs.part.package.next_partname("/ppt/slides/slide%d.xml")
 
     prs.save(output_path)
     file_size = os.path.getsize(output_path)
     return {
-        "success": True,
+        "success": not any(c["status"] == "error" for c in change_log),
         "mode": mode,
         "output_path": output_path,
         "file_size_bytes": file_size,
         "slide_count": len(prs.slides),
-        "slides_created": sum(1 for c in change_log if c["status"] == "ok"),
+        "slides_created": sum(1 for c in change_log if c["status"] == "ok" and "slide" in c),
         "slides_failed": sum(1 for c in change_log if c["status"] == "error"),
         "change_log": change_log,
     }
@@ -570,7 +672,7 @@ def main() -> int:
         source = sys.argv[3] if len(sys.argv) > 3 else None
         result = generate_pptx(plan, sys.argv[2], source)
         print(json.dumps(result, ensure_ascii=False))
-        return 0
+        return 0 if result["success"] else 1
     except Exception as exc:  # noqa: BLE001
         print(json.dumps({"error": str(exc), "error_type": type(exc).__name__, "success": False}, ensure_ascii=False))
         return 1

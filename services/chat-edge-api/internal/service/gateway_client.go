@@ -333,6 +333,7 @@ type RoutingHints struct {
 }
 
 type GatewayChatRequest struct {
+	VisualReview  bool             `json:"visual_review,omitempty"`
 	Model         string           `json:"model"`
 	Messages      []GatewayMessage `json:"messages"`
 	Stream        bool             `json:"stream"`
@@ -555,7 +556,7 @@ type ReasoningNotice struct {
 // StreamProviderError is the payload of a Gateway “error“ SSE frame
 // (B1). “Attempts“ is populated on the “all_models_failed“ case so
 // the client can show which models were tried and why each failed.
-// QueueStatus (FIX133 A2) is the gateway's ``queued`` frame: where a turn
+// QueueStatus (FIX133 A2) is the gateway's “queued“ frame: where a turn
 // stands in the line of turns waiting for a generation slot. Position 0
 // means it holds one now. The wire shape is the client's too.
 type QueueStatus struct {
@@ -1044,11 +1045,12 @@ func (g *GatewayClient) bearer() (string, error) {
 // (backend/app/schemas/public.py). Only the fields chat-edge sets are
 // included; the gateway applies defaults for the rest.
 type GatewayImagesRequest struct {
-	Model   string `json:"model"`
-	Prompt  string `json:"prompt"`
-	N       int    `json:"n,omitempty"`
-	Size    string `json:"size,omitempty"`
-	Quality string `json:"quality,omitempty"`
+	SourceImages []string `json:"source_images,omitempty"`
+	Model        string   `json:"model"`
+	Prompt       string   `json:"prompt"`
+	N            int      `json:"n,omitempty"`
+	Size         string   `json:"size,omitempty"`
+	Quality      string   `json:"quality,omitempty"`
 }
 
 // GatewayImageDatum is one entry in the images response. gpt-image-1

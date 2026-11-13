@@ -39,6 +39,8 @@ export type SidePane =
 
 interface SidePaneState {
   pane: SidePane | null;
+  files: FileAttachment[];
+  rememberFile: (file: FileAttachment) => void;
   hostMounted: boolean;
   dockedWidth: number;
   /** Open (or replace with) this pane. The previous pane's closer runs
@@ -57,10 +59,16 @@ interface SidePaneState {
 const closers: Partial<Record<SidePaneKind, () => void>> = {};
 
 export const useSidePaneStore = create<SidePaneState>((set, get) => ({
+  files: [],
+  rememberFile: (file) => set(state => {
+    const files = state.files.filter(f => f.id !== file.id && f.id !== file.parent_file_id);
+    return { files: [...files, file].slice(-20) };
+  }),
   pane: null,
   hostMounted: false,
   dockedWidth: 0,
   open: (pane) => {
+    if (pane.kind === "preview") get().rememberFile(pane.file);
     const prev = get().pane;
     if (prev && prev.kind !== pane.kind) closers[prev.kind]?.();
     set({ pane });
@@ -78,7 +86,7 @@ export const useSidePaneStore = create<SidePaneState>((set, get) => ({
   registerCloser: (kind, fn) => {
     closers[kind] = fn;
   },
-  setHostMounted: (mounted) => set({ hostMounted: mounted }),
+  setHostMounted: (mounted) => set({ hostMounted: mounted, ...(!mounted ? { files: [] } : {}) }),
   setDockedWidth: (px) => {
     if (get().dockedWidth !== px) set({ dockedWidth: px });
   },

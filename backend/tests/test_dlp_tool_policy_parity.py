@@ -48,7 +48,7 @@ DESKTOP_TOOLS_DIR = (
 _DESKTOP_MAIN = REPO_ROOT / "apps" / "desktop" / "src" / "main"
 # Files that declare host tools: definitions (``name: "…"``) in the first two,
 # the question tool's constant in the third.
-DESKTOP_HOST_TOOL_FILES = [_DESKTOP_MAIN / "host-tools.ts", _DESKTOP_MAIN / "turn-coordinator.ts"]
+DESKTOP_HOST_TOOL_FILES = [_DESKTOP_MAIN / "host-tools.ts", _DESKTOP_MAIN / "turn-coordinator.ts", _DESKTOP_MAIN / "office-media-tools.ts"]
 DESKTOP_ASK_USER_TS = _DESKTOP_MAIN / "ask-user.ts"
 CHAT_EDGE_TOOLS_GO = (
     REPO_ROOT / "services" / "chat-edge-api" / "internal" / "service" / "tools.go"
@@ -93,8 +93,12 @@ def _chat_edge_tool_names() -> set[str]:
         f"chat-edge tool registry not found at {CHAT_EDGE_TOOLS_GO} — if the "
         "file moved, update this test so the parity gate keeps running."
     )
-    text = CHAT_EDGE_TOOLS_GO.read_text(encoding="utf-8", errors="replace")
-    return set(_GO_NAME_RE.findall(text))
+    sources = [CHAT_EDGE_TOOLS_GO, CHAT_EDGE_TOOLS_GO.with_name("file_editor_tool.go"), CHAT_EDGE_TOOLS_GO.with_name("video_job_tool.go")]
+    names: set[str] = set()
+    for source in sources:
+        assert source.is_file(), f"Missing tool definition source: {source}"
+        names.update(_GO_NAME_RE.findall(source.read_text(encoding="utf-8", errors="replace")))
+    return names
 
 
 class TestToolPolicyParity:
@@ -111,6 +115,7 @@ class TestToolPolicyParity:
         # Spot-check names we know exist on both classification sides.
         assert "read_file" in names
         assert "web_fetch" in names
+        assert {"edit_office_file", "generate_video", "video_job"} <= names
 
     def test_chat_edge_registry_scan_is_alive(self):
         names = _chat_edge_tool_names()

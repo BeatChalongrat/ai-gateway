@@ -6,6 +6,21 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Same bundled Thai/Latin face used by PDF editing; no remote font request. */
+@font-face { font-family: 'Sarabun'; src: url('/fonts/Sarabun-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Sarabun'; src: url('/fonts/Sarabun-Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; font-display: swap; }
+
+.visual-editor button {
+  @apply rounded border border-border-subtle px-2 py-1 text-xs transition-colors hover:bg-bg-secondary disabled:cursor-not-allowed disabled:opacity-40;
+}
+.visual-editor button[aria-pressed="true"] {
+  @apply bg-bg-secondary;
+}
+.visual-editor input[type="number"], .visual-editor select {
+  @apply rounded border border-border-subtle bg-bg-base px-1 py-1 text-text-primary;
+}
+
+
 /* ─── Theme tokens ─────────────────────────────────────────────
    All visual color decisions live here. Tailwind tokens
    (bg-base, text-primary, …) point at these via tailwind.config.js,

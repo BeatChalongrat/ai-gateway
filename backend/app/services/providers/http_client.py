@@ -119,7 +119,14 @@ def request_shape(body: bytes | None) -> dict | None:
 
 async def _log_request_shape(request: httpx.Request) -> None:
     """httpx request hook: one ``provider_request_shape`` line per call."""
-    shape = request_shape(request.content)
+    # Multipart image/audio inputs are streams, not JSON chat envelopes.
+    # Never consume a stream just to log it (or expose its binary contents).
+    if "application/json" not in request.headers.get("content-type", ""):
+        return
+    try:
+        shape = request_shape(request.content)
+    except httpx.RequestNotRead:
+        return
     if shape is None:
         return
     logger.info(

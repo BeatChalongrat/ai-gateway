@@ -29,7 +29,7 @@ FROM python:3.12-slim AS base
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         tesseract-ocr tesseract-ocr-tha tesseract-ocr-eng \
-        unzip p7zip-full bc ripgrep fd-find sqlite3 \
+        unzip p7zip-full bc ripgrep fd-find sqlite3 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Office/data libs. openpyxl/python-docx/reportlab/pypdf/python-pptx/

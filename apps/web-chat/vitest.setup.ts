@@ -4,6 +4,13 @@
 import "@testing-library/jest-dom/vitest";
 import { beforeEach, expect, vi } from "vitest";
 
+// jsdom lacks native dialog methods. Real modal focus/escape behavior is
+// exercised in Playwright; these shims model the open state in component tests.
+if (!HTMLDialogElement.prototype.showModal) {
+  HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
+  HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); this.dispatchEvent(new Event("close")); };
+}
+
 // AM11 — Agent Market follows the app's language, and the app's store starts
 // in English. The feature's tests were written against the Thai dictionary
 // and assert its words, so every test under src/features/agent-market/

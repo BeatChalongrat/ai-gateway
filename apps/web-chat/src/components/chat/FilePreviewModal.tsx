@@ -36,6 +36,8 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
+import { FileEditor } from "./FileEditor";
+import { VisualFileEditor } from "./VisualFileEditor";
 import { Download, X } from "lucide-react";
 
 import { SidePane } from "@/components/ui/SidePane";
@@ -393,7 +395,7 @@ export function FilePreviewModal({
           <span className="min-w-0 flex-1 truncate text-sm font-medium text-text-primary">
             {file.filename}
           </span>
-          <DownloadButton file={file} />
+
           <button
             type="button"
             onClick={onClose}
@@ -403,7 +405,7 @@ export function FilePreviewModal({
             <X width={16} height={16} aria-hidden />
           </button>
         </div>
-        <FilePreviewBody file={file} />
+        <FileWorkspace key={file.id} file={file} initialEditing={false} />
       </div>
     </div>
   );
@@ -428,13 +430,43 @@ export function FilePreviewPane() {
       open={file !== null}
       widthKey="preview"
       label={shown?.filename ?? t("preview.close")}
-      actions={shown ? <DownloadButton file={shown} /> : null}
-      maxWidth={672}
+      actions={null}
+      maxWidth={960}
       closeLabel={t("preview.close")}
       onClose={() => closeIf("preview")}
       testId="preview-pane"
     >
-      {shown ? <FilePreviewBody key={shown.id} file={shown} /> : null}
+      {shown ? <FileWorkspace key={shown.id} file={shown} /> : null}
     </SidePane>
   );
+}
+
+function FileWorkspace({ file, initialEditing = true }: { file: FileAttachment; initialEditing?: boolean }) {
+  const t = useT();
+  const [current, setCurrent] = useState(file);
+  const [editing, setEditing] = useState(initialEditing);
+  const [dirty, setDirty] = useState(false);
+  const visual = /\.(docx|pptx|pdf|png|jpe?g|webp)$/i.test(current.filename);
+  const editable = visual || /\.(xlsx|csv|txt|md|json)$/i.test(current.filename);
+  useEffect(() => {
+    if (!editable || !editing) return;
+    let active = true;
+    void api.editFile(file.id, { mode: "history" }).then(r => {
+      const versions = r.versions ?? [];
+      const head = versions.filter(v => !versions.some(child => child.parent_file_id === v.id)).sort((a,b) => (b.version ?? 1) - (a.version ?? 1))[0];
+      if (active && head && head.id !== file.id) { setCurrent(head); useSidePaneStore.getState().rememberFile(head); }
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [file.id, editing]);
+  const tabs = useSidePaneStore(s => s.files);
+  function saved(next: FileAttachment) { setCurrent(next); useSidePaneStore.getState().rememberFile(next); }
+  return <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <nav aria-label={t("artifact.tabs")} className="flex shrink-0 gap-2 overflow-x-auto border-b border-border-subtle p-2 text-xs">{tabs.map(f => <button key={f.id} disabled={dirty} aria-current={f.id === current.id ? "page" : undefined} className="max-w-48 shrink-0 truncate rounded border border-border-subtle px-2 py-1" onClick={() => { setCurrent(f); setEditing(true); }}>{f.filename}</button>)}</nav>
+    <div className="flex items-center gap-3 border-b border-border-subtle p-3 text-xs text-text-primary">
+      <span className="min-w-0 flex-1 truncate">{current.filename} · {t("editor.version", { n: String(current.version ?? 1) })}</span>
+      {editable && <button disabled={dirty} onClick={() => setEditing(value => !value)}>{t(editing ? "editor.preview" : "editor.title")}</button>}
+      <DownloadButton file={current} />
+    </div>
+    {editing && editable ? (visual ? <VisualFileEditor file={current} onSaved={saved} onDirtyChange={setDirty} /> : <FileEditor file={current} onSaved={saved} onDirtyChange={setDirty} />) : <FilePreviewBody key={current.id} file={current} />}
+  </div>;
 }

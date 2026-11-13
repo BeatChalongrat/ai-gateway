@@ -189,8 +189,9 @@ services:
       - KB_RERANK_BUDGET_MS=${KB_RERANK_BUDGET_MS:-4000}
       - KB_RERANK_FLOOR=${KB_RERANK_FLOOR:-0.01}
       # Phase B — image-generation tool. The gateway image model the
-      # generate_image tool calls (gpt-image-1 is OpenAI's current image model).
-      - IMAGE_GEN_MODEL=${IMAGE_GEN_MODEL:-gpt-image-1}
+      # generate_image tool calls; keep the fallback aligned with config.go.
+      - OFFICE_VISUAL_MODEL=${OFFICE_VISUAL_MODEL:-}
+      - IMAGE_GEN_MODEL=${IMAGE_GEN_MODEL:-gpt-image-2.6-flare}
       - CHAT_EDGE_IMAGE_TIMEOUT_SECONDS=${CHAT_EDGE_IMAGE_TIMEOUT_SECONDS:-180}
       # ── Code-interpreter sandbox — ON BY DEFAULT on this stack ──────────
       # Every python path chat-edge shells out to (text extraction from

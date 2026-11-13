@@ -124,28 +124,30 @@ type DocStructure struct {
 // three generators emit; omitempty means a docx-only field is left
 // out of the response when the generator was pptx, and vice versa.
 type DocGenerationResult struct {
-	Success         bool             `json:"success"`
-	Mode            string           `json:"mode,omitempty"`
-	OutputPath      string           `json:"output_path"`
-	FileSizeBytes   int64            `json:"file_size_bytes"`
-	PageCount       int              `json:"page_count,omitempty"`
-	FontUsed        string           `json:"font_used,omitempty"`
-	ActionsExecuted int              `json:"actions_executed,omitempty"`
-	ActionsFailed   int              `json:"actions_failed,omitempty"`
-	SlideCount      int              `json:"slide_count,omitempty"`
-	SlidesCreated   int              `json:"slides_created,omitempty"`
-	SlidesFailed    int              `json:"slides_failed,omitempty"`
-	ChangeLog       []map[string]any `json:"change_log"`
+	OfficeQuality   *OfficeQualityReport `json:"office_quality,omitempty"`
+	Success         bool                 `json:"success"`
+	Mode            string               `json:"mode,omitempty"`
+	OutputPath      string               `json:"output_path"`
+	FileSizeBytes   int64                `json:"file_size_bytes"`
+	PageCount       int                  `json:"page_count,omitempty"`
+	FontUsed        string               `json:"font_used,omitempty"`
+	ActionsExecuted int                  `json:"actions_executed,omitempty"`
+	ActionsFailed   int                  `json:"actions_failed,omitempty"`
+	SlideCount      int                  `json:"slide_count,omitempty"`
+	SlidesCreated   int                  `json:"slides_created,omitempty"`
+	SlidesFailed    int                  `json:"slides_failed,omitempty"`
+	ChangeLog       []map[string]any     `json:"change_log"`
 }
 
 // DocValidationResult mirrors doc_validator.py output.
 type DocValidationResult struct {
-	Valid         bool           `json:"valid"`
-	FileType      string         `json:"file_type"`
-	FileSizeBytes int64          `json:"file_size_bytes"`
-	Errors        []string       `json:"errors"`
-	Warnings      []string       `json:"warnings"`
-	Stats         map[string]int `json:"stats"`
+	OfficeQuality *OfficeQualityReport `json:"office_quality,omitempty"`
+	Valid         bool                 `json:"valid"`
+	FileType      string               `json:"file_type"`
+	FileSizeBytes int64                `json:"file_size_bytes"`
+	Errors        []string             `json:"errors"`
+	Warnings      []string             `json:"warnings"`
+	Stats         map[string]int       `json:"stats"`
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +166,10 @@ type DocService struct {
 	// apply the model-authored plan) through the Phase 13 hardened
 	// sandbox. A nil sandbox fails closed.
 	sandbox *sandbox.Runner
+	office  *OfficeQuality
 }
+
+func (s *DocService) SetOfficeQuality(q *OfficeQuality) { s.office = q }
 
 // SetSandbox migrates the doc generators into the Phase 13 hardened
 // sandbox. Nil-safe.
@@ -436,6 +441,7 @@ func (s *DocService) ExecutePlan(
 			Detail: redactScriptError(strings.Join(validation.Errors, "; "))}
 	}
 
+	validation.OfficeQuality = genResult.OfficeQuality
 	outFilename := strings.TrimSpace(in.OutputFilename)
 	if outFilename == "" {
 		switch role {
@@ -577,6 +583,12 @@ func (s *DocService) runGenerator(
 		// hint for the log (redacted — a traceback can quote the plan).
 		return res.Stdout, fmt.Errorf("%w %s (exit %d; stderr: %s)", errGeneratorNoOutput, outName, res.Exit,
 			redactScriptError(lastLine(res.Stderr)))
+	}
+	if res.Exit == 0 {
+		res.Stdout, err = s.office.FinalizePlan(ctx, art, res.Stdout)
+		if err != nil {
+			return res.Stdout, err
+		}
 	}
 	if err := copyFile(art.Path, outPath); err != nil {
 		return nil, err

@@ -8,17 +8,17 @@ IDs are strings (the DB stores UUIDs as String(36)).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class VideoGenSubmitRequest(BaseModel):
-    prompt: str
+    prompt: str = Field(min_length=1, max_length=4000)
     model: str  # model_configs.model identifier
-    duration_sec: int = 5
-    resolution: str = "1080p"  # reserved for future use
-    has_audio: bool = False  # reserved for future use
+    duration_sec: int = Field(5, ge=1, le=60, strict=True)
+    resolution: Literal["auto"] = "auto"  # provider default; no resolution control yet
+    has_audio: Literal[False] = False  # no audio control in the current adapter
     conversation_id: Optional[str] = None
     message_id: Optional[str] = None
     idempotency_key: Optional[str] = None
@@ -26,7 +26,7 @@ class VideoGenSubmitRequest(BaseModel):
 
 class VideoGenSubmitResponse(BaseModel):
     job_id: str
-    status: str  # "queued" at submit
+    status: str  # queued or pending_confirm
     estimated_cost_credits: int
     estimated_cost_usd: str
     balance_after_credits: int

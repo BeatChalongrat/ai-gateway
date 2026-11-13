@@ -34,6 +34,8 @@ def _set(monkeypatch, *, gate: bool, key, verified: bool) -> None:
     monkeypatch.setattr(settings, "video_gen_enabled", gate)
     monkeypatch.setattr(settings, "replicate_api_token", key)
     monkeypatch.setattr(settings, "video_model_verified", verified)
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr("app.services.provider_key_service.ProviderKeyService.get_active_key_async", AsyncMock(return_value=key))
 
 
 @pytest.mark.asyncio

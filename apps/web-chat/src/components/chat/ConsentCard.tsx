@@ -25,6 +25,7 @@ const DANGER_KEY: Record<string, DictKey> = {
   "danger.computerUse": "consent.danger.computerUse",
   "danger.code": "consent.danger.code",
   "danger.fileWrite": "consent.danger.fileWrite",
+  "danger.fileUpload": "consent.danger.fileUpload",
   "danger.clipboard": "consent.danger.clipboard",
   "danger.browser": "consent.danger.browser",
   "danger.connector": "consent.danger.connector",

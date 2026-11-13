@@ -117,6 +117,12 @@ TOOL_ARG_POLICY: dict[str, str] = {
     "read_file": LOCAL_EXECUTION,
     "write_file": LOCAL_EXECUTION,
     "edit_file": LOCAL_EXECUTION,
+    # Granted-folder paths stay in the host; file bytes move only between the
+    # host and the authenticated first-party conversation store, not a provider.
+    "import_local_file": LOCAL_EXECUTION,
+    "save_conversation_file": LOCAL_EXECUTION,
+    "edit_office_file": LOCAL_EXECUTION,
+    "video_job": PLACEHOLDER_SAFE,
     "create_directory": LOCAL_EXECUTION,
     "move_file": LOCAL_EXECUTION,
     "list_directory": LOCAL_EXECUTION,

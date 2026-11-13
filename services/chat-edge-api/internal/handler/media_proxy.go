@@ -17,6 +17,8 @@ package handler
 //	GET  /api/v1/jobs/{id}/output   -> gateway GET  /v1/jobs/{id}/output (streamed)
 
 import (
+	"encoding/json"
+	"github.com/google/uuid"
 	"io"
 	"net/http"
 
@@ -31,11 +33,16 @@ import (
 const maxMediaProxyBody = 1 << 20 // 1 MiB
 
 type MediaProxyHandler struct {
-	gw *service.GatewayClient
+	gw         *service.GatewayClient
+	videoModel string
 }
 
-func NewMediaProxyHandler(gw *service.GatewayClient) *MediaProxyHandler {
-	return &MediaProxyHandler{gw: gw}
+func NewMediaProxyHandler(gw *service.GatewayClient, model ...string) *MediaProxyHandler {
+	h := &MediaProxyHandler{gw: gw}
+	if len(model) > 0 {
+		h.videoModel = model[0]
+	}
+	return h
 }
 
 func (h *MediaProxyHandler) callCtx(r *http.Request) service.GatewayCallContext {
@@ -71,6 +78,22 @@ func (h *MediaProxyHandler) forward(
 }
 
 // SubmitVideo proxies POST /videos/generations.
+func (h *MediaProxyHandler) VideoConfig(w http.ResponseWriter, r *http.Request) {
+	status, body, err := h.gw.ProxyPublicMedia(r.Context(), h.callCtx(r), http.MethodGet, "/video/config", nil)
+	if err != nil {
+		WriteError(w, 502, CodeInternalError, "media service unavailable")
+		return
+	}
+	var config map[string]any
+	if status == 200 && json.Unmarshal(body, &config) == nil {
+		config["agent_model"] = h.videoModel
+		body, _ = json.Marshal(config)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(body)
+}
+
 func (h *MediaProxyHandler) SubmitVideo(w http.ResponseWriter, r *http.Request) {
 	h.forward(w, r, http.MethodPost, "/videos/generations")
 }
@@ -87,6 +110,11 @@ func (h *MediaProxyHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 }
 
 // CancelJob proxies POST /jobs/{id}/cancel (Sprint 3 — abort + refund).
+func (h *MediaProxyHandler) ConfirmJob(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	h.forward(w, r, http.MethodPost, "/jobs/"+id+"/confirm")
+}
+
 func (h *MediaProxyHandler) CancelJob(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	h.forward(w, r, http.MethodPost, "/jobs/"+id+"/cancel")
@@ -118,4 +146,13 @@ func (h *MediaProxyHandler) JobOutput(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
+}
+
+func (h *MediaProxyHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.URL.Query().Get("conversation_id"))
+	if err != nil {
+		WriteError(w, 400, CodeBadRequest, "invalid conversation id")
+		return
+	}
+	h.forward(w, r, http.MethodGet, "/jobs?conversation_id="+id.String())
 }

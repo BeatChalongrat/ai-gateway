@@ -680,7 +680,7 @@ def execute_plan(plan_path: str, source_path: str, output_path: str) -> dict[str
     wb.close()
 
     result = {
-        "success": True,
+        "success": not any(change.startswith("ERROR") for change in changes),
         "output_file": output_path,
         "changes": changes,
         "action_count": len(plan.get("actions", []) or []),
@@ -702,7 +702,7 @@ def main() -> int:
     try:
         result = execute_plan(sys.argv[1], sys.argv[2], sys.argv[3])
         print(json.dumps(result, ensure_ascii=False))
-        return 0
+        return 0 if result["success"] else 1
     except Exception as exc:  # noqa: BLE001 — surface every error to Go
         print(json.dumps({"error": str(exc), "error_type": type(exc).__name__, "success": False}, ensure_ascii=False))
         return 1

@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
+import { OfficeQualityNotice } from "./OfficeQualityNotice";
 import { api } from "@/lib/api";
 import { tOutside, useT } from "@/lib/i18n";
 import {
@@ -248,6 +249,7 @@ export function ExcelResultCard({ result }: { result: ExcelResult }) {
           ))}
         </PlanList>
       ) : null}
+      <OfficeQualityNotice report={validation?.office_quality} />
       {validation ? (
         <ValidationBadge
           valid={validation.valid ?? false}

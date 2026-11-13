@@ -456,6 +456,15 @@ _AsyncIntegrationSession = async_sessionmaker(
 )
 
 
+def pytest_sessionfinish(session, exitstatus):
+    # aiosqlite owns a worker thread per pooled connection. Returning a session
+    # to StaticPool is not enough: without disposal, Windows pytest can report
+    # every test passed and then hang indefinitely at interpreter shutdown.
+    import asyncio
+    asyncio.run(_async_integration_engine.dispose())
+    _integration_engine.dispose()
+
+
 async def _integration_async_db_session():
     """Async mirror of ``_integration_db_session`` — yields an AsyncSession
     on the shared integration file, commit-on-success / rollback-on-error."""

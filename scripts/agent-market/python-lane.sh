@@ -21,3 +21,13 @@ MSYS_NO_PATHCONV=1 docker run --rm --network none \
   -v "$ROOT/services/chat-edge-api/scripts:/sandbox/scripts:ro" \
   --entrypoint python3 "$IMAGE" \
   -c "import sys; sys.path[0:0]=['/src','/sandbox/scripts']; import unittest; sys.argv=['unittest','discover','-s','agent_market/tests','-t','.','-v']+sys.argv[1:]; unittest.main(module=None)" "$@"
+
+# Shared Office generators are also used by ordinary Web Chat and Desktop.
+# Exercise saved OOXML/PDF outputs, including edits, with the checkout's code.
+MSYS_NO_PATHCONV=1 docker run --rm --network none --read-only --cap-drop ALL \
+  --security-opt no-new-privileges --security-opt "seccomp=$ROOT/services/chat-edge-api/sandbox/seccomp.json" \
+  --memory 512m --cpus 1 --pids-limit 64 --tmpfs /tmp:rw,nosuid,nodev,size=128m \
+  -e PYTHONDONTWRITEBYTECODE=1 \
+  -v "$ROOT/services/chat-edge-api/scripts:/sandbox/scripts:ro" \
+  --entrypoint python3 "$IMAGE" \
+  -m unittest discover -s /sandbox/scripts/tests -v "$@"

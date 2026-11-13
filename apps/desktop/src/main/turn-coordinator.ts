@@ -34,7 +34,7 @@ import type { ChatEdgeClient, ConversationDto, ImportMessageItem, MessageDto } f
 import type { ConnectorOAuth } from "./connector-oauth";
 import type { ConnectorTools } from "./connector-mcp";
 import type { GatewayClient, GatewayContentBlock, GatewayMessage, GatewayToolCall, GatewayToolDefinition } from "./gateway-client";
-import type { GrantStore } from "./grants";
+import { defaultForbiddenRoots, type GrantStore } from "./grants";
 import { HostTools, NESTED_MAX_ITERATIONS, NESTED_MAX_MINUTES, SUBAGENT_FAILED_RE, type NestedRunRequest, type NestedRunResult } from "./host-tools";
 import type { Logger } from "./logger";
 import { LiveApprovalMode, parseStoredApprovalMode } from "./approval-mode";
@@ -118,7 +118,7 @@ interface RunningTurn {
   /** FIX80 — ConversationFiles the turn's tools persisted server-side
    *  (run_python artifacts). Shown live via a message_files frame and
    *  linked to the assistant row at import (file_ids). */
-  attachedFiles?: { id: string; filename: string; content_type: string; file_size_bytes: number }[];
+  attachedFiles?: { id: string; filename: string; content_type: string; file_size_bytes: number; extraction_status?: string }[];
   messageId: string;
   /** FIX119 — the run id of the turn's run (beginRun), for the import. */
   runId?: string;
@@ -2173,7 +2173,7 @@ export class TurnCoordinator {
           // FIX130 — a sub-agent's run id is not a conversation; `remember`
           // names the chat the user is in (eventConv) as a suggestion's source.
           const toolConv = name === "remember" ? eventConv : run.conversationId;
-          const r = await this.hostTools.execute(name, args, { conversationId: toolConv, toolCallId: call.id, signal: run.signal, memoryEnabled: run.memoryEnabled, userMessage: run.userMessage });
+          const r = await this.hostTools.execute(name, args, { conversationId: toolConv, toolCallId: call.id, signal: run.signal, memoryEnabled: run.memoryEnabled, userMessage: run.userMessage, grantedFolders: this.grants.list(), forbiddenFolders: defaultForbiddenRoots(process.env, this.opts.dataDir) });
           ok = r.ok;
           text = r.text;
           image = r.imageDataUri;
@@ -2199,7 +2199,7 @@ export class TurnCoordinator {
               const now = new Date().toISOString();
               this.emit(eventConv, "message_files", {
                 message_id: turn.messageId,
-                files: turn.attachedFiles.map((f) => ({ ...f, extraction_status: "completed", created_at: now, message_id: turn.messageId })),
+                files: turn.attachedFiles.map((f) => ({ ...f, extraction_status: f.extraction_status ?? "completed", created_at: now, message_id: turn.messageId })),
               });
             }
           }

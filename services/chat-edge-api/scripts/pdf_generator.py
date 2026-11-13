@@ -369,7 +369,7 @@ def generate_pdf(plan: dict, output_path: str) -> dict:
 
     file_size = os.path.getsize(output_path)
     return {
-        "success": True,
+        "success": not any(c["status"] == "error" for c in change_log),
         "output_path": output_path,
         "file_size_bytes": file_size,
         "page_count": page_count,
@@ -389,7 +389,7 @@ def main() -> int:
             plan = json.load(f)
         result = generate_pdf(plan, sys.argv[2])
         print(json.dumps(result, ensure_ascii=False))
-        return 0
+        return 0 if result["success"] else 1
     except Exception as exc:  # noqa: BLE001
         print(json.dumps({"error": str(exc), "error_type": type(exc).__name__, "success": False}, ensure_ascii=False))
         return 1

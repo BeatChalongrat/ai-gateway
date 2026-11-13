@@ -941,6 +941,7 @@ app.add_middleware(
         # exceeds the 1 MB default. Chat is authenticated and
         # rate-limited, so the wider limit is safe.
         "/v1/chat/completions": 20 * 1024 * 1024,
+        "/v1/images/generations": 20 * 1024 * 1024,
     },
 )
 

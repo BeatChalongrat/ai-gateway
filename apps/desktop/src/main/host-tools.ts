@@ -1,15 +1,17 @@
-// Host-side tools (E4 §1 #1, #5, #7): the five tools that need something
+// Host-side tools: capabilities that need something
 // only the host has — the user's session, the agent key, Electron's
 // clipboard, or the orchestrator itself. Same names, descriptions, schemas,
 // categories and default permissions as the WPF tools they replace, so the
 // model's tool list and the consent classifier see no difference.
 
+import { OFFICE_MEDIA_TOOLS, officeMediaTool } from "./office-media-tools";
 import { clipboard } from "electron";
 import type { ChatEdgeClient } from "./chat-edge-client";
 import { explicitRememberRequest } from "./explicit-remember";
 import { memoryLabel } from "./prompt-assembler";
 import type { GatewayClient } from "./gateway-client";
 import type { Logger } from "./logger";
+import { transferLocalFile } from "./local-office-files";
 
 export interface HostToolDefinition {
   name: string;
@@ -29,7 +31,7 @@ export interface HostToolResult {
    *  artifacts: charts AND xlsx/csv/…). The coordinator shows them under
    *  the assistant message (message_files) and links them at import
    *  (file_ids), so the user can open and download them from the chat. */
-  attachedFiles?: { id: string; filename: string; content_type: string; file_size_bytes: number }[];
+  attachedFiles?: { id: string; filename: string; content_type: string; file_size_bytes: number; extraction_status?: string }[];
   /** FIX130 — `remember` saved a memory: what the page's "บันทึกความจำแล้ว" /
    *  "เสนอความจำใหม่ — รอยืนยัน" marker shows (the `memory_saved` turn event). */
   memorySaved?: { id: string; label: string; status: "active" | "pending_confirmation" };
@@ -44,6 +46,9 @@ export interface HostToolContext {
   signal: AbortSignal;
   memoryEnabled?: boolean;
   userMessage?: string;
+  /** Host-owned snapshot; never accept folder grants from model arguments. */
+  grantedFolders?: readonly string[];
+  forbiddenFolders?: readonly string[];
 }
 
 /** FIX130 — how much of the user's message rides a suggestion as its evidence. */
@@ -78,6 +83,17 @@ export interface NestedRunResult {
 }
 
 export const HOST_TOOL_DEFINITIONS: Record<string, HostToolDefinition> = {
+  ...OFFICE_MEDIA_TOOLS,
+  import_local_file: {
+    name: "import_local_file",
+    description: "Upload a copy of an Office document, PDF, text/data file or image from a granted local folder into this conversation (up to 25 MB). This sends the file to the server. Returns a file_id for run_python.files and attaches it to the chat. Use an absolute path; symbolic links are refused. The original remains unchanged.",
+    inputSchema: { type: "object", properties: { path: { type: "string", description: "Absolute path inside a folder granted in Desktop Settings." } }, required: ["path"] },
+  },
+  save_conversation_file: {
+    name: "save_conversation_file",
+    description: "Save an attached or generated file from this conversation to a NEW file in a granted local folder (up to 25 MB). Provide its file_id and absolute destination path. The parent folder must exist. Existing files are never overwritten; choose a new filename for an edited copy.",
+    inputSchema: { type: "object", properties: { file_id: { type: "string" }, path: { type: "string", description: "Absolute destination path with filename, inside a granted folder." } }, required: ["file_id", "path"] },
+  },
   read_clipboard: {
     name: "read_clipboard",
     description: "Read the current text content of the system clipboard.",
@@ -100,8 +116,13 @@ export const HOST_TOOL_DEFINITIONS: Record<string, HostToolDefinition> = {
   generate_image: {
     name: "generate_image",
     description:
-      "Generate an image from a text description and attach it to your reply. Use it when the user asks you to draw, create, or generate a picture/image/logo/illustration.",
-    inputSchema: { type: "object", properties: { prompt: { type: "string", description: "A detailed description of the image to generate." } }, required: ["prompt"] },
+      "Generate or edit an image and attach it to your reply. Preserve literal text, original language and user constraints. To edit, supply source_file_ids from this conversation: those bytes are sent to the configured image provider. Only use references the user asked to use.",
+    inputSchema: { type: "object", properties: {
+      prompt: { type: "string", description: "Description or edit instruction. Preserve quoted text exactly." },
+      source_file_ids: { type: "array", maxItems: 4, items: { type: "string" }, description: "Existing conversation image IDs; 4 MiB each / 12 MiB total." },
+      size: { type: "string", enum: ["1024x1024", "1024x1536", "1536x1024"] },
+      quality: { type: "string", enum: ["auto", "low", "medium", "high"] },
+    }, required: ["prompt"] },
   },
   run_python: {
     name: "run_python",
@@ -117,14 +138,35 @@ export const HOST_TOOL_DEFINITIONS: Record<string, HostToolDefinition> = {
       "is to WRITE IT TO /job/out/ — e.g. plt.savefig('/job/out/chart.png') or " +
       "df.to_excel('/job/out/report.xlsx'). Everything in /job/out/ is attached to the chat, where the " +
       "user can view and download it; files written anywhere else are discarded. Files made with " +
-      "run_command or write_file stay on the user's computer and CANNOT be attached to the chat, and " +
+      "run_command or write_file stay on the user's computer; use import_local_file to attach supported files. " +
+      "Use save_conversation_file to save a generated file into a granted local folder. " +
       "pasting base64 of a file into your reply never works — use /job/out/ instead. " +
+      "To read or edit an attached or previously generated file, pass its file_id in files. " +
+      "Each input is mounted read-only at /job/in/<original_filename>; save the edited copy to /job/out/. " +
       "Read the output, then refine and run again or explain the result. Do NOT invent output you did " +
       "not see. Making alternatives for the user to choose between? Save them all in ONE run under " +
       "distinct names (/job/out/option-a.png, /job/out/option-b.png) — all are shown. Re-running " +
       "because the previous attempt was wrong? Write to the SAME filename — only the last attempt " +
-      "stays visible.",
-    inputSchema: { type: "object", properties: { code: { type: "string", description: "The Python source to run. Self-contained; use print() to surface results." } }, required: ["code"] },
+      "stays visible. " +
+      "For Office templates: import sys; sys.path.insert(0, '/sandbox/scripts'); " +
+      "from office_templates import catalog, create, inspect_file. Print catalog() first for schemas. " +
+      "For animated business graphics: import motion_templates; print(motion_templates.catalog()); " +
+      "motion_templates.render('motion.explainer' (or motion.metrics/motion.slideshow), data, '/job/out/brief.mp4'). " +
+      "It exports silent MP4, poster, contact sheet and editable storyboard JSON; review these before delivery. " +
+      "create(template_id, data, '/job/out/name.ext') supports pptx executive_brief/project_update/proposal, " +
+      "docx business_report/proposal/meeting_minutes, pdf business_report/invoice, xlsx budget/tracker/analysis " +
+      "and csv data_export (IDs use format.name). Supply real user facts, typed columns and sources; " +
+      "never invent missing figures. Inspect original files before editing; preserve their templates. " +
+      "Read the Office quality report: checked means rendered, not visually approved. Fix formula errors; " +
+      "do not claim recalculated values when recalculated=false. Inspect attached previews before delivery.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        code: { type: "string", description: "The Python source to run. Self-contained; use print() to surface results." },
+        files: { type: "array", items: { type: "string" }, description: "File IDs from this conversation to mount read-only at /job/in/<original_filename>." },
+      },
+      required: ["code"],
+    },
   },
   // FIX11 §2: search the user's own past conversations/messages/memories.
   // Host-side (chat-edge GET /api/v1/search) because it needs the user's
@@ -230,7 +272,11 @@ export class HostTools {
   }
 
   async execute(name: string, args: Record<string, unknown>, ctx: HostToolContext): Promise<HostToolResult> {
+    if (name in OFFICE_MEDIA_TOOLS) return officeMediaTool(name, args, ctx, this.chatEdge);
     switch (name) {
+      case "import_local_file":
+      case "save_conversation_file":
+        return transferLocalFile(name, args, ctx, this.chatEdge);
       case "read_clipboard": {
         const text = String(await clipboard.readText());
         return { ok: true, text: text.length > 0 ? text : "Clipboard has no text content.", imageDataUri: null };
@@ -329,7 +375,20 @@ export class HostTools {
       case "generate_image": {
         const prompt = args["prompt"];
         if (typeof prompt !== "string" || !prompt.trim()) return { ok: false, text: "'prompt' is required.", imageDataUri: null };
-        const r = await this.gateway.generateImage(prompt.trim(), ctx.signal);
+        let sources: string[];
+        try {
+          const { imageSources } = await import("./image-sources");
+          sources = await imageSources(this.chatEdge, ctx.conversationId, args["source_file_ids"], ctx.signal);
+        } catch (err) { return { ok: false, text: (err as Error).message, imageDataUri: null }; }
+        const size = args["size"];
+        const quality = args["quality"];
+        if (size !== undefined && !["1024x1024", "1024x1536", "1536x1024"].includes(String(size))) return { ok: false, text: "Unsupported image size.", imageDataUri: null };
+        if (quality !== undefined && !["auto", "low", "medium", "high"].includes(String(quality))) return { ok: false, text: "Unsupported image quality.", imageDataUri: null };
+        const r = await this.gateway.generateImage(prompt.trim(), ctx.signal, {
+          ...(sources.length ? { source_images: sources } : {}),
+          ...(typeof size === "string" ? { size } : {}),
+          ...(typeof quality === "string" ? { quality } : {}),
+        });
         if (!r.ok) return { ok: false, text: r.error, imageDataUri: null };
         // FIX67 — tell the user which model produced it (every time). After a
         // fallback this is the second-tier model, not the primary.
@@ -345,7 +404,7 @@ export class HostTools {
         const saved = b64 ? await this.chatEdge.attachGeneratedFile(ctx.conversationId, b64, name, guessImageMime(r.dataUri), r.producedBy ?? undefined) : null;
         return {
           ok: true,
-          text: `Generated an image${r.revised ? ` (revised prompt: ${r.revised})` : ""}.${madeBy}${saved ? " It is attached to this chat as a file the user can view and download." : ""} The image follows in the next message.`,
+          text: `Generated an image${r.revised ? ` (revised prompt: ${r.revised})` : ""}.${madeBy}${saved ? ` It is attached to this chat; file_id=${saved.id} (reusable for edits).` : ""} The image follows in the next message.`,
           imageDataUri: r.dataUri,
           ...(saved ? { attachedFiles: [{ id: saved.id, filename: saved.filename, content_type: saved.content_type, file_size_bytes: saved.file_size_bytes }] } : {}),
         };
@@ -353,12 +412,17 @@ export class HostTools {
       case "run_python": {
         const code = args["code"];
         if (typeof code !== "string" || !code.trim()) return { ok: false, text: "'code' is required.", imageDataUri: null };
+        const rawFiles = args["files"] ?? [];
+        if (!Array.isArray(rawFiles) || rawFiles.some((id) => typeof id !== "string" || !UUID_RE.test(id.trim()))) {
+          return { ok: false, text: "'files' must be an array of file IDs from this conversation.", imageDataUri: null };
+        }
+        const fileIds = [...new Set(rawFiles.map((id: string) => id.trim()))];
         // FIX80 — naming the conversation makes chat-edge PERSIST every
         // /job/out/ artifact as a ConversationFile; before this, images
         // lived only in a session data URI and .xlsx/.csv bytes were
         // silently discarded, so the model went hunting for somewhere on
         // the user's disk to write a "real file" (the owner's PNG turn).
-        const r = await this.chatEdge.runCode(code, [], ctx.signal, ctx.conversationId);
+        const r = await this.chatEdge.runCode(code, fileIds, ctx.signal, ctx.conversationId);
         if (!r) return { ok: false, text: "Code interpreter call failed (chat-edge unreachable or refused).", imageDataUri: null };
         const lines: string[] = [`Exit code: ${r.exit}`];
         const stdout = (r.stdout ?? "").replace(/\n+$/, "");
@@ -366,6 +430,7 @@ export class HostTools {
         if (stdout) lines.push("", "stdout:", stdout);
         if (stderr && (r.exit !== 0 || !stdout)) lines.push("", "stderr:", stderr);
         if (r.truncated) lines.push("[output truncated]");
+        if (r.timed_out) lines.push("The code timed out and was stopped.");
         if (!stdout && !stderr) lines.push("(no output was printed)");
         const images = r.images ?? [];
         const files = r.files ?? [];
@@ -374,6 +439,7 @@ export class HostTools {
         for (const f of files) if (f.id) attached.push({ id: f.id, filename: f.filename, content_type: f.content_type, file_size_bytes: f.size_bytes });
         if (attached.length) {
           lines.push("", "Attached to this chat (the user can open and download them there — no need to save them anywhere else): " + attached.map((a) => a.filename).join(", "));
+          lines.push("To read or revise these files in another run_python call, use these file IDs:", JSON.stringify(attached.map((a) => ({ file_id: a.id, filename: a.filename }))));
         } else if (images.length || files.length) {
           lines.push("", "Generated: " + [...images.map((i) => i.filename), ...files.map((f) => f.filename)].join(", "));
         }
@@ -381,7 +447,7 @@ export class HostTools {
         // image rides the result so the card shows them all (the first one
         // used to be the only survivor).
         return {
-          ok: true,
+          ok: r.exit === 0 && !r.timed_out,
           text: lines.join("\n"),
           imageDataUri: images[0]?.data_uri ?? null,
           ...(images.length > 1 ? { imageDataUris: images.map((i) => i.data_uri) } : {}),

@@ -30,6 +30,8 @@ vi.mock("@/lib/api", () => ({
     fileObjectUrl: vi.fn(async () => "blob:x"),
     downloadFile: vi.fn(),
     getFilePreviewData: vi.fn(async () => { throw new Error("415"); }),
+    editFile: vi.fn(async (_id, request) => request.mode === "history" ? { versions: [] } : { inspection: { sha256: "hash", format: "txt", fields: [{ id: "text", value: "hello" }], sheets: [], offset: 0, pdf_notes_only: false } }),
+    getArtifactDraft: vi.fn(async () => ({ draft: null })),
   },
   ApiError: class extends Error {},
 }));
@@ -226,6 +228,8 @@ describe("file preview: pane when a page hosts the slot, modal otherwise", () =>
     expect(pane.getAttribute("role")).toBe("complementary");
     expect(pane.getAttribute("aria-label")).toBe("notes.txt");
     expect(screen.queryByTestId("preview-backdrop")).toBeNull();
+    expect(await screen.findByRole("textbox", { name: "text" })).toHaveValue("hello");
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
     expect(await screen.findByTestId("preview-text")).toHaveTextContent("hello");
     fireEvent.click(screen.getByTestId("preview-pane-close"));
     expect(useSidePaneStore.getState().pane).toBeNull();

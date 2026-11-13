@@ -20,14 +20,14 @@
 package main
 
 import (
-	"strings"
-	"regexp"
 	"context"
 	"errors"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -375,6 +375,13 @@ func main() {
 	// inspected.
 	excelSvc := service.NewExcelService(filesRepo, conversations, storageBackend, cfg.ExtractPythonBinary, "scripts")
 	docSvc := service.NewDocService(filesRepo, conversations, storageBackend, cfg.ExtractPythonBinary, "scripts")
+	officeQuality := service.NewOfficeQuality(cfg.OfficeConverterURL)
+	if err := officeQuality.ConfigurationError(); err != nil {
+		slog.Error("invalid Office converter configuration", "err", err)
+		os.Exit(1)
+	}
+	excelSvc.SetOfficeQuality(officeQuality)
+	docSvc.SetOfficeQuality(officeQuality)
 	// Session 5 — workspace (rollback + compare). Tenant + user
 	// scoping happens inside the service via the conversations repo
 	// (the conv ownership check gates Rollback/Compare/ListGenerated);
@@ -403,6 +410,9 @@ func main() {
 		excelSvc.SetSandbox(sbx)
 		docSvc.SetSandbox(sbx)
 		fileSvc.SetSandbox(sbx)
+		fileSvc.SetOfficeQuality(officeQuality)
+		fileSvc.SetVisualGateway(gateway, cfg.OfficeVisualModel, cfg.ImageGenModel)
+		officeQuality.SetRepairRunner(sbx)
 		workspaceSvc.SetSandbox(sbx)
 		// FIX14 §2 — state the isolation boundary in effect at boot, measured
 		// from a probe run (not from config), so an operator learns it here
@@ -504,7 +514,9 @@ func main() {
 	var codeInterp *service.CodeInterpreter
 	if sbx != nil {
 		codeInterp = service.NewCodeInterpreter(sbx)
+		codeInterp.SetOfficeQuality(officeQuality)
 		messageSvc.SetCodeInterpreter(codeInterp, fileSvc, fileSvc)
+		messageSvc.SetFileEditor(fileSvc)
 		slog.Info("run_python code interpreter active")
 	} else {
 		slog.Warn("SANDBOX_ENABLED=0 — run_python code interpreter DISABLED")
@@ -781,7 +793,7 @@ func main() {
 		),
 		// Sprint 2A.5 — direct-dispatch media proxy. Reuses the same
 		// GatewayClient (and its internal-trust headers) as the video tool.
-		MediaProxy: handler.NewMediaProxyHandler(gateway),
+		MediaProxy: handler.NewMediaProxyHandler(gateway, cfg.VideoGenModel),
 		// Phase 3 — desktop agent-conversation backup mirror (migration 026).
 		// filesRepo: FIX 10 — imported user messages can link uploaded
 		// attachments via file_ids.

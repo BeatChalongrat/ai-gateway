@@ -613,12 +613,11 @@ class UnchangedCoordinateWrites(unittest.TestCase):
         self.assertEqual(ws.freeze_panes, "A2")
 
 
-class UnchangedReplaceText(unittest.TestCase):
-    """What docx_generator.py's replace_text did before: body paragraphs,
-    one run at a time — a find split across runs is not found, a header is
-    not searched."""
+class ReplaceTextAcrossStories(unittest.TestCase):
+    """Office edits include split runs and headers; an invalid find fails
+    the plan instead of silently reporting a successful no-op."""
 
-    def test_replace_text_as_before(self):
+    def test_replace_text_in_body_header_and_split_runs(self):
         tmp = tempfile.mkdtemp()
         doc = Document()
         doc.sections[0].header.paragraphs[0].text = "H {{name}}"
@@ -636,11 +635,13 @@ class UnchangedReplaceText(unittest.TestCase):
         self.assertEqual(set(res), {"success", "mode", "output_path", "file_size_bytes", "actions_executed",
                                     "actions_failed", "change_log"})
         self.assertEqual([c["detail"] for c in res["change_log"]], [
-            "Replaced '{{name}}' (2 run hits)", "Replaced '{{split}}' (0 run hits)",
-            "Skipped replace_text (empty find)"])
+            "Replaced '{{name}}' (3 occurrences)", "Replaced '{{split}}' (1 occurrences)",
+            "replace_text needs nonempty find and string replace"])
+        self.assertFalse(res["success"])
+        self.assertEqual(res["actions_failed"], 1)
         d = Document(out)
-        self.assertEqual([x.text for x in d.paragraphs], ["Hello Ann and {{split}}", "Ann again"])
-        self.assertEqual(d.sections[0].header.paragraphs[0].text, "H {{name}}")
+        self.assertEqual([x.text for x in d.paragraphs], ["Hello Ann and X", "Ann again"])
+        self.assertEqual(d.sections[0].header.paragraphs[0].text, "H Ann")
 
 
 if __name__ == "__main__":

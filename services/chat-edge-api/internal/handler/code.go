@@ -10,8 +10,9 @@
 // desktop can hand them to the model for vision; other files are
 // summarised (a headless agent run has no conversation to attach them to).
 //
-// File inputs are optional and resolved by CALLER (tenant+user) ownership
-// only — never another user's file. The route is ALWAYS registered so the
+// File inputs are optional and checked against CALLER (tenant+user) ownership.
+// A named conversation additionally restricts inputs to that conversation.
+// The route is ALWAYS registered so the
 // client/server contract is stable; when the sandbox is disabled the
 // interpreter is nil and Run answers 503 (feature off), not 404.
 package handler
@@ -22,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -36,6 +38,7 @@ import (
 // database or a storage backend.
 type codeRunFiles interface {
 	OpenUserFileCopy(ctx context.Context, tenantID, userID, fileID uuid.UUID) (path, name string, cleanup func(), err error)
+	OpenConversationFileCopy(ctx context.Context, tenantID, userID, convID, fileID uuid.UUID) (path, name string, cleanup func(), err error)
 	AssertConversationOwned(ctx context.Context, tenantID, userID, convID uuid.UUID) error
 	SaveGeneratedFile(ctx context.Context, in service.GeneratedFileInput) (*model.ConversationFile, error)
 }
@@ -144,13 +147,24 @@ func (h *CodeHandler) Run(w http.ResponseWriter, r *http.Request) {
 			cl()
 		}
 	}()
+	seen := make(map[uuid.UUID]bool)
 	for _, raw := range req.Files {
-		fid, err := uuid.Parse(raw)
+		fid, err := uuid.Parse(strings.TrimSpace(raw))
 		if err != nil {
 			WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid file id: "+raw)
 			return
 		}
-		path, name, cleanup, err := h.files.OpenUserFileCopy(r.Context(), caller.TenantUUID, caller.UserID, fid)
+		if seen[fid] {
+			continue
+		}
+		seen[fid] = true
+		var path, name string
+		var cleanup func()
+		if convID != uuid.Nil {
+			path, name, cleanup, err = h.files.OpenConversationFileCopy(r.Context(), caller.TenantUUID, caller.UserID, convID, fid)
+		} else {
+			path, name, cleanup, err = h.files.OpenUserFileCopy(r.Context(), caller.TenantUUID, caller.UserID, fid)
+		}
 		if err != nil {
 			if errors.Is(err, service.ErrFileNotFound) {
 				WriteError(w, http.StatusNotFound, CodeNotFound, "file not found: "+fid.String())

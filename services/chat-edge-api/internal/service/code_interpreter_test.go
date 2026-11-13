@@ -146,6 +146,9 @@ func TestExecRunPython_RunsAndSavesArtifacts(t *testing.T) {
 	if !strings.Contains(out, "chart.png") {
 		t.Fatalf("result text should note the attached image: %s", out)
 	}
+	if !strings.Contains(out, "file_id=") || !strings.Contains(out, "run_python files") {
+		t.Fatalf("the next tool call needs a persisted file reference: %s", out)
+	}
 }
 
 func TestExecRunPython_EmptyCodeNoRun(t *testing.T) {

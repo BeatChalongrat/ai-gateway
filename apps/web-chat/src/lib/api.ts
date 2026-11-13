@@ -1,3 +1,6 @@
+import type { ConversationVideoJob } from "@/components/media/VideoJobsPanel";
+import type { EditorRequest, EditorResponse } from "./fileEditor";
+import type { ArtifactDraft, ArtifactLibraryItem, ArtifactWork, ArtifactWorkRequest } from "./artifactWorkspace";
 // Fetch wrapper that:
 //   • sends the HttpOnly Portal session cookies (credentials:"include")
 //   • on 401, silently refreshes via the gateway then retries ONCE
@@ -180,14 +183,23 @@ class ApiClient {
       body: JSON.stringify(input),
     });
   }
+  getVideoConfig() {
+    return this.json<{ enabled: boolean; reason: string; supported_controls: { duration_sec: [number, number]; resolution: string[]; has_audio: boolean[] } }>("/video/config");
+  }
   submitAudioGen(input: AudioGenInput) {
     return this.json<MediaGenSubmitResponse>("/audio/generations", {
       method: "POST",
       body: JSON.stringify(input),
     });
   }
+  listVideoJobs(conversationId: string) {
+    return this.json<{ jobs: ConversationVideoJob[] }>(`/jobs?conversation_id=${encodeURIComponent(conversationId)}`);
+  }
   getMediaJob(jobId: string) {
     return this.json<MediaJobStatus>(`/jobs/${jobId}`);
+  }
+  confirmMediaJob(jobId: string) {
+    return this.json<MediaJobStatus>(`/jobs/${jobId}/confirm`, { method: "POST" });
   }
   // Sprint 3 — abort a reserved/in-flight job (premium-confirm Cancel and the
   // in-progress Cancel button). Backend marks it cancelled + refunds the L1
@@ -661,6 +673,18 @@ class ApiClient {
    *  type has no structured view and 503 when the server cannot produce
    *  one; both mean "fall back to getFileText", which is why this is a
    *  separate call rather than an extra field on it. */
+  editFile(fileId: string, request: EditorRequest) {
+    return this.json<EditorResponse>(`/files/${fileId}/editor`, { method: "POST", body: JSON.stringify(request) });
+  }
+  getArtifactDraft(fileId: string) { return this.json<{ draft: ArtifactDraft | null }>(`/files/${fileId}/draft`); }
+  saveArtifactDraft(fileId: string, draft: ArtifactDraft) { return this.json<{ draft: ArtifactDraft }>(`/files/${fileId}/draft`, { method: "PUT", body: JSON.stringify(draft) }); }
+  deleteArtifactDraft(fileId: string, revision: number) { return this.json(`/files/${fileId}/draft`, { method: "DELETE", body: JSON.stringify({ revision }) }); }
+  startArtifactWork(fileId: string, request: ArtifactWorkRequest) { return this.json<{ work: ArtifactWork }>(`/files/${fileId}/work`, { method: "POST", body: JSON.stringify(request) }); }
+  latestArtifactWork(fileId: string) { return this.json<{ work: ArtifactWork | null }>(`/files/${fileId}/work`); }
+  getArtifactWork(id: string) { return this.json<{ work: ArtifactWork }>(`/file-work/${id}`); }
+  controlArtifactWork(id: string, action: "cancel" | "reject" | "retry" | "accept", ids: string[] = []) { return this.json<EditorResponse>(`/file-work/${id}`, { method: "POST", body: JSON.stringify({ action, ids }) }); }
+  createWorkspaceTemplate(conversation: string, template: string, data: Record<string, unknown>) { return this.json<EditorResponse>(`/conversations/${conversation}/templates`, { method: "POST", body: JSON.stringify({ template, data }) }); }
+  artifactLibrary(q = "", kind = "", offset = 0) { return this.json<{ items: ArtifactLibraryItem[]; has_more: boolean }>(`/files/library?${new URLSearchParams({ q, kind, offset: String(offset) })}`); }
   getFilePreviewData(
     fileId: string,
     opts: { sheet?: number; offset?: number; limit?: number } = {},

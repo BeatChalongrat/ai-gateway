@@ -12,8 +12,8 @@
 //   - the POST /code/run HTTP endpoint (handler/code.go) the desktop
 //     agent's thin-client RunPythonTool calls.
 //
-// The core is deliberately dumb: it clamps to SERVER-enforced limits,
-// runs ModeCode, and hands back the raw Result. File resolution
+// The core clamps to SERVER-enforced limits, runs ModeCode, and applies
+// the configured Office quality stage before returning artifacts. File resolution
 // (ownership-checked) and artifact persistence live in the callers, which
 // differ (a chat tool attaches artifacts to the assistant message; the
 // desktop endpoint returns them inline). Part C's DLP egress gate
@@ -86,7 +86,11 @@ const (
 // stages an isolated per-run dir).
 type CodeInterpreter struct {
 	runner sandboxRunner
+	office *OfficeQuality
 }
+
+// SetOfficeQuality must be called before serving requests.
+func (c *CodeInterpreter) SetOfficeQuality(q *OfficeQuality) { c.office = q }
 
 // NewCodeInterpreter wires the interpreter to a sandbox runner. Callers
 // build this ONLY when the sandbox is available (SANDBOX_ENABLED=1) —
@@ -111,12 +115,16 @@ func (c *CodeInterpreter) Run(
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	return c.runner.Execute(ctx, sandbox.Spec{
+	res, err := c.runner.Execute(ctx, sandbox.Spec{
 		Mode:   sandbox.ModeCode,
 		Code:   code,
 		Inputs: inputs,
 		Limits: codeInterpreterLimits,
 	})
+	if err == nil {
+		c.office.Apply(ctx, res)
+	}
+	return res, err
 }
 
 // artifactContentType maps a produced artifact's basename to a MIME type
@@ -134,6 +142,10 @@ func ArtifactContentType(name string) string {
 		return "image/gif"
 	case ".webp":
 		return "image/webp"
+	case ".mp4":
+		return "video/mp4"
+	case ".wav":
+		return "audio/wav"
 	case ".csv":
 		return "text/csv"
 	case ".json":
@@ -173,12 +185,15 @@ func ReadArtifact(path string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, maxArtifactBytes))
+	data, err := io.ReadAll(io.LimitReader(f, maxArtifactBytes+1))
 	if err != nil {
 		return nil, err
 	}
 	if len(data) == 0 {
 		return nil, fmt.Errorf("empty artifact")
+	}
+	if len(data) > maxArtifactBytes {
+		return nil, fmt.Errorf("artifact exceeds 16 MiB; reduce its size before delivery")
 	}
 	return data, nil
 }

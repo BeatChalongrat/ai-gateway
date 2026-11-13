@@ -10,15 +10,16 @@ Sibling of excel_executor.py. Two modes:
             mutated.
 
 Each action runs inside a try/except so a single malformed step is
-recorded in the change log instead of aborting the whole plan; the
-validator (doc_validator.py) catches structural breakage downstream.
+recorded in the change log; failed actions make the result unsuccessful.
+The validator (doc_validator.py) also checks structural breakage downstream.
 
 Template filling (AM2): fill_placeholders fills {{key}} markers wherever
 the document shows text (body, tables, headers, footers, text boxes), also
 a marker Word split across runs, and repeats a table row carrying
 {{<list>.<field>}} once per item; fill_content_controls fills plain-text
 content controls by tag or alias. Anything not filled is reported, never
-skipped silently. replace_text is unchanged.
+skipped silently. replace_text also traverses these stories and preserves
+unaffected formatting when a match crosses runs.
 
 Usage:  python3 docx_generator.py <plan.json> <output.docx> [source.docx]
 Output: JSON result on stdout
@@ -233,19 +234,18 @@ def add_horizontal_rule(doc, _action: dict, _ctx: dict) -> str:
 
 
 def replace_text(doc, action: dict, _ctx: dict) -> str:
-    find = action.get("find", "")
+    find = action.get("find")
     replace = action.get("replace", "")
-    if not find:
-        return "Skipped replace_text (empty find)"
+    if not isinstance(find, str) or not find or not isinstance(replace, str):
+        raise ValueError("replace_text needs nonempty find and string replace")
     count = 0
-    for p in doc.paragraphs:
-        if find not in p.text:
-            continue
-        for run in p.runs:
-            if find in run.text:
-                run.text = run.text.replace(find, replace)
-                count += 1
-    return f"Replaced '{find[:30]}' ({count} run hits)"
+    pattern = re.compile("(" + re.escape(find) + ")")
+    for _, root in story_roots(doc):
+        for p in root.iter(W_P):
+            count += len(replace_markers_in_paragraph(p, lambda _: replace, pattern=pattern))
+    if not count:
+        raise ValueError(f"Text was not found: {find!r}")
+    return f"Replaced '{find[:30]}' ({count} occurrences)"
 
 
 def _build_paged_footer(p, text: str, font_name: str) -> None:
@@ -441,7 +441,7 @@ def markers_in(root, t_tag: str = W_T, p_tag: str = W_P) -> list[str]:
     return [m.group(1) for p in root.iter(p_tag) for m in MARKER_RE.finditer(paragraph_text(p, t_tag, p_tag))]
 
 
-def replace_markers_in_paragraph(p, resolve, t_tag: str = W_T, p_tag: str = W_P) -> list[tuple[str, bool]]:
+def replace_markers_in_paragraph(p, resolve, t_tag: str = W_T, p_tag: str = W_P, pattern=MARKER_RE) -> list[tuple[str, bool]]:
     """Replace every {{key}} in paragraph p — also one split across runs —
     with resolve(key); resolve returns None to leave that marker as it is.
     The text goes into the run where the marker starts, so it keeps that
@@ -450,7 +450,7 @@ def replace_markers_in_paragraph(p, resolve, t_tag: str = W_T, p_tag: str = W_P)
     ts = own_texts(p, t_tag, p_tag)
     orig = [t.text or "" for t in ts]
     full = "".join(orig)
-    if "{{" not in full:
+    if pattern is MARKER_RE and "{{" not in full:
         return []
     texts = list(orig)
     starts, pos = [], 0
@@ -460,7 +460,7 @@ def replace_markers_in_paragraph(p, resolve, t_tag: str = W_T, p_tag: str = W_P)
     owner = [i for i, s in enumerate(orig) for _ in s]
     results: list[tuple[str, bool]] = []
     # Right to left: a replacement never moves the text of a match before it.
-    for m in reversed(list(MARKER_RE.finditer(full))):
+    for m in reversed(list(pattern.finditer(full))):
         key = m.group(1)
         text = resolve(key)
         if text is None:
@@ -767,10 +767,12 @@ ACTION_HANDLERS = {
 
 
 def generate_docx(plan: dict, output_path: str, source_path: str | None = None) -> dict:
-    settings = plan.get("document_settings") or {}
+    settings = dict(plan.get("document_settings") or {})
     actions = plan.get("actions") or []
 
-    if source_path and os.path.exists(source_path):
+    if source_path:
+        if not os.path.isfile(source_path):
+            raise FileNotFoundError("The source document does not exist")
         # FIX131 — content only: copy2 also copies xattrs, and the sandbox
         # seccomp profile refuses listxattr (EPERM on /job/in/source.*),
         # which failed every same-kind edit (.docx → .docx) in the sandbox.
@@ -782,7 +784,16 @@ def generate_docx(plan: dict, output_path: str, source_path: str | None = None) 
         mode = "create"
 
     language = (settings.get("language") or "en").lower()
-    if language == "th":
+    if mode == "edit":
+        # An edit must not reset the template's typography merely because
+        # the model omitted document_settings (or named its language).
+        normal = doc.styles["Normal"]
+        if settings.get("font_family"):
+            normal.font.name = settings["font_family"]
+        if settings.get("base_font_size"):
+            normal.font.size = Pt(int(settings["base_font_size"]))
+        font = normal.font.name or ("Sarabun" if language == "th" else "Arial")
+    elif language == "th":
         font = settings.get("font_family") or "Sarabun"
         size = int(settings.get("base_font_size") or 16)
         setup_thai_font(doc, font, size)
@@ -831,7 +842,7 @@ def generate_docx(plan: dict, output_path: str, source_path: str | None = None) 
     doc.save(output_path)
     file_size = os.path.getsize(output_path)
     return {
-        "success": True,
+        "success": not any(c["status"] == "error" for c in change_log),
         "mode": mode,
         "output_path": output_path,
         "file_size_bytes": file_size,
@@ -859,7 +870,7 @@ def main() -> int:
         source = sys.argv[3] if len(sys.argv) > 3 else None
         result = generate_docx(plan, sys.argv[2], source)
         print(json.dumps(result, ensure_ascii=False))
-        return 0
+        return 0 if result["success"] else 1
     except Exception as exc:  # noqa: BLE001
         print(json.dumps({"error": str(exc), "error_type": type(exc).__name__, "success": False}, ensure_ascii=False))
         return 1

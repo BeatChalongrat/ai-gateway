@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from app.api.deps import ResolvedApiKey, get_resolved_api_key
 from app.core.config import settings
@@ -50,29 +50,20 @@ _DEFAULT_MAX_VIDEO_SEC = 10
 
 
 def _max_video_seconds() -> int:
-    return int(getattr(settings, "replicate_max_video_duration_sec", _DEFAULT_MAX_VIDEO_SEC))
+    return max(1, min(60, int(getattr(settings, "replicate_max_video_duration_sec", _DEFAULT_MAX_VIDEO_SEC))))
 
 
 async def _resolve_video_capability(session: AsyncSession) -> dict:
-    """Whether video generation should be OFFERED — the capability answer, the
-    same shape as GET /v1/search/config for web_search. Three independent signals,
-    ANDed, because none alone is sufficient:
+    """Gate + DB key + owner verification + an active installed video adapter.
 
-      * gate    — the operator kill-switch (``video_gen_enabled``), already wired
-                  into the model catalog / audio surfaces;
-      * key     — a Replicate token IS configured (the value is never revealed —
-                  "configured / not configured" is the whole answer);
-      * model   — the configured video model has been VERIFIED current by the
-                  owner (``video_model_verified``). Our own seed (059) labels the
-                  models UNVERIFIED and code cannot confirm a provider model is
-                  still alive, so this stays an explicit owner acknowledgement
-                  rather than enabling on faith.
-
-    A key being present is not a key being usable; a model being seeded is not a
-    model being current — hence all three, plus at least one active video model.
+    This checks configuration, not live provider entitlement or model liveness.
     """
     gate = bool(settings.video_gen_enabled)
-    key_configured = bool((settings.replicate_api_token or "").strip())
+    from app.services.provider_key_service import ProviderKeyService
+    from app.services.media_gen.registry import registered_adapters
+    # Use the same DB-backed key source as the adapter, not the retired env key.
+    key_configured = bool(await ProviderKeyService().get_active_key_async(session, "replicate"))
+    video_providers = [p for p, kind in registered_adapters() if kind == "video" and p != "mock"]
     model_verified = bool(settings.video_model_verified)
     model_count = 0
     if gate:
@@ -84,6 +75,7 @@ async def _resolve_video_capability(session: AsyncSession) -> dict:
                     .where(
                         ModelConfigORM.supports_video_gen.is_(True),
                         ModelConfigORM.is_active.is_(True),
+                        ModelConfigORM.provider.in_(video_providers),
                     )
                 )
             ).scalar()
@@ -110,6 +102,8 @@ async def _resolve_video_capability(session: AsyncSession) -> dict:
         "model_verified": model_verified,
         "model_count": model_count,
         "reason": reason,
+        "supported_controls": {"duration_sec": [1, _max_video_seconds()], "resolution": ["auto"], "has_audio": [False]},
+        "reference_image_supported": False,
     }
 
 
@@ -182,7 +176,7 @@ async def generate_video(
         user_id=user_id,
     )
 
-    duration = max(1, min(int(payload.duration_sec or 5), _max_video_seconds()))
+    duration = payload.duration_sec
     meta = {
         "duration_sec": duration,
         "resolution": payload.resolution,
@@ -212,6 +206,32 @@ async def generate_video(
     return VideoGenPublicResponse(**format_submit_response_usd(job, est.balance))
 
 
+@router.get("/jobs")
+async def list_conversation_video_jobs(
+    conversation_id: str,
+    auth: ResolvedApiKey = Depends(get_resolved_api_key),
+    session: AsyncSession = Depends(get_async_db),
+) -> dict:
+    from uuid import UUID
+    try:
+        conversation_id = str(UUID(conversation_id))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid conversation id")
+    user_id, _ = await _resolve_user(auth, session)
+    await enforce_media_rate_limit(auth, bucket="jobs", limit=settings.media_rate_limit_jobs_per_min,
+                                   window_seconds=60, scope="jobs/min per key")
+    rows = (await session.execute(select(GenerationJobORM).where(
+        GenerationJobORM.tenant_id == auth.tenant_id, GenerationJobORM.user_id == user_id,
+        GenerationJobORM.conversation_id == conversation_id, GenerationJobORM.job_type == "video",
+    ).order_by(GenerationJobORM.created_at.desc()).limit(20))).scalars().all()
+    return {"jobs": [{"job_id": j.id, "status": j.status, "model": j.model_id,
+                     "progress_pct": j.progress_pct, "created_at": j.created_at,
+                     "estimated_cost_usd": credits_to_usd_display(j.estimated_cost_credits),
+                     "error_message": j.error_message,
+                     "output_url": f"/v1/jobs/{j.id}/output" if j.status == "done" else None}
+                    for j in rows]}
+
+
 @router.get(
     "/jobs/{job_id}",
     response_model=JobStatusPublicResponse,
@@ -235,7 +255,7 @@ async def get_job_status(
         scope=f"{settings.media_rate_limit_jobs_per_min}/min per key",
     )
     job = await session.get(GenerationJobORM, job_id)
-    if job is None or job.tenant_id != auth.tenant_id:
+    if job is None or job.tenant_id != auth.tenant_id or job.user_id != getattr(auth, "portal_user_id", None):
         raise HTTPException(status_code=404, detail="job not found")
 
     output_url = None
@@ -257,6 +277,41 @@ async def get_job_status(
         created_at=job.created_at,
         completed_at=job.completed_at,
     )
+
+
+@router.post("/jobs/{job_id}/confirm", response_model=JobStatusPublicResponse)
+async def confirm_video_job(
+    job_id: str,
+    auth: ResolvedApiKey = Depends(get_resolved_api_key),
+    session: AsyncSession = Depends(get_async_db),
+) -> JobStatusPublicResponse:
+    """Owner-only, idempotent transition. Workers claim queued jobs only."""
+    from datetime import datetime, timezone
+    await enforce_media_rate_limit(auth, bucket="confirm", limit=settings.media_rate_limit_cancel_per_min,
+                                   window_seconds=60, scope="video confirmations/min per key")
+    user_id, balance = await _resolve_user(auth, session)
+    job = await session.get(GenerationJobORM, job_id)
+    if job is None or job.tenant_id != auth.tenant_id or job.user_id != user_id or job.job_type != "video":
+        raise HTTPException(status_code=404, detail="job not found")
+    if job.status == "pending_confirm":
+        expiry = job.ttl_expires_at
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        if expiry <= datetime.now(timezone.utc):
+            raise HTTPException(status_code=409, detail="Video quote expired; submit a new request.")
+        mc = await validate_model_capability(session, job.model_id, "supports_video_gen")
+        if balance < job.estimated_cost_credits:
+            raise HTTPException(status_code=402, detail="insufficient credits")
+        estimate = await estimate_and_validate_cost(session, auth.tenant_id, user_id, "video", mc, job.input_metadata or {})
+        if estimate.estimated_credits > job.estimated_cost_credits:
+            raise HTTPException(status_code=409, detail="Video price changed; submit a new request for a current quote.")
+        # Conditional UPDATE cannot revive a concurrently cancelled job.
+        await session.execute(update(GenerationJobORM).where(
+            GenerationJobORM.id == job.id,
+            GenerationJobORM.status == "pending_confirm",
+        ).values(status="queued"))
+        await session.commit()
+    return await get_job_status(job_id, auth, session)
 
 
 @router.post(
@@ -290,10 +345,11 @@ async def cancel_job(
         scope=f"{settings.media_rate_limit_cancel_per_min}/min per key",
     )
     job = await session.get(GenerationJobORM, job_id)
-    if job is None or job.tenant_id != auth.tenant_id:
+    if job is None or job.tenant_id != auth.tenant_id or job.user_id != getattr(auth, "portal_user_id", None):
         raise HTTPException(status_code=404, detail="job not found")
 
-    if job.status in ("queued", "processing"):
+    if job.status in ("pending_confirm", "queued", "processing"):
+        was_processing = job.status == "processing"
         job.status = "cancelled"
         job.completed_at = datetime.now(timezone.utc)
         await session.commit()
@@ -301,7 +357,7 @@ async def cancel_job(
 
         # Refund the L1 session reservation (best-effort; the estimate was
         # stashed on input_metadata at submit time — Sprint 2B.5).
-        est = (job.input_metadata or {}).get("estimate_usd")
+        est = (job.input_metadata or {}).get("estimate_usd") if was_processing else None
         if est:
             try:
                 from app.services.media_gen.spend_guard import release_session_budget
@@ -350,7 +406,7 @@ async def get_job_output(
     session: AsyncSession = Depends(get_async_db),
 ):
     job = await session.get(GenerationJobORM, job_id)
-    if job is None or job.tenant_id != auth.tenant_id:
+    if job is None or job.tenant_id != auth.tenant_id or job.user_id != getattr(auth, "portal_user_id", None):
         raise HTTPException(status_code=404, detail="job not found")
     meta = job.output_metadata or {}
     path = meta.get("output_path")
